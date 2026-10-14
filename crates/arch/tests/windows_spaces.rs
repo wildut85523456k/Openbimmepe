@@ -262,3 +262,79 @@ proptest! {
         prop_assert!((v + st + ch + ct - lh).abs() < 1e-12);
     }
 }
+
+// ------------------------------------------------------------ edges found by the mutation test
+fn what(e: ArchError) -> String { match e { ArchError::BadValue { what, .. } => what.to_string(), other => format!("{other:?}") } }
+
+#[test]
+fn material_limits_and_target_edges() {
+    let mk = |d: Option<f64>, c: Option<f64>, cat: &str| Library::new(vec![Material { name: "m".into(), conductivity: 1.0, density: d, specific_heat: c, category: cat.into() }]);
+    assert!(mk(Some(0.0), None, "").is_err());
+    assert!(mk(Some(MAX_DENSITY), None, "").is_ok() && mk(Some(MAX_DENSITY + 1.0), None, "").is_err());
+    assert!(mk(None, Some(MAX_SPECIFIC_HEAT), "").is_ok() && mk(None, Some(MAX_SPECIFIC_HEAT + 1.0), "").is_err());
+    assert!(mk(None, Some(0.0), "").is_err());
+    assert!(mk(None, None, &"c".repeat(128)).is_ok());
+    assert!(mk(None, None, &"c".repeat(129)).is_err());
+    assert!(mk(None, None, "bad\tcat").is_err());
+    // targets: exact binary numbers so the equality edge is real
+    let l = Library::new(vec![Material::new("Ins", 0.5)]).unwrap();
+    let a = Assembly { name: "A".into(), kind: AssemblyKind::Wall, layers: vec![Layer::Resistance { name: "Gap".into(), thickness: 0.5, r: 0.5 }, Layer::Solid { material: "Ins".into(), thickness: 0.25 }], r_se: 0.25, r_si: 0.25 };
+    // the other layers and surfaces already give exactly 1.0: a target U of 1.0 needs nothing from the insulation
+    assert_eq!(what(a.thickness_for_u(1, 1.0, &l).unwrap_err()), "target U (already met without this layer)");
+    assert_eq!(what(a.thickness_for_u(1, 0.0, &l).unwrap_err()), "target U");
+    // a target of 0.5 needs R = 2: insulation R 1.0 -> thickness 0.5
+    assert_eq!(a.thickness_for_u(1, 0.5, &l).unwrap(), 0.5);
+    // the rest of the build-up plus the new layer may not pass 5 m even if the layer alone is under 5 m
+    let big = Assembly { layers: vec![Layer::Resistance { name: "Gap".into(), thickness: 3.0, r: 0.5 }, Layer::Solid { material: "Ins".into(), thickness: 0.25 }], ..a.clone() };
+    assert_eq!(big.thickness_for_u(1, 0.2, &l).unwrap(), 2.0); // 3.0 + 2.0 = 5.0 m in total is still allowed
+    let tight = Assembly { layers: vec![Layer::Resistance { name: "Gap".into(), thickness: 3.5, r: 0.5 }, Layer::Solid { material: "Ins".into(), thickness: 0.25 }], ..a.clone() };
+    assert!(tight.thickness_for_u(1, 0.2, &l).is_err()); // 3.5 + 2.0 > 5
+    assert!(tight.thickness_for_u(1, 0.5, &l).is_ok());  // 3.5 + 0.5 = 4.0
+}
+
+#[test]
+fn glazing_edges() {
+    // glass with a conductivity other than 1 so a multiplication cannot pass for a division
+    let l = Library::new(vec![Material::new("Glass", 0.5)]).unwrap();
+    let g = Glazing { panes: vec![Pane { material: "Glass".into(), thickness: 0.004 }, Pane { material: "Glass".into(), thickness: 0.004 }], gaps: vec![Gap { thickness: 0.016, r: 0.2 }], ..double() };
+    // R = 0.04 + 0.13 + 0.004/0.5 + 0.2 + 0.004/0.5 = 0.386
+    assert!(close(g.ug(&l).unwrap(), 1.0 / 0.386));
+    let ok = |f: &dyn Fn(&mut Glazing)| { let mut x = g.clone(); f(&mut x); x.check(&l).is_ok() };
+    assert!(ok(&|x| x.panes[0].thickness = 0.05));
+    assert!(ok(&|x| x.r_se = 10.0) && ok(&|x| x.r_si = 10.0) && !ok(&|x| x.r_se = 10.5));
+    assert!(ok(&|x| x.panes[0].thickness = 0.001) && ok(&|x| x.gaps[0].thickness = 0.001) && ok(&|x| x.gaps[0].thickness = 0.1));
+    let mut none = g.clone(); none.panes.clear(); none.gaps.clear();
+    assert!(none.check(&l).is_err());
+    let fr = frame();
+    let w = WindowGeometry { width: 1.2, height: 1.5, frame_width: 0.07, bars: 0, bar_width: 0.0 };
+    // a window with no width or height says so, with the size message
+    assert_eq!(what(window_u(WindowGeometry { width: 0.0, ..w }, 1.1, &fr).unwrap_err()), "window size");
+    assert_eq!(what(window_u(WindowGeometry { height: 0.0, ..w }, 1.1, &fr).unwrap_err()), "window size");
+    // glass too short: 0.145 - 0.14 = 5 mm of glass height
+    assert!(window_u(WindowGeometry { height: 0.145, ..w }, 1.1, &fr).is_err());
+    assert!(window_u(WindowGeometry { height: 0.16, ..w }, 1.1, &fr).is_ok());
+}
+
+#[test]
+fn ceiling_and_shaft_edges() {
+    let c = |h: f64, t: f64| Ceiling { name: "c".into(), height: h, thickness: t };
+    assert!(c(30.0, 0.0).check().is_ok() && c(30.5, 0.0).check().is_err());
+    assert!(c(2.7, 0.0).check().is_ok() && c(2.7, 2.0).check().is_ok() && c(2.7, 2.5).check().is_err());
+    // exact binary numbers: level 4.0, structure 0.5, ceiling 3.0 + 0.25 leaves a void of exactly 0.25
+    let k = c(3.0, 0.25);
+    assert_eq!(k.void_depth(4.0, 0.5).unwrap(), 0.25);
+    assert!(k.fits(4.0, 0.5, 0.125, 0.0625).unwrap());      // 0.125 + 2 x 0.0625 = 0.25: exactly full
+    assert!(!k.fits(4.0, 0.5, 0.1251, 0.0625).unwrap());
+    // a ceiling filling the whole level height leaves no void at all, and a void of exactly zero is allowed
+    assert_eq!(c(3.25, 0.25).void_depth(4.0, 0.5).unwrap(), 0.0);
+    assert_eq!(what(c(2.0, 0.0).void_depth(0.0, 0.0).unwrap_err()), "level height or structure depth");
+    // shafts
+    let lv = levels();
+    let two = Shaft { name: "S".into(), usage: String::new(), outline: vec![[0.0, 0.0], [1.0, 0.0]], from: 0, to: 1 };
+    assert_eq!(what(two.check(&lv).unwrap_err()), "shaft outline points");
+    let cw = Shaft { name: "S".into(), usage: String::new(), outline: vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]], from: 0, to: 1 };
+    assert!(cw.check(&lv).is_ok());
+    // a self-crossing outline with a non-zero area (unequal lobes)
+    let x = Shaft { outline: vec![[0.0, 0.0], [4.0, 0.0], [0.0, 2.0], [5.0, 2.0]], ..cw.clone() };
+    assert_eq!(what(x.check(&lv).unwrap_err()), "shaft outline (crosses itself)");
+}

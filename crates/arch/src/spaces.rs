@@ -73,7 +73,6 @@ impl Shaft {
         if a.abs() < 1e-6 { return Err(ArchError::BadValue { what: "shaft area", name: self.name.clone() }); }
         let m = self.outline.len();
         for i in 0..m { for j in (i + 2)..m {
-            if i == 0 && j == m - 1 { continue; }
             if segs_cross(self.outline[i], self.outline[(i + 1) % m], self.outline[j], self.outline[(j + 1) % m]) {
                 return Err(ArchError::BadValue { what: "shaft outline (crosses itself)", name: self.name.clone() });
             }

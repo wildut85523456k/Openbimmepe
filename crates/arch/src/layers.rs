@@ -216,7 +216,6 @@ impl Library {
     pub fn from_text(text: &str) -> Result<Library, (usize, ArchError)> {
         let mut v = Vec::new();
         for (n, line) in text.lines().enumerate() {
-            let line = line.trim_end_matches('\r');
             if line.trim().is_empty() || line.starts_with('#') { continue; }
             let f: Vec<&str> = line.split('\t').collect();
             if f.len() < 2 || f.len() > 5 { return Err((n + 1, ArchError::BadValue { what: "number of columns", name: line.chars().take(40).collect() })); }

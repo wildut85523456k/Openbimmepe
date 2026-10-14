@@ -35,7 +35,7 @@ impl Glazing {
     pub fn check(&self, lib: &Library) -> Result<(), ArchError> {
         check_name(&self.name)?;
         let bad = |what: &'static str| ArchError::BadValue { what, name: self.name.clone() };
-        if self.panes.is_empty() || self.panes.len() > MAX_PANES { return Err(bad("number of panes")); }
+        if self.panes.len() > MAX_PANES { return Err(bad("number of panes")); }
         if self.gaps.len() + 1 != self.panes.len() { return Err(bad("number of gaps (one fewer than the panes)")); }
         for p in &self.panes {
             fin(p.thickness, "pane thickness")?;
