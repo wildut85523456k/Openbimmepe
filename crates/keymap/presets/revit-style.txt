@@ -1,0 +1,73 @@
+# Default shortcut preset: Revit-style key map.
+# Source: https://mashyo.com/keyboard-shortcuts-revit/ (third-party list, read 14 Oct 2026). PARTIAL: that page states it does not list every default.
+# To be checked against Revit's own KeyboardShortcuts.xml when available. Entries the page labels as the author's custom shortcuts (QQ, BX, SWC) are left out.
+# Format: command id <TAB> shortcut # shortcut ... (letters typed one after the other, Ctrl+Z for chords). Users change these in the settings menu; this file is not edited by users.
+# Columns: id, shortcuts, English name (not read by the program)
+create.wall	WA	Wall
+create.door	DR	Door
+create.window	WN	Window
+create.component	CM	Component
+create.column	CL	Column
+create.grid	GR	Grid
+create.level	LL	Level
+create.room	RM	Room
+create.reference-plane	RP	Reference Plane
+create.structural-floor	SB	Structural Floor
+annotate.aligned-dimension	DI	Aligned Dimension
+annotate.detail-line	DL	Detail Line
+annotate.spot-elevation	EL	Spot Elevation
+annotate.text	TX	Text
+annotate.tag-by-category	TG	Tag by Category
+annotate.room-tag	RT	Room Tag
+annotate.group	GP	Group
+annotate.find-replace	FR	Find/Replace
+modify.align	AL	Align
+modify.array	AR	Array
+modify.copy	CO#CC	Copy
+modify.create-similar	CS	Create Similar
+modify.delete	DE	Delete
+modify.mirror-draw-axis	DM	Mirror - Draw Axis
+modify.mirror-pick-axis	MM	Mirror - Pick Axis
+modify.move	MV	Move
+modify.offset	OF	Offset
+modify.pin	PN	Pin
+modify.rotate	RO	Rotate
+modify.split-element	SL	Split Element
+modify.trim-extend	TR	Trim/Extend
+modify.match-type-properties	MA	Match Type Properties
+modify.linework	LW	Linework
+view.visibility-graphics	VG#VV	Visibility/Graphics
+view.tile-windows	WT	Tile Windows
+view.cascade-windows	WC	Cascade Windows
+view.thin-lines	TL	Thin Lines
+view.render	RR	Render
+view.keyboard-shortcuts	KS	Keyboard Shortcuts
+view.hide-element	HH	Hide Element
+view.hide-category	HC	Hide Category
+view.isolate-element	HI	Isolate Element
+view.isolate-category	IC	Isolate Category
+view.reset-temporary-hide-isolate	HR	Reset Temporary Hide/Isolate
+view.graphic-display-options	GD	Graphic Display Options
+view.wireframe	WF	Wireframe
+view.hidden-line	HL	Hidden Line
+view.shaded-with-edges	SD	Shaded with Edges
+nav.zoom-all-to-fit	ZA	Zoom All to Fit
+nav.zoom-to-fit	ZE#ZF#ZX	Zoom to Fit
+nav.zoom-in-region	ZR#ZZ	Zoom in Region
+nav.zoom-out-2x	ZO#ZV	Zoom Out 2x
+nav.previous-pan-zoom	ZP#ZC	Previous Pan/Zoom
+nav.walk-mode	3W	Walk Mode
+nav.fly-mode	3F	Fly Mode
+nav.object-mode	3O	Object Mode
+snap.snap-intersections	SI	Snap Intersections
+snap.snap-endpoints	SE	Snap Endpoints
+snap.snap-midpoints	SM	Snap Midpoints
+snap.snap-centers	SC	Snap Centers
+snap.snap-nearest	SN	Snap Nearest
+snap.snap-perpendicular	SP	Snap Perpendicular
+snap.snap-quadrants	SQ	Snap Quadrants
+snap.snap-tangents	ST	Snap Tangents
+snap.snap-work-plane-grid	SW	Snap Work Plane Grid
+snap.snaps-off-for-one-pick	SO	Snaps Off for One Pick
+snap.snap-points	SX	Snap Points
+snap.snap-remote-objects	SR	Snap Remote Objects

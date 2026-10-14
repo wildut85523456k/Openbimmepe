@@ -1,0 +1,44 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --release
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+  ifc-checks:
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ifcopenshell numpy
+      - name: Wall, family and placement scene against IFC
+        run: |
+          cargo run -q --release -p openbim-place --example place_scene > /tmp/scene.txt
+          python spikes/s2b_place_ifc/place_ifc.py /tmp/scene.txt
+      - name: Rooms
+        run: |
+          cargo run -q --release -p openbim-arch --example arch_scene > /tmp/rooms.txt
+          python spikes/s5_rooms_ifc/rooms_ifc.py /tmp/rooms.txt
+      - name: Layers and envelope
+        run: |
+          cargo run -q --release -p openbim-arch --example envelope_scene > /tmp/env.txt
+          python spikes/s6_layers_ifc/layers_ifc.py /tmp/env.txt
+      - name: Ceilings and risers
+        run: |
+          cargo run -q --release -p openbim-arch --example spaces_scene > /tmp/spaces.txt
+          python spikes/s7_spaces_ifc/spaces_ifc.py /tmp/spaces.txt

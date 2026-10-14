@@ -1,0 +1,15 @@
+[package]
+name = "openbim-arch"
+version = "0.0.1"
+edition = "2021"
+description = "Architectural model basics for MEP: levels, grids and rooms found from closed wall chains"
+publish = false
+
+[dependencies]
+openbim-geom = { path = "../geom" }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unsafe_code = "forbid"

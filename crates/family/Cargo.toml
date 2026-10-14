@@ -1,0 +1,16 @@
+[package]
+name = "openbim-family"
+version = "0.0.1"
+edition = "2021"
+description = "Spike S2: parametric family solver (named values, formulas, planes, checks, arrays, type catalogue)"
+publish = false
+
+[dependencies]
+rayon = "1.10"
+
+[dev-dependencies]
+proptest = "1"
+openbim-arch = { path = "../arch" }
+
+[lints.rust]
+unsafe_code = "forbid"
