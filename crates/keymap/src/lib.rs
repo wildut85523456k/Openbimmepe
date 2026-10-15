@@ -2,10 +2,14 @@
 //!
 //! A `Keymap` has a *preset* (the defaults, loaded from a reference such as Revit's `KeyboardShortcuts.xml`)
 //! and the user's *overrides* (what the settings menu changes). The effective map is the preset with the
-//! overrides on top. No two commands may share a shortcut, and no shortcut may be the beginning of another
-//! (typing `W` `A` must not also be a complete shortcut `W`), so a typed sequence is never ambiguous.
+//! overrides on top. Two commands may share a shortcut, as in Revit: typing it offers the commands and the user
+//! picks one (`Match::Choice`); the settings menu can list the sharing with [`Keymap::shared`]. A shortcut may not
+//! be the beginning of a different one (typing `W` `A` must not also be a complete shortcut `W`), so a typed
+//! sequence is either a whole shortcut, the start of a longer one, or nothing.
 //!
 //! The preset values are data, not code: this crate contains no shortcut of any product.
+
+pub mod mouse;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -39,7 +43,7 @@ pub enum KeymapError {
     TooLong,
     TooMany,
     UnknownCommand(String),
-    /// the shortcut is already used (or is a beginning / an extension of one) by another command
+    /// the shortcut is the beginning of another command's shortcut, or the other way round (an equal shortcut is allowed)
     Conflict { shortcut: String, with_command: String },
     /// two shortcuts of the same command clash
     SelfConflict(String),
@@ -114,13 +118,18 @@ pub fn parse_revit_token(tok: &str) -> Result<Sequence, KeymapError> {
     let tok = tok.trim();
     if tok.is_empty() { return Err(KeymapError::EmptySequence); }
     if tok.contains('+') || tok.contains(' ') { return parse_sequence(tok); }
+    // a key's name ("Escape", "Tab", "space") is one key, not letters typed one after the other
+    if let Some(name) = NAMED.iter().find(|n| n.eq_ignore_ascii_case(tok)) { return parse_sequence(name); }
     let up = tok.to_ascii_uppercase();
     if valid_key(&up) { return parse_sequence(&up); }                       // one key, or an F-key
     if tok.len() > MAX_SEQ_LEN || !tok.chars().all(|c| c.is_ascii_alphanumeric()) { return Err(KeymapError::BadKey(tok.into())); }
     tok.chars().map(|c| Chord::new(Mods::NONE, &c.to_string())).collect()   // typed one key at a time
 }
 
+/// one is the beginning of the other, or they are equal
 fn clash(a: &[Chord], b: &[Chord]) -> bool { let n = a.len().min(b.len()); a[..n] == b[..n] }
+/// one is the beginning of the other but they are not equal: refused between commands (equal ones share the shortcut)
+fn blocks(a: &[Chord], b: &[Chord]) -> bool { a != b && clash(a, b) }
 
 /// a command id and its shortcuts as text
 pub type Preset = (String, Vec<String>);
@@ -157,7 +166,7 @@ impl Keymap {
             for b in &seqs[i + 1..] { if clash(a, b) { return Err(KeymapError::SelfConflict(format_sequence(a))); } }
             for (other, os) in self.all_effective() {
                 if other == command { continue; }
-                if os.iter().any(|o| clash(a, o)) { return Err(KeymapError::Conflict { shortcut: format_sequence(a), with_command: other.to_string() }); }
+                if os.iter().any(|o| blocks(a, o)) { return Err(KeymapError::Conflict { shortcut: format_sequence(a), with_command: other.to_string() }); }
             }
         }
         Ok(())
@@ -187,7 +196,7 @@ impl Keymap {
             for (k, a) in seqs.iter().enumerate() {
                 for b in &seqs[k + 1..] { if clash(a, b) { return Err(KeymapError::SelfConflict(format_sequence(a))); } }
                 for (o, os) in &all[i + 1..] {
-                    if os.iter().any(|x| clash(a, x)) { return Err(KeymapError::Conflict { shortcut: format_sequence(a), with_command: o.to_string() }); }
+                    if os.iter().any(|x| blocks(a, x)) { return Err(KeymapError::Conflict { shortcut: format_sequence(a), with_command: o.to_string() }); }
                 }
             }
             let _ = c;
@@ -237,10 +246,25 @@ impl Keymap {
     pub fn reset_all(&mut self) { self.overrides.clear(); }
     pub fn is_customised(&self, command: &str) -> bool { self.overrides.contains_key(command) }
 
-    /// Which command does this exact sequence run?
+    /// Which command does this exact sequence run? `None` when none does, and also when more than one does
+    /// (use [`Keymap::commands_for`] for those).
     pub fn command_for(&self, shortcut: &str) -> Option<&str> {
-        let seq = parse_sequence(shortcut).ok()?;
-        self.all_effective().find(|(_, ss)| ss.contains(&seq)).map(|(c, _)| c)
+        let all = self.commands_for(shortcut);
+        if all.len() == 1 { Some(all[0]) } else { None }
+    }
+    /// Every command that has this exact sequence, in the order of their ids.
+    pub fn commands_for(&self, shortcut: &str) -> Vec<&str> {
+        let Ok(seq) = parse_sequence(shortcut) else { return Vec::new() };
+        self.all_effective().filter(|(_, ss)| ss.contains(&seq)).map(|(c, _)| c).collect()
+    }
+    /// For the settings menu: each shortcut of the command that another command has too, with those commands.
+    pub fn shared(&self, command: &str) -> Vec<(String, Vec<String>)> {
+        let mut out = Vec::new();
+        for s in self.effective(command) {
+            let others: Vec<String> = self.all_effective().filter(|(c, ss)| *c != command && ss.contains(s)).map(|(c, _)| c.to_string()).collect();
+            if !others.is_empty() { out.push((format_sequence(s), others)); }
+        }
+        out
     }
 
     /// Typed keys, one at a time. Create with `matcher()`.
@@ -326,23 +350,36 @@ fn attr(tag: &str, name: &str) -> Option<String> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Match { /// not the start of any shortcut: typing starts over
-    None, /// the start of a longer shortcut: keep typing
-    Pending, /// complete
-    Command(String) }
+pub enum Match {
+    /// not the start of any shortcut: typing starts over
+    None,
+    /// the start of a longer shortcut: keep typing
+    Pending,
+    /// a whole shortcut of one command
+    Command(String),
+    /// a whole shortcut of several commands, in the order of their ids: the user picks one (arrow keys, Enter)
+    Choice(Vec<String>),
+}
 
 pub struct Matcher<'a> { map: &'a Keymap, typed: Sequence }
 impl Matcher<'_> {
     pub fn feed(&mut self, chord: Chord) -> Match {
         self.typed.push(chord);
         let mut pending = false;
+        let mut whole: Vec<String> = Vec::new();
         for (c, ss) in self.map.all_effective() {
             for s in ss {
-                if *s == self.typed { self.typed.clear(); return Match::Command(c.to_string()); }
+                if *s == self.typed { whole.push(c.to_string()); }
                 if s.len() > self.typed.len() && s[..self.typed.len()] == self.typed[..] { pending = true; }
             }
         }
-        if pending { Match::Pending } else { self.typed.clear(); Match::None }
+        // a whole shortcut cannot also begin a longer one (the map refuses that), so nothing is pending here
+        match whole.len() {
+            0 if pending => Match::Pending,
+            0 => { self.typed.clear(); Match::None }
+            1 => { self.typed.clear(); Match::Command(whole.remove(0)) }
+            _ => { self.typed.clear(); Match::Choice(whole) }
+        }
     }
     pub fn cancel(&mut self) { self.typed.clear(); }
 }

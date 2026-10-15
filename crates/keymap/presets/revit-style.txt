@@ -3,6 +3,8 @@
 # To be checked against Revit's own KeyboardShortcuts.xml when available. Entries the page labels as the author's custom shortcuts (QQ, BX, SWC) are left out.
 # Format: command id <TAB> shortcut # shortcut ... (letters typed one after the other, Ctrl+Z for chords). Users change these in the settings menu; this file is not edited by users.
 # Columns: id, shortcuts, English name (not read by the program)
+# The editing, file and modal keys at the end (Ctrl+, Escape, Tab, Space, F1) are the author's knowledge of Revit's own and are not from the page above; check them too.
+# Escape cancels, and pressed twice leaves the tool: the program counts the presses, the key map only says which key cancels. Space flips (door swing, hand) while placing.
 create.wall	WA	Wall
 create.door	DR	Door
 create.window	WN	Window
@@ -71,3 +73,17 @@ snap.snap-work-plane-grid	SW	Snap Work Plane Grid
 snap.snaps-off-for-one-pick	SO	Snaps Off for One Pick
 snap.snap-points	SX	Snap Points
 snap.snap-remote-objects	SR	Snap Remote Objects
+edit.undo	Ctrl+Z	Undo
+edit.redo	Ctrl+Y	Redo
+edit.copy-to-clipboard	Ctrl+C	Copy to Clipboard
+edit.cut-to-clipboard	Ctrl+X	Cut to Clipboard
+edit.paste-from-clipboard	Ctrl+V	Paste from Clipboard
+file.new	Ctrl+N	New
+file.open	Ctrl+O	Open
+file.save	Ctrl+S	Save
+file.print	Ctrl+P	Print
+edit.cancel	Escape	Cancel (twice to leave the tool)
+edit.cycle-selection	Tab	Cycle the element under the pointer
+edit.cycle-selection-back	Shift+Tab	Cycle the element under the pointer, backwards
+edit.flip-while-placing	Space	Flip while placing
+help.help	F1	Help

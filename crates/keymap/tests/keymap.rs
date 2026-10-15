@@ -35,10 +35,14 @@ fn preset_lookup_and_settings_changes() {
     assert_eq!(k.command_for("Q W"), None);
     assert_eq!(k.command_for("W A"), Some("wall"));
     assert!(k.is_customised("wall") && !k.is_customised("door"));
-    // taken: refused, nothing changes
-    assert_eq!(k.set("door", &["W A"]), Err(KeymapError::Conflict { shortcut: "W A".into(), with_command: "wall".into() }));
+    // an equal shortcut is shared, as in Revit
+    k.set("door", &["W A"]).unwrap();
+    assert_eq!(k.commands_for("W A"), vec!["door", "wall"]);
+    assert_eq!(k.command_for("W A"), None, "two commands: no single answer");
+    k.set("door", &["Q D"]).unwrap();
+    assert_eq!(k.command_for("W A"), Some("wall"));
+    // a beginning of another shortcut, and an extension of one, are refused, and nothing changes
     assert_eq!(k.shortcuts("door"), vec!["Q D"]);
-    // a beginning of another shortcut, and an extension of one, are also refused
     assert!(matches!(k.set("door", &["W"]), Err(KeymapError::Conflict { .. })));
     assert!(matches!(k.set("door", &["W A B"]), Err(KeymapError::Conflict { .. })));
     // own shortcuts may be reused and rearranged
@@ -53,8 +57,9 @@ fn preset_lookup_and_settings_changes() {
     assert_eq!(k.shortcuts("window"), Vec::<String>::new());
     k.set("door", &["Q N"]).unwrap();
     assert_eq!(k.command_for("Q N"), Some("door"));
-    // reset: refused while the preset shortcut is taken by someone else, allowed after
-    assert!(matches!(k.reset("window"), Err(KeymapError::Conflict { .. })));
+    // reset: the preset shortcut is shared with the door now, which is allowed
+    k.reset("window").unwrap();
+    assert_eq!(k.commands_for("Q N"), vec!["door", "window"]);
     k.reset("door").unwrap();
     k.reset("window").unwrap();
     assert_eq!(k.shortcuts("window"), vec!["Q N"]);
@@ -111,7 +116,7 @@ fn settings_file_round_trip_and_bad_files_change_nothing() {
     k2.load_overrides(&text).unwrap();
     for c in ["wall", "door", "window", "move", "undo", "zoom"] { assert_eq!(k.shortcuts(c), k2.shortcuts(c), "{c}"); }
     assert_eq!(k2.save_overrides(), text);
-    for bad in ["wall W A\n", "nope\tX\n", "wall\tW A\nwall\tW B\n", "wall\tQ D\n", "wall\tW A|W\n", "wall\t\u{0}\n"] {
+    for bad in ["wall W A\n", "nope\tX\n", "wall\tW A\nwall\tW B\n", "wall\tQ\n", "wall\tW A|W\n", "wall\t\u{0}\n"] {
         let mut k3 = km();
         assert!(k3.load_overrides(bad).is_err(), "{bad:?}");
         assert_eq!(k3.shortcuts("wall"), vec!["Q W"], "{bad:?} must leave the map alone");
@@ -127,7 +132,9 @@ fn settings_file_round_trip_and_bad_files_change_nothing() {
 #[test]
 fn a_bad_preset_is_refused_whole() {
     let mut k = Keymap::new(&["a", "b"]).unwrap();
-    assert!(matches!(k.set_preset(&[("a", &["X"]), ("b", &["X"])]), Err(KeymapError::Conflict { .. })));
+    k.set_preset(&[("a", &["X"]), ("b", &["X"])]).unwrap();
+    assert_eq!(k.commands_for("X"), vec!["a", "b"]);
+    k.set_preset(&[]).unwrap();
     assert!(matches!(k.set_preset(&[("a", &["X"]), ("b", &["X Y"])]), Err(KeymapError::Conflict { .. })));
     assert!(matches!(k.set_preset(&[("a", &["X"]), ("c", &["Y"])]), Err(KeymapError::UnknownCommand(_))));
     assert!(matches!(k.set_preset(&[("a", &["X"]), ("a", &["Y"])]), Err(KeymapError::SelfConflict(_))));
@@ -135,7 +142,7 @@ fn a_bad_preset_is_refused_whole() {
     // a new preset that clashes with a user's override is refused, nothing changes
     k.set_preset(&[("a", &["X"])]).unwrap();
     k.set("b", &["Y"]).unwrap();
-    assert!(k.set_preset(&[("a", &["Y"])]).is_err());
+    assert!(k.set_preset(&[("a", &["Y Z"])]).is_err());
     assert_eq!(k.shortcuts("a"), vec!["X"]);
 }
 
@@ -193,12 +200,16 @@ proptest! {
         // lookup and matcher agree for every shortcut in force
         for c in cmds {
             for s in k.shortcuts(c) {
-                prop_assert_eq!(k.command_for(&s), Some(c));
+                let owners: Vec<String> = k.commands_for(&s).iter().map(|x| x.to_string()).collect();
+                prop_assert!(owners.contains(&c.to_string()));
                 let mut m = k.matcher();
                 let chords: Vec<Chord> = parse_sequence(&s).unwrap();
                 let mut last = Match::None;
                 for ch in chords { last = m.feed(ch); }
-                prop_assert_eq!(last, Match::Command(c.to_string()));
+                match owners.len() {
+                    1 => prop_assert_eq!(last, Match::Command(c.to_string())),
+                    _ => prop_assert_eq!(last, Match::Choice(owners)),
+                }
             }
         }
         // saving and loading reproduces the map
@@ -213,7 +224,7 @@ proptest! {
 fn the_revit_style_preset_file_loads_without_clashes() {
     let text = include_str!("../presets/revit-style.txt");
     let entries = parse_preset_text(text).unwrap();
-    assert!(entries.len() >= 60, "{}", entries.len());
+    assert!(entries.len() >= 70, "{}", entries.len());
     let ids: Vec<&str> = entries.iter().map(|(c, _)| c.as_str()).collect();
     let mut k = Keymap::new(&ids).unwrap();
     let refs: Vec<(&str, Vec<&str>)> = entries.iter().map(|(c, v)| (c.as_str(), v.iter().map(|s| s.as_str()).collect())).collect();
@@ -221,7 +232,9 @@ fn the_revit_style_preset_file_loads_without_clashes() {
     k.set_preset(&refs2).unwrap();
     // spot checks against the source page, written by hand
     for (keys, cmd) in [("W A", "create.wall"), ("D R", "create.door"), ("W N", "create.window"), ("M V", "modify.move"), ("C O", "modify.copy"), ("C C", "modify.copy"),
-                        ("V V", "view.visibility-graphics"), ("V G", "view.visibility-graphics"), ("Z E", "nav.zoom-to-fit"), ("Z Z", "nav.zoom-in-region"), ("3 W", "nav.walk-mode"), ("S W", "snap.snap-work-plane-grid"), ("K S", "view.keyboard-shortcuts")] {
+                        ("V V", "view.visibility-graphics"), ("V G", "view.visibility-graphics"), ("Z E", "nav.zoom-to-fit"), ("Z Z", "nav.zoom-in-region"), ("3 W", "nav.walk-mode"), ("S W", "snap.snap-work-plane-grid"), ("K S", "view.keyboard-shortcuts"),
+                        ("Ctrl+Z", "edit.undo"), ("Ctrl+Y", "edit.redo"), ("Ctrl+C", "edit.copy-to-clipboard"), ("Ctrl+X", "edit.cut-to-clipboard"), ("Ctrl+V", "edit.paste-from-clipboard"),
+                        ("Ctrl+S", "file.save"), ("Escape", "edit.cancel"), ("Tab", "edit.cycle-selection"), ("Shift+Tab", "edit.cycle-selection-back"), ("Space", "edit.flip-while-placing")] {
         assert_eq!(k.command_for(keys), Some(cmd), "{keys}");
     }
     // a typed sequence runs the command on its last key
@@ -232,4 +245,136 @@ fn the_revit_style_preset_file_loads_without_clashes() {
     k.set("create.wall", &["Q W"]).unwrap();
     assert_eq!(k.command_for("W A"), None);
     assert!(parse_preset_text("onlyid\n").is_err() && parse_preset_text("a\tabcdef\n").is_err());
+}
+
+#[test]
+fn a_shortcut_two_commands_share_offers_both_and_the_settings_menu_can_list_the_sharing() {
+    let mut k = Keymap::new(&["copy", "cc", "paste", "other"]).unwrap();
+    k.set_preset(&[("copy", &["C O", "Ctrl+C"]), ("cc", &["C O"]), ("paste", &["Ctrl+V"]), ("other", &["Z"])]).unwrap();
+    let mut m = k.matcher();
+    assert_eq!(m.feed(ch("C")), Match::Pending);
+    assert_eq!(m.feed(ch("O")), Match::Choice(vec!["cc".into(), "copy".into()]));
+    // typing starts over after a choice
+    assert_eq!(m.feed(ch("Z")), Match::Command("other".into()));
+    assert_eq!(m.feed(ch("Ctrl+C")), Match::Command("copy".into()));
+    assert_eq!(k.shared("copy"), vec![("C O".to_string(), vec!["cc".to_string()])]);
+    assert_eq!(k.shared("cc"), vec![("C O".to_string(), vec!["copy".to_string()])]);
+    assert!(k.shared("paste").is_empty() && k.shared("other").is_empty());
+    // a command cannot give itself the same shortcut twice
+    assert!(matches!(k.set("copy", &["C O", "C O"]), Err(KeymapError::SelfConflict(_))));
+    // but a beginning of a shared shortcut is still refused for another command
+    assert!(matches!(k.set("other", &["C"]), Err(KeymapError::Conflict { .. })));
+    assert!(matches!(k.set("other", &["C O E"]), Err(KeymapError::Conflict { .. })));
+    // reassign still takes the shortcut away from all that have it
+    let mut gone = k.reassign("paste", "C O").unwrap();
+    gone.sort();
+    assert_eq!(gone, vec!["cc", "copy"]);
+    assert_eq!(k.commands_for("C O"), vec!["paste"]);
+    // the sharing survives saving and loading the settings
+    k.reset_all();
+    k.set("other", &["C O"]).unwrap();
+    let mut k2 = Keymap::new(&["copy", "cc", "paste", "other"]).unwrap();
+    k2.set_preset(&[("copy", &["C O", "Ctrl+C"]), ("cc", &["C O"]), ("paste", &["Ctrl+V"]), ("other", &["Z"])]).unwrap();
+    k2.load_overrides(&k.save_overrides()).unwrap();
+    assert_eq!(k2.commands_for("C O"), vec!["cc", "copy", "other"]);
+}
+
+#[test]
+fn the_preset_has_no_chord_that_begins_a_typed_sequence_and_the_single_keys_run_at_once() {
+    let entries = parse_preset_text(include_str!("../presets/revit-style.txt")).unwrap();
+    let ids: Vec<&str> = entries.iter().map(|(c, _)| c.as_str()).collect();
+    let mut k = Keymap::new(&ids).unwrap();
+    let refs: Vec<(&str, Vec<&str>)> = entries.iter().map(|(c, v)| (c.as_str(), v.iter().map(|s| s.as_str()).collect())).collect();
+    let refs2: Vec<(&str, &[&str])> = refs.iter().map(|(c, v)| (*c, v.as_slice())).collect();
+    k.set_preset(&refs2).unwrap();
+    let mut m = k.matcher();
+    assert_eq!(m.feed(ch("Escape")), Match::Command("edit.cancel".into()));
+    assert_eq!(m.feed(ch("Escape")), Match::Command("edit.cancel".into()));
+    assert_eq!(m.feed(ch("Tab")), Match::Command("edit.cycle-selection".into()));
+    assert_eq!(m.feed(ch("Space")), Match::Command("edit.flip-while-placing".into()));
+    // Ctrl+C and the letters C O are different shortcuts
+    assert_eq!(m.feed(ch("Ctrl+C")), Match::Command("edit.copy-to-clipboard".into()));
+    assert_eq!(m.feed(ch("C")), Match::Pending);
+    // nothing in the preset is shared
+    for (id, _) in &entries { assert!(k.shared(id).is_empty(), "{id}"); }
+}
+
+#[test]
+fn a_real_revit_file_may_give_two_commands_one_shortcut() {
+    let xml = r#"<Shortcuts><ShortcutItem CommandName="Alpha" CommandId="ID_A" Shortcuts="XY" /><ShortcutItem CommandName="Beta" CommandId="ID_B" Shortcuts="XY#QQ" /></Shortcuts>"#;
+    let (entries, report) = Keymap::parse_revit_xml(xml, &|id| match id { "ID_A" => Some("alpha".into()), "ID_B" => Some("beta".into()), _ => None }).unwrap();
+    assert!(report.skipped.is_empty());
+    let mut k = Keymap::new(&["alpha", "beta"]).unwrap();
+    let refs: Vec<(&str, Vec<&str>)> = entries.iter().map(|(c, v)| (c.as_str(), v.iter().map(|s| s.as_str()).collect())).collect();
+    let refs2: Vec<(&str, &[&str])> = refs.iter().map(|(c, v)| (*c, v.as_slice())).collect();
+    k.set_preset(&refs2).unwrap();
+    let mut m = k.matcher();
+    assert_eq!(m.feed(ch("X")), Match::Pending);
+    assert_eq!(m.feed(ch("Y")), Match::Choice(vec!["alpha".into(), "beta".into()]));
+}
+
+mod mouse_controls {
+    use openbim_keymap::mouse::*;
+    use openbim_keymap::KeymapError;
+
+    fn g(s: &str) -> Gesture { Gesture::parse(s).unwrap() }
+
+    #[test]
+    fn gestures_parse_and_print() {
+        for s in ["MiddleDrag", "Wheel", "Shift+MiddleDrag", "Ctrl+Shift+Wheel", "Alt+LeftClick", "RightDoubleClick", "Ctrl+Alt+RightDrag"] {
+            assert_eq!(g(s).to_string(), s);
+        }
+        for bad in ["", "Drag", "MiddleDrag+Shift", "Shift+Shift+Wheel", "Meta+Wheel", "MiddleClack", "Wheel+Wheel", "Shift+"] {
+            assert!(Gesture::parse(bad).is_err(), "{bad:?}");
+        }
+        assert_ne!(g("MiddleDrag"), g("MiddleClick"));
+        assert_ne!(g("Wheel"), g("Shift+Wheel"));
+    }
+
+    #[test]
+    fn the_preset_file_gives_pan_zoom_and_orbit() {
+        let m = MouseMap::from_preset_text(include_str!("../presets/revit-style-mouse.txt")).unwrap();
+        assert_eq!(m.action(g("MiddleDrag")), Some("nav.pan"));
+        assert_eq!(m.action(g("Wheel")), Some("nav.zoom-at-cursor"));
+        assert_eq!(m.action(g("Shift+MiddleDrag")), Some("nav.orbit"));
+        assert_eq!(m.action(g("LeftDrag")), None);
+        assert_eq!(m.action(g("Ctrl+MiddleDrag")), None);
+        assert_eq!(m.gestures_for("nav.orbit"), vec![g("Shift+MiddleDrag")]);
+    }
+
+    #[test]
+    fn the_user_can_change_and_clear_gestures_and_reset() {
+        let mut m = MouseMap::from_preset_text("MiddleDrag\tnav.pan\nWheel\tnav.zoom\n").unwrap();
+        m.set(g("RightDrag"), "nav.pan").unwrap();
+        assert_eq!(m.gestures_for("nav.pan"), vec![g("MiddleDrag"), g("RightDrag")]);
+        m.set(g("MiddleDrag"), "nav.orbit").unwrap();
+        assert_eq!(m.action(g("MiddleDrag")), Some("nav.orbit"));
+        assert_eq!(m.gestures_for("nav.pan"), vec![g("RightDrag")]);
+        m.clear(g("Wheel"));
+        assert_eq!(m.action(g("Wheel")), None);
+        assert!(m.gestures_for("nav.zoom").is_empty());
+        assert_eq!(m.set(g("Wheel"), "  "), Err(KeymapError::EmptySequence));
+        m.reset_all();
+        assert_eq!(m.action(g("MiddleDrag")), Some("nav.pan"));
+        assert_eq!(m.action(g("Wheel")), Some("nav.zoom"));
+        assert_eq!(m.action(g("RightDrag")), None);
+    }
+
+    #[test]
+    fn a_bad_preset_file_is_refused() {
+        assert!(matches!(MouseMap::from_preset_text("MiddleDrag\ta\nMiddleDrag\tb\n"), Err(KeymapError::SelfConflict(_))));
+        assert!(matches!(MouseMap::from_preset_text("MiddleDrag\n"), Err(KeymapError::BadLine(1))));
+        assert!(matches!(MouseMap::from_preset_text("# c\n\nMiddleDrag\t \n"), Err(KeymapError::BadLine(3))));
+        assert!(MouseMap::from_preset_text("Nope\ta\n").is_err());
+        assert!(MouseMap::from_preset_text(&"x".repeat(5 * 1024 * 1024)).is_err());
+    }
+}
+
+#[test]
+fn a_key_name_in_a_revit_token_is_one_key_and_not_its_letters() {
+    for (tok, want) in [("Tab", "Tab"), ("tab", "Tab"), ("TAB", "Tab"), ("Escape", "Escape"), ("space", "Space"), ("Shift+Tab", "Shift+Tab")] {
+        assert_eq!(format_sequence(&parse_revit_token(tok).unwrap()), want, "{tok}");
+    }
+    // letters that are not a key's name are still typed one at a time
+    assert_eq!(format_sequence(&parse_revit_token("TAP").unwrap()), "T A P");
 }
