@@ -448,3 +448,13 @@ fn a_circle_profile_crossing_the_axis_is_refused() {
     assert!(why(FormDef::revolve("r", Axis::Z, "0", true, "0", "360", ProfileDef::circle("0.05", "0.5", "0.1"))).contains("crosses the axis"));
     assert!(solve(FormDef::revolve("r", Axis::Z, "0", true, "0", "360", ProfileDef::circle("0.1", "0.5", "0.1"))).is_ok());
 }
+
+#[test]
+fn the_mitre_tip_is_exact_in_both_directions() {
+    // north, then a 120 degree left turn (heading 210 degrees); profile on the outside (right of travel)
+    let p = [("0", "0"), ("0", "4"), ("-3.4641016151377544", "2")];
+    let f = ok(sweep(&p, rect("-0.2", "-0.05", "0", "0.05")));
+    let (lo, hi) = f.bounds_local();
+    assert!((hi[1] - (4.0 + 0.2 * 3f64.sqrt())).abs() < 1e-9, "{hi:?}");
+    assert!((hi[0] - 0.2).abs() < 1e-9 && lo[0] < -3.46, "{lo:?} {hi:?}");
+}

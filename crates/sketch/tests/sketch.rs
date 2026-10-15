@@ -395,3 +395,83 @@ fn free_movements_stay_where_they_were_drawn() {
     let sol = s.solve().unwrap();
     assert!(near(sol.points[2], 4.0, 2.2) && near(sol.points[3], 0.0, 2.2), "{:?}", sol.points);
 }
+
+#[test]
+fn every_index_of_every_constraint_is_checked() {
+    let mut s = Sketch::default();
+    let (a, b, c) = (s.point(0.0, 0.0), s.point(1.0, 0.0), s.point(2.0, 0.0));
+    let l = s.line(a, b);
+    let k = s.circle(c, 1.0);
+    let (bp, bl, bc) = (99, 99, 99);
+    use Constraint::*;
+    let cases = vec![
+        Fixed { p: bp, x: 0.0, y: 0.0 },
+        Coincident { a: bp, b }, Coincident { a, b: bp },
+        Horizontal { a: bp, b }, Horizontal { a, b: bp }, Vertical { a: bp, b }, Vertical { a, b: bp },
+        Parallel { l1: bl, l2: l }, Parallel { l1: l, l2: bl }, Perpendicular { l1: bl, l2: l }, Perpendicular { l1: l, l2: bl },
+        EqualLength { l1: bl, l2: l }, EqualLength { l1: l, l2: bl },
+        Distance { a: bp, b, d: 1.0 }, Distance { a, b: bp, d: 1.0 },
+        DistanceX { a: bp, b, d: 1.0 }, DistanceX { a, b: bp, d: 1.0 }, DistanceY { a: bp, b, d: 1.0 }, DistanceY { a, b: bp, d: 1.0 },
+        PointOnLine { p: bp, l }, PointOnLine { p: a, l: bl }, Midpoint { p: bp, l }, Midpoint { p: a, l: bl },
+        Angle { l1: bl, l2: l, degrees: 1.0 }, Angle { l1: l, l2: bl, degrees: 1.0 },
+        Radius { c: bc, r: 1.0 }, EqualRadius { c1: bc, c2: k }, EqualRadius { c1: k, c2: bc },
+        PointOnCircle { p: bp, c: k }, PointOnCircle { p: a, c: bc }, Tangent { l: bl, c: k }, Tangent { l: l, c: bc },
+    ];
+    for con in &cases {
+        let mut t = s.clone();
+        t.constrain(*con);
+        assert!(matches!(t.solve(), Err(SketchError::BadIndex { constraint: 0, .. })), "{con:?}");
+    }
+    // the same constraints with valid indices are accepted
+    let good = [Fixed { p: a, x: 0.0, y: 0.0 }, Coincident { a, b }, Horizontal { a, b }, Vertical { a, b }, Parallel { l1: l, l2: l }, Perpendicular { l1: l, l2: l }, EqualLength { l1: l, l2: l },
+        Distance { a, b, d: 1.0 }, DistanceX { a, b, d: 1.0 }, DistanceY { a, b, d: 1.0 }, PointOnLine { p: c, l }, Midpoint { p: c, l }, Angle { l1: l, l2: l, degrees: 0.0 },
+        Radius { c: k, r: 1.0 }, EqualRadius { c1: k, c2: k }, PointOnCircle { p: a, c: k }, Tangent { l, c: k }];
+    for con in good { let mut t = s.clone(); t.constrain(con); assert!(t.solve().is_ok(), "{con:?}"); }
+    // values: every number of every constraint must be finite
+    for con in [Fixed { p: a, x: f64::NAN, y: 0.0 }, Fixed { p: a, x: 0.0, y: f64::NAN }, Fixed { p: a, x: 2.0e6, y: 0.0 }, Radius { c: k, r: 0.0 }, Radius { c: k, r: -1.0 }, Radius { c: k, r: f64::NAN },
+        Angle { l1: l, l2: l, degrees: f64::INFINITY }, DistanceY { a, b, d: f64::NAN }, DistanceX { a, b, d: 2.0e6 }] {
+        let mut t = s.clone();
+        t.constrain(con);
+        assert!(matches!(t.solve(), Err(SketchError::BadValue { .. })), "{con:?}");
+    }
+    // a line with a bad first or second point
+    for bad in [(99, b), (a, 99)] { let mut t = s.clone(); t.lines.push(bad); assert!(matches!(t.solve(), Err(SketchError::BadIndex { .. }))); }
+}
+
+#[test]
+fn points_drawn_on_top_of_each_other_still_solve() {
+    let mut s = Sketch::default();
+    let (a, b) = (s.point(0.0, 0.0), s.point(0.0, 0.0));
+    s.constrain(Constraint::Distance { a, b, d: 5.0 });
+    let sol = s.solve().unwrap();
+    assert_eq!(sol.status, Status::Solved);
+    let d = ((sol.points[0][0] - sol.points[1][0]).powi(2) + (sol.points[0][1] - sol.points[1][1]).powi(2)).sqrt();
+    assert!((d - 5.0).abs() < 1e-9);
+    // a line of zero length made longer
+    let mut s = Sketch::default();
+    let (a, b, c) = (s.point(1.0, 1.0), s.point(1.0, 1.0), s.point(4.0, 1.0));
+    let (l1, l2) = (s.line(a, b), s.line(a, c));
+    s.constrain(Constraint::Fixed { p: a, x: 1.0, y: 1.0 }).constrain(Constraint::Fixed { p: c, x: 4.0, y: 1.0 })
+        .constrain(Constraint::Perpendicular { l1, l2 }).constrain(Constraint::Distance { a, b, d: 2.0 });
+    let sol = s.solve().unwrap();
+    assert_eq!(sol.status, Status::Solved);
+    assert!((sol.points[1][0] - 1.0).abs() < 1e-8 && (sol.points[1][1] - 1.0).abs() > 1.9);
+}
+
+#[test]
+fn a_bad_first_guess_still_converges() {
+    // the second line is drawn almost 180 degrees away from where the angle wants it
+    let mut s = Sketch::default();
+    let o = s.point(0.0, 0.0);
+    let a = s.point(2.0, 0.0);
+    let b = s.point(-1.9, 0.3);
+    let (l1, l2) = (s.line(o, a), s.line(o, b));
+    s.constrain(Constraint::Fixed { p: o, x: 0.0, y: 0.0 }).constrain(Constraint::Fixed { p: a, x: 2.0, y: 0.0 })
+        .constrain(Constraint::Angle { l1, l2, degrees: 80.0 }).constrain(Constraint::Distance { a: o, b, d: 2.0 });
+    let sol = s.solve().unwrap();
+    assert_eq!(sol.status, Status::Solved);
+    let (x, y) = (sol.points[2][0], sol.points[2][1]);
+    // modulo 180: the line through the origin makes 80 degrees with the x axis
+    let ang = (y.atan2(x).to_degrees()).rem_euclid(180.0);
+    assert!((ang - 80.0).abs() < 1e-6, "{ang}");
+}

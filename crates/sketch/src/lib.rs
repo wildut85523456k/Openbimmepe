@@ -9,7 +9,7 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
-use std::ops::{Add, Mul, Neg, Sub};
+use std::ops::{Add, Mul, Sub};
 
 pub const MAX_POINTS: usize = 200;
 pub const MAX_LINES: usize = 400;
@@ -130,7 +130,6 @@ impl D {
 }
 impl Add for D { type Output = D; fn add(self, o: D) -> D { let mut g = self.g; for (a, b) in g.iter_mut().zip(o.g) { *a += b; } D { v: self.v + o.v, g } } }
 impl Sub for D { type Output = D; fn sub(self, o: D) -> D { let mut g = self.g; for (a, b) in g.iter_mut().zip(o.g) { *a -= b; } D { v: self.v - o.v, g } } }
-impl Neg for D { type Output = D; fn neg(self) -> D { D { v: -self.v, g: self.g.map(|x| -x) } } }
 impl Mul for D {
     type Output = D;
     fn mul(self, o: D) -> D {
@@ -163,7 +162,7 @@ impl Sketch {
         if self.lines.len() > MAX_LINES { return Err(SketchError::TooMany("lines")); }
         if self.circles.len() > MAX_CIRCLES { return Err(SketchError::TooMany("circles")); }
         if self.constraints.len() > MAX_CONSTRAINTS { return Err(SketchError::TooMany("constraints")); }
-        let fin = |v: f64| v.is_finite() && v.abs() <= MAX_VALUE;
+        let fin = |v: f64| v.abs() <= MAX_VALUE;
         for p in &self.points { if !fin(p[0]) || !fin(p[1]) { return Err(SketchError::NotFinite("a point")); } }
         for (i, &(a, b)) in self.lines.iter().enumerate() {
             if a >= self.points.len() || b >= self.points.len() { return Err(SketchError::BadIndex { constraint: i, what: "point of a line" }); }
@@ -298,10 +297,21 @@ impl Sketch {
     }
 
     pub fn solve(&self) -> Result<Solution, SketchError> {
+        let first = self.solve_from(self)?;
+        if !matches!(first.status, Status::Unsolved { .. }) { return Ok(first); }
+        // Points sitting exactly on each other have no direction between them; nudge them apart and try again.
+        let mut nudged = self.clone();
+        for (i, p) in nudged.points.iter_mut().enumerate() { p[0] += 1e-4 * (i as f64 + 1.0); p[1] += 0.7e-4 * ((i % 7) as f64 + 1.0); }
+        let second = self.solve_from(&nudged)?;
+        Ok(if matches!(second.status, Status::Solved) { second } else { first })
+    }
+
+    /// Solve with the constraints of `self` starting from the drawing in `start` (and measuring movement from it).
+    fn solve_from(&self, start: &Sketch) -> Result<Solution, SketchError> {
         self.validate()?;
         let np = self.points.len();
         let n = 2 * np + self.circles.len();
-        let mut x: Vec<f64> = self.points.iter().flat_map(|p| [p[0], p[1]]).chain(self.circles.iter().map(|c| c.radius)).collect();
+        let mut x: Vec<f64> = start.points.iter().flat_map(|p| [p[0], p[1]]).chain(start.circles.iter().map(|c| c.radius)).collect();
         let rows = self.rows();
         let norm2 = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
         let inf = |r: &[f64]| r.iter().fold(0.0f64, |a, v| a.max(v.abs()));
@@ -341,7 +351,7 @@ impl Sketch {
         let (rank, fixed_cols) = analyse(&jac, n);
         if residual <= TOLERANCE && rank < n && !rows.is_empty() {
             // free motions are left: settle on the answer closest to the drawing, not just any answer
-            let x0: Vec<f64> = self.points.iter().flat_map(|p| [p[0], p[1]]).chain(self.circles.iter().map(|c| c.radius)).collect();
+            let x0: Vec<f64> = start.points.iter().flat_map(|p| [p[0], p[1]]).chain(start.circles.iter().map(|c| c.radius)).collect();
             if let Some(better) = Self::closest(&rows, &x0, &x) { x = better; let (nr, _) = Self::evaluate(&rows, &x); residual = inf(&nr); }
         }
         let fixed = (0..np).map(|p| fixed_cols[2 * p] && fixed_cols[2 * p + 1]).collect();
@@ -450,4 +460,21 @@ fn analyse(jac: &[Vec<f64>], n: usize) -> (usize, Vec<bool>) {
         fixed[pc] = (0..n).all(|c| used[c] || a[r][c].abs() <= tol * 1e3);
     }
     (rank, fixed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::solve_linear;
+
+    #[test]
+    fn linear_solver_pivots_and_detects_singular() {
+        // a zero on the diagonal needs a row swap
+        let x = solve_linear(vec![vec![0.0, 1.0], vec![1.0, 0.0]], vec![3.0, 5.0]).unwrap();
+        assert_eq!(x, vec![5.0, 3.0]);
+        let x = solve_linear(vec![vec![1e-20, 1.0], vec![1.0, 1.0]], vec![1.0, 2.0]).unwrap();
+        assert!((x[0] - 1.0).abs() < 1e-9 && (x[1] - 1.0).abs() < 1e-9);
+        assert!(solve_linear(vec![vec![1.0, 2.0], vec![2.0, 4.0]], vec![1.0, 2.0]).is_none());
+        assert!(solve_linear(vec![vec![0.0, 0.0], vec![0.0, 0.0]], vec![1.0, 2.0]).is_none());
+        assert_eq!(solve_linear(vec![vec![4.0]], vec![2.0]).unwrap(), vec![0.5]);
+    }
 }
