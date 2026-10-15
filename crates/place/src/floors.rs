@@ -193,6 +193,25 @@ impl FloorPenetration {
     }
 }
 
+/// The floor openings as text for a schedule: one row per opening, comma separated, metres and minutes.
+pub fn floor_register_csv(pens: &[FloorPenetration], runs: &[Run]) -> String {
+    let mut s = String::from("id,slab,x0_m,x1_m,y0_m,y1_m,size_x_m,size_y_m,x_m,y_m,z_m,fire_rating_min,fire_partition,kind,fits,runs,systems\n");
+    for p in pens {
+        let labels: Vec<String> = p.runs.iter().map(|&r| crate::penetrations::csv_safe(&runs[r].label)).collect();
+        let systems: Vec<String> = p.systems.iter().map(|x| format!("{x:?}")).collect();
+        let kind = match p.kind {
+            FloorOpeningKind::Cut => "cut".to_string(),
+            FloorOpeningKind::InShaft(i) => format!("shaft {i}"),
+        };
+        s.push_str(&format!(
+            "{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{},{}\n",
+            p.id, p.id.slab, p.x0, p.x1, p.y0, p.y1, p.size_x(), p.size_y(), p.centre[0], p.centre[1], p.centre[2],
+            p.fire_rating_min.map(|m| m.to_string()).unwrap_or_default(), p.in_fire_partition(), kind, p.fits, labels.join(" | "), systems.join(" | ")
+        ));
+    }
+    s
+}
+
 const EPS: f64 = 1e-9;
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {

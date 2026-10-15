@@ -335,14 +335,17 @@ pub fn find(chains: &[WallChain], runs: &[Run], merge_gap: f64) -> (Vec<Penetrat
     (out, issues)
 }
 
+/// A label as one cell of a comma separated file: no separators or quotes, and never read as a formula by a spreadsheet.
+pub(crate) fn csv_safe(label: &str) -> String {
+    let t = label.replace([',', '\n', '\r', '"'], " ");
+    if t.starts_with(['=', '+', '-', '@']) { format!(" {t}") } else { t }
+}
+
 /// The register as text for a schedule: one row per penetration, comma separated, metres and minutes.
 pub fn register_csv(pens: &[Penetration], runs: &[Run]) -> String {
     let mut s = String::from("id,wall,segment,offset_m,width_m,sill_m,height_m,x_m,y_m,z_m,fire_rating_min,fire_partition,cut,runs,systems\n");
     for p in pens {
-        let labels: Vec<String> = p.runs.iter().map(|&r| {
-            let t = runs[r].label.replace([',', '\n', '\r', '"'], " ");
-            if t.starts_with(['=', '+', '-', '@']) { format!(" {t}") } else { t } // never read as a formula by a spreadsheet
-        }).collect();
+        let labels: Vec<String> = p.runs.iter().map(|&r| csv_safe(&runs[r].label)).collect();
         let systems: Vec<String> = p.systems.iter().map(|x| format!("{x:?}")).collect();
         s.push_str(&format!(
             "{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{}\n",

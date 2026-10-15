@@ -204,3 +204,25 @@ fn margin_applies_to_both_sides_of_a_rectangular_run() {
     let (sx, sy) = (p[0].size_x(), p[0].size_y());
     assert!((close(sx, 0.7) && close(sy, 0.4)) || (close(sx, 0.4) && close(sy, 0.7)), "{:?}", p[0]);
 }
+
+#[test]
+fn the_floor_openings_export_as_safe_csv() {
+    let evil = Run { label: "=SUM(A1),\"x\"\n+cmd".into(), ..pipe([1.0, 1.0, 0.0], [1.0, 1.0, 6.0], 0.1) };
+    let runs = vec![evil, pipe([5.0, 5.0, 0.0], [5.0, 5.0, 6.0], 0.1)];
+    let (p, _) = find_floor(&[slab(3.0, 0.2, Some(60))], &[], &runs, 0.0);
+    let csv = floor_register_csv(&p, &runs);
+    let lines: Vec<&str> = csv.lines().collect();
+    assert_eq!(lines.len(), 3, "{csv}");
+    assert!(lines[0].starts_with("id,slab,x0_m,x1_m"));
+    assert!(lines[1].starts_with("F0-P1,0,0.9500,1.0500,0.9500,1.0500,0.1000,0.1000,1.0000,1.0000,2.9000,60,true,cut,true,"), "{}", lines[1]);
+    // exactly the 17 columns, whatever the labels hold; a label never begins like a formula
+    for l in &lines {
+        assert_eq!(l.split(',').count(), 17, "{l}");
+    }
+    assert!(lines[1].contains(", =SUM(A1)  x  +cmd"), "{}", lines[1]);
+    // an opening inside a shaft says so
+    let shaft = ShaftVoid { name: "S".into(), outline: vec![[4.5, 4.5], [5.5, 4.5], [5.5, 5.5], [4.5, 5.5]], z_bottom: 0.0, z_top: 6.0 };
+    let (p, _) = find_floor(&[slab(3.0, 0.2, None)], &[shaft], &runs[1..], 0.0);
+    assert!(floor_register_csv(&p, &runs[1..]).lines().nth(1).unwrap().contains(",shaft 0,"));
+    assert_eq!(floor_register_csv(&[], &[]).lines().count(), 1);
+}
