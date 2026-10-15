@@ -1,0 +1,12 @@
+[package]
+name = "openbim-oplog"
+version = "0.0.1"
+edition = "2021"
+description = "Operation log: transactions, undo/redo, crash-safe binary log with checksums, snapshots, merge conflict detection"
+publish = false
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unsafe_code = "forbid"

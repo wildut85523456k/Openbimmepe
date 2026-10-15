@@ -274,6 +274,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-oplog"
+version = "0.0.1"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "openbim-place"
 version = "0.0.1"
 dependencies = [
