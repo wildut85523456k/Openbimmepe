@@ -1,0 +1,127 @@
+{
+  "tool": "Built-in image_gen",
+  "preparation": "Single-image outputs resized with Lanczos to 128 px for the 34 px ribbon; committed PNGs define shipped artwork.",
+  "assets": {
+    "save": {
+      "prompt": "Use case: stylized-concept. Asset type: production desktop CAD ribbon icon, one single icon only. Subject: Save command, a recognizable silver-grey and blue floppy disk, rendered as a small solid dimensional object in a clean 3/4 isometric view. Style: detailed realistic 3D engineering catalog miniature, brushed silver/grey metal, restrained blue accents, soft studio illumination, crisp edges, same family as a BIM equipment catalog. Center a single object occupying 82% of a square canvas, readable at 34 pixels. Pure white background, subtle contact shadow. No text, no letters, no label, no frame, no extra objects. This is a new common-command asset complementing the user's BIM catalog.",
+      "source_sha256": "a363e2b4b6bf5ddf55dfeadfcb6ec25623969d062ba532125cbe55ad9c6a43da",
+      "sha256": "61db913d7a3cadd10ec8371e83aba3eca8212748fe3d9a635a8773dc2d9741d8"
+    },
+    "select": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Select command: a solid silver computer pointer arrow with a blue side face. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "391ce5db19a0d5ad41068f8dceaade5475d746fba743173eadc386a327922188",
+      "sha256": "eee98cf08aaaf4e82d82aa19a2b967a41b1ae8045cea21412668dc8f4a640fea"
+    },
+    "open": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Open command: an open silver-grey folder holding two blue drawing sheets. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "5f4e615165a28e74b9a80ae2a59fb12a61824f385a24ddb375e63e5bd3d26f01",
+      "sha256": "7a7a21fa2f0c9207c53c321279a6d47e31dacbdf70300df1c924557663765a46"
+    },
+    "new": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: New document command: a silver-grey blank drawing sheet with a folded top right corner and a raised blue plus sign. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "c265633c45f4b58de9c106b586e75f334e940ebd4230f91ed2f340fa1f7b597e",
+      "sha256": "bc4804071f3e54d6fe9fb1b1d564da54a59108d39137055c6a81677ed57006c2"
+    },
+    "undo": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Undo command: a thick solid blue curved arrow bending to the left, with brushed silver beveled sides. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "b4b4e55b86fd3d54f3e877316774d794a87a580c1b0c8eded2b329b0d6e5a383",
+      "sha256": "84e0fbca4af9215a96b0d3bbbbe5abd427d1ae64b4e8fef4966a346db241f75b"
+    },
+    "redo": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Redo command: a thick solid blue curved arrow bending to the right, with brushed silver beveled sides. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "47cc6ea9fe01f9f1b942deb728bc5954741d21d3a53c8c0bf21e279f9ef1a8c4",
+      "sha256": "d282ce43b041a064293196da5c946859463756ca4a302ac862cdc4f7c082df5b"
+    },
+    "search": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Search command: a polished silver magnifying glass with a thick blue handle and clear lens. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "070936e6d994df9276346a917eb96bd68192fd05033b3d43f2d3b99c0bb50d03",
+      "sha256": "d57f75c514d318e40ba91578cd2e662e4d92c30fac749d7fc5c976898d55d7b1"
+    },
+    "settings": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Settings command: a single robust machined silver gear with blue central hub. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "b34520534db45b35951a6ff83d2342b66e9b9747da4613098cb0129d0923048d",
+      "sha256": "a979b221f2a9bcb49f403b52e8fc63c833403d40e282abd89b9028aaa198b85a"
+    },
+    "zoom_in": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Zoom In command: a silver magnifying glass with a blue handle, a raised blue plus sign visible in its lens. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "f201284eff06b3dfdca10d1abb3a16c7714d26ff1b16ae7fa0dfab93a63f523e",
+      "sha256": "76481e211ee01779261a633dd47aeb9d72badcbb8a1a90fe62efc6d1c6d9a39f"
+    },
+    "zoom_out": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Zoom Out command: a silver magnifying glass with a blue handle, a raised blue minus sign visible in its lens. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "62c7874d2b90354ec8218619d040a751cba3baab4c401bdd707bed49446d04c8",
+      "sha256": "9ebccc5926886f32b30031fb8ca7e190596920a25d2c914a6c0fe0578b8a0d89"
+    },
+    "pan": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Pan command: a silver-grey open palm hand symbol with slightly raised fingers, blue wrist. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "a3aedd1eb2365809f5a83230ef5e5a48f08155919f418f70f7d969b12d87c15a",
+      "sha256": "fcf1417a56abf36ca74a069b05665b59afd5640723c24bcc8ec67c6c56a7015c"
+    },
+    "orbit": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Orbit command: a silver cube surrounded by a single blue elliptical orbit ring ending in an arrowhead. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "a39a6a99d850960787eb203dbefd13fc3c39275d2820102e4aae051ffd2c2297",
+      "sha256": "6070847ed0003ec634672843b09d28bed7a7bfd86d69c60e7731aadcba24cd77"
+    },
+    "copy": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Copy command: two overlapping silver-grey document sheets with folded corners and blue side faces. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "a60e70573ddf1fa8fa314c06c6a6299b19308b6f8a9289b2dc1a26afa35cfffb",
+      "sha256": "ed6731c5f36dd3ef780f39a7e84a59d0452c9d7eeaf6c599d691d4ed9a4cc6f6"
+    },
+    "move": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Move command: a blue solid four-way arrow cross on a small silver-grey square base. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "8986d44570866d38c13ab79dbc6e524dbb21b2c3516f1f2f59f579785f466a19",
+      "sha256": "2f7aebf6534854cd0a95d7f70b5b950e4cea8725789bb49feacfdd31f8ebd287"
+    },
+    "rotate": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Rotate command: a silver cube with a blue curved circular arrow wrapping around its vertical axis. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "807226af8c5a0bcfa73183367b96983fa8f6d3ecf69d4bbf41abac04c088ee47",
+      "sha256": "01f0ac16015d3353d459ead9975997fce7ecd42aff9910a0930efdfffb69157f"
+    },
+    "mirror": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Mirror command: two identical small silver wedge objects on either side of a translucent vertical blue glass mirror plane. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "718984e0ad450ea258993101699f450c03b036bf2b9627843b1813d9d7c54760",
+      "sha256": "fd35942c7c01cab96981a788946478b1ddae2ac2b70b46674d79e70d777dd2ea"
+    },
+    "align": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Align command: two silver cuboids of differing lengths, aligned against one vertical blue ruler line. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "3d44fcb0eaff1eed20e7019e9de302274701552aa220d39b71ffeb54972b0122",
+      "sha256": "588a00604611253dd90f97d0e25adc70b8b1bf0fabcbdd755d70f8b54a6c008f"
+    },
+    "trim": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Trim command: two intersecting silver bars, with a blue scissor blade snipping the overhanging end. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "b4a1a6dfb40d14940c21584c20ec994fc7420021efe744be87ae548eaa600651",
+      "sha256": "3426edced18e26d7fe29990f8ef277052875adb0fab08033e983399a04aadf20"
+    },
+    "delete": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Delete command: a small silver-grey waste bin with an open lid and a blue rim. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "5643f5bc409cffc9bf139a0aec321b6f189a673a9cca28592b39bf1a57cb168e",
+      "sha256": "e75826815c6170d8415b127f3d3bd9afef3ed39d6f1cd7ba0db736c0cafa7ddb"
+    },
+    "measure": {
+      "prompt": "Edit the attached image precisely: remove ONLY the separate long straight silver metal ruler lying diagonally across the foreground. KEEP the entire retractable rolling tape measure: its black/silver/blue rounded housing, blue lock, extended yellow measuring tape, and silver end hook. Preserve their shapes, materials, orientation, and colors. Clean white background where ruler was. Center the remaining complete tape measure for a compact app icon. No additional objects or labels. Do not remove the case. Do not show just a loose ribbon. The result must be ONE retractable tape measure with short yellow tape extended.",
+      "source_sha256": "3d627188b996fda06a438a6f6aa6e4b3e5ee5c96bc269bbfc10c6579b07a1580",
+      "sha256": "b02e9b48e5849d998275dcac35ef9330ff7c1bcd90457e32bfbbfc0f0652adaa",
+      "revision": "Keep the rolling retractable tape measure with housing; remove only separate straight ruler"
+    },
+    "duct_tee": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: HVAC duct tee: a realistic galvanized sheet metal rectangular duct T junction with three open rectangular bores, accurate engineering geometry. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "a6623e1116aa6ed20fbea7097960ef3fe5fc43fa2db5efce649b6779980c3ccf",
+      "sha256": "d53ca12d456fd1ae0d9b9a75019ba12aa37779d862765b573adea297672522c7"
+    },
+    "duct_accessory": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: HVAC duct accessory: a galvanized rectangular duct with a blue damper actuator mounted on top and a visible internal blade. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "394c6234d155c1f69fbe21c3b16c58e25767067daddf7fe6fe514c16a4211a1d",
+      "sha256": "45d784a755ab5e1353f2c04b13537a63efdb63a7bb0d7ebbec9115fab7dbd665"
+    },
+    "circuit": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Electrical circuit command: a small silver-grey miniature circuit breaker with a blue toggle and two clear looped blue insulated electrical wires. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "e3bf689196ef5c0368aacf8b5196b61dd9abd1b0318895779cf3cd4767d9a69f",
+      "sha256": "14f6cf11ead6e322aa2533071353aa9d34847b220709a9509831a02423ea14e0"
+    },
+    "cable": {
+      "prompt": "Use case: stylized-concept. Asset type: one single production desktop CAD ribbon icon. Subject: Electrical cable command: a short gently curved thick grey electrical cable with its cut end facing viewer, revealing three colored copper conductors. Style: realistic detailed 3D engineering catalog miniature, brushed silver and neutral grey materials, restrained blue accents, 3/4 isometric view, soft studio light, crisp edges, restrained contact shadow. Center a single coherent symbol occupying 82% of the square canvas, legible at 34 pixels. Pure white background. No text, letters, numbers, labels, borders, grid, or unrelated objects. Match a BIM equipment catalog with realistic metallic components. One icon only.",
+      "source_sha256": "bca26437f6ce737a8a43962ebb224b46cc6466c0f5ea56a0cf3dfc95dc9f2dae",
+      "sha256": "d5c660bbc30cddecb1aa792b8842d2c009da37b0e22368534e0a81f6593fd1b2"
+    }
+  }
+}

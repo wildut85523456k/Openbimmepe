@@ -1,40 +1,28 @@
-# Ribbon and toolbar icons
+# Icons for the egui desktop app
 
-Used by the egui desktop app (`apps/desktop`). They are embedded in the executable through `apps/desktop/src/icons.rs`. Commands, and the icons that go with them, are looked up by stable command ID, never by their English label.
+The ribbon and toolbars use the **approved 3D icon package** (`approved-3d/`, 15–16 Oct 2026), the same artwork as the Qt prototype. It comes from the user's `BIM_CAD Icon Library Catalog.png`, plus generated common and supplemental symbols; see `APPROVED-3D-ASSETS.md`, `LICENSE.md` and `approved-3d/catalog-provenance.json` for provenance.
 
-## `ribbon/` — discipline icons (PNG, 64 × 64, transparent)
+## What the Rust app embeds
 
-100 icons, cut from the reference sheet (except `ifc_import` and `ifc_export`, redrawn as original icons) supplied by the project owner on 15 Oct 2026 (`ribbon/source-sheet.png`). They are grouped in folders by discipline:
+`apps/desktop/src/icons.rs` embeds `rust/*.png`, a derived set that this repository can rebuild at any time:
 
-| Folder | Icons |
-|---|---|
-| `architecture/` | 17 |
-| `structure/` | 17 |
-| `hvac/` | 16 |
-| `plumbing/` | 17 |
-| `electrical/` | 17 |
-| `coordination/` | 16 |
+```sh
+python3 assets/icons/make_rust_icons.py   # approved-3d/*.png -> rust/*.png (transparent background)
+python3 assets/icons/make_ifc_icons.py    # redraws ifc_import / ifc_export
+```
 
-Each tile's label was removed and its background made transparent. The tile backgrounds of solid objects were filled so that white parts stay opaque.
+- **Transparent background.** The approved PNGs sit on opaque white, which shows as white tiles in the dark theme. `make_rust_icons.py` removes the background (flood fill from the border, soft edge). The approved files are never modified.
+- **Dark variants.** Seven line drawings (grid, level, tag, dimension, section, elevation, detail) have a light-stroke `*.dark.png` for the dark theme.
+- **Import / Export IFC are redrawn.** The catalog's IFC icons resemble the buildingSMART logo, which is a trademark, so they are not used. `make_ifc_icons.py` draws original icons in the package style: a brushed-metal page, a glossy blue model cube and a blue arrow (into the page = import, out of it = export). The Qt branch still carries the catalog versions.
+- **Command IDs.** Commands and icons are looked up by stable ID, never by label. A few Rust IDs map to differently named package icons (`pipe_support` → `support`, `valve_gate` → `valve`, `revision_cloud` → `revision`, `anchor_cast_in` → `anchor`); see `ALIASES` in `icons.rs`. Unit tests fail if any ribbon, tab or quick-access ID has no icon, if an icon ID is duplicated, or if an embedded file is not a PNG.
 
-Eight line drawings also have a `*.dark.png` variant with light lines for the dark theme: grid, level, section, elevation, detail, dimension, tag and view.
+## Known limits
 
-The sheet is about 60–100 px per icon. The ribbon shows the icons at 32 px, which is sharp up to 2× screens. Larger sizes need a higher-resolution source.
+- The source crops are about 75–130 px. The ribbon shows them at 32 px, which is sharp on 2× screens; larger sizes need higher-resolution artwork.
+- Electrical switch and socket keep the supplied **EU** designs, while the first calculation profile is British practice (BS 1363). A profile-specific icon may be needed.
+- There is no separate cast-in anchor drawing yet.
+- Choose an asset licence before external distribution (`LICENSE.md`).
 
-ID notes, against the labels on the sheet:
-- The second "Railing" is `railing_alt`.
-- "Bnchor" is `anchor_cast_in`.
-- Structural "Column" is `structural_column`.
-- "Duct (Rectangular)" is `duct`.
+## Superseded files
 
-## `common/` — common commands (SVG, 3D)
-
-There are 20 common commands: select, save, open, new, undo, redo, search, settings, zoom in, zoom out, pan, orbit, copy, move, rotate, mirror, align, trim/extend, delete and measure.
-
-They are drawn as 3D SVGs in the same style as the sheet: isometric, brushed metal, with blue as the accent colour. They are a **proposal for review** (15 Oct 2026). The SVG files are the source; egui rasterises them in Rust at the size needed.
-
-## Before shipping
-
-- **IFC logo.** Resolved 15 Oct 2026: the Import IFC and Export IFC icons on the sheet resembled the buildingSMART logo (a trademark), so they were replaced with original drawings: a document page with a blue model cube and a green arrow out (export) or in (import).
-- **Socket and switch.** These icons are European. The first calculation profile is British practice (BS 1363), so a neutral or profile-specific icon may be needed.
-- **Asset licence.** Choose a licence for these assets before external distribution.
+`ribbon/` (the 100 icons cut from the first sheet) and `common/` (the proposed 3D SVGs) are no longer embedded or used. They are kept only until the owner confirms they can be deleted.

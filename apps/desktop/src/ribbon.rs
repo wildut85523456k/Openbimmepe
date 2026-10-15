@@ -200,8 +200,7 @@ pub fn icon_image(id: &str, dark: bool) -> egui::Image<'static> {
         (true, Some(d)) => (d, "dark"),
         _ => (icon.light, "light"),
     };
-    let ext = if icon.svg { "svg" } else { "png" };
-    egui::Image::from_bytes(format!("bytes://icons/{theme}/{}.{ext}", icon.id), bytes)
+    egui::Image::from_bytes(format!("bytes://icons/{theme}/{}.png", icon.id), bytes)
 }
 
 /// A ribbon panel: the commands in a row with the title centred underneath, then a divider.
@@ -243,4 +242,46 @@ pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: 
         ui.painter().galley(egui::pos2(rect.center().x, rect.top() + 39.0), galley, color);
     }
     response.on_hover_text(label)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn png_size(b: &[u8]) -> Option<(u32, u32)> {
+        if b.len() < 24 || b[..8] != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] || &b[12..16] != b"IHDR" {
+            return None;
+        }
+        Some((u32::from_be_bytes(b[16..20].try_into().ok()?), u32::from_be_bytes(b[20..24].try_into().ok()?)))
+    }
+
+    /// Every ID the ribbon, tab strip, sub-tabs and quick-access bar use must have a real icon, not the fallback.
+    #[test]
+    fn every_ribbon_id_has_an_icon() {
+        let mut ids: Vec<&str> = TABS.iter().map(|t| t.1).collect();
+        ids.extend(SYSTEMS_SUBTABS.iter().map(|t| t.1));
+        ids.extend(QUICK_ACCESS.iter().map(|t| t.0));
+        for (tab, _) in TABS {
+            for sub in ["HVAC", "Plumbing & Piping", "Electrical", "All"] {
+                for g in groups(tab, sub) {
+                    ids.extend(g.commands.iter().map(|c| c.id));
+                }
+            }
+        }
+        let missing: Vec<_> = ids.iter().filter(|id| icons::find(id).is_none()).collect();
+        assert!(missing.is_empty(), "ribbon IDs without an icon: {missing:?}");
+    }
+
+    #[test]
+    fn embedded_icons_are_valid_png_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for i in icons::ICONS {
+            assert!(seen.insert(i.id), "duplicate icon id {}", i.id);
+            let (w, h) = png_size(i.light).unwrap_or_else(|| panic!("{} is not a PNG", i.id));
+            assert!(w >= 32 && h >= 32, "{} is only {w}x{h}", i.id);
+            if let Some(d) = i.dark {
+                assert!(png_size(d).is_some(), "{} dark is not a PNG", i.id);
+            }
+        }
+    }
 }

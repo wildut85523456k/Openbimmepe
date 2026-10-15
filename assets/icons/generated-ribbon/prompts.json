@@ -1,0 +1,196 @@
+{
+  "tool": "Built-in image_gen",
+  "preparation": "Single simple 3D command symbols, resized with Lanczos to 128 px; shown at 34 px. Committed PNGs define the shipped appearance.",
+  "assets": {
+    "link_cad": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a small silver drawing sheet with two blue interlocking chain links, representing a linked CAD drawing. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "da4a2aa57919e8e211e7542b4b9a5f57396b0688599a639da7c1a95bb494a880",
+      "sha256": "22859fa138db68096494459b1c89fb4e157c4278bd2ff9d3c6d0d2262521dbab"
+    },
+    "import_cad": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a silver drawing sheet with a bold blue arrow pointing inward onto it, representing importing a CAD drawing. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "0285fb373e428511b72ad4ba2ac9e11e364f3d9c5bd24655cdc655082ee8a541",
+      "sha256": "147f258bd5fc0ffe35e91fcbc546fef27043d18fc225136f694df8d75a92c376"
+    },
+    "load_family": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a blue downward arrow entering a simple silver cube on a small shelf, representing loading a BIM component family. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "f55bd84ba113433210a15e89e9f53114f49c35215a10cc33fe81cf66cd57ff21",
+      "sha256": "f4ae2d868cce10c8fa7309215638bb74c439508c04601ecc1b94c0860e27d91e"
+    },
+    "image_import": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a small silver picture frame containing one blue mountain silhouette and a sun disk. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "205a506c3292393cdb37711a0f625228510468c85083419640f4cb999afb89dd",
+      "sha256": "3fe024edbe520b35273da0dbf9d05774ebabf7249b74cb3b34dd13ab43d2d7cb"
+    },
+    "pdf_import": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a silver document sheet with a folded corner and a bold red tab marked PDF, no other text. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "621b36f3de684cc8deff2009cbccdd9d230977544d5edd3f71d1f553d772141c",
+      "sha256": "6e6d01d1d30544002058125f9c2b6063f4de62de1e118795968757563603b390"
+    },
+    "text_note": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one thick blue capital letter A as a simple raised solid symbol on a small silver sheet. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "be25325605a2a04147ce8da95c369c376fcf6bc7c225ea75ced0456b8446c0d9",
+      "sha256": "c1d791e49757189b329b2e5f1889141a339e8e653a3c2741b7372c7fb6726547"
+    },
+    "filled_region": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a flat silver square panel with bold blue diagonal hatch lines. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "131b922c6cce79ef5e7f949e4705a2fdb72a9a8199e38beed6e78a486686d024",
+      "sha256": "1bce9b7136d9db1b753e4e0f32e268806016b0a10833304654a68eb6c0d8f875"
+    },
+    "detail_component": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a compact silver layered construction corner detail with a small blue plus symbol. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "bb78d0a5a1d7319b563c8430747bc0256f7fb2afcaf53383cb67cdcbd471f5a5",
+      "sha256": "c704887413a6d075d2ab931a97947f2cbddab6af7e91295c9d6ee879ce17900f"
+    },
+    "systems_analysis": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a simple silver bar chart with three chunky blue rising bars and a small magnifying lens. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "c28cbac6f4d258ffa1078072f9a9d00859241d85504282d1c435fa89a2091c6f",
+      "sha256": "0e8575287c53025ad8856aef62ba6e5fe31bf17109b7186bb9c65b01ef95dcc5"
+    },
+    "energy_model": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a simple silver house-shaped building with one blue lightning bolt on its front. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "e5d291be48c73cf04b1a55cfaa437fad06b2ae41f39ee5df3cf7d46a14066a5b",
+      "sha256": "27296c3955b8c5f0260470759579f90b01f093afa132094ecf5640bf4e9f25bc"
+    },
+    "analytical_model": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a simple blue skeletal wireframe cube with thick silver connection nodes, clearly an analytical structural model. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "eba0e176b84c570d5344c92c2c881f09e2c5097b8e7ecd51ba9fb489976b7d08",
+      "sha256": "0f562e21564994dd429f130a300abf4590d874eca5e095209f4529124430a068"
+    },
+    "loads": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a silver beam with one bold blue arrow pointing vertically downward onto its midpoint. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "ee4dfe021ea35dd36b8b21f094145579e2883a69d85cf7f5f2d6afaec4f1daf4",
+      "sha256": "161d780eeab6519f41f91cfdbd2aa4b6177bda1339c80a78e73bcb77a71537b6"
+    },
+    "space_zone": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: three simple translucent blue room boxes grouped within one bold silver boundary. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "470fed814556d6f44ad993ad2cba52f0591ca4fbb80f34e7d810155615e759d3",
+      "sha256": "8462847398a828ce72ccbf3e87ab5833d7df4d5c922b971c2a2f20cd285d8c23"
+    },
+    "in_place_mass": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a simple silver rectangular architectural mass block with a small blue pencil beside it. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "1855a665efca72d4b19efd13814f253e47c31ab11a349d2cbf99388b55b51958",
+      "sha256": "35810c5deeb7f1227faf276c35c689fd302c8c64b1a8323f1989b1e42b12d262"
+    },
+    "toposolid": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a small square piece of green terrain with two gentle hills and a visible brown soil thickness, simple broad shapes. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "4caf02405b325dccd678cc74c44534e022db5f65757d63b8edd358e76b99f824",
+      "sha256": "d6a094803598cd7b6c1d93e3794b4060b71efd892749289f9a42b2e18ee47b10"
+    },
+    "site_component": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a single simple green deciduous tree with round low detail crown and brown trunk on a small silver site base. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "702bd887e64dde4472d85988b392aa106cf032a7340d70b49c779405aa0340f4",
+      "sha256": "e15008ab54317a858387c9f6e237ff41e41f266bef942683ff1f559a41a35e37"
+    },
+    "parking": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one small blue car within a simple silver parking bay marked by two white boundary lines. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "8a560fd34f12f86de2e92806a9799a6eaaab4f7b03ca33970b98e785c4e61749",
+      "sha256": "3106694a59a64e4fd0feb9e8bb78aee265084b2f2114d22b936b1959135ad272"
+    },
+    "property_line": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a simple blue dashed rectangular site boundary with four prominent silver corner survey pegs. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "d33d3cd291b6e31897c74a62bada6b00bd1b99f29f7439152c1226e6bf01a254",
+      "sha256": "e075155132ca129895383dcaeb4d28343e8ff0391d5dbbf997e8e4ff53ca1012"
+    },
+    "synchronize": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: two thick blue curved arrows forming a circle around one small silver building block. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "c179199ea02ec0360b3b1acb08f4536ced5d42c589fe7b7ff80b54f05fd7cc8f",
+      "sha256": "5f2b80a9f57f01673460b632d83dfe72c10017a842b339383f0b29b93978961b"
+    },
+    "reload_latest": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one bold blue downward arrow over a silver stack of two model sheets. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "5fc5505fa8e377a0e1b7249ba0dca0703b4668976e75fda40555c479e7d233eb",
+      "sha256": "d56c67b53e4eebe7b38da585ab3b66e9d6b2274fcf81345408236b32613ea153"
+    },
+    "copy_monitor": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: two identical silver building blocks with a blue magnifying lens over one, representing copy and monitor. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "8b96c5e9f44d41641228b26f02d1969b7640cebeab638a24cab0448643d9c754",
+      "sha256": "b5e69255798c33b0c57e8278e89b5fbf953e06ce38e8235c1edb8fc292c56448"
+    },
+    "coordination_review": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a silver clipboard with two bold blue check marks next to simple building outlines. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "b221445704ef0701dca24706eb01738e273c45cbc22719ecc4c91b10cd123630",
+      "sha256": "3ea32da2f6b78f917fe9ab5e5d09bc6da9d2cbd820fa2e3acb70445cd223f30a"
+    },
+    "view_3d": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one simple silver isometric cube with one blue face. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "c40d079449699d61a15bddcee1ffd46e3e71c7396ced4328d2a5e4a2fb203579",
+      "sha256": "01bef8d57aa39734d19da04e9401e6cae3937a1906a10b3d0e1646b2149a2197"
+    },
+    "camera": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one simple compact silver and blue camera with a large lens. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "a297e85aa3160cefdc80dc2f40444b78485573929ac9025b216d5da4e3089912",
+      "sha256": "842acfc02a31d4b832d89d2fe7deb16f57484c4b7509f630f2f9334464123dc2"
+    },
+    "schedule": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a silver rectangular table sheet with three bold blue column headers and three visible rows. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "f2fb0b2e019c0f9715313a43ad49e2e084cea9702651703fb9256a36ccd333e7",
+      "sha256": "3f1954ab7494a7b08a1bb2510fc4e485087ff4968a2767f2a9911bebbf06804f"
+    },
+    "sheet": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one landscape silver drawing sheet with a blue title block in the lower right corner and a simple plan rectangle. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "a717c6c45f7f830dc73563a11a18f48d016bb5116e04dd66450272c9b435de7d",
+      "sha256": "371c41539f8d1a1e0b8d64046f266c87267f7b8fb966ecdd053130825a8249ff"
+    },
+    "view_template": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: two stacked silver view sheets with a blue gear on the front sheet. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "13e25460f75b57a153857f440293ad4a5614b80b666ab4846978d8a9b4c203c2",
+      "sha256": "9e6892a7f5ca1cd267fed729f1ce5259670e471784a15d3a1dc817f410c63e68"
+    },
+    "visibility": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one simple blue open eye floating in front of a small silver cube. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "f2eb4424fee15bde6ef7b46717b2c74dcd2d5996954bf73de4e1849de10a1eb1",
+      "sha256": "76a670d80bb808c3dd486be4ab991c65df4ac494e1440e1cec5f71ded11e72c0"
+    },
+    "materials": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: three simple material samples: one silver sphere, one blue glass cube and one tan wood block. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "d7e65100c3722cbc361e15ca1bdde6ec111cd9ec15d5ad7c9447865c64c8154b",
+      "sha256": "26d9a232122c3ddd91aef3bd818d8c0df0ac30194d5fad4f2b32271a10cf9545"
+    },
+    "project_parameters": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: three silver slider tracks with large blue adjustment knobs, representing project parameters. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "4a6bef206b7f26f5ffb4304d32201672e922cdcb137cca63a1d91ff35b17b80f",
+      "sha256": "f5f8004a357a974129272642be99c276bd67cbca9bd6c0b9b9fb19106afb7829"
+    },
+    "project_units": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: a compact silver drafting ruler with a bold blue double headed dimension arrow, no numbers. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "ca2819e3119fb1b45727bbb3d9d76adfe17e903dd820582938779d56ab9e9be4",
+      "sha256": "3680bf613795954a4d39137cefd15730e8017865576612994fd34f3333033deb"
+    },
+    "project_info": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one silver document with a large blue lowercase i information symbol. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "7dd49b8eeae1bbaf43669313b44eff44a876817985f76637034d00c84938cc9e",
+      "sha256": "e7cf8333eb446ba8f8ecb28853995aa4a51d97602ca869bb6483c261c1b5c84b"
+    },
+    "external_tools": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: one silver puzzle piece with a single blue wrench, representing external software tools. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "1f2d07eade4c89d365f2851babeb442297a32e339bf754bf37d1f27a4d64379d",
+      "sha256": "2a52c29543d1eb463ad56a962305a90352aa1f453860d6675c40dc513fdc62b0"
+    },
+    "addin_manager": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: two chunky interlocking silver and blue puzzle pieces above a small blue toggle switch. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "8833298e612889f167e6eb49d50fd96a1ac3a1e4918157fc407d6ad77e5b31e0",
+      "sha256": "74530a705a34fac482fe0aced210e4fe324fcd18d1434c5daa9f4a19ac9bf988"
+    },
+    "visual_programming": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small desktop BIM CAD ribbon command icon. Subject: three simple blue square nodes connected by thick silver right angle lines, no letters or text. Style: SIMPLE low detail 3D icon with broad clear shapes, silver/neutral grey and blue accents, gentle isometric perspective, soft restrained shadow, pure white background. Must be immediately legible at 34 pixels. Avoid photorealistic texture, tiny screws, fine machining, dense linework and decorative objects. Center one coherent symbol occupying 85% of a square canvas. No labels, borders or lettering except the explicitly requested PDF or single A or i symbol. Match a clean engineering icon catalog. Exactly one icon, not a sheet of icons.",
+      "source_sha256": "aadf75ff325602c2e8a85a8716bd14752d1db3ead9b92fed59bc7ce9eb5bfc37",
+      "sha256": "2deb5454c44e6595a7caa5be3f702b01abd29690fff88460b7db34b7ad4da3b2"
+    },
+    "relinquish": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small BIM CAD desktop ribbon icon. Subject: one simple silver open padlock with a bold blue outward pointing arrow, relinquishing editing ownership. SIMPLE low detail 3D silver/grey and blue symbol with broad clear shapes, gentle isometric view, soft shadow on pure white. Centered, fills 85% of square canvas, readable at 34 pixels. No words, labels, tiny textures, screws, frame or extra objects. One icon only.",
+      "source_sha256": "4ac5ad0f8d285ac00181a388c2c44b5e961d6c0cae3a257d8a42a7821f6bf12e",
+      "sha256": "0d316d5f2a77fe1aa1b52b9cdfe01dd8d003e44433446ba0f3a35bb23fa18699"
+    },
+    "location": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small BIM CAD desktop ribbon icon. Subject: one bold blue map location pin on a small silver folded site map. SIMPLE low detail 3D silver/grey and blue symbol with broad clear shapes, gentle isometric view, soft shadow on pure white. Centered, fills 85% of square canvas, readable at 34 pixels. No words, labels, tiny textures, screws, frame or extra objects. One icon only.",
+      "source_sha256": "d550571c86f94bffb07f8ce4f0216c1ea967b72ab6a8a1b6a643196718bd652b",
+      "sha256": "28a4a2ca20a0103412de7f61bc681e1cdf99efafb1e74e4473d1e24b47761503"
+    },
+    "visual_player": {
+      "prompt": "Use case: stylized-concept. Asset type: ONE small BIM CAD desktop ribbon icon. Subject: three simple connected silver node squares with a bold blue triangular play button in front, running a visual programming graph. SIMPLE low detail 3D silver/grey and blue symbol with broad clear shapes, gentle isometric view, soft shadow on pure white. Centered, fills 85% of square canvas, readable at 34 pixels. No words, labels, tiny textures, screws, frame or extra objects. One icon only.",
+      "source_sha256": "2c7a96a7e89af4480d0536b3c1a7bbb557ba0a6eb815230c38be04c18287494b",
+      "sha256": "2677c1967d801fb5c69fa92f3a61f6edf7a23b12b9a3a6ca572e29d82e5e81cd"
+    }
+  }
+}
