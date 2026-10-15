@@ -15,9 +15,12 @@
 
 pub mod expr;
 pub mod mep;
+pub mod shared;
+pub mod catalogue;
 pub mod library;
 
 use expr::{Expr, ExprError};
+pub use shared::{SharedParam, SharedSet};
 pub use mep::{Category, Connector, ConnectorDef, Dir, Domain, FlowDir, Host, MateError, PlanDef, PlanShape, Pose, Resize, ShapeDef, System};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -208,6 +211,8 @@ pub struct Family {
     pub classification: Vec<(String, String)>,
     pub connectors: Vec<ConnectorDef>,
     pub plan: Vec<PlanDef>,
+    /// names of shared parameters this family uses; they come before its own values
+    pub shared: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -244,6 +249,8 @@ pub enum FamilyError {
     BadNested { nested: String, why: &'static str },
     Nested { path: String, err: Box<FamilyError> },
     BadMeta(&'static str),
+    Shared { name: String, why: &'static str },
+    UnknownShared(String),
     Connector { name: String, why: &'static str },
     Plan { index: usize, why: &'static str },
 }
@@ -284,6 +291,8 @@ impl fmt::Display for FamilyError {
             BadNested { nested, why } => write!(f, "nested family '{nested}': {why}"),
             Nested { path, err } => write!(f, "in {path}: {err}"),
             BadMeta(why) => write!(f, "family data: {why}"),
+            Shared { name, why } => write!(f, "shared parameter '{name}': {why}"),
+            UnknownShared(n) => write!(f, "shared parameter '{n}' is not in the shared set"),
             Connector { name, why } => write!(f, "connector '{name}': {why}"),
             Plan { index, why } => write!(f, "plan symbol {index}: {why}"),
         }
@@ -356,6 +365,7 @@ pub struct Inner {
     classification: Vec<(String, String)>,
     connectors: Vec<mep::CConnector>,
     plan: Vec<mep::CPlan>,
+    shared_ids: Vec<(String, u128)>,
 }
 
 /// A family that has passed every structural check. Solving it cannot hit a missing name or a loop.
@@ -369,7 +379,7 @@ pub(crate) fn valid_name(n: &str) -> bool {
     matches!(c.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_') && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') && n.len() <= 64
 }
 
-fn clean_text(name: &str, s: &str, max: usize) -> Result<(), FamilyError> {
+pub(crate) fn clean_text(name: &str, s: &str, max: usize) -> Result<(), FamilyError> {
     if s.chars().count() > max { return Err(FamilyError::BadText { name: name.into(), why: "text is too long" }); }
     if s.chars().any(|c| c.is_control()) { return Err(FamilyError::BadText { name: name.into(), why: "text contains a control character" }); }
     Ok(())
@@ -383,13 +393,21 @@ impl Family {
 }
 
 /// Compile a set of families that may nest each other by name. The result is in the same order.
-pub fn compile_library(families: &[Family]) -> Result<Vec<Compiled>, FamilyError> {
+pub fn compile_library(families: &[Family]) -> Result<Vec<Compiled>, FamilyError> { compile_library_with(families, None) }
+
+/// Like `compile_library`, with a shared parameter set that families name in `Family::shared`.
+pub fn compile_library_shared(families: &[Family], shared: &SharedSet) -> Result<Vec<Compiled>, FamilyError> {
+    shared.check()?;
+    compile_library_with(families, Some(shared))
+}
+
+fn compile_library_with(families: &[Family], shared: Option<&SharedSet>) -> Result<Vec<Compiled>, FamilyError> {
     let mut by_name: HashMap<&str, usize> = HashMap::new();
     for (i, f) in families.iter().enumerate() {
         if by_name.insert(f.name.as_str(), i).is_some() { return Err(FamilyError::DuplicateName(f.name.clone())); }
     }
     let mut done: Vec<Option<Compiled>> = vec![None; families.len()];
-    fn get(i: usize, families: &[Family], by_name: &HashMap<&str, usize>, done: &mut Vec<Option<Compiled>>, stack: &mut Vec<usize>) -> Result<Compiled, FamilyError> {
+    fn get(i: usize, families: &[Family], by_name: &HashMap<&str, usize>, done: &mut Vec<Option<Compiled>>, stack: &mut Vec<usize>, shared: Option<&SharedSet>) -> Result<Compiled, FamilyError> {
         if let Some(c) = &done[i] { return Ok(c.clone()); }
         if let Some(p) = stack.iter().position(|&s| s == i) {
             let mut path: Vec<String> = stack[p..].iter().map(|&s| families[s].name.clone()).collect();
@@ -402,20 +420,35 @@ pub fn compile_library(families: &[Family]) -> Result<Vec<Compiled>, FamilyError
         for n in &families[i].nested {
             if kids.contains_key(&n.family) { continue; }
             let j = *by_name.get(n.family.as_str()).ok_or_else(|| FamilyError::UnknownFamily(n.family.clone()))?;
-            let c = get(j, families, by_name, done, stack)?;
+            let c = get(j, families, by_name, done, stack, shared)?;
             kids.insert(n.family.clone(), c);
         }
         stack.pop();
-        let c = compile_one(&families[i], &kids)?;
+        let c = compile_one(&families[i], &kids, shared)?;
         done[i] = Some(c.clone());
         Ok(c)
     }
     let mut out = Vec::new();
-    for i in 0..families.len() { out.push(get(i, families, &by_name, &mut done, &mut Vec::new())?); }
+    for i in 0..families.len() { out.push(get(i, families, &by_name, &mut done, &mut Vec::new(), shared)?); }
     Ok(out)
 }
 
-fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>) -> Result<Compiled, FamilyError> {
+fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&SharedSet>) -> Result<Compiled, FamilyError> {
+    // shared parameters come first, in the order the family names them
+    let mut shared_ids = Vec::new();
+    let expanded;
+    let fam = if fam.shared.is_empty() { fam } else {
+        let set = shared.ok_or_else(|| FamilyError::UnknownShared(fam.shared[0].clone()))?;
+        let mut vals = Vec::with_capacity(fam.shared.len() + fam.values.len());
+        for n in &fam.shared {
+            let p = set.get(n).ok_or_else(|| FamilyError::UnknownShared(n.clone()))?;
+            shared_ids.push((n.clone(), p.id));
+            vals.push(p.def.clone());
+        }
+        vals.extend(fam.values.iter().cloned());
+        expanded = Family { values: vals, ..fam.clone() };
+        &expanded
+    };
     if fam.values.len() > MAX_VALUES { return Err(FamilyError::TooMany("values")); }
     if fam.solids.len() > MAX_SOLIDS { return Err(FamilyError::TooMany("solids")); }
     if fam.nested.len() > MAX_SOLIDS { return Err(FamilyError::TooMany("nested families")); }
@@ -632,7 +665,7 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>) -> Result<Compile
     for (i, (s, _)) in fam.classification.iter().enumerate() { if fam.classification[..i].iter().any(|(o, _)| o == s) { return Err(FamilyError::BadMeta("a classification system is listed twice")); } }
     let (connectors, plan) = mep::compile(&fam.connectors, &fam.plan, &parse)?;
     let derived: Vec<usize> = (0..nvalues).filter(|&i| formulas[i].is_some() && fam.values[i].axis.is_none()).collect();
-    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan })))
+    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids })))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -695,6 +728,8 @@ struct Resolved<'a> {
 impl Inner {
     pub fn name(&self) -> &str { &self.name }
     pub fn category(&self) -> Category { self.category }
+    /// (name, identity) of the shared parameters this family uses
+    pub fn shared_ids(&self) -> &[(String, u128)] { &self.shared_ids }
     pub fn host(&self) -> Host { self.host }
     pub fn classification(&self) -> &[(String, String)] { &self.classification }
     pub fn slot(&self, name: &str) -> Option<usize> { self.index.get(name).copied() }
