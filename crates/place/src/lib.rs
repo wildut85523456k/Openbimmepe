@@ -67,6 +67,25 @@ pub struct Built {
     pub volume: f64,
 }
 
+/// What a lenient build skipped, and why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Warning {
+    /// the placement that was left out, or None when a whole wall chain was left out
+    pub placement: Option<usize>,
+    pub error: PlaceError,
+}
+
+/// Result of `build_lenient`: everything that is fine is built, the rest is listed in `warnings`.
+pub struct LenientBuilt {
+    /// all chains, in order; placements that were skipped have no opening in them
+    pub chains: Vec<WallChain>,
+    /// one entry per placement; None for a placement that was skipped
+    pub instances: Vec<Option<Instance>>,
+    /// net volume of the valid chains, openings cut; an invalid chain counts for 0
+    pub volume: f64,
+    pub warnings: Vec<Warning>,
+}
+
 /// A solid of a placed family in world coordinates: an oriented box.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldBox {
@@ -141,6 +160,93 @@ impl Model {
         let chains = results.into_iter().collect::<Result<Vec<_>, _>>()?;
         let volume = openbim_geom::total_volume_parallel(&chains).map_err(|err| PlaceError::Chain { chain: usize::MAX, err })?;
         Ok(Built { chains, instances, volume })
+    }
+
+    /// Like `build`, but a bad element does not stop the model: a placement that cannot be solved, has a bad
+    /// reference, or does not fit its wall is skipped, and a wall chain that is not valid is left out of the
+    /// volume. Each skipped element gets a warning. Only a model with too many placements is refused.
+    /// With no warnings the result equals `build`.
+    pub fn build_lenient(&self) -> Result<LenientBuilt, PlaceError> {
+        if self.placements.len() > MAX_PLACEMENTS { return Err(PlaceError::TooMany); }
+        let mut warnings: Vec<Warning> = Vec::new();
+        let chain_ok: Vec<bool> = self.chains.iter().enumerate().map(|(i, c)| match c.validate() {
+            Ok(()) => true,
+            Err(err) => { warnings.push(Warning { placement: None, error: PlaceError::Chain { chain: i, err } }); false }
+        }).collect();
+        // a placement is usable when its references are good and its wall chain is valid
+        let mut usable = vec![true; self.placements.len()];
+        for (k, p) in self.placements.iter().enumerate() {
+            let why = if p.family >= self.families.len() { Some("no such family") }
+                else if p.chain >= self.chains.len() { Some("no such wall chain") }
+                else if !chain_ok[p.chain] { Some("its wall chain is not valid") }
+                else if p.segment >= self.chains[p.chain].segment_count() { Some("no such wall segment") }
+                else { None };
+            if let Some(what) = why { usable[k] = false; warnings.push(Warning { placement: Some(k), error: PlaceError::BadReference { placement: k, what } }); }
+            else if !p.centre.is_finite() { usable[k] = false; warnings.push(Warning { placement: Some(k), error: PlaceError::NotFinite { placement: k } }); }
+        }
+        // solve the families
+        let mut instances: Vec<Option<Instance>> = vec![None; self.placements.len()];
+        for (fi, fam) in self.families.iter().enumerate() {
+            let idx: Vec<usize> = (0..self.placements.len()).filter(|&k| usable[k] && self.placements[k].family == fi).collect();
+            if idx.is_empty() { continue; }
+            let inject = fam.input_scope("wall_t") == Some(Scope::Instance);
+            let reqs: Vec<Request> = idx.iter().map(|&k| {
+                let p = &self.placements[k];
+                let mut ov: Vec<(&str, f64)> = p.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+                if inject && !ov.iter().any(|(n, _)| *n == "wall_t") { ov.push(("wall_t", self.chains[p.chain].thickness)); }
+                Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }
+            }).collect();
+            for (&k, r) in idx.iter().zip(fam.solve_many(&reqs)) {
+                match r {
+                    Ok(i) => instances[k] = Some(i),
+                    Err(err) => warnings.push(Warning { placement: Some(k), error: PlaceError::Family { placement: k, err } }),
+                }
+            }
+        }
+        // cut the openings, one chain per task; a placement that breaks its wall is taken out again
+        let mut by_chain: Vec<Vec<usize>> = vec![Vec::new(); self.chains.len()];
+        for (k, p) in self.placements.iter().enumerate() { if instances[k].is_some() { by_chain[p.chain].push(k); } }
+        type Cut = (WallChain, Vec<usize>, Vec<Warning>);
+        let cuts: Vec<Cut> = self.chains.par_iter().zip(by_chain.par_iter()).enumerate().map(|(ci, (c, ks))| {
+            let mut c = c.clone();
+            let mut dropped = Vec::new();
+            let mut warns = Vec::new();
+            if !chain_ok[ci] { return (c, dropped, warns); }
+            let n = c.segment_count();
+            if c.openings.len() < n { c.openings.resize(n, Vec::new()); }
+            let plans = match c.plans() {
+                Ok(p) => p,
+                Err(err) => { warns.push(Warning { placement: None, error: PlaceError::Chain { chain: ci, err } }); return (c, ks.clone(), warns); }
+            };
+            for &k in ks {
+                let p = &self.placements[k];
+                let inst = instances[k].as_ref().expect("solved");
+                let Some([w, h, sill]) = inst.opening else { continue };
+                let poly = inst.opening_rise != 0.0;
+                if poly {
+                    if c.poly_openings.len() < n { c.poly_openings.resize(n, Vec::new()); }
+                    c.poly_openings[p.segment].push(inst.opening_outline(p.centre - w / 2.0).expect("opening present"));
+                } else {
+                    c.openings[p.segment].push(Opening { offset: p.centre - w / 2.0, width: w, sill, height: h });
+                }
+                if let Err(err) = c.segment_volume_exact(p.segment, &plans[p.segment]) {
+                    if poly { c.poly_openings[p.segment].pop(); } else { c.openings[p.segment].pop(); }
+                    dropped.push(k);
+                    warns.push(Warning { placement: Some(k), error: PlaceError::Wall { placement: k, err } });
+                }
+            }
+            (c, dropped, warns)
+        }).collect();
+        let mut chains = Vec::with_capacity(cuts.len());
+        for (c, dropped, warns) in cuts {
+            for k in dropped { instances[k] = None; }
+            warnings.extend(warns);
+            chains.push(c);
+        }
+        let good: Vec<WallChain> = chains.iter().zip(&chain_ok).filter(|(_, ok)| **ok).map(|(c, _)| c.clone()).collect();
+        let volume = openbim_geom::total_volume_parallel(&good).map_err(|err| PlaceError::Chain { chain: usize::MAX, err })?;
+        warnings.sort_by_key(|w| (w.placement.is_some(), w.placement.unwrap_or(0))); // chain warnings first, then by placement
+        Ok(LenientBuilt { chains, instances, volume, warnings })
     }
 
     /// Replace one placement; keep the change only if the whole model still builds.

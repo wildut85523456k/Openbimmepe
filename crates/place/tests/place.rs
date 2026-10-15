@@ -287,3 +287,78 @@ fn an_open_door_leaf_is_placed_turned_in_the_world() {
     m.placements[0].overrides = vec![("open_angle".into(), 90.0)];
     assert_eq!(m.build().unwrap().volume, closed);
 }
+
+// ---------- lenient build: a bad element is a warning, not a stop ----------
+
+#[test]
+fn lenient_build_equals_strict_when_nothing_is_wrong() {
+    let m = model(vec![room(6.0, 4.0, 0.2, 3.0)], vec![pl(0, 0, 0, 2.0), pl(1, 0, 1, 2.0), pl(0, 0, 2, 3.0)]);
+    let s = m.build().unwrap();
+    let l = m.build_lenient().unwrap();
+    assert!(l.warnings.is_empty());
+    assert_eq!(l.volume, s.volume);
+    assert_eq!(l.chains.len(), s.chains.len());
+    for (a, b) in l.chains.iter().zip(&s.chains) { assert_eq!(format!("{:?}", a.openings), format!("{:?}", b.openings)); }
+    assert_eq!(l.instances.len(), s.instances.len());
+    for (a, b) in l.instances.iter().zip(&s.instances) { assert_eq!(a.as_ref().unwrap().solids, b.solids); }
+}
+
+#[test]
+fn a_bad_placement_is_skipped_and_the_rest_is_built() {
+    let walls = || vec![room(6.0, 4.0, 0.2, 3.0)];
+    let good = || model(walls(), vec![pl(0, 0, 0, 3.0)]).build().unwrap();
+    // the same door plus one on top of it, one outside, one with a bad family, one with a bad wall, one with NaN
+    let mut ps = vec![pl(0, 0, 0, 3.0), pl(0, 0, 0, 3.3), pl(0, 0, 0, 0.5), pl(9, 0, 0, 3.0), pl(0, 0, 9, 3.0), pl(0, 0, 1, f64::NAN)];
+    ps.push(pl(0, 7, 0, 1.0));
+    let l = model(walls(), ps).build_lenient().unwrap();
+    assert_eq!(l.volume, good().volume);
+    assert_eq!(l.warnings.len(), 6);
+    assert!(l.instances[0].is_some() && l.instances[1..].iter().all(|i| i.is_none()));
+    let w = |p: usize| l.warnings.iter().find(|w| w.placement == Some(p)).unwrap().error.clone();
+    assert!(matches!(w(1), PlaceError::Wall { placement: 1, err: GeomError::OpeningsOverlap { .. } }));
+    assert!(matches!(w(2), PlaceError::Wall { placement: 2, err: GeomError::OpeningOutside { .. } }));
+    assert!(matches!(w(3), PlaceError::BadReference { what: "no such family", .. }));
+    assert!(matches!(w(4), PlaceError::BadReference { what: "no such wall segment", .. }));
+    assert!(matches!(w(5), PlaceError::NotFinite { .. }));
+    assert!(matches!(w(6), PlaceError::BadReference { what: "no such wall chain", .. }));
+    // the wall keeps only the one good opening
+    assert_eq!(l.chains[0].openings.iter().map(|o| o.len()).sum::<usize>(), 1);
+}
+
+#[test]
+fn a_family_error_and_a_window_through_the_top_are_warnings() {
+    let mut w = pl(1, 0, 0, 3.0);
+    w.overrides = vec![("sill".into(), 2.0)];
+    let l = model(vec![straight(6.0, 1.5, 3.0), room(6.0, 4.0, 0.2, 3.0)], vec![pl(0, 0, 0, 3.0), w, pl(0, 1, 0, 3.0)]).build_lenient().unwrap();
+    assert!(matches!(l.warnings[0].error, PlaceError::Family { placement: 0, .. }));
+    assert!(matches!(l.warnings[1].error, PlaceError::Wall { placement: 1, .. }) || matches!(l.warnings[1].error, PlaceError::Family { placement: 1, .. }));
+    assert!(l.instances[2].is_some());
+    assert!(l.volume > 0.0);
+}
+
+#[test]
+fn a_broken_chain_is_left_out_and_its_placements_are_skipped() {
+    let bad = WallChain::new(vec![[0.0, 0.0], [0.0, 0.0]], false, 0.2, 3.0);
+    let only = model(vec![room(6.0, 4.0, 0.2, 3.0)], vec![pl(0, 0, 0, 3.0)]).build().unwrap();
+    let l = model(vec![bad, room(6.0, 4.0, 0.2, 3.0)], vec![pl(0, 0, 0, 1.0), pl(0, 1, 0, 3.0)]).build_lenient().unwrap();
+    assert_eq!(l.volume, only.volume);
+    assert_eq!(l.warnings.len(), 2);
+    assert_eq!(l.warnings[0].placement, None);
+    assert!(matches!(l.warnings[0].error, PlaceError::Chain { chain: 0, .. }));
+    assert_eq!(l.warnings[1].placement, Some(0));
+    assert!(l.instances[0].is_none() && l.instances[1].is_some());
+    assert_eq!(l.chains.len(), 2);
+    // nothing at all but bad things still gives an answer
+    let e = model(vec![], vec![pl(0, 0, 0, 1.0)]).build_lenient().unwrap();
+    assert_eq!((e.volume, e.warnings.len()), (0.0, 1));
+}
+
+#[test]
+fn lenient_results_do_not_depend_on_order_of_good_and_bad() {
+    let walls = || vec![room(6.0, 4.0, 0.2, 3.0)];
+    let a = model(walls(), vec![pl(0, 0, 0, 3.0), pl(0, 0, 0, 0.5), pl(0, 0, 2, 3.0)]).build_lenient().unwrap();
+    let b = model(walls(), vec![pl(0, 0, 2, 3.0), pl(0, 0, 0, 0.5), pl(0, 0, 0, 3.0)]).build_lenient().unwrap();
+    assert_eq!(a.volume, b.volume);
+    assert_eq!(a.warnings.len(), 1);
+    assert_eq!(b.warnings.len(), 1);
+}
