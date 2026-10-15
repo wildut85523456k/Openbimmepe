@@ -362,3 +362,37 @@ fn lenient_results_do_not_depend_on_order_of_good_and_bad() {
     assert_eq!(a.warnings.len(), 1);
     assert_eq!(b.warnings.len(), 1);
 }
+
+/// A long chain of 4 m walls, turning left and right, with a door on every second one.
+fn long_model(n: usize) -> Model {
+    let mut p = vec![[0.0, 0.0]];
+    for i in 0..n {
+        let l = p[i];
+        p.push(match i % 4 { 0 => [l[0] + 4.0, l[1]], 1 => [l[0], l[1] + 4.0], 2 => [l[0] + 4.0, l[1]], _ => [l[0], l[1] - 4.0] });
+    }
+    let ps = (0..n).filter(|s| s % 2 == 0).map(|s| pl(0, 0, s, 2.0)).collect();
+    model(vec![WallChain::new(p, false, 0.2, 3.0)], ps)
+}
+
+#[test]
+fn a_long_chain_gives_the_same_bits_on_any_number_of_threads() {
+    let m = long_model(3000); // above the length at which one chain is shared among the threads
+    let one = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| m.build().unwrap());
+    let four = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap().install(|| m.build().unwrap());
+    assert_eq!(one.volume.to_bits(), four.volume.to_bits());
+    let key = |b: &Built| b.chains[0].openings.iter().flatten().map(|o| [o.offset.to_bits(), o.width.to_bits(), o.sill.to_bits(), o.height.to_bits()]).collect::<Vec<_>>();
+    assert_eq!(key(&one), key(&four));
+    // and equals the serial total of the same chain
+    assert_eq!(one.volume.to_bits(), openbim_geom::total_volume_serial(&one.chains).unwrap().to_bits());
+    assert_eq!(one.chains[0].openings.iter().filter(|o| !o.is_empty()).count(), 1500);
+}
+
+#[test]
+fn on_a_long_chain_the_error_still_names_the_placement_that_caused_it() {
+    let mut m = long_model(3000);
+    // a second door on segment 1000, on top of the first: the later placement is the one that fails
+    let first = m.placements.iter().position(|p| p.segment == 1000).unwrap();
+    m.placements.insert(first + 1, pl(0, 0, 1000, 2.1));
+    let e = m.build().err().expect("the overlap is refused");
+    assert!(matches!(e, PlaceError::Wall { placement, .. } if placement == first + 1), "{e:?}");
+}

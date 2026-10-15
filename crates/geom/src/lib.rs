@@ -713,7 +713,7 @@ fn total_with<F: Fn(&WallChain) -> Result<f64, GeomError> + Sync>(chains: &[Wall
 }
 
 /// Total exact volume of all chains, evaluated in parallel (same result as the serial version, bit for bit).
-pub fn total_volume_parallel(chains: &[WallChain]) -> Result<f64, GeomError> { total_with(chains, true, chain_volume) }
+pub fn total_volume_parallel(chains: &[WallChain]) -> Result<f64, GeomError> { total_with(chains, true, chain_volume_par) }
 
 pub fn total_volume_serial(chains: &[WallChain]) -> Result<f64, GeomError> { total_with(chains, false, chain_volume) }
 
@@ -721,6 +721,24 @@ fn chain_volume(c: &WallChain) -> Result<f64, GeomError> {
     let plans = c.plans()?;
     let mut s = 0.0;
     for (i, p) in plans.iter().enumerate() { s += c.segment_volume_exact(i, p)?; }
+    Ok(s)
+}
+
+/// Chains with more segments than this share their segments among the threads.
+const LONG_CHAIN: usize = 512;
+
+/// Same value as `chain_volume`, bit for bit: the segments are evaluated in parallel on a long chain, but added in
+/// segment order.
+fn chain_volume_par(c: &WallChain) -> Result<f64, GeomError> {
+    let plans = c.plans()?;
+    if plans.len() <= LONG_CHAIN {
+        let mut s = 0.0;
+        for (i, p) in plans.iter().enumerate() { s += c.segment_volume_exact(i, p)?; }
+        return Ok(s);
+    }
+    let parts: Result<Vec<f64>, GeomError> = plans.par_iter().enumerate().map(|(i, p)| c.segment_volume_exact(i, p)).collect();
+    let mut s = 0.0;
+    for v in parts? { s += v; }
     Ok(s)
 }
 

@@ -121,10 +121,12 @@ pub struct WorldBox {
 impl Model {
     fn check_refs(&self) -> Result<(), PlaceError> {
         if self.placements.len() > MAX_PLACEMENTS { return Err(PlaceError::TooMany); }
+        // each chain is validated once, not once per placement on it (that made a long chain cost n squared)
+        let valid: Vec<bool> = self.chains.par_iter().map(|c| c.validate().is_ok()).collect();
         for (k, p) in self.placements.iter().enumerate() {
             if p.family >= self.families.len() { return Err(PlaceError::BadReference { placement: k, what: "no such family" }); }
             let Some(c) = self.chains.get(p.chain) else { return Err(PlaceError::BadReference { placement: k, what: "no such wall chain" }) };
-            if c.validate().is_err() { continue; } // reported with the chain below
+            if !valid[p.chain] { continue; } // reported with the chain below
             if p.segment >= c.segment_count() { return Err(PlaceError::BadReference { placement: k, what: "no such wall segment" }); }
             if !p.centre.is_finite() { return Err(PlaceError::NotFinite { placement: k }); }
         }
@@ -146,13 +148,14 @@ impl Model {
             let idx: Vec<usize> = (0..self.placements.len()).filter(|&k| self.placements[k].family == fi).collect();
             if idx.is_empty() { continue; }
             let inject = fam.input_scope("wall_t") == Some(Scope::Instance);
-            let reqs: Vec<Request> = idx.iter().map(|&k| {
+            // the request is made on the thread that solves it, so the work of building it is shared too
+            let solved: Vec<Result<Instance, openbim_family::FamilyError>> = idx.par_iter().map(|&k| {
                 let p = &self.placements[k];
                 let mut ov: Vec<(&str, f64)> = p.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
                 if inject && !ov.iter().any(|(n, _)| *n == "wall_t") { ov.push(("wall_t", self.chains[p.chain].thickness)); }
-                Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }
+                fam.solve(&Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
             }).collect();
-            for (&k, r) in idx.iter().zip(fam.solve_many(&reqs)) {
+            for (&k, r) in idx.iter().zip(solved) {
                 instances[k] = Some(r.map_err(|err| PlaceError::Family { placement: k, err })?);
             }
         }
@@ -165,18 +168,45 @@ impl Model {
             let n = c.segment_count();
             if c.openings.len() < n { c.openings.resize(n, Vec::new()); }
             let plans = c.plans().map_err(|err| PlaceError::Chain { chain: ci, err })?;
+            let mut cut = c.clone();
+            let mut touched: Vec<usize> = Vec::new();
             for &k in ks {
                 let p = &self.placements[k];
                 if let Some([w, h, sill]) = instances[k].opening {
                     if instances[k].opening_rise == 0.0 {
-                        c.openings[p.segment].push(Opening { offset: p.centre - w / 2.0, width: w, sill, height: h });
+                        cut.openings[p.segment].push(Opening { offset: p.centre - w / 2.0, width: w, sill, height: h });
                     } else {
-                        if c.poly_openings.len() < n { c.poly_openings.resize(n, Vec::new()); }
+                        if cut.poly_openings.len() < n { cut.poly_openings.resize(n, Vec::new()); }
                         let outline = instances[k].opening_outline(p.centre - w / 2.0).expect("opening present");
-                        c.poly_openings[p.segment].push(outline);
+                        cut.poly_openings[p.segment].push(outline);
                     }
-                    // check this segment now so a failure names the placement that caused it
-                    c.segment_volume_exact(p.segment, &plans[p.segment]).map_err(|err| PlaceError::Wall { placement: k, err })?;
+                    touched.push(p.segment);
+                }
+            }
+            touched.sort_unstable();
+            touched.dedup();
+            // all openings are in: a long chain checks its touched segments on all threads. When one fails, the
+            // placements are replayed one by one, so the error names the placement that caused it
+            let all_good = if touched.len() > 64 {
+                touched.par_iter().all(|&sg| cut.segment_volume_exact(sg, &plans[sg]).is_ok())
+            } else {
+                touched.iter().all(|&sg| cut.segment_volume_exact(sg, &plans[sg]).is_ok())
+            };
+            if all_good {
+                c = cut;
+            } else {
+                for &k in ks {
+                    let p = &self.placements[k];
+                    if let Some([w, h, sill]) = instances[k].opening {
+                        if instances[k].opening_rise == 0.0 {
+                            c.openings[p.segment].push(Opening { offset: p.centre - w / 2.0, width: w, sill, height: h });
+                        } else {
+                            if c.poly_openings.len() < n { c.poly_openings.resize(n, Vec::new()); }
+                            let outline = instances[k].opening_outline(p.centre - w / 2.0).expect("opening present");
+                            c.poly_openings[p.segment].push(outline);
+                        }
+                        c.segment_volume_exact(p.segment, &plans[p.segment]).map_err(|err| PlaceError::Wall { placement: k, err })?;
+                    }
                 }
             }
             for pen in &pens_by_chain[ci] {
