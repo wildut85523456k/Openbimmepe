@@ -177,7 +177,15 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 for (sys, code) in fam.classification() {
                     props.push(("Classification", Val::Label(format!("{sys}: {code}"))));
                 }
-                psets.push(format!("#{}", o.pset_entity("OpenBIM_Family", props)));
+                let mut report = std::mem::take(&mut o.report);
+                let split = crate::split_props(&scene.pset_map, fam.category().ifc_class(), props, &tname, &mut report);
+                o.report = report;
+                if !split.custom.is_empty() {
+                    psets.push(format!("#{}", o.pset_entity("OpenBIM_Family", split.custom)));
+                }
+                for (name, list) in split.sets {
+                    psets.push(format!("#{}", o.pset_entity(name, list)));
+                }
                 let tid = (0xFFFF_FFFEu64 << 32) | (u64::from(fr.id) << 16) | slot as u64;
                 let g = o.gid(tid, 0);
                 let cls = upper(&format!("{}Type", fam.category().ifc_class()));
@@ -233,7 +241,14 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
         o.report.items += 1;
         let props = props_of(fam, &it.instance, openbim_family::Scope::Instance);
         if !props.is_empty() {
-            o.pset(occ, "OpenBIM_Instance", props);
+            o.pset_mapped(occ, cat.ifc_class(), "OpenBIM_Instance", props, &it.name);
+        }
+        if let Some([ow, oh, _]) = it.instance.opening {
+            match cat {
+                Category::Door => o.qto(occ, "Qto_DoorBaseQuantities", &crate::quantities::opening_item(ow, oh)),
+                Category::Window => o.qto(occ, "Qto_WindowBaseQuantities", &crate::quantities::opening_item(ow, oh)),
+                _ => {}
+            }
         }
         groups[gi].occurrences.push(occ);
         // fills its wall opening

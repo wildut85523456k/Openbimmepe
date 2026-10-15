@@ -56,7 +56,7 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![] }
+    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
     WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0) }
@@ -204,4 +204,86 @@ fn occurrences_differing_only_in_a_form_or_a_turn_keep_their_own_bodies() {
     let out = export(&s).unwrap();
     assert_eq!(out.report.items, 4);
     assert_eq!(out.report.mapped, 2, "only the two identical benches share the map");
+}
+
+#[test]
+fn mapped_parameters_go_to_their_standard_set_and_the_rest_stay_custom() {
+    use openbim_ifc::pset_map::PsetMap;
+    let mut s = library_scene(&[(Some("Type A"), "D1")]);
+    s.pset_map = PsetMap::from_text("IfcDoor\thandle_height\tPset_DoorCommon\tHandleHeight\tpositive_length\nIfcDoor\topen_angle\tPset_DoorCommon\tAngle\tlength\n").unwrap();
+    let out = export(&s).unwrap();
+    assert_eq!(out.report.mapped_properties, 2);
+    assert!(out.report.warnings.is_empty(), "{:?}", out.report.warnings);
+    assert!(out.text.contains("IFCPROPERTYSET(") && out.text.contains("'Pset_DoorCommon'"));
+    assert!(out.text.contains("'HandleHeight',$,IFCPOSITIVELENGTHMEASURE(1.0)"));
+    assert!(out.text.contains("'Angle',$,IFCLENGTHMEASURE(0.)"));
+    // the mapped one is gone from the custom type set
+    assert!(!out.text.contains("'handle_height'"));
+    assert!(out.text.contains("'OpenBIM_Family'"));
+    // without a table, the same value stays in the custom set
+    let plain = export(&library_scene(&[(Some("Type A"), "D1")])).unwrap();
+    assert!(plain.text.contains("'handle_height'") && !plain.text.contains("Pset_DoorCommon"));
+    assert_eq!(plain.report.mapped_properties, 0);
+}
+
+#[test]
+fn a_value_that_does_not_fit_its_row_stays_custom_with_a_warning() {
+    use openbim_ifc::pset_map::PsetMap;
+    let mut s = library_scene(&[(Some("Type A"), "D1")]);
+    // 'frame' is 0.05: not a whole number
+    s.pset_map = PsetMap::from_text("IfcDoor\tframe\tPset_DoorCommon\tFrameCount\tinteger\n*\topen_angle\tPset_X\tLen\tpositive_length\n").unwrap();
+    let out = export(&s).unwrap();
+    assert_eq!(out.report.mapped_properties, 0);
+    assert_eq!(out.report.warnings.len(), 2, "{:?}", out.report.warnings);
+    assert!(out.report.warnings.iter().any(|w| w.contains("frame") && w.contains("whole number")));
+    assert!(out.report.warnings.iter().any(|w| w.contains("open_angle") && w.contains("above 0")));
+    assert!(out.text.contains("'frame'") && !out.text.contains("'FrameCount'"));
+}
+
+#[test]
+fn door_and_window_get_base_quantities_from_their_opening() {
+    let out = export(&library_scene(&[(Some("Type A"), "D1")])).unwrap();
+    assert_eq!(out.text.matches("'Qto_DoorBaseQuantities'").count(), 1);
+    assert!(out.text.contains("IFCQUANTITYAREA('Area',$,$,"));
+    assert_eq!(out.report.quantity_sets, 2, "the wall and the door");
+}
+
+#[test]
+fn walls_slabs_and_rooms_get_base_quantities() {
+    use openbim_arch::Room;
+    use openbim_place::floors::Slab;
+    let mut s = scene(vec![wall(5)]);
+    s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 0.0, thickness: 0.2, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], fire_rating_min: None } }];
+    s.rooms = vec![RoomItem { id: 7, room: Room { name: "R".into(), usage: "office".into(), occupancy: 1.0, level: 0, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], holes: vec![vec![[1.0, 1.0], [1.0, 2.0], [2.0, 2.0], [2.0, 1.0]]], height: 2.5 } }];
+    let out = export(&s).unwrap();
+    assert_eq!((out.report.walls, out.report.slabs, out.report.spaces, out.report.quantity_sets), (1, 1, 1, 3));
+    for n in ["Qto_WallBaseQuantities", "Qto_SlabBaseQuantities", "Qto_SpaceBaseQuantities"] {
+        assert_eq!(out.text.matches(&format!("'{n}'")).count(), 1, "{n}");
+    }
+    assert!(out.text.contains("IFCARBITRARYPROFILEDEFWITHVOIDS("));
+    assert!(out.text.contains("IFCSPACE("));
+    // net space volume: (16 - 1) * 2.5
+    assert!(out.text.contains("IFCQUANTITYVOLUME('NetVolume',$,$,37.5,$)"), "{}", out.text.lines().filter(|l| l.contains("NetVolume")).collect::<Vec<_>>().join("\n"));
+    // the room is written twice the same
+    assert_eq!(out.text, export(&s).unwrap().text);
+    // a room on a level that does not exist is refused
+    s.rooms[0].room.level = 3;
+    assert!(matches!(export(&s), Err(ExportError::Unsupported(_))));
+}
+
+#[test]
+fn slab_net_quantities_take_off_shafts_and_cut_openings() {
+    use openbim_arch::spaces::Shaft;
+    use openbim_place::floors::{ShaftVoid, Slab};
+    let mut s = scene(vec![wall(5)]);
+    let levels = Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }, Level { name: "L2".into(), elevation: 6.0 }]).unwrap();
+    s.levels = levels.clone();
+    let shaft = Shaft { name: "S".into(), usage: "x".into(), outline: vec![[1.0, 1.0], [3.0, 1.0], [3.0, 2.0], [1.0, 2.0]], from: 0, to: 2 };
+    s.shafts = vec![ShaftVoid::from_shaft(&shaft, &levels).unwrap()];
+    s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 3.0, thickness: 0.2, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None } }];
+    let out = export(&s).unwrap();
+    // 80 - 2 (shaft) = 78 net; the volume is 78 x 0.2 = 15.6
+    assert!(out.text.contains("IFCQUANTITYAREA('NetArea',$,$,78.0,$)"));
+    assert!(out.text.contains("IFCQUANTITYVOLUME('NetVolume',$,$,15.6"));
+    assert!(out.text.contains("IFCQUANTITYVOLUME('GrossVolume',$,$,16.0,$)"));
 }

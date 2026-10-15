@@ -291,6 +291,53 @@ for g in f.by_type("IfcRelAssignsToGroup"):
 for r in rows("SEG"):
     ok(sysmap.get(int(r[0])) == r[1], f"system of segment {r[0]}")
 
+# ---- 6b. property sets and base quantities, against geometry computed here
+def qto(e, name):
+    for r in e.IsDefinedBy:
+        if r.is_a("IfcRelDefinesByProperties") and r.RelatingPropertyDefinition.is_a("IfcElementQuantity") and r.RelatingPropertyDefinition.Name == name:
+            return {q.Name: (q.is_a(), list(q)[3]) for q in r.RelatingPropertyDefinition.Quantities}
+    return None
+def mesh_volume(e, subtract):
+    st = ifcopenshell.geom.settings()
+    st.set("disable-opening-subtractions", not subtract)
+    sh = ifcopenshell.geom.create_shape(st, e)
+    return ush.get_volume(sh.geometry)
+for w in f.by_type("IfcWall"):
+    q = qto(w, "Qto_WallBaseQuantities")
+    ok(q is not None, "wall has Qto_WallBaseQuantities")
+    if q is None: continue
+    ok(q["GrossVolume"][0] == "IfcQuantityVolume" and q["Length"][0] == "IfcQuantityLength" and q["NetSideArea"][0] == "IfcQuantityArea", "wall quantity kinds")
+    ok(abs(q["GrossVolume"][1] - mesh_volume(w, False)) < 1e-6, f"wall gross volume {q['GrossVolume'][1]} vs mesh {mesh_volume(w, False)}")
+    ok(abs(q["NetVolume"][1] - mesh_volume(w, True)) < 1e-6, f"wall net volume {q['NetVolume'][1]} vs mesh {mesh_volume(w, True)}")
+    ok(abs(q["GrossVolume"][1] - q["GrossFootprintArea"][1] * q["Height"][1]) < 1e-6, "wall gross volume = footprint x height")
+for sl in f.by_type("IfcSlab"):
+    q = qto(sl, "Qto_SlabBaseQuantities")
+    ok(q is not None, "slab has Qto_SlabBaseQuantities")
+    if q is None: continue
+    ok(abs(q["GrossVolume"][1] - mesh_volume(sl, False)) < 1e-6, "slab gross volume")
+    ok(abs(q["NetVolume"][1] - mesh_volume(sl, True)) < 1e-6, f"slab net volume {q['NetVolume'][1]} vs mesh {mesh_volume(sl, True)}")
+    ok(abs(q["NetArea"][1] * q["Depth"][1] - q["NetVolume"][1]) < 1e-6, "slab net area x depth = net volume")
+for sp in f.by_type("IfcSpace"):
+    q = qto(sp, "Qto_SpaceBaseQuantities")
+    ok(q is not None, "space has Qto_SpaceBaseQuantities")
+    if q is None: continue
+    ok(abs(q["NetVolume"][1] - mesh_volume(sp, False)) < 1e-6, "space net volume equals the mesh of the room with its hole")
+    ok(abs(q["NetFloorArea"][1] * q["Height"][1] - q["NetVolume"][1]) < 1e-6, "space area x height = volume")
+    ok(q["GrossFloorArea"][1] > q["NetFloorArea"][1], "the hole is taken off the net floor area")
+    ok(sp.Decomposes[0].RelatingObject.is_a("IfcBuildingStorey"), "space sits in a storey")
+for r in rows("IOPEN"):
+    o = occs[int(r[0])]
+    name = "Qto_DoorBaseQuantities" if o.is_a("IfcDoor") else "Qto_WindowBaseQuantities"
+    q = qto(o, name)
+    ok(q is not None, f"{o.Name} has {name}")
+    if q is None: continue
+    ok(abs(q["Width"][1] - float(r[1])) < 1e-9 and abs(q["Height"][1] - float(r[2])) < 1e-9 and abs(q["Area"][1] - float(r[1]) * float(r[2])) < 1e-9, f"{o.Name} quantities match its opening")
+ps = ue.get_psets(occs[by_name["D-01"]])
+ok(ps.get("Pset_DoorCommon", {}).get("Reference") == "D-01", "mapped parameter reached Pset_DoorCommon.Reference")
+ok("Reference" not in ps.get("OpenBIM_Instance", {}), "mapped parameter is not also in the custom set")
+tp = ue.get_psets(ue.get_type(occs[by_name["D-01"]]))
+ok("OpenBIM_Family" in tp, "unmapped type values stay in OpenBIM_Family")
+
 # ---- 7. repeatability and stable ids
 a = open(sys.argv[2], "rb").read(); b = open(sys.argv[3], "rb").read()
 ok(a == b, "two exports are byte for byte the same")

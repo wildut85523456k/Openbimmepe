@@ -1,12 +1,13 @@
 //! Writes the test building as IFC4 to the path given, and prints what it expects to be in the file, as plain
 //! text, for the independent IfcOpenShell check (this text is not a product data path).
 use openbim_arch::spaces::Shaft;
-use openbim_arch::{Level, Levels};
+use openbim_arch::{Level, Levels, Room};
 use openbim_family::forms::{FormDef, ProfileDef};
 use openbim_family::{compile_library, library, Axis, Category, Family, NestedDef, SolidDef, ValueDef};
 use openbim_family::mep::{Domain, System};
 use openbim_family::Request;
 use openbim_geom::WallChain;
+use openbim_ifc::pset_map::PsetMap;
 use openbim_ifc::*;
 use openbim_place::floors::{find_floor, ShaftVoid, Slab};
 use openbim_place::penetrations::RunSize;
@@ -159,6 +160,8 @@ pub fn build_scene(edit: bool) -> Scene {
         networks: vec![net],
         families: fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect(),
         items,
+        rooms: vec![RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[2.5, 0.2], [9.8, 0.2], [9.8, 7.8], [2.5, 7.8]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } }],
+        pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
     }
 }
 

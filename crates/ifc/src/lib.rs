@@ -16,9 +16,11 @@
 //! The output is the same bytes for the same input: nothing in it depends on the clock or on hash order.
 mod families;
 pub mod guid;
+pub mod pset_map;
+pub mod quantities;
 pub mod step;
 
-use openbim_arch::Levels;
+use openbim_arch::{Levels, Room};
 use openbim_family::mep::{up_for, Domain, System};
 use openbim_family::{Compiled, Instance};
 use openbim_geom::WallChain;
@@ -27,6 +29,7 @@ use openbim_place::penetrations::{Penetration, RunSize};
 use openbim_route::graph::{Network, NodeRef, PortRef};
 use openbim_route::{Fitting, FittingKind};
 use std::collections::BTreeMap;
+use pset_map::{PropKind, PsetMap};
 use step::{real, string, Step};
 
 pub struct WallItem {
@@ -95,6 +98,12 @@ pub struct FamilyItem {
     pub host: Option<(usize, usize, f64)>,
 }
 
+/// A room, written as an `IfcSpace` with its base quantities.
+pub struct RoomItem {
+    pub id: u64,
+    pub room: Room,
+}
+
 pub struct Scene {
     pub project_name: String,
     /// 48-bit key that makes the GlobalIds of this project different from every other project's
@@ -112,6 +121,9 @@ pub struct Scene {
     pub networks: Vec<Network>,
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
+    pub rooms: Vec<RoomItem>,
+    /// where family and shared parameters go; what it does not name goes to the custom sets
+    pub pset_map: PsetMap,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,6 +158,11 @@ pub struct Report {
     pub types: usize,
     /// occurrences whose shape is a mapped item of their type's shared shape
     pub mapped: usize,
+    pub spaces: usize,
+    /// base quantity sets written
+    pub quantity_sets: usize,
+    /// parameters written in the property set the mapping table names
+    pub mapped_properties: usize,
 }
 
 pub struct Exported {
@@ -182,10 +199,71 @@ fn perp(d: V3) -> V3 {
 
 enum Val {
     Label(String),
+    Text(String),
+    Ident(String),
     Bool(bool),
+    /// a positive length
     Len(f64),
+    /// a length of any sign
+    LenAny(f64),
+    Area(f64),
+    Vol(f64),
     Int(i64),
     Real(f64),
+}
+
+/// A value written as the kind a mapping row asks for; the reason when it cannot be.
+fn convert(v: &Val, kind: PropKind) -> Result<Val, &'static str> {
+    Ok(match (v, kind) {
+        (Val::Real(x), PropKind::Real) => Val::Real(*x),
+        (Val::Real(x), PropKind::Length) => Val::LenAny(*x),
+        (Val::Real(x), PropKind::PositiveLength) if *x > 0.0 => Val::Len(*x),
+        (Val::Real(_), PropKind::PositiveLength) => return Err("a positive length must be above 0"),
+        (Val::Real(x), PropKind::Area) => Val::Area(*x),
+        (Val::Real(x), PropKind::Volume) => Val::Vol(*x),
+        (Val::Real(x), PropKind::Integer) if x.fract() == 0.0 && x.abs() < 1e15 => Val::Int(*x as i64),
+        (Val::Real(_), PropKind::Integer) => return Err("an integer must be a whole number"),
+        (Val::Real(x), PropKind::Boolean) if *x == 0.0 || *x == 1.0 => Val::Bool(*x == 1.0),
+        (Val::Real(_), PropKind::Boolean) => return Err("a boolean must be 0 or 1"),
+        (Val::Bool(b), PropKind::Boolean) => Val::Bool(*b),
+        (Val::Int(i), PropKind::Integer) => Val::Int(*i),
+        (Val::Label(t), PropKind::Label) => Val::Label(t.clone()),
+        (Val::Label(t), PropKind::Text) => Val::Text(t.clone()),
+        (Val::Label(t), PropKind::Identifier) => Val::Ident(t.clone()),
+        _ => return Err("the value is not of a kind that can be written like that"),
+    })
+}
+
+/// Values split by where they go: the custom set, and the property sets the mapping table names.
+pub(crate) struct Split<'a> {
+    pub custom: Vec<(&'a str, Val)>,
+    pub sets: Vec<(&'a str, Vec<(&'a str, Val)>)>,
+}
+
+/// Sort `props` of an element of `class` by the mapping table. A value that cannot be written as its row asks
+/// stays in the custom set, with a warning.
+pub(crate) fn split_props<'a>(map: &'a PsetMap, class: &str, props: Vec<(&'a str, Val)>, who: &str, report: &mut Report) -> Split<'a> {
+    let mut out = Split { custom: Vec::new(), sets: Vec::new() };
+    for (n, v) in props {
+        let Some(row) = map.find(class, n) else {
+            out.custom.push((n, v));
+            continue;
+        };
+        match convert(&v, row.kind) {
+            Ok(cv) => {
+                report.mapped_properties += 1;
+                match out.sets.iter_mut().find(|(s, _)| *s == row.pset) {
+                    Some((_, list)) => list.push((row.property.as_str(), cv)),
+                    None => out.sets.push((row.pset.as_str(), vec![(row.property.as_str(), cv)])),
+                }
+            }
+            Err(why) => {
+                report.warnings.push(format!("{who}: '{n}' could not go to {}.{}: {why}", row.pset, row.property));
+                out.custom.push((n, v));
+            }
+        }
+    }
+    out
 }
 
 struct Out<'a> {
@@ -250,6 +328,11 @@ impl<'a> Out<'a> {
         let r = rel.map_or("$".to_string(), |r| format!("#{r}"));
         self.s.add(format!("IFCLOCALPLACEMENT({r},#{a})"))
     }
+    fn poly_ring(&mut self, pts: &[[f64; 2]]) -> u32 {
+        let mut ids: Vec<String> = pts.iter().map(|p| format!("#{}", self.p2(p[0], p[1]))).collect();
+        ids.push(ids[0].clone());
+        self.s.add(format!("IFCPOLYLINE(({}))", ids.join(",")))
+    }
     fn poly_profile(&mut self, pts: &[[f64; 2]]) -> u32 {
         let mut ids: Vec<String> = Vec::new();
         for p in pts.iter().chain(pts.first()) {
@@ -296,8 +379,13 @@ impl<'a> Out<'a> {
         for (n, v) in props {
             let val = match v {
                 Val::Label(s) => format!("IFCLABEL({})", string(&s)),
+                Val::Text(s) => format!("IFCTEXT({})", string(&s)),
+                Val::Ident(s) => format!("IFCIDENTIFIER({})", string(&s)),
                 Val::Bool(b) => format!("IFCBOOLEAN({})", if b { ".T." } else { ".F." }),
                 Val::Len(x) => format!("IFCPOSITIVELENGTHMEASURE({})", self.r(x, "property")),
+                Val::LenAny(x) => format!("IFCLENGTHMEASURE({})", self.r(x, "property")),
+                Val::Area(x) => format!("IFCAREAMEASURE({})", self.r(x, "property")),
+                Val::Vol(x) => format!("IFCVOLUMEMEASURE({})", self.r(x, "property")),
                 Val::Int(i) => format!("IFCINTEGER({i})"),
                 Val::Real(x) => format!("IFCREAL({})", self.r(x, "property")),
             };
@@ -310,6 +398,37 @@ impl<'a> Out<'a> {
         let ps = self.pset_entity(name, props);
         let g = self.gen_gid();
         self.s.add(format!("IFCRELDEFINESBYPROPERTIES({g},$,$,$,(#{owner}),#{ps})"));
+    }
+    /// A base quantity set on an element.
+    fn qto(&mut self, owner: u32, name: &str, qs: &[quantities::Qty]) {
+        let mut ids = Vec::new();
+        for q in qs {
+            let v = self.r(q.value.max(0.0), "quantity");
+            let (class, _) = match q.kind {
+                quantities::Kind::Length => ("IFCQUANTITYLENGTH", 0),
+                quantities::Kind::Area => ("IFCQUANTITYAREA", 0),
+                quantities::Kind::Volume => ("IFCQUANTITYVOLUME", 0),
+            };
+            ids.push(format!("#{}", self.s.add(format!("{class}({},$,$,{v},$)", string(q.name)))));
+        }
+        let g = self.gen_gid();
+        let eq = self.s.add(format!("IFCELEMENTQUANTITY({g},$,{},$,$,({}))", string(name), ids.join(",")));
+        let g = self.gen_gid();
+        self.s.add(format!("IFCRELDEFINESBYPROPERTIES({g},$,$,$,(#{owner}),#{eq})"));
+        self.report.quantity_sets += 1;
+    }
+    /// Property sets for the values of an element, by the mapping table; the rest to the custom set `custom`.
+    fn pset_mapped(&mut self, owner: u32, class: &str, custom: &str, props: Vec<(&str, Val)>, who: &str) {
+        let scene = self.scene;
+        let mut report = std::mem::take(&mut self.report);
+        let split = split_props(&scene.pset_map, class, props, who, &mut report);
+        self.report = report;
+        if !split.custom.is_empty() {
+            self.pset(owner, custom, split.custom);
+        }
+        for (name, list) in split.sets {
+            self.pset(owner, name, list);
+        }
     }
     fn storey_for(&self, z: f64) -> usize {
         let mut k = 0;
@@ -404,6 +523,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     write_walls(&mut o)?;
     families::write_families(&mut o)?;
     write_slabs(&mut o)?;
+    write_spaces(&mut o)?;
     write_networks(&mut o)?;
 
     // containment, per storey
@@ -447,6 +567,10 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         let wall = o.s.add(format!("IFCWALL({g},$,{},$,$,#{pl},#{shape},$,.STANDARD.)", string(&w.name)));
         o.contain(st, wall);
         o.report.walls += 1;
+        match quantities::wall(c) {
+            Ok(q) => o.qto(wall, "Qto_WallBaseQuantities", &q),
+            Err(e) => o.report.warnings.push(format!("wall {}: no base quantities: {e}", w.name)),
+        }
         if let Some(m) = c.fire_rating_min {
             o.pset(wall, "Pset_WallCommon", vec![("FireRating", Val::Label(fire_label(m)))]);
         }
@@ -511,6 +635,17 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,.FLOOR.)", string(&s.name)));
         o.contain(st, slab);
         o.report.slabs += 1;
+        let mut void_area = 0.0;
+        for sh in scene.shafts.iter().filter(|sh| s.top > sh.z_bottom + 1e-6 && s.top < sh.z_top - 1e-6) {
+            match quantities::overlap_area(&s.outline, &sh.outline).or_else(|| quantities::overlap_area(&sh.outline, &s.outline)) {
+                Some(a) => void_area += a,
+                None => o.report.warnings.push(format!("slab {}: shaft {} area not found (neither outline is convex)", s.name, sh.name)),
+            }
+        }
+        for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == si && p.kind == FloorOpeningKind::Cut && p.fits) {
+            void_area += p.size_x() * p.size_y();
+        }
+        o.qto(slab, "Qto_SlabBaseQuantities", &quantities::slab(s, void_area));
         if let Some(m) = s.fire_rating_min {
             o.pset(slab, "Pset_SlabCommon", vec![("FireRating", Val::Label(fire_label(m)))]);
         }
@@ -556,6 +691,39 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             }
             o.pset(oe, "OpenBIM_Penetration", props);
         }
+    }
+    Ok(())
+}
+
+fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for r in &scene.rooms {
+        let room = &r.room;
+        if room.level >= scene.levels.all().len() {
+            return Err(ExportError::Unsupported(format!("room {}: no level {}", room.name, room.level)));
+        }
+        if room.outline.len() < 3 {
+            return Err(ExportError::Unsupported(format!("room {}: outline has fewer than 3 points", room.name)));
+        }
+        let st = room.level;
+        let pl = o.place(Some(o.storeys[st].1), [0.0, 0.0, 0.0], None, None);
+        let outer = o.poly_ring(&room.outline);
+        let prof = if room.holes.is_empty() {
+            o.s.add(format!("IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#{outer})"))
+        } else {
+            let holes: Vec<String> = room.holes.iter().map(|h| format!("#{}", o.poly_ring(h))).collect();
+            o.s.add(format!("IFCARBITRARYPROFILEDEFWITHVOIDS(.AREA.,$,#{outer},({}))", holes.join(",")))
+        };
+        let solid = o.extrusion(prof, [0.0; 3], None, None, room.height);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(r.id, 0);
+        let sp = o.s.add(format!("IFCSPACE({g},$,{},$,$,#{pl},#{shape},$,.ELEMENT.,.INTERNAL.,$)", string(&room.name)));
+        let g = o.gen_gid();
+        o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{},(#{sp}))", o.storeys[st].0));
+        o.report.spaces += 1;
+        let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy))];
+        o.pset_mapped(sp, "IfcSpace", "OpenBIM_Space", props, &room.name);
+        o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(room));
     }
     Ok(())
 }
