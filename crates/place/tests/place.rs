@@ -8,7 +8,7 @@ fn pl(family: usize, chain: usize, segment: usize, centre: f64) -> Placement {
     Placement { family, type_name: None, overrides: vec![], texts: vec![], chain, segment, centre }
 }
 fn model(chains: Vec<WallChain>, placements: Vec<Placement>) -> Model {
-    Model { chains, families: library_families(), placements }
+    Model { chains, families: library_families(), placements, ..Default::default() }
 }
 fn straight(len: f64, t: f64, h: f64) -> WallChain { WallChain::new(vec![[0.0, 0.0], [len, 0.0]], false, t, h) }
 fn room(w: f64, d: f64, t: f64, h: f64) -> WallChain { WallChain::new(vec![[0.0, 0.0], [w, 0.0], [w, d], [0.0, d]], true, t, h) }
@@ -124,7 +124,7 @@ fn bad_placements_are_refused_with_the_culprit_named() {
 fn a_family_without_an_opening_does_not_cut() {
     let mut f = door();
     f.opening = None;
-    let m = Model { chains: vec![straight(6.0, 0.2, 3.0)], families: openbim_family::compile_library(&[library::handle(), f]).unwrap().split_off(1), placements: vec![pl(0, 0, 0, 3.0)] };
+    let m = Model { chains: vec![straight(6.0, 0.2, 3.0)], families: openbim_family::compile_library(&[library::handle(), f]).unwrap().split_off(1), placements: vec![pl(0, 0, 0, 3.0)], ..Default::default() };
     assert!(close(m.build().unwrap().volume, 6.0 * 0.2 * 3.0));
 }
 

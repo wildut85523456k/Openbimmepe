@@ -29,7 +29,7 @@ fn arch_area(w: f64, h: f64, r: f64) -> f64 {
     let n = ARCH_SEGMENTS as f64;
     w * (h - r) + 0.5 * rr * rr * (n * (2.0 * a / n).sin() - (2.0 * a).sin())
 }
-fn model(ps: Vec<Placement>) -> Model { Model { chains: vec![wall()], families: vec![arch_family()], placements: ps } }
+fn model(ps: Vec<Placement>) -> Model { Model { chains: vec![wall()], families: vec![arch_family()], placements: ps, ..Default::default() } }
 
 #[test]
 fn an_arched_door_cuts_the_hand_calculated_volume_and_the_mesh_agrees() {
@@ -80,7 +80,7 @@ fn the_build_is_the_same_on_one_and_many_threads() {
 fn arches_go_into_the_wall_segment_they_are_placed_on() {
     let room = WallChain::new(vec![[0.0, 0.0], [6.0, 0.0], [6.0, 5.0], [0.0, 5.0]], true, 0.25, 3.2);
     let p = |seg: usize, c: f64, rise: f64| Placement { segment: seg, ..pl(c, &[("rise", rise)]) };
-    let m = Model { chains: vec![room.clone()], families: vec![arch_family()], placements: vec![p(2, 3.0, 0.3), p(1, 2.5, 0.2)] };
+    let m = Model { chains: vec![room.clone()], families: vec![arch_family()], placements: vec![p(2, 3.0, 0.3), p(1, 2.5, 0.2)], ..Default::default() };
     let b = m.build().unwrap();
     let counts: Vec<usize> = (0..4).map(|s| b.chains[0].poly_openings.get(s).map_or(0, |v| v.len())).collect();
     assert_eq!(counts, vec![0, 1, 1, 0]);

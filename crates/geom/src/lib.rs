@@ -75,12 +75,14 @@ pub struct WallChain {
     /// open chains only: extend the first / last end to this line instead of a square end
     pub start_stop: Option<StopLine>,
     pub end_stop: Option<StopLine>,
+    /// fire resistance of the whole chain in minutes, as the author sets it; None = not a fire partition
+    pub fire_rating_min: Option<u32>,
 }
 
 impl WallChain {
     pub fn new(points: Vec<P>, closed: bool, thickness: f64, height: f64) -> Self {
         WallChain { points, closed, thickness, height, base_z: 0.0, openings: vec![], poly_openings: vec![],
-                    tops: vec![], start_stop: None, end_stop: None }
+                    tops: vec![], start_stop: None, end_stop: None, fire_rating_min: None }
     }
 }
 

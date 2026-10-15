@@ -9,6 +9,8 @@
 
 use openbim_family::{Compiled, FamilyError, Instance, Request, Scope};
 use openbim_geom::{GeomError, Opening, WallChain};
+pub mod penetrations;
+use penetrations::{Penetration, Run, RunProblem};
 use rayon::prelude::*;
 
 pub const MAX_PLACEMENTS: usize = 5_000_000;
@@ -35,6 +37,10 @@ pub enum PlaceError {
     Family { placement: usize, err: FamilyError },
     Wall { placement: usize, err: GeomError },
     Chain { chain: usize, err: GeomError },
+    /// a service run that cannot be turned into wall openings
+    Run { run: usize, problem: RunProblem },
+    /// the opening a service run needs does not fit its wall
+    Penetration { id: penetrations::PenetrationId, err: GeomError },
 }
 
 impl std::fmt::Display for PlaceError {
@@ -46,6 +52,8 @@ impl std::fmt::Display for PlaceError {
             PlaceError::Family { placement, err } => write!(f, "placement {placement}: {err}"),
             PlaceError::Wall { placement, err } => write!(f, "placement {placement} does not fit its wall: {err:?}"),
             PlaceError::Chain { chain, err } => write!(f, "wall chain {chain}: {err:?}"),
+            PlaceError::Run { run, problem } => write!(f, "run {run}: {}", problem.text()),
+            PlaceError::Penetration { id, err } => write!(f, "penetration {id} does not fit its wall: {err:?}"),
         }
     }
 }
@@ -56,6 +64,10 @@ pub struct Model {
     pub chains: Vec<WallChain>,
     pub families: Vec<Compiled>,
     pub placements: Vec<Placement>,
+    /// straight service runs (duct, pipe, conduit, cable tray); each wall they cross gets an opening
+    pub runs: Vec<Run>,
+    /// openings of different runs closer than this (metres) are merged into one penetration
+    pub merge_gap: f64,
 }
 
 pub struct Built {
@@ -65,11 +77,15 @@ pub struct Built {
     pub instances: Vec<Instance>,
     /// net wall volume of all chains, openings cut
     pub volume: f64,
+    /// the register of wall penetrations by service runs, ordered by wall, segment and position
+    pub penetrations: Vec<Penetration>,
 }
 
 /// What a lenient build skipped, and why.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Warning {
+    /// the run that was left out, when the warning is about a run
+    pub run: Option<usize>,
     /// the placement that was left out, or None when a whole wall chain was left out
     pub placement: Option<usize>,
     pub error: PlaceError,
@@ -83,6 +99,8 @@ pub struct LenientBuilt {
     pub instances: Vec<Option<Instance>>,
     /// net volume of the valid chains, openings cut; an invalid chain counts for 0
     pub volume: f64,
+    /// penetrations of the runs that could be used; `cut` is false for one that did not fit its wall
+    pub penetrations: Vec<Penetration>,
     pub warnings: Vec<Warning>,
 }
 
@@ -116,6 +134,11 @@ impl Model {
     pub fn build(&self) -> Result<Built, PlaceError> {
         self.check_refs()?;
         for (i, c) in self.chains.iter().enumerate() { c.validate().map_err(|err| PlaceError::Chain { chain: i, err })?; }
+        if self.runs.len() > penetrations::MAX_RUNS { return Err(PlaceError::TooMany); }
+        let (pens, issues) = penetrations::find(&self.chains, &self.runs, self.merge_gap);
+        if let Some(i) = issues.first() { return Err(PlaceError::Run { run: i.run, problem: i.problem }); }
+        let mut pens_by_chain: Vec<Vec<&Penetration>> = vec![Vec::new(); self.chains.len()];
+        for p in &pens { pens_by_chain[p.id.chain].push(p); }
         // 1. solve the families, one parallel batch per family
         let mut instances: Vec<Option<Instance>> = vec![None; self.placements.len()];
         for (fi, fam) in self.families.iter().enumerate() {
@@ -155,11 +178,15 @@ impl Model {
                     c.segment_volume_exact(p.segment, &plans[p.segment]).map_err(|err| PlaceError::Wall { placement: k, err })?;
                 }
             }
+            for pen in &pens_by_chain[ci] {
+                c.openings[pen.id.segment].push(Opening { offset: pen.offset, width: pen.width, sill: pen.sill, height: pen.height });
+                c.segment_volume_exact(pen.id.segment, &plans[pen.id.segment]).map_err(|err| PlaceError::Penetration { id: pen.id, err })?;
+            }
             Ok(c)
         }).collect();
         let chains = results.into_iter().collect::<Result<Vec<_>, _>>()?;
         let volume = openbim_geom::total_volume_parallel(&chains).map_err(|err| PlaceError::Chain { chain: usize::MAX, err })?;
-        Ok(Built { chains, instances, volume })
+        Ok(Built { chains, instances, volume, penetrations: pens })
     }
 
     /// Like `build`, but a bad element does not stop the model: a placement that cannot be solved, has a bad
@@ -171,7 +198,7 @@ impl Model {
         let mut warnings: Vec<Warning> = Vec::new();
         let chain_ok: Vec<bool> = self.chains.iter().enumerate().map(|(i, c)| match c.validate() {
             Ok(()) => true,
-            Err(err) => { warnings.push(Warning { placement: None, error: PlaceError::Chain { chain: i, err } }); false }
+            Err(err) => { warnings.push(Warning { run: None, placement: None, error: PlaceError::Chain { chain: i, err } }); false }
         }).collect();
         // a placement is usable when its references are good and its wall chain is valid
         let mut usable = vec![true; self.placements.len()];
@@ -181,9 +208,15 @@ impl Model {
                 else if !chain_ok[p.chain] { Some("its wall chain is not valid") }
                 else if p.segment >= self.chains[p.chain].segment_count() { Some("no such wall segment") }
                 else { None };
-            if let Some(what) = why { usable[k] = false; warnings.push(Warning { placement: Some(k), error: PlaceError::BadReference { placement: k, what } }); }
-            else if !p.centre.is_finite() { usable[k] = false; warnings.push(Warning { placement: Some(k), error: PlaceError::NotFinite { placement: k } }); }
+            if let Some(what) = why { usable[k] = false; warnings.push(Warning { run: None, placement: Some(k), error: PlaceError::BadReference { placement: k, what } }); }
+            else if !p.centre.is_finite() { usable[k] = false; warnings.push(Warning { run: None, placement: Some(k), error: PlaceError::NotFinite { placement: k } }); }
         }
+        // service runs: a run with a problem is left out; its penetrations are not recorded
+        if self.runs.len() > penetrations::MAX_RUNS { return Err(PlaceError::TooMany); }
+        let (mut pens, issues) = penetrations::find(&self.chains, &self.runs, self.merge_gap);
+        for i in &issues { warnings.push(Warning { run: Some(i.run), placement: None, error: PlaceError::Run { run: i.run, problem: i.problem } }); }
+        let mut pens_by_chain: Vec<Vec<usize>> = vec![Vec::new(); self.chains.len()];
+        for (n, p) in pens.iter().enumerate() { pens_by_chain[p.id.chain].push(n); }
         // solve the families
         let mut instances: Vec<Option<Instance>> = vec![None; self.placements.len()];
         for (fi, fam) in self.families.iter().enumerate() {
@@ -199,24 +232,25 @@ impl Model {
             for (&k, r) in idx.iter().zip(fam.solve_many(&reqs)) {
                 match r {
                     Ok(i) => instances[k] = Some(i),
-                    Err(err) => warnings.push(Warning { placement: Some(k), error: PlaceError::Family { placement: k, err } }),
+                    Err(err) => warnings.push(Warning { run: None, placement: Some(k), error: PlaceError::Family { placement: k, err } }),
                 }
             }
         }
         // cut the openings, one chain per task; a placement that breaks its wall is taken out again
         let mut by_chain: Vec<Vec<usize>> = vec![Vec::new(); self.chains.len()];
         for (k, p) in self.placements.iter().enumerate() { if instances[k].is_some() { by_chain[p.chain].push(k); } }
-        type Cut = (WallChain, Vec<usize>, Vec<Warning>);
+        type Cut = (WallChain, Vec<usize>, Vec<Warning>, Vec<(usize, GeomError)>);
         let cuts: Vec<Cut> = self.chains.par_iter().zip(by_chain.par_iter()).enumerate().map(|(ci, (c, ks))| {
             let mut c = c.clone();
             let mut dropped = Vec::new();
             let mut warns = Vec::new();
-            if !chain_ok[ci] { return (c, dropped, warns); }
+            let mut pen_fail: Vec<(usize, GeomError)> = Vec::new();
+            if !chain_ok[ci] { return (c, dropped, warns, pen_fail); }
             let n = c.segment_count();
             if c.openings.len() < n { c.openings.resize(n, Vec::new()); }
             let plans = match c.plans() {
                 Ok(p) => p,
-                Err(err) => { warns.push(Warning { placement: None, error: PlaceError::Chain { chain: ci, err } }); return (c, ks.clone(), warns); }
+                Err(err) => { warns.push(Warning { run: None, placement: None, error: PlaceError::Chain { chain: ci, err } }); return (c, ks.clone(), warns, pen_fail); }
             };
             for &k in ks {
                 let p = &self.placements[k];
@@ -232,21 +266,34 @@ impl Model {
                 if let Err(err) = c.segment_volume_exact(p.segment, &plans[p.segment]) {
                     if poly { c.poly_openings[p.segment].pop(); } else { c.openings[p.segment].pop(); }
                     dropped.push(k);
-                    warns.push(Warning { placement: Some(k), error: PlaceError::Wall { placement: k, err } });
+                    warns.push(Warning { run: None, placement: Some(k), error: PlaceError::Wall { placement: k, err } });
                 }
             }
-            (c, dropped, warns)
+            for &n in &pens_by_chain[ci] {
+                let pen = &pens[n];
+                c.openings[pen.id.segment].push(Opening { offset: pen.offset, width: pen.width, sill: pen.sill, height: pen.height });
+                if let Err(err) = c.segment_volume_exact(pen.id.segment, &plans[pen.id.segment]) {
+                    c.openings[pen.id.segment].pop();
+                    pen_fail.push((n, err));
+                }
+            }
+            (c, dropped, warns, pen_fail)
         }).collect();
         let mut chains = Vec::with_capacity(cuts.len());
-        for (c, dropped, warns) in cuts {
+        for (c, dropped, warns, pen_fail) in cuts {
             for k in dropped { instances[k] = None; }
             warnings.extend(warns);
+            for (n, err) in pen_fail {
+                pens[n].cut = false;
+                let r = pens[n].runs.first().copied();
+                warnings.push(Warning { run: r, placement: None, error: PlaceError::Penetration { id: pens[n].id, err } });
+            }
             chains.push(c);
         }
         let good: Vec<WallChain> = chains.iter().zip(&chain_ok).filter(|(_, ok)| **ok).map(|(c, _)| c.clone()).collect();
         let volume = openbim_geom::total_volume_parallel(&good).map_err(|err| PlaceError::Chain { chain: usize::MAX, err })?;
-        warnings.sort_by_key(|w| (w.placement.is_some(), w.placement.unwrap_or(0))); // chain warnings first, then by placement
-        Ok(LenientBuilt { chains, instances, volume, warnings })
+        warnings.sort_by_key(|w| (w.placement.is_some() || w.run.is_some(), w.placement.unwrap_or(0), w.run.unwrap_or(0))); // chain warnings first, then by placement, then run
+        Ok(LenientBuilt { chains, instances, volume, penetrations: pens, warnings })
     }
 
     /// Replace one placement; keep the change only if the whole model still builds.

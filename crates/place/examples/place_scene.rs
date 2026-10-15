@@ -26,7 +26,7 @@ fn main() {
         Placement { texts: vec![("mark".into(), "D-03".into())], ..pl(2, 0, 0, 5.5, None, &[]) },
         Placement { texts: vec![("mark".into(), "D-04".into())], ..pl(2, 1, 0, 4.5, Some("Type A"), &[]) },
     ];
-    let m = Model { chains, families: library_families(), placements };
+    let m = Model { chains, families: library_families(), placements, ..Default::default() };
     let b = m.build().expect("scene builds");
     for (ci, c) in b.chains.iter().enumerate() {
         let plans = c.plans().unwrap();

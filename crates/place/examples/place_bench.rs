@@ -12,7 +12,7 @@ fn main() {
         ps.push(Placement { family: 1, type_name: None, overrides: vec![("mullions".into(), (k % 4) as f64)], texts: vec![], chain: k, segment: 2, centre: 2.0 });
         ps.push(Placement { family: 1, type_name: Some("Type A".into()), overrides: vec![], texts: vec![], chain: k, segment: 1, centre: 2.0 });
     }
-    let m = Model { chains, families: library_families(), placements: ps };
+    let m = Model { chains, families: library_families(), placements: ps, ..Default::default() };
     let mut base = 0.0;
     for t in [1usize, 2, 4] {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(t).build().unwrap();
