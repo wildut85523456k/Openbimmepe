@@ -415,7 +415,7 @@ fn every_index_of_every_constraint_is_checked() {
         PointOnLine { p: bp, l }, PointOnLine { p: a, l: bl }, Midpoint { p: bp, l }, Midpoint { p: a, l: bl },
         Angle { l1: bl, l2: l, degrees: 1.0 }, Angle { l1: l, l2: bl, degrees: 1.0 },
         Radius { c: bc, r: 1.0 }, EqualRadius { c1: bc, c2: k }, EqualRadius { c1: k, c2: bc },
-        PointOnCircle { p: bp, c: k }, PointOnCircle { p: a, c: bc }, Tangent { l: bl, c: k }, Tangent { l: l, c: bc },
+        PointOnCircle { p: bp, c: k }, PointOnCircle { p: a, c: bc }, Tangent { l: bl, c: k }, Tangent { l, c: bc },
     ];
     for con in &cases {
         let mut t = s.clone();
