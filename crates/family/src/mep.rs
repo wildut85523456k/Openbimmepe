@@ -114,6 +114,14 @@ pub enum Domain {
 }
 
 impl Domain {
+    pub const ALL: [Domain; 5] = [Domain::Duct, Domain::Pipe, Domain::CableTray, Domain::Conduit, Domain::Electrical];
+    /// Stable number for saving.
+    pub fn code(self) -> u8 {
+        Domain::ALL.iter().position(|d| *d == self).unwrap_or(0) as u8
+    }
+    pub fn from_code(c: u8) -> Option<Domain> {
+        Domain::ALL.get(c as usize).copied()
+    }
     /// IfcDistributionPortTypeEnum value.
     pub fn ifc_port_type(self) -> &'static str {
         match self {
@@ -152,6 +160,19 @@ pub enum System {
 }
 
 impl System {
+    pub const ALL: [System; 21] = [
+        System::SupplyAir, System::ReturnAir, System::ExhaustAir, System::OutsideAir, System::ChilledWaterSupply, System::ChilledWaterReturn,
+        System::HeatingWaterSupply, System::HeatingWaterReturn, System::CondenserWaterSupply, System::CondenserWaterReturn, System::DomesticCold,
+        System::DomesticHot, System::Sanitary, System::Vent, System::StormWater, System::Condensate, System::FireProtection, System::Gas,
+        System::Power, System::Data, System::Other,
+    ];
+    /// Stable number for saving.
+    pub fn code(self) -> u8 {
+        System::ALL.iter().position(|d| *d == self).unwrap_or(0) as u8
+    }
+    pub fn from_code(c: u8) -> Option<System> {
+        System::ALL.get(c as usize).copied()
+    }
     pub fn domain_ok(self, d: Domain) -> bool {
         use System::*;
         match self {

@@ -11,6 +11,7 @@
 //! in the penetration register. No standard values live here: radii, angles, stubs and margins are the
 //! author's routing preferences.
 pub mod catalogue;
+pub mod graph;
 pub mod snaps;
 
 use openbim_family::mep::{up_for, Connector, Domain, Size, System};
