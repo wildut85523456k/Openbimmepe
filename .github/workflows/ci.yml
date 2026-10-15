@@ -50,3 +50,7 @@ jobs:
         run: |
           cargo run -q --release -p openbim-family --example forms_scene > /tmp/forms.txt
           python spikes/s10_forms_ifc/forms_ifc.py /tmp/forms.txt
+      - name: Sketch constraint solver
+        run: |
+          cargo run -q --release -p openbim-sketch --example sketch_scene > /tmp/sketch.txt
+          python spikes/s11_sketch_check/sketch_check.py /tmp/sketch.txt
