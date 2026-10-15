@@ -13,6 +13,7 @@
 pub mod auto;
 pub mod catalogue;
 pub mod graph;
+pub mod reroute;
 pub mod snaps;
 
 use openbim_family::mep::{up_for, Connector, Domain, Size, System};

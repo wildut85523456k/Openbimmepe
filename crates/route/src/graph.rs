@@ -87,6 +87,12 @@ pub enum GraphError {
     NotATee,
     NotATap,
     NotOnRun,
+    /// a run on the way has a tap on it, so it cannot be taken away
+    TapOnChain(usize),
+    /// no equipment connector with that number
+    NoSuchEquipment(usize),
+    /// the connector given does not belong to this equipment connector (domain or system differ)
+    EquipmentMismatch,
     /// the connector is not at that end of the run, or does not face along the run
     ConnectorMismatch,
     Corrupt(&'static str),
@@ -107,6 +113,33 @@ pub struct Network {
     links: Vec<(PortRef, PortRef)>,
     pub taps: Vec<Tapping>,
     next_id: u64,
+}
+
+/// How a chain of pieces from an equipment connector ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChainEnd {
+    /// at this port of the next junction (a tee or tap leg, or another equipment connector)
+    Port(PortRef),
+    /// the last piece has a run end that leads nowhere
+    Open,
+}
+
+/// The pieces between an equipment connector and the next junction, in order from the equipment: runs and
+/// fittings with two legs. These are what moves when the equipment moves.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chain {
+    pub nodes: Vec<NodeRef>,
+    pub end: ChainEnd,
+}
+
+impl Chain {
+    /// The port of the junction this chain ends at, if it ends at one.
+    pub fn end_port(&self) -> Option<PortRef> {
+        match self.end {
+            ChainEnd::Port(p) => Some(p),
+            ChainEnd::Open => None,
+        }
+    }
 }
 
 /// What `add_route` and `add_branch` created.
@@ -457,6 +490,161 @@ impl Network {
             self.equipment.pop();
         }
         r.map(|_| e)
+    }
+
+
+    /// Follow the pieces from an equipment connector until a junction (a fitting with other than two legs, or
+    /// other equipment) or an open end.
+    pub fn chain_from_equipment(&self, equip: usize) -> Result<Chain, GraphError> {
+        if equip >= self.equipment.len() {
+            return Err(GraphError::NoSuchEquipment(equip));
+        }
+        let mut nodes = Vec::new();
+        let mut port = PortRef { node: NodeRef::Equipment(equip), port: 0 };
+        for _ in 0..=self.segments.len() + self.fittings.len() {
+            let Some(q) = self.link_of(port) else {
+                return Ok(Chain { nodes, end: ChainEnd::Open });
+            };
+            match q.node {
+                NodeRef::Equipment(_) => return Ok(Chain { nodes, end: ChainEnd::Port(q) }),
+                NodeRef::Fitting(i) if self.port_count(q.node) != 2 => {
+                    let _ = i;
+                    return Ok(Chain { nodes, end: ChainEnd::Port(q) });
+                }
+                NodeRef::Segment(i) if self.taps.iter().any(|t| t.segment == i) => return Err(GraphError::TapOnChain(i)),
+                _ => {}
+            }
+            nodes.push(q.node);
+            port = PortRef { node: q.node, port: 1 - q.port };
+        }
+        Err(GraphError::Corrupt("a chain of pieces loops"))
+    }
+
+    /// Take runs and fittings out, with every link that touched them and the taps on them. The numbers of
+    /// the other pieces move up to fill the gaps; their element numbers (ids) stay.
+    pub fn remove_nodes(&mut self, nodes: &[NodeRef]) {
+        let gone_seg: std::collections::HashSet<usize> = nodes.iter().filter_map(|n| if let NodeRef::Segment(i) = n { Some(*i) } else { None }).collect();
+        let gone_fit: std::collections::HashSet<usize> = nodes.iter().filter_map(|n| if let NodeRef::Fitting(i) = n { Some(*i) } else { None }).collect();
+        let map = |len: usize, gone: &std::collections::HashSet<usize>| -> Vec<Option<usize>> {
+            let mut next = 0;
+            (0..len)
+                .map(|i| {
+                    if gone.contains(&i) {
+                        None
+                    } else {
+                        next += 1;
+                        Some(next - 1)
+                    }
+                })
+                .collect()
+        };
+        let (sm, fm) = (map(self.segments.len(), &gone_seg), map(self.fittings.len(), &gone_fit));
+        let remap = |p: PortRef| -> Option<PortRef> {
+            let node = match p.node {
+                NodeRef::Segment(i) => NodeRef::Segment((*sm.get(i)?)?),
+                NodeRef::Fitting(i) => NodeRef::Fitting((*fm.get(i)?)?),
+                e => e,
+            };
+            Some(PortRef { node, port: p.port })
+        };
+        let mut i = 0;
+        self.segments.retain(|_| {
+            i += 1;
+            !gone_seg.contains(&(i - 1))
+        });
+        let mut i = 0;
+        self.fittings.retain(|_| {
+            i += 1;
+            !gone_fit.contains(&(i - 1))
+        });
+        self.links = self
+            .links
+            .iter()
+            .filter_map(|&(a, b)| {
+                let (a, b) = (remap(a)?, remap(b)?);
+                Some(if a <= b { (a, b) } else { (b, a) })
+            })
+            .collect();
+        self.taps = self.taps.iter().filter_map(|t| Some(Tapping { fitting: (*fm.get(t.fitting)?)?, segment: (*sm.get(t.segment)?)?, distance: t.distance })).collect();
+    }
+
+    /// Replace the pieces of a chain by a new route that starts at the moved equipment connector `conn`
+    /// and ends at the chain's junction. The new runs and fittings take over the element numbers of the old
+    /// ones in order (so their ids stay), and get new numbers only when there are more of them. Nothing changes
+    /// when this fails. The route must already end where the junction port is, facing into it.
+    pub fn replace_chain(&mut self, equip: usize, conn: &Connector, chain: &Chain, route: &Route) -> Result<Added, GraphError> {
+        let snapshot = self.clone();
+        let r = self.replace_chain_inner(equip, conn, chain, route);
+        if r.is_err() {
+            *self = snapshot;
+        }
+        r
+    }
+
+    fn replace_chain_inner(&mut self, equip: usize, conn: &Connector, chain: &Chain, route: &Route) -> Result<Added, GraphError> {
+        let old = self.equipment.get(equip).ok_or(GraphError::NoSuchEquipment(equip))?.clone();
+        if conn.domain != old.domain || !conn.system.compatible(old.system) {
+            return Err(GraphError::EquipmentMismatch);
+        }
+        let mut seg_ids: Vec<u64> = Vec::new();
+        let mut fit_ids: Vec<u64> = Vec::new();
+        for n in &chain.nodes {
+            match n {
+                NodeRef::Segment(i) => seg_ids.push(self.segments.get(*i).ok_or(GraphError::NoSuchPort(PortRef { node: *n, port: 0 }))?.id),
+                NodeRef::Fitting(i) => fit_ids.push(self.fittings.get(*i).ok_or(GraphError::NoSuchPort(PortRef { node: *n, port: 0 }))?.id),
+                NodeRef::Equipment(_) => return Err(GraphError::NoSuchPort(PortRef { node: *n, port: 0 })),
+            }
+        }
+        // the junction port is a node that stays; find it again after the numbers move
+        let end_port = match chain.end {
+            ChainEnd::Port(p) => Some(p),
+            ChainEnd::Open => None,
+        };
+        let end_after = end_port.map(|p| {
+            let shift = |i: usize, gone: &dyn Fn(&NodeRef) -> bool, mk: &dyn Fn(usize) -> NodeRef| i - (0..i).filter(|k| gone(&mk(*k))).count();
+            let in_chain = |n: &NodeRef| chain.nodes.contains(n);
+            let node = match p.node {
+                NodeRef::Segment(i) => NodeRef::Segment(shift(i, &in_chain, &NodeRef::Segment)),
+                NodeRef::Fitting(i) => NodeRef::Fitting(shift(i, &in_chain, &NodeRef::Fitting)),
+                e => e,
+            };
+            PortRef { node, port: p.port }
+        });
+        self.remove_nodes(&chain.nodes);
+        // the equipment connector now sits where the new connector is
+        let size = crate::conn_run_size(conn).map_err(|_| GraphError::ConnectorMismatch)?;
+        {
+            let e = &mut self.equipment[equip];
+            e.pos = conn.pos;
+            e.dir = unit(conn.dir);
+            e.size = size;
+        }
+        self.check_room(route.runs.len() + route.fittings.len())?;
+        let mut added = Added::default();
+        let (mut si, mut fi) = (seg_ids.into_iter(), fit_ids.into_iter());
+        for r in &route.runs {
+            let id = si.next().unwrap_or_else(|| self.take_id());
+            self.segments.push(NetSegment { id, run: r.clone() });
+            added.segments.push(self.segments.len() - 1);
+        }
+        let (domain, system) = (old.domain, old.system);
+        for f in &route.fittings {
+            let id = fi.next().unwrap_or_else(|| self.take_id());
+            self.fittings.push(NetFitting { id, fitting: f.clone(), domain, system });
+            added.fittings.push(self.fittings.len() - 1);
+        }
+        let nodes: Vec<NodeRef> = added.segments.iter().map(|i| NodeRef::Segment(*i)).chain(added.fittings.iter().map(|i| NodeRef::Fitting(*i))).collect();
+        self.auto_link(&nodes)?;
+        let (first, last) = match (added.segments.first(), added.segments.last()) {
+            (Some(&f), Some(&l)) => (f, l),
+            _ => return Err(GraphError::ConnectorMismatch),
+        };
+        self.link(PortRef { node: NodeRef::Equipment(equip), port: 0 }, PortRef { node: NodeRef::Segment(first), port: 0 })?;
+        if let Some(p) = end_after {
+            self.link(PortRef { node: NodeRef::Segment(last), port: 1 }, p)?;
+        }
+        self.validate()?;
+        Ok(added)
     }
 
     /// Ports that are not linked: run ends and fitting legs that lead nowhere.
