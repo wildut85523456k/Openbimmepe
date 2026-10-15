@@ -295,8 +295,10 @@ fn the_preset_has_no_chord_that_begins_a_typed_sequence_and_the_single_keys_run_
     // Ctrl+C and the letters C O are different shortcuts
     assert_eq!(m.feed(ch("Ctrl+C")), Match::Command("edit.copy-to-clipboard".into()));
     assert_eq!(m.feed(ch("C")), Match::Pending);
-    // nothing in the preset is shared
-    for (id, _) in &entries { assert!(k.shared(id).is_empty(), "{id}"); }
+    // Autodesk's list gives these letters to two commands each, one for each place they are used; nothing else is shared
+    let twice = ["modify.remove-coping", "context.repeat-last-command", "context.restore-all-excluded", "analyze.reset-analytical-model", "snap.snap-point-clouds", "analyze.check-pipe-systems", "group.remove", "view.render-gallery"];
+    for (id, _) in &entries { assert!(twice.contains(&id.as_str()) || k.shared(id).is_empty(), "{id}"); }
+    for id in twice { assert!(!k.shared(id).is_empty(), "{id}"); }
 }
 
 #[test]

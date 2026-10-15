@@ -1,6 +1,6 @@
 # Default shortcut preset: Revit-style key map.
-# Source: https://mashyo.com/keyboard-shortcuts-revit/ (third-party list, read 14 Oct 2026). PARTIAL: that page states it does not list every default.
-# To be checked against Revit's own KeyboardShortcuts.xml when available. Entries the page labels as the author's custom shortcuts (QQ, BX, SWC) are left out.
+# Source: Autodesk's own list, https://www.autodesk.com/shortcuts/revit (read 15 Oct 2026), which says it is an abbreviated list; earlier read from https://mashyo.com/keyboard-shortcuts-revit/ (third-party, 14 Oct 2026). Every key sequence the first page gives that is also on the Autodesk page agrees with it.
+# Still to be checked against Revit's own KeyboardShortcuts.xml, and Autodesk's downloadable PDF has more. Entries the page labels as the author's custom shortcuts (QQ, BX, SWC) are left out.
 # Format: command id <TAB> shortcut # shortcut ... (letters typed one after the other, Ctrl+Z for chords). Users change these in the settings menu; this file is not edited by users.
 # Columns: id, shortcuts, English name (not read by the program)
 # The editing, file and modal keys at the end (Ctrl+, Escape, Tab, Space, F1) are the author's knowledge of Revit's own and are not from the page above; check them too.
@@ -35,7 +35,7 @@ modify.offset	OF	Offset
 modify.pin	PN	Pin
 modify.rotate	RO	Rotate
 modify.split-element	SL	Split Element
-modify.trim-extend	TR	Trim/Extend
+modify.trim-extend	TR	Trim/Extend to Corner
 modify.match-type-properties	MA	Match Type Properties
 modify.linework	LW	Linework
 view.visibility-graphics	VG#VV	Visibility/Graphics
@@ -73,6 +73,82 @@ snap.snap-work-plane-grid	SW	Snap Work Plane Grid
 snap.snaps-off-for-one-pick	SO	Snaps Off for One Pick
 snap.snap-points	SX	Snap Points
 snap.snap-remote-objects	SR	Snap Remote Objects
+modify.scale	RE	Scale
+modify.split-face	SF	Split Face
+modify.paint	PT	Paint
+modify.cope	CP	Cope
+modify.remove-coping	RC	Remove Coping
+modify.hide-elements-in-view	EH	Hide in View: Hide Elements
+modify.override-graphics-by-element	EOD	Override Graphics in View: By Element
+modify.modify	MD	Modify
+create.model-line	LI	Model Line
+create.properties	PP#Ctrl+1#VP	Properties
+view.render-gallery	RG	Render Gallery
+view.render-in-cloud	RD	Render in Cloud
+view.ray-trace	RY	Ray Trace
+view.reveal-constraints	CX	Reveal Constraints
+view.reveal-hidden-elements	RH	Reveal Hidden Elements
+view.unhide-element	EU	Unhide Element
+view.unhide-category	VU	Unhide Category
+nav.two-d-mode	32	2D Mode
+snap.snap-point-clouds	PC	Snap to Point Clouds
+snap.turn-override-off	SS	Turn Override Off
+context.repeat-last-command	RC	Repeat Last Command
+context.select-all-instances	SA	Select All Instances in Entire Project
+context.restore-all-excluded	RA	Restore All Excluded
+context.restore-excluded-member	RB	Restore Excluded Member
+context.move-to-project	MP	Move to Project
+context.define-center-of-rotation	R3	Define a New Center of Rotation
+group.edit	EG	Edit Group
+group.add	AP	Add to Group
+group.remove	RG	Remove from Group
+group.ungroup	UG	Ungroup
+structure.beam	BM	Structural Framing: Beam
+structure.brace	BR	Structural Framing: Brace
+structure.beam-system	BS	Structural Beam System
+structure.foundation-wall	FT	Structural Foundation: Wall
+structure.reinforcement-numbers	RN	Reinforcement Numbers
+manage.project-units	UN	Project Units
+manage.sun-settings	SU	Sun Settings
+manage.mep-electrical-settings	ES	Electrical Settings
+manage.mep-mechanical-settings	MS	Mechanical Settings
+collaborate.editing-requests	ER	Editing Requests
+collaborate.reload-latest	RL#RW	Reload Latest
+analyze.adjust-analytical-model	AA	Adjust Analytical Model
+analyze.reset-analytical-model	RA	Reset Analytical Model
+analyze.check-duct-systems	DC	Check Duct Systems
+analyze.check-pipe-systems	PC	Check Pipe Systems
+analyze.check-circuits	EC	Check Circuits
+analyze.loads	LD	Loads
+analyze.heating-cooling-loads	LO	Heating and Cooling Loads
+analyze.panel-schedules	PS	Panel Schedules
+mep.air-terminal	AT	Air Terminal
+mep.duct	DT	Duct
+mep.duct-fitting	DF	Duct Fitting
+mep.duct-accessory	DA	Duct Accessory
+mep.flex-duct	FD	Flex Duct
+mep.convert-to-flex-duct	CV	Convert to Flex Duct
+mep.pipe	PI	Pipe
+mep.pipe-fitting	PF	Pipe Fitting
+mep.pipe-accessory	PA	Pipe Accessory
+mep.flex-pipe	FP	Flex Pipe
+mep.plumbing-fixture	PX	Plumbing Fixture
+mep.sprinkler	SK	Sprinkler
+mep.mechanical-equipment	ME	Mechanical Equipment
+mep.electrical-equipment	EE	Electrical Equipment
+mep.lighting-fixture	LF	Lighting Fixture
+mep.conduit	CN	Conduit
+mep.conduit-fitting	NF	Conduit Fitting
+mep.cable-tray	CT	Cable Tray
+mep.cable-tray-fitting	TF	Cable Tray Fitting
+mep.arc-wire	EW	Arc Wire
+group.attach-detail-group	AD	Attach Detail Group
+edit.edit-part	EP	Edit Par (as Autodesk writes it)
+sketch.finish	FG	Finish
+help.show-tooltip	HT	Show Help Tooltip
+sketch.justification-points	JP	Justification Points
+sketch.y-offset	JY	Y Offset
+sketch.z-offset	JZ	Z Offset
 edit.undo	Ctrl+Z	Undo
 edit.redo	Ctrl+Y	Redo
 edit.copy-to-clipboard	Ctrl+C	Copy to Clipboard
@@ -82,7 +158,7 @@ file.new	Ctrl+N	New
 file.open	Ctrl+O	Open
 file.save	Ctrl+S	Save
 file.print	Ctrl+P	Print
-edit.cancel	Escape	Cancel (twice to leave the tool)
+edit.cancel	Escape#CG	Cancel (twice to leave the tool)
 edit.cycle-selection	Tab	Cycle the element under the pointer
 edit.cycle-selection-back	Shift+Tab	Cycle the element under the pointer, backwards
 edit.flip-while-placing	Space	Flip while placing
