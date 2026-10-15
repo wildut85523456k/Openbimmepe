@@ -83,6 +83,8 @@ fn what_is_refused() {
     assert!(units_error("cos(Width / Width)").contains("needs an angle"));
     assert!(units_error("asin(Width)").contains("needs a number"));
     assert!(units_error("if(Width, 1 m, 2 m)").contains("yes/no or a number"));
+    assert!(units_error("!Width").contains("yes/no or a number"));
+    assert!(units_error("Width * Width * Width * Width * Width * Width * Width").contains("beyond what a formula may build"));
     assert!(units_error("Width && Width").contains("yes/no or a number"));
     assert!(units_error("atan2(Width, 30 deg)").contains("cannot compare"));
 }
