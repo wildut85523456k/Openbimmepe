@@ -1,0 +1,9 @@
+[package]
+name = "openbim-document"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Initial transactional Rust BIM document core"
+
+[lints.rust]
+unsafe_code = "forbid"

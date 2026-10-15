@@ -1,0 +1,17 @@
+[package]
+name = "openbim-desktop"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Revit-style desktop UI in egui (sample scene only)"
+
+[dependencies]
+eframe = "0.36"
+egui = "0.36"
+egui_extras = { version = "0.36", default-features = false, features = ["image", "svg"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+openbim-keymap = { path = "../../crates/keymap" }
+openbim-document = { path = "../../crates/document" }
+
+[lints.rust]
+unsafe_code = "forbid"
