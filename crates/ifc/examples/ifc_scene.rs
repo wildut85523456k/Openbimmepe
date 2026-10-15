@@ -2,7 +2,7 @@
 //! text, for the independent IfcOpenShell check (this text is not a product data path).
 use openbim_arch::spaces::Shaft;
 use openbim_arch::{Level, Levels, Room};
-use openbim_family::forms::{FormDef, ProfileDef};
+use openbim_family::forms::{Align, FormDef, ProfileDef};
 use openbim_family::{compile_library, library, Axis, Category, Family, NestedDef, SolidDef, ValueDef};
 use openbim_family::mep::{Domain, System};
 use openbim_family::Request;
@@ -57,6 +57,8 @@ pub fn build_scene(edit: bool) -> Scene {
         forms: vec![
             FormDef::extrusion("plate", Axis::Z, "0", "0.05", r("0", "0", "0.4", "0.2")).hole(c("0.1", "0.1", "0.03")).hole(r("0.25", "0.05", "0.35", "0.15")),
             FormDef::extrusion("tube", Axis::X, "0.1", "0.5", c("0.1", "0.05", "0.04")).hole(c("0.1", "0.05", "0.03")),
+            // a bent bar, hung from its path line by its bottom edge
+            FormDef::sweep("bar", "0.3", &[("0", "0"), ("0.3", "0"), ("0.3", "0.2")], r("-0.02", "0", "0.02", "0.03")).align(Align::Bottom),
         ],
         category: Category::Generic,
         ..Default::default()
@@ -71,6 +73,8 @@ pub fn build_scene(edit: bool) -> Scene {
         solids: vec![SolidDef::new("base", ("x0", "x1"), ("y0", "y1"), ("z0", "z1"))],
         forms: vec![
             FormDef::revolve("knob", Axis::Z, "0.1", true, "0.3", "250", r("0.35", "0.1", "0.45", "0.25")).hole(r("0.38", "0.15", "0.42", "0.2")),
+            // a ring turned about its own left edge
+            FormDef::revolve("ring", Axis::Z, "0.2", true, "0", "180", r("0.45", "0", "0.5", "0.04")).align(Align::Left),
             FormDef::extrusion("rail", Axis::Y, "0.35", "0.4", r("0.05", "0.1", "0.55", "0.3")),
         ],
         nested: vec![NestedDef::new("part", "Test part", ("0.1", "0.05", "0.1")).rotate_about("90", "0.1", "0.05")],
@@ -257,6 +261,9 @@ fn main() {
         for f in &it.instance.forms {
             let (l, h, exact) = f.bounds();
             assert!(exact, "the test scene turns forms by quarter turns only");
+            if matches!(f.geom, openbim_family::forms::FormGeom::Sweep { .. }) {
+                println!("SWEEP {} {} {} {}", it.id, f.volume(), v(l), v(h));
+            }
             take(l);
             take(h);
         }

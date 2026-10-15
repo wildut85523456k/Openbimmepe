@@ -4,7 +4,7 @@
 //! more mullions) keeps its own extruded bodies and is still an occurrence of the type.
 //!
 //! Boxes and extruded or revolved forms are written as `IfcExtrudedAreaSolid` and `IfcRevolvedAreaSolid`, never
-//! as meshes. Swept forms are not written yet (a warning says which). Doors and windows fill their wall opening
+//! as meshes. Swept forms are written as `IfcFixedReferenceSweptAreaSolid` along the path with the profile's up fixed. Doors and windows fill their wall opening
 //! (`IfcRelFillsElement`); connectors become ports nested in the occurrence, and a network joins them.
 use super::*;
 use openbim_family::forms::{Form, FormGeom, Loop};
@@ -39,7 +39,7 @@ fn solids(o: &mut Out, inst: &Instance, name: &str) -> Vec<u32> {
     for f in &inst.forms {
         match write_form(o, f) {
             Some(s) => out.push(s),
-            None => o.report.warnings.push(format!("{name}: a swept form was not written (swept solids are not exported yet)")),
+            None => o.report.warnings.push(format!("{name}: a form was not written")),
         }
     }
     out
@@ -84,7 +84,27 @@ fn write_form(o: &mut Out, f: &Form) -> Option<u32> {
     let (plane, offset) = match &f.geom {
         FormGeom::Extrusion { plane, from, to } => (*plane, from.min(*to)),
         FormGeom::Revolve { plane, offset, .. } => (*plane, *offset),
-        FormGeom::Sweep { .. } => return None,
+        FormGeom::Sweep { z, path } => {
+            // `IfcFixedReferenceSweptAreaSolid` takes the profile's x along the fixed reference ("up" here) and its y
+            // along (direction of travel x up), which is to the right; our profile has u to the left and v up, so
+            // the profile is written turned a quarter: x = v, y = -u. The corners are mitred.
+            let turn = |l: &Loop| match l {
+                Loop::Poly(p) => Loop::Poly(p.iter().map(|q| [q[1], -q[0]]).collect()),
+                Loop::Circle { c, r } => Loop::Circle { c: [c[1], -c[0]], r: *r },
+            };
+            let t = Form { outer: turn(&f.outer), holes: f.holes.iter().map(turn).collect(), ..f.clone() };
+            let prof = form_profile(o, &t);
+            let pts: Vec<String> = path
+                .iter()
+                .map(|q| {
+                    let xy = f.xf.apply(*q);
+                    format!("#{}", o.p3([xy[0], xy[1], z + f.dz]))
+                })
+                .collect();
+            let dx = o.s.add(format!("IFCPOLYLINE(({}))", pts.join(",")));
+            let up = o.dir([0.0, 0.0, 1.0]);
+            return Some(o.s.add(format!("IFCFIXEDREFERENCESWEPTAREASOLID(#{prof},$,#{dx},$,$,#{up})")));
+        }
     };
     let (axis, refd, org): (V3, V3, V3) = match plane {
         Axis::Z => ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 0.0, offset]),

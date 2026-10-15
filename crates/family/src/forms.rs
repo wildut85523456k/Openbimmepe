@@ -88,8 +88,22 @@ pub enum FormKind {
     Sweep { z: String, path: Vec<(String, String)> },
 }
 
+/// Which part of the profile sits on the sweep path, or on the axis of a revolve.
+/// The profile is moved so that the path (or axis) runs through the middle of the profile's box, along its bottom
+/// or top edge, or along its left or right edge (u to the left of travel / of the axis, v up).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Centre,
+    Bottom,
+    Top,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone)]
 pub struct FormDef {
+    /// where the profile sits on the path (sweep) or the axis (revolve); None = as drawn
+    pub align: Option<Align>,
     pub name: String,
     pub kind: FormKind,
     pub outer: ProfileDef,
@@ -100,14 +114,15 @@ pub struct FormDef {
 
 impl FormDef {
     pub fn extrusion(name: &str, plane: Axis, from: &str, to: &str, outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Extrusion { plane, from: from.into(), to: to.into() }, outer, holes: vec![], material: None, visible: None }
+        FormDef { name: name.into(), kind: FormKind::Extrusion { plane, from: from.into(), to: to.into() }, outer, holes: vec![], material: None, visible: None, align: None }
     }
     pub fn revolve(name: &str, plane: Axis, offset: &str, about_v: bool, at: &str, angle: &str, outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Revolve { plane, offset: offset.into(), about_v, at: at.into(), angle: angle.into() }, outer, holes: vec![], material: None, visible: None }
+        FormDef { name: name.into(), kind: FormKind::Revolve { plane, offset: offset.into(), about_v, at: at.into(), angle: angle.into() }, outer, holes: vec![], material: None, visible: None, align: None }
     }
     pub fn sweep(name: &str, z: &str, path: &[(&str, &str)], outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Sweep { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer, holes: vec![], material: None, visible: None }
+        FormDef { name: name.into(), kind: FormKind::Sweep { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer, holes: vec![], material: None, visible: None, align: None }
     }
+    pub fn align(mut self, a: Align) -> Self { self.align = Some(a); self }
     pub fn hole(mut self, p: ProfileDef) -> Self { self.holes.push(p); self }
     pub fn material(mut self, value_name: &str) -> Self { self.material = Some(value_name.into()); self }
     pub fn visible_if(mut self, f: &str) -> Self { self.visible = Some(f.into()); self }
@@ -143,6 +158,7 @@ pub(crate) enum CKind {
 }
 pub(crate) struct CForm {
     pub name: String,
+    align: Option<Align>,
     kind: CKind,
     outer: CLoop,
     holes: Vec<CLoop>,
@@ -215,7 +231,8 @@ pub(crate) fn compile(forms: &[FormDef], parse: Parse, material_slot: &dyn Fn(&s
         for (i, h) in f.holes.iter().enumerate() { holes.push(compile_loop(&f.name, &format!("hole{i}"), h, parse)?); }
         let material = match &f.material { Some(m) => Some(material_slot(&f.name, m)?), None => None };
         let visible = match &f.visible { Some(v) => Some(pn("visible", v)?), None => None };
-        out.push(CForm { name: f.name.clone(), kind, outer, holes, material, visible });
+        if f.align.is_some() && matches!(f.kind, FormKind::Extrusion { .. }) { return Err(bad(&f.name, "only a sweep or a revolve can be aligned to its path or axis")); }
+        out.push(CForm { name: f.name.clone(), align: f.align, kind, outer, holes, material, visible });
     }
     Ok(out)
 }
@@ -432,6 +449,10 @@ fn poly_pts(l: &Loop) -> Vec<P2> {
 /// every point of the loop satisfies `f`
 fn loop_all(l: &Loop, f: &dyn Fn(P2) -> bool) -> bool { poly_pts(l).into_iter().all(f) }
 
+fn shift(l: &Loop, d: P2) -> Loop {
+    match l { Loop::Poly(p) => Loop::Poly(p.iter().map(|q| [q[0] + d[0], q[1] + d[1]]).collect()), Loop::Circle { c, r } => Loop::Circle { c: [c[0] + d[0], c[1] + d[1]], r: *r } }
+}
+
 fn path_turns(path: &[P2]) -> Vec<f64> {
     (1..path.len() - 1).map(|i| { let (a, b) = (sub(path[i], path[i - 1]), sub(path[i + 1], path[i])); cross(a, b).atan2(dot(a, b)) }).collect()
 }
@@ -449,7 +470,27 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
             if v.abs() > MAX_COORD { return Err(bad(name, "a value is not a finite number within 100 m")); }
             Ok(v)
         };
-        let (outer, holes) = solve_profile(name, &f.outer, &f.holes, vals)?;
+        let (mut outer, mut holes) = solve_profile(name, &f.outer, &f.holes, vals)?;
+        if let Some(a) = f.align {
+            // bounds of the outer profile; the profile moves so that the chosen part sits on the path or axis
+            let pts = poly_pts(&outer);
+            let (u0, u1) = (pts.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max));
+            let (v0, v1) = (pts.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max));
+            let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+            match &f.kind {
+                CKind::Sweep { .. } => {
+                    let d = match a { Align::Centre => [-um, -vm], Align::Bottom => [-um, -v0], Align::Top => [-um, -v1], Align::Left => [-u0, -vm], Align::Right => [-u1, -vm] };
+                    outer = shift(&outer, d);
+                    holes = holes.iter().map(|h| shift(h, d)).collect();
+                }
+                CKind::Revolve { about_v, .. } => {
+                    // the axis is parallel to v (about_v) or to u; it can lie along the edges it is parallel to, or through the middle
+                    let ok = match a { Align::Centre => true, Align::Left | Align::Right => *about_v, Align::Bottom | Align::Top => !*about_v };
+                    if !ok { return Err(bad(name, "an axis parallel to v can lie on the left or right edge or the centre, an axis parallel to u on the bottom or top edge or the centre")); }
+                }
+                CKind::Extrusion { .. } => {}
+            }
+        }
         let geom = match &f.kind {
             CKind::Extrusion { plane, from, to } => {
                 let (from, to) = (ev(from, "from")?, ev(to, "to")?);
@@ -458,6 +499,15 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
             }
             CKind::Revolve { plane, offset, about_v, at, angle } => {
                 let (offset, at) = (ev(offset, "offset")?, ev(at, "at")?);
+                // an aligned revolve puts the axis on the profile itself, whatever `at` says
+                let at = match f.align {
+                    Some(a) => {
+                        let pts = poly_pts(&outer);
+                        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q[if *about_v { 0 } else { 1 }]), h.max(q[if *about_v { 0 } else { 1 }])));
+                        match a { Align::Centre => (lo + hi) / 2.0, Align::Left | Align::Bottom => lo, Align::Right | Align::Top => hi }
+                    }
+                    None => at,
+                };
                 let angle = angle.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.angle"), err })?;
                 if !(angle > 0.0 && angle <= 360.0) { return Err(bad(name, "the angle must be above 0 and at most 360 degrees")); }
                 let k = if *about_v { 0 } else { 1 };

@@ -458,3 +458,47 @@ fn the_mitre_tip_is_exact_in_both_directions() {
     assert!((hi[1] - (4.0 + 0.2 * 3f64.sqrt())).abs() < 1e-9, "{hi:?}");
     assert!((hi[0] - 0.2).abs() < 1e-9 && lo[0] < -3.46, "{lo:?} {hi:?}");
 }
+
+#[test]
+fn a_sweep_sits_on_its_path_by_centre_bottom_top_left_or_right() {
+    // a profile 0.2 wide (u) and 0.1 high (v), drawn anywhere; the path runs through the part asked for
+    let prof = rect("1", "5", "1.2", "5.1");
+    let path = [("0", "0"), ("3", "0")];
+    let at = |a: Align| { let f = ok(FormDef::sweep("s", "1", &path, prof.clone()).align(a)); (f.volume(), f.bounds_local()) };
+    for (a, ulo, uhi, zlo, zhi) in [
+        (Align::Centre, -0.1, 0.1, 0.95, 1.05),
+        (Align::Bottom, -0.1, 0.1, 1.0, 1.1),
+        (Align::Top, -0.1, 0.1, 0.9, 1.0),
+        (Align::Left, 0.0, 0.2, 0.95, 1.05),
+        (Align::Right, -0.2, 0.0, 0.95, 1.05),
+    ] {
+        let (v, (lo, hi)) = at(a);
+        assert!(close(v, 0.02 * 3.0) && close3(lo, [0.0, ulo, zlo]) && close3(hi, [3.0, uhi, zhi]), "{a:?}: {lo:?} {hi:?}");
+    }
+    // a circle with a hole follows too
+    let f = ok(FormDef::sweep("s", "1", &path, ProfileDef::circle("2", "2", "0.05")).hole(ProfileDef::circle("2", "2", "0.04")).align(Align::Bottom));
+    let (lo, hi) = f.bounds_local();
+    assert!(close3(lo, [0.0, -0.05, 1.0]) && close3(hi, [3.0, 0.05, 1.1]), "{lo:?} {hi:?}");
+    // without alignment the profile stays as drawn
+    let (lo, _) = ok(FormDef::sweep("s", "1", &path, prof.clone())).bounds_local();
+    assert!(close(lo[1], 1.0));
+}
+
+#[test]
+fn a_revolve_puts_its_axis_on_the_profile_where_asked() {
+    // axis parallel to v: left edge, right edge or centre of the profile in u
+    let r = |a: Align, about_v: bool| ok(FormDef::revolve("r", Axis::Z, "0", about_v, "9", "360", rect("1", "2", "1.5", "4")).align(a));
+    let vol = |a: Align, about_v: bool| r(a, about_v).volume();
+    // left edge: a ring from radius 0 to 0.5; right: the same ring seen from the other side; centre: radius -0.25..0.25 would cross, so it is refused
+    assert!(close(vol(Align::Left, true), PI * 0.25 * 2.0));
+    assert!(close(vol(Align::Right, true), vol(Align::Left, true)));
+    assert!(why(FormDef::revolve("r", Axis::Z, "0", true, "0", "360", rect("1", "2", "1.5", "4")).align(Align::Centre)).contains("crosses"));
+    // axis parallel to u: bottom or top edge of the profile in v
+    assert!(close(vol(Align::Bottom, false), PI * 4.0 * 0.5));
+    // an axis parallel to v cannot lie on a bottom or top edge
+    let f = FormDef::revolve("r", Axis::Z, "0", true, "0", "360", rect("1", "2", "1.5", "4")).align(Align::Bottom);
+    assert!(why(f).contains("axis parallel to v"));
+    // an extrusion has no path or axis
+    let f = FormDef::extrusion("e", Axis::Z, "0", "1", rect("0", "0", "1", "1")).align(Align::Centre);
+    assert!(matches!(one(f).compile(), Err(FamilyError::Form { .. })));
+}

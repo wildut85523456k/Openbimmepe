@@ -219,10 +219,21 @@ for iid, r in item_rows.items():
     # parametric bodies, never meshes
     reps = e.Representation.Representations[0].Items
     kinds = {i.is_a() for i in reps}
-    ok(kinds <= {"IfcMappedItem", "IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid"}, f"{name_of(r)} body kinds {kinds}")
+    ok(kinds <= {"IfcMappedItem", "IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid", "IfcFixedReferenceSweptAreaSolid"}, f"{name_of(r)} body kinds {kinds}")
     if is_mapped(e):
         inner = {i.is_a() for m in reps for i in m.MappingSource.MappedRepresentation.Items}
-        ok(inner <= {"IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid"}, f"{name_of(r)} shared shape kinds {inner}")
+        ok(inner <= {"IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid", "IfcFixedReferenceSweptAreaSolid"}, f"{name_of(r)} shared shape kinds {inner}")
+# swept forms: each one, built alone, has the volume and the box the Rust code solved (mitred corners, profile the right way up)
+file_sweeps = []
+for sw in f.by_type("IfcFixedReferenceSweptAreaSolid"):
+    rep = f.createIfcShapeRepresentation(None, "Body", "SweptSolid", [sw])
+    sh = ifcopenshell.geom.create_shape(st, rep)
+    sv = np.array(sh.verts).reshape(-1, 3)
+    file_sweeps.append((ush.get_volume(sh), sv.min(axis=0), sv.max(axis=0)))
+ok(len(file_sweeps) == len(rows("SWEEP")) >= 1, f"{len(file_sweeps)} swept solids in the file, {len(rows('SWEEP'))} in the manifest")
+for r in rows("SWEEP"):
+    vol, lo, hi = float(r[1]), np.array(r[2:5], float), np.array(r[5:8], float)
+    ok(any(abs(a - vol) < 1e-9 and np.allclose(b, lo, atol=1e-9) and np.allclose(c, hi, atol=1e-9) for a, b, c in file_sweeps), f"swept form of item {r[0]}: volume {vol} box {lo} {hi}")
 for tid, ids in types_seen.items():
     t = f.by_id(tid)
     ok(t.RepresentationMaps is not None and len(t.RepresentationMaps) == 1, f"{t.Name} has one representation map")
