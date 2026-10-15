@@ -545,3 +545,23 @@ proptest! {
 fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
 fn dist3(a: [f64; 3], b: [f64; 3]) -> f64 { let d = sub3(a, b); (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() }
 fn unit3(a: [f64; 3]) -> [f64; 3] { let n = dist3(a, [0.0; 3]); [a[0] / n, a[1] / n, a[2] / n] }
+
+#[test]
+fn a_kink_too_small_for_a_fitting_keeps_both_runs_and_gets_no_elbow() {
+    // 0.00001 degrees off straight: not merged (that would move a point), and no fitting is made for it
+    let k = 1e-5f64.to_radians().tan();
+    let pts = [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [6.0, 3.0 * k, 0.0]];
+    let r = route_path(&pts, &sizes(2, 0.1), &prefs(), &off()).unwrap();
+    assert_eq!((r.runs.len(), r.fittings.len()), (2, 0));
+    assert!(close3(r.runs[0].b, [3.0, 0.0, 0.0]) && close3(r.runs[1].a, [3.0, 0.0, 0.0]));
+    // exactly straight is merged, as before
+    let r = route_path(&[[0.0; 3], [3.0, 0.0, 0.0], [6.0, 0.0, 0.0]], &sizes(2, 0.1), &prefs(), &off()).unwrap();
+    assert_eq!(r.runs.len(), 1);
+    // nearly straight but a size change: a transition, as for exactly straight
+    let r = route_path(&pts, &[round(0.1), round(0.2)], &prefs(), &off()).unwrap();
+    assert_eq!(r.fittings.len(), 1);
+    assert_eq!(r.fittings[0].kind, FittingKind::Transition);
+    // doubling back on the same line is a reversal, never a merge
+    let back = [[0.0; 3], [3.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    assert_eq!(route_path(&back, &sizes(2, 0.1), &prefs(), &off()).err(), Some(RouteError::Reversal { vertex: 1 }));
+}

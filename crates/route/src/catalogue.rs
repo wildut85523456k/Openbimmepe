@@ -59,6 +59,9 @@ pub struct FittingType {
     pub transition_angle_deg: f64,
     /// transition: shortest length, metres
     pub min_len: f64,
+    /// how far (degrees, 0 to 45) the angle drawn may differ from a listed angle and still use this fitting; a
+    /// gravity pipe on a slope bends a little less than the angle in plan, so its fittings need some slack
+    pub angle_slack_deg: f64,
 }
 
 impl FittingType {
@@ -82,6 +85,7 @@ impl FittingType {
             stub_factor: 1.0,
             transition_angle_deg: 30.0,
             min_len: 0.0,
+            angle_slack_deg: crate::ANGLE_TOL,
         }
     }
     pub fn code(mut self, c: &str) -> Self {
@@ -117,6 +121,10 @@ impl FittingType {
     pub fn tee_lengths(mut self, half: f64, stub: f64) -> Self {
         self.half_factor = half;
         self.stub_factor = stub;
+        self
+    }
+    pub fn slack(mut self, deg: f64) -> Self {
+        self.angle_slack_deg = deg;
         self
     }
     pub fn transition(mut self, angle_deg: f64, min_len: f64) -> Self {
@@ -184,7 +192,7 @@ impl Catalogue {
             }
             let pos = |v: f64| v.is_finite() && v > 0.0 && v <= 1000.0;
             let nonneg = |v: f64| v.is_finite() && (0.0..=1000.0).contains(&v);
-            if !pos(t.radius_factor) || !nonneg(t.half_factor) || !nonneg(t.stub_factor) || !nonneg(t.min_len) || !(t.transition_angle_deg.is_finite() && t.transition_angle_deg > 0.0 && t.transition_angle_deg < 180.0) {
+            if !pos(t.radius_factor) || !nonneg(t.half_factor) || !nonneg(t.stub_factor) || !nonneg(t.min_len) || !(t.angle_slack_deg.is_finite() && (0.0..=45.0).contains(&t.angle_slack_deg)) || !(t.transition_angle_deg.is_finite() && t.transition_angle_deg > 0.0 && t.transition_angle_deg < 180.0) {
                 return Err(CatalogueError::BadDimension);
             }
             if let AngleSet::List(v) = &t.angles {
@@ -202,7 +210,7 @@ impl Catalogue {
         for t in &self.types {
             if t.base_fits(FittingClass::Elbow, domain, system, size) {
                 any = true;
-                if t.angles.allows(angle) {
+                if t.angles.allows_within(angle, t.angle_slack_deg) {
                     return Ok(t);
                 }
             }
@@ -219,7 +227,7 @@ impl Catalogue {
                 let b = crate::ref_dim(branch);
                 if t.shape_branch_fits(branch) && b >= t.branch_min - 1e-9 && b <= t.branch_max + 1e-9 {
                     any_branch = true;
-                    if t.angles.allows(angle) || t.angles.allows(180.0 - angle) {
+                    if t.angles.allows_within(angle, t.angle_slack_deg) || t.angles.allows_within(180.0 - angle, t.angle_slack_deg) {
                         return Ok(t);
                     }
                 }

@@ -33,9 +33,13 @@ pub enum AngleSet {
 
 impl AngleSet {
     pub fn allows(&self, deg: f64) -> bool {
+        self.allows_within(deg, ANGLE_TOL)
+    }
+    /// Is `deg` within `slack` degrees of a listed angle?
+    pub fn allows_within(&self, deg: f64, slack: f64) -> bool {
         match self {
             AngleSet::Any => true,
-            AngleSet::List(v) => v.iter().any(|a| (a - deg).abs() <= ANGLE_TOL),
+            AngleSet::List(v) => v.iter().any(|a| (a - deg).abs() <= slack),
         }
     }
 }
@@ -85,6 +89,8 @@ pub struct RoutingPrefs {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RouteError {
     BadCatalogue(CatalogueError),
+    /// a gradient is not a finite number from -1 to 1, or the plan and gradients do not match
+    BadGrade,
     /// the catalogue has no fitting of this class for the size here (or at the vertex)
     NoFitting { class: FittingClass, vertex: usize },
     /// the catalogue has tees but none takes a branch of this size
@@ -150,6 +156,20 @@ pub struct Route {
 }
 
 impl Route {
+    /// Does every straight run fall at least `min_gradient` (rise over run, more than 0) along its own
+    /// direction? Gives the index of the first run that does not. For gravity drainage.
+    pub fn check_fall(&self, min_gradient: f64) -> Result<(), usize> {
+        for (i, r) in self.runs.iter().enumerate() {
+            let h = ((r.b[0] - r.a[0]).powi(2) + (r.b[1] - r.a[1]).powi(2)).sqrt();
+            let fall = r.a[2] - r.b[2];
+            // a vertical run (a drop) always falls; otherwise compare fall over horizontal length
+            let ok = if h < 1e-9 { fall > 0.0 } else { fall / h >= min_gradient - 1e-12 };
+            if !ok {
+                return Err(i);
+            }
+        }
+        Ok(())
+    }
     /// Length of the centreline: straight runs plus the arcs of the elbows plus the other fittings' lengths.
     pub fn centreline_length(&self) -> f64 {
         let straight: f64 = self.runs.iter().map(|r| dist(r.a, r.b)).sum();
@@ -207,7 +227,7 @@ fn neg(a: [f64; 3]) -> [f64; 3] {
 fn sin_deg(x: f64) -> f64 {
     let r = x.rem_euclid(360.0);
     if r % 90.0 == 0.0 {
-        return match (r / 90.0) as u8 {
+        return match (r / 90.0) as u8 % 4 {
             0 | 2 => 0.0,
             1 => 1.0,
             _ => -1.0,
@@ -374,7 +394,9 @@ fn route_inner(points: &[[f64; 3]], sizes: &[RunSize], prefs: &RoutingPrefs, sna
         let d = unit(sub(snapped[i + 1], snapped[i]));
         if let Some(&sz) = szs.last() {
             let pd = unit(sub(pts[pts.len() - 1], pts[pts.len() - 2]));
-            if dot(pd, d) > 1.0 - 1e-12 && same_size(sz, sizes[i]) {
+            // merged only when really on one line (a kink of even a millionth of a degree must keep its own run)
+            let c = cross(pd, d);
+            if dot(pd, d) > 0.0 && len(c) < 1e-10 && same_size(sz, sizes[i]) {
                 let n = pts.len();
                 pts[n - 1] = snapped[i + 1];
                 continue;
@@ -397,7 +419,11 @@ fn route_inner(points: &[[f64; 3]], sizes: &[RunSize], prefs: &RoutingPrefs, sna
             return Err(RouteError::Reversal { vertex: v });
         }
         if theta < 1e-4 {
-            // straight on, so the size must differ (equal sizes were merged): a transition
+            // straight on to within noise
+            if same_size(szs[v - 1], szs[v]) {
+                continue; // a kink too small for a fitting
+            }
+            // the size differs: a transition
             if matches!((szs[v - 1], szs[v]), (RunSize::Round { .. }, RunSize::Rect { .. }) | (RunSize::Rect { .. }, RunSize::Round { .. })) {
                 return Err(RouteError::MixedTransition { vertex: v });
             }
@@ -549,4 +575,46 @@ pub fn route_from_connector(conn: &Connector, points: &[[f64; 3]], size: RunSize
     sizes.extend(std::iter::repeat_n(size, points.len()));
     // the stub leg is exactly the connector's direction; the first point after it is snapped from the stub end
     route_inner(&pts, &sizes, prefs, snaps, &Opts { lead_start: 0.0, keep_first: true })
+}
+
+// ---------- gradient ----------
+
+/// Draw a route in plan with a gradient on each leg (for gravity pipes). `grades[i]` is the fall along leg i
+/// divided by its horizontal length: positive falls in the direction drawn, negative rises, 0 is level; each is
+/// from -1 to 1. Elevation starts at `z0` and changes along each leg by the gradient, so the gradient of a straight
+/// run is exact. The plan angle snaps apply; the vertical snaps do not (the gradient is the slope).
+pub fn route_graded(plan: &[[f64; 2]], z0: f64, grades: &[f64], sizes: &[RunSize], prefs: &RoutingPrefs, snaps: &Snaps) -> Result<Route, RouteError> {
+    if plan.len() < 2 || plan.len() > MAX_POINTS || grades.len() != plan.len() - 1 || !z0.is_finite() || z0.abs() > 1.0e6 {
+        return Err(RouteError::BadInput("a graded route needs 2 to 1000 plan points, one gradient per leg and a start elevation"));
+    }
+    if grades.iter().any(|g| !g.is_finite() || g.abs() > 1.0) {
+        return Err(RouteError::BadGrade);
+    }
+    if plan.iter().any(|p| p.iter().any(|v| !v.is_finite() || v.abs() > 1.0e6)) {
+        return Err(RouteError::BadInput("a point is not a finite number within range"));
+    }
+    let mut pts = vec![[plan[0][0], plan[0][1], z0]];
+    for i in 1..plan.len() {
+        let prev = pts[i - 1];
+        let h = ((plan[i][0] - plan[i - 1][0]).powi(2) + (plan[i][1] - plan[i - 1][1]).powi(2)).sqrt();
+        pts.push([plan[i][0], plan[i][1], prev[2] - grades[i - 1] * h]);
+    }
+    // the vertical snaps are off: the slope of each leg is its gradient, and snapping the plan angle keeps it
+    let a = snaps.active();
+    let flat = Snaps::new(snaps::SnapSettings { plan: a.plan.clone(), vertical: snaps::SnapMode::Off });
+    flat.active().check().map_err(RouteError::Snap)?;
+    route_inner(&pts, sizes, prefs, &flat, &Opts { lead_start: 0.0, keep_first: false })
+}
+
+/// Draw a route in plan that falls evenly from elevation `z_start` to `z_end` over its whole horizontal length.
+pub fn route_fall_between(plan: &[[f64; 2]], z_start: f64, z_end: f64, sizes: &[RunSize], prefs: &RoutingPrefs, snaps: &Snaps) -> Result<Route, RouteError> {
+    if plan.len() < 2 || plan.len() > MAX_POINTS || !z_start.is_finite() || !z_end.is_finite() {
+        return Err(RouteError::BadInput("a graded route needs 2 to 1000 plan points and two elevations"));
+    }
+    let total: f64 = (1..plan.len()).map(|i| ((plan[i][0] - plan[i - 1][0]).powi(2) + (plan[i][1] - plan[i - 1][1]).powi(2)).sqrt()).sum();
+    if total.is_nan() || total <= 1e-6 {
+        return Err(RouteError::BadInput("the plan has no length"));
+    }
+    let g = (z_start - z_end) / total;
+    route_graded(plan, z_start, &vec![g; plan.len() - 1], sizes, prefs, snaps)
 }

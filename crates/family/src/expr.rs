@@ -350,7 +350,8 @@ impl Parser<'_> {
 pub(crate) fn sin_deg(x: f64) -> f64 {
     let r = x.rem_euclid(360.0);
     if r % 90.0 == 0.0 {
-        return match (r / 90.0) as u8 { 0 | 2 => 0.0, 1 => 1.0, _ => -1.0 };
+        // r can come out as exactly 360 for a tiny negative angle (rem_euclid rounds up), so reduce the quadrant too
+        return match (r / 90.0) as u8 % 4 { 0 | 2 => 0.0, 1 => 1.0, _ => -1.0 };
     }
     r.to_radians().sin()
 }

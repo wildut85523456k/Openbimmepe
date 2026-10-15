@@ -149,3 +149,25 @@ fn longest_name_wins_and_long_names_work() {
     let long31 = vec!["a"; 31].join(" ");
     assert_eq!(ev_with(&format!("{long31} + 1"), &[long31.as_str()], &[5.0]).unwrap(), 6.0);
 }
+
+#[test]
+fn sine_and_cosine_of_a_tiny_angle_next_to_a_multiple_of_90_are_right() {
+    // rem_euclid(360) of a tiny negative angle rounds up to exactly 360: that is quadrant 0, not 4 (which read as -1)
+    for tiny in ["0 - 0.00000000000001", "0 - 0.000000000000001", "360 - 0.00000000000001", "720 - 0.00000000000001"] {
+        assert!(ev(&format!("sin({tiny})")).unwrap().abs() < 1e-9, "{tiny}");
+        assert!((ev(&format!("cos({tiny})")).unwrap() - 1.0).abs() < 1e-9, "{tiny}");
+    }
+    for (a, s, c) in [(90.0, 1.0, 0.0), (180.0, 0.0, -1.0), (270.0, -1.0, 0.0), (360.0, 0.0, 1.0), (-90.0, -1.0, 0.0), (-180.0, 0.0, -1.0), (-270.0, 1.0, 0.0), (450.0, 1.0, 0.0), (-360.0, 0.0, 1.0)] {
+        assert!((ev(&format!("sin({a})")).unwrap() - s).abs() < 1e-12, "sin {a}");
+        assert!((ev(&format!("cos({a})")).unwrap() - c).abs() < 1e-12, "cos {a}");
+    }
+    // just beside the exact multiples of 90 the values are continuous
+    for k in 0..8 {
+        let a = 90.0 * k as f64;
+        for d in [-1e-9, 1e-9, -1e-13, 1e-13] {
+            let x = a + d;
+            assert!((ev(&format!("sin({x})")).unwrap() - x.to_radians().sin()).abs() < 1e-9, "sin {x}");
+            assert!((ev(&format!("cos({x})")).unwrap() - x.to_radians().cos()).abs() < 1e-9, "cos {x}");
+        }
+    }
+}

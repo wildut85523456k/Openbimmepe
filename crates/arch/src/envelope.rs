@@ -49,6 +49,7 @@ pub fn wall_envelope(chain: &WallChain, exterior: Side, north: f64) -> Result<Ve
         // normal pointing out: right of travel is (dy, -dx), left is (-dy, dx)
         let n = if right { [dy, -dx] } else { [-dy, dx] };
         let az = (n[0].atan2(n[1]).to_degrees() + north).rem_euclid(360.0);
+        let az = if az >= 360.0 { 0.0 } else { az }; // rem_euclid can round a tiny negative angle up to 360
         let gross = len * chain.height;
         let mut open = 0.0;
         for o in chain.openings.get(i).into_iter().flatten() { open += o.width * o.height; }
