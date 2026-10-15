@@ -56,7 +56,7 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![] }
+    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![] }
 }
 fn wall(id: u64) -> WallItem {
     WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0) }
@@ -101,4 +101,107 @@ fn an_edited_wall_keeps_its_id_and_a_new_one_gets_its_own() {
     assert!(a.text.contains(&id5) && b.text.contains(&id5));
     assert!(b.text.contains(&format!("IFCWALL('{}'", global_id(1, 0, 6))));
     assert_ne!(a.text, b.text);
+}
+
+fn close3(a: [f64; 3], b: [f64; 3]) -> bool {
+    (0..3).all(|k| (a[k] - b[k]).abs() < 1e-12)
+}
+
+#[test]
+fn a_frame_on_a_wall_turns_and_shifts_points_and_directions() {
+    let c = WallChain::new(vec![[1.0, 1.0], [1.0, 5.0]], false, 0.2, 3.0);
+    let f = Frame::on_wall(&c, 0, 1.5);
+    assert!(close3(f.origin, [1.0, 2.5, 0.0]));
+    assert!((f.x[0]).abs() < 1e-12 && (f.x[1] - 1.0).abs() < 1e-12);
+    // local x runs up the wall, local y is to its left (towards -x)
+    assert!(close3(f.point([2.0, 0.0, 0.5]), [1.0, 4.5, 0.5]));
+    assert!(close3(f.point([0.0, 1.0, 0.0]), [0.0, 2.5, 0.0]));
+    assert!(close3(f.vector([0.0, 1.0, 1.0]), [-1.0, 0.0, 1.0]));
+    // a raised wall base lifts the frame
+    let mut c2 = c.clone();
+    c2.base_z = 3.0;
+    assert!(close3(Frame::on_wall(&c2, 0, 0.0).origin, [1.0, 1.0, 3.0]));
+}
+
+fn library_scene(types: &[(Option<&str>, &str)]) -> Scene {
+    use openbim_family::{library, Request};
+    let fams = library::all().unwrap();
+    let mut items = Vec::new();
+    for (k, (t, name)) in types.iter().enumerate() {
+        let inst = fams[1].solve(&Request { type_name: *t, ..Default::default() }).unwrap();
+        items.push(FamilyItem { id: 10 + k as u64, name: (*name).into(), family: 1, type_name: t.map(|s| s.to_string()), frame: Frame { origin: [k as f64 * 2.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None });
+    }
+    let mut s = scene(vec![wall(5)]);
+    s.families = fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect();
+    s.items = items;
+    s
+}
+
+#[test]
+fn occurrences_of_one_type_share_one_type_entity_and_one_map() {
+    let out = export(&library_scene(&[(Some("Type A"), "D1"), (Some("Type A"), "D2"), (Some("Type B"), "D3")])).unwrap();
+    assert_eq!((out.report.items, out.report.types, out.report.mapped), (3, 2, 3));
+    assert_eq!(out.text.matches("IFCDOORTYPE(").count(), 2);
+    assert_eq!(out.text.matches("IFCREPRESENTATIONMAP(").count(), 2);
+    assert_eq!(out.text.matches("IFCRELDEFINESBYTYPE(").count(), 2);
+    assert_eq!(out.text.matches("IFCMAPPEDITEM(").count(), 3);
+    assert_eq!(out.text.matches("IFCDOOR(").count(), 3);
+    // the type id comes from the family number and the type's place in the family, not from the occurrences
+    let a = global_id(1, 0, (0xFFFF_FFFEu64 << 32) | (2u64 << 16) | 1);
+    let b = global_id(1, 0, (0xFFFF_FFFEu64 << 32) | (2u64 << 16) | 2);
+    assert!(out.text.contains(&format!("IFCDOORTYPE('{a}'")) && out.text.contains(&format!("IFCDOORTYPE('{b}'")));
+    // the same input writes the same file; removing the first occurrence keeps the type ids
+    let again = export(&library_scene(&[(Some("Type A"), "D1"), (Some("Type A"), "D2"), (Some("Type B"), "D3")])).unwrap();
+    assert_eq!(out.text, again.text);
+    let fewer = export(&library_scene(&[(Some("Type B"), "D3")])).unwrap();
+    assert!(fewer.text.contains(&format!("IFCDOORTYPE('{b}'")));
+}
+
+#[test]
+fn an_occurrence_with_another_shape_keeps_its_own_bodies() {
+    use openbim_family::Request;
+    let mut s = library_scene(&[(Some("Type A"), "D1"), (Some("Type A"), "D2")]);
+    let left = s.families[1].family.solve(&Request { type_name: Some("Type A"), texts: vec![("swing", "left")], ..Default::default() }).unwrap();
+    s.items[1].instance = left;
+    let out = export(&s).unwrap();
+    assert_eq!((out.report.types, out.report.mapped), (1, 1));
+    assert_eq!(out.text.matches("IFCMAPPEDITEM(").count(), 1);
+    assert!(out.text.contains("SINGLE_SWING_LEFT") && out.text.contains("SINGLE_SWING_RIGHT"));
+}
+
+#[test]
+fn a_missing_family_is_refused() {
+    let mut s = library_scene(&[(None, "D1")]);
+    s.items[0].family = 99;
+    assert!(matches!(export(&s).err(), Some(ExportError::Unsupported(_))));
+}
+
+#[test]
+fn occurrences_differing_only_in_a_form_or_a_turn_keep_their_own_bodies() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{compile_library, Axis, Category, Family, Request, Scope, SolidDef, ValueDef};
+    let f = Family {
+        name: "Bench".into(),
+        values: vec![
+            ValueDef::input("w", 0.4, 0.1, 1.0, Scope::Instance),
+            ValueDef::input("a", 0.0, 0.0, 90.0, Scope::Instance),
+            ValueDef::plane("x0", Axis::X, "0"), ValueDef::plane("x1", Axis::X, "0.5"),
+            ValueDef::plane("y0", Axis::Y, "0"), ValueDef::plane("y1", Axis::Y, "0.2"),
+            ValueDef::plane("z0", Axis::Z, "0"), ValueDef::plane("z1", Axis::Z, "0.1"),
+        ],
+        solids: vec![SolidDef::new("seat", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).rotate_about("a", "0.1", "0.1")],
+        forms: vec![FormDef::extrusion("leg", Axis::Z, "0", "0.3", ProfileDef::rect("0", "0", "w", "0.1"))],
+        category: Category::Furniture,
+        ..Default::default()
+    };
+    let c = compile_library(std::slice::from_ref(&f)).unwrap();
+    let mk = |ov: Vec<(&str, f64)>| c[0].solve(&Request { overrides: ov, ..Default::default() }).unwrap();
+    let mut s = scene(vec![wall(5)]);
+    s.families = vec![FamilyRef { id: 1, family: c[0].clone() }];
+    let item = |id: u64, inst| FamilyItem { id, name: format!("B{id}"), family: 0, type_name: None, frame: Frame { origin: [id as f64, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None };
+    // same everything: shared; another leg width: own bodies; another turn: own bodies
+    s.items = vec![item(10, mk(vec![])), item(11, mk(vec![])), item(12, mk(vec![("w", 0.3)])), item(13, mk(vec![("a", 30.0)]))];
+    let out = export(&s).unwrap();
+    assert_eq!(out.report.items, 4);
+    assert_eq!(out.report.mapped, 2, "only the two identical benches share the map");
 }

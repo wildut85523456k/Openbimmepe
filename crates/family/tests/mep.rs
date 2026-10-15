@@ -640,3 +640,12 @@ fn power_factor_apparent_power_and_current() {
     assert!(run(el("230", "1").power_factor("1")).is_ok());
     assert_eq!(run(duct("a")).unwrap().connectors[0].current(), None);
 }
+
+#[test]
+fn type_names_come_in_the_authors_order() {
+    let all = library::all().unwrap();
+    let door = all.iter().find(|c| c.name() == "Door, single flush").unwrap();
+    assert_eq!(door.type_names(), vec!["Type A", "Type B"]);
+    let fc = all.iter().find(|c| c.name() == "Fan coil unit, ducted").unwrap();
+    assert!(fc.type_names().is_empty());
+}

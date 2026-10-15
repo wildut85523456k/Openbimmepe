@@ -755,6 +755,8 @@ impl Inner {
     /// (name, identity) of the shared parameters this family uses
     pub fn shared_ids(&self) -> &[(String, u128)] { &self.shared_ids }
     pub fn host(&self) -> Host { self.host }
+    /// Names of the family's types, in the order the author gave them.
+    pub fn type_names(&self) -> Vec<&str> { self.types.iter().map(|t| t.0.as_str()).collect() }
     pub fn classification(&self) -> &[(String, String)] { &self.classification }
     pub fn slot(&self, name: &str) -> Option<usize> { self.index.get(name).copied() }
     pub fn value(&self, inst: &Instance, name: &str) -> Option<f64> { self.slot(name).map(|i| inst.values[i]) }

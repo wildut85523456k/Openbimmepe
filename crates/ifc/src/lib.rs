@@ -14,11 +14,13 @@
 //!   `IfcFlowTerminal` that owns the connector ports, until families are exported as types.
 //!
 //! The output is the same bytes for the same input: nothing in it depends on the clock or on hash order.
+mod families;
 pub mod guid;
 pub mod step;
 
 use openbim_arch::Levels;
 use openbim_family::mep::{up_for, Domain, System};
+use openbim_family::{Compiled, Instance};
 use openbim_geom::WallChain;
 use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab};
 use openbim_place::penetrations::{Penetration, RunSize};
@@ -40,6 +42,59 @@ pub struct SlabItem {
     pub slab: Slab,
 }
 
+/// A compiled family with the number it keeps for life (it is part of the GlobalId of each of its types).
+pub struct FamilyRef {
+    pub id: u32,
+    pub family: Compiled,
+}
+
+/// Where the family frame sits in the model: origin, and the plan direction of its x axis (y is to the left of x).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    pub origin: [f64; 3],
+    pub x: [f64; 2],
+}
+
+impl Frame {
+    /// The frame of a family placed on wall segment `segment` of `chain`, `centre` along it.
+    pub fn on_wall(chain: &WallChain, segment: usize, centre: f64) -> Frame {
+        let n = chain.points.len();
+        let (a, b) = (chain.points[segment], chain.points[(segment + 1) % n]);
+        let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+        let u = [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+        Frame { origin: [a[0] + u[0] * centre, a[1] + u[1] * centre, chain.base_z], x: u }
+    }
+    pub fn point(&self, p: [f64; 3]) -> [f64; 3] {
+        let (u, v) = (self.x, [-self.x[1], self.x[0]]);
+        [self.origin[0] + u[0] * p[0] + v[0] * p[1], self.origin[1] + u[1] * p[0] + v[1] * p[1], self.origin[2] + p[2]]
+    }
+    pub fn vector(&self, p: [f64; 3]) -> [f64; 3] {
+        let (u, v) = (self.x, [-self.x[1], self.x[0]]);
+        [u[0] * p[0] + v[0] * p[1], u[1] * p[0] + v[1] * p[1], p[2]]
+    }
+    /// A connector given in the family frame, moved into the model.
+    pub fn connector(&self, c: &openbim_family::mep::Connector) -> openbim_family::mep::Connector {
+        let mut w = c.clone();
+        w.pos = self.point(c.pos);
+        w.dir = self.vector(c.dir);
+        w.up = self.vector(c.up);
+        w
+    }
+}
+
+/// One placed family: its element number, which family and type, the solved instance, where it is.
+pub struct FamilyItem {
+    pub id: u64,
+    pub name: String,
+    /// index into `Scene::families`
+    pub family: usize,
+    pub type_name: Option<String>,
+    pub frame: Frame,
+    pub instance: Instance,
+    /// the wall it sits in: (index into `Scene::walls`, segment, distance of its origin along the segment)
+    pub host: Option<(usize, usize, f64)>,
+}
+
 pub struct Scene {
     pub project_name: String,
     /// 48-bit key that makes the GlobalIds of this project different from every other project's
@@ -55,6 +110,8 @@ pub struct Scene {
     /// register of openings in slabs, by slab index into `slabs`
     pub floor_penetrations: Vec<FloorPenetration>,
     pub networks: Vec<Network>,
+    pub families: Vec<FamilyRef>,
+    pub items: Vec<FamilyItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +142,10 @@ pub struct Report {
     pub fittings: usize,
     pub ports: usize,
     pub connections: usize,
+    pub items: usize,
+    pub types: usize,
+    /// occurrences whose shape is a mapped item of their type's shared shape
+    pub mapped: usize,
 }
 
 pub struct Exported {
@@ -124,6 +185,7 @@ enum Val {
     Bool(bool),
     Len(f64),
     Int(i64),
+    Real(f64),
 }
 
 struct Out<'a> {
@@ -138,6 +200,10 @@ struct Out<'a> {
     storeys: Vec<(u32, u32, f64)>, // (storey entity, its placement, elevation)
     contained: BTreeMap<usize, Vec<u32>>,
     report: Report,
+    /// every wall opening written: (wall, segment, [offset, width, sill, height], entity)
+    opening_ids: Vec<(usize, usize, [f64; 4], u32)>,
+    /// connector ports of placed families: (item, connector name) to port entity
+    item_ports: BTreeMap<(u64, String), u32>,
 }
 
 impl<'a> Out<'a> {
@@ -212,9 +278,12 @@ impl<'a> Out<'a> {
         self.s.add(format!("IFCEXTRUDEDAREASOLID(#{profile},#{pos},#{up},{d})"))
     }
     fn shape(&mut self, solids: &[u32]) -> u32 {
-        let items: Vec<String> = solids.iter().map(|i| format!("#{i}")).collect();
-        let rep = self.s.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','SweptSolid',({}))", self.body_ctx, items.join(",")));
+        let rep = self.shape_rep("SweptSolid", solids);
         self.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"))
+    }
+    fn shape_rep(&mut self, kind: &str, items: &[u32]) -> u32 {
+        let items: Vec<String> = items.iter().map(|i| format!("#{i}")).collect();
+        self.s.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','{kind}',({}))", self.body_ctx, items.join(",")))
     }
     fn size_profile(&mut self, size: RunSize) -> u32 {
         match size {
@@ -222,7 +291,7 @@ impl<'a> Out<'a> {
             RunSize::Rect { width, height, .. } => self.rect_profile(0.0, 0.0, width, height),
         }
     }
-    fn pset(&mut self, owner: u32, name: &str, props: Vec<(&str, Val)>) {
+    fn pset_entity(&mut self, name: &str, props: Vec<(&str, Val)>) -> u32 {
         let mut ids = Vec::new();
         for (n, v) in props {
             let val = match v {
@@ -230,11 +299,15 @@ impl<'a> Out<'a> {
                 Val::Bool(b) => format!("IFCBOOLEAN({})", if b { ".T." } else { ".F." }),
                 Val::Len(x) => format!("IFCPOSITIVELENGTHMEASURE({})", self.r(x, "property")),
                 Val::Int(i) => format!("IFCINTEGER({i})"),
+                Val::Real(x) => format!("IFCREAL({})", self.r(x, "property")),
             };
             ids.push(format!("#{}", self.s.add(format!("IFCPROPERTYSINGLEVALUE({},$,{val},$)", string(n)))));
         }
         let g = self.gen_gid();
-        let ps = self.s.add(format!("IFCPROPERTYSET({g},$,{},$,({}))", string(name), ids.join(",")));
+        self.s.add(format!("IFCPROPERTYSET({g},$,{},$,({}))", string(name), ids.join(",")))
+    }
+    fn pset(&mut self, owner: u32, name: &str, props: Vec<(&str, Val)>) {
+        let ps = self.pset_entity(name, props);
         let g = self.gen_gid();
         self.s.add(format!("IFCRELDEFINESBYPROPERTIES({g},$,$,$,(#{owner}),#{ps})"));
     }
@@ -293,7 +366,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default() };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new() };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     let ctx = o.s.add(format!("IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-6,#{wcs},$)"));
@@ -329,6 +402,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{bld},({}))", storey_ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
 
     write_walls(&mut o)?;
+    families::write_families(&mut o)?;
     write_slabs(&mut o)?;
     write_networks(&mut o)?;
 
@@ -406,6 +480,7 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
                 let g = o.gen_gid();
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{wall},#{oe})"));
                 o.report.openings += 1;
+                o.opening_ids.push((wi, si, [op.offset, op.width, op.sill, op.height], oe));
                 if let Some(p) = pen {
                     let systems: Vec<&str> = p.systems.iter().map(|s| s.ifc_system()).collect();
                     let mut props = vec![("Register", Val::Label(p.id.to_string())), ("Systems", Val::Label(systems.join(","))), ("InFirePartition", Val::Bool(p.in_fire_partition()))];
@@ -592,6 +667,10 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
         let mut holder: BTreeMap<u64, (u32, u32, V3, Vec<u32>)> = BTreeMap::new();
         let mut eq_ports: Vec<u32> = Vec::new();
         for eq in &net.equipment {
+            if let Some(&p) = o.item_ports.get(&(eq.element, eq.connector.clone())) {
+                eq_ports.push(p); // the equipment is a placed family: its own port is used
+                continue;
+            }
             let (pl, base) = match holder.get(&eq.element).map(|h| (h.1, h.2)) {
                 Some(x) => x,
                 None => {

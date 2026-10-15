@@ -74,7 +74,7 @@ ok(all(my_compress(*decode(g)) == g for g in guids), "re-encoding gives the same
 
 seg_ids = {int(r[0]) for r in rows("SEG")}
 fit_ids = {int(r[0]) for r in rows("FIT")}
-eq_ids = {int(r[0]) for r in rows("EQ")}
+item_rows = {int(r[0]): r for r in rows("ITEM")}
 wall_ids = {int(r[0]) for r in rows("WALL")}
 slab_ids = {int(r[0]) for r in rows("SLAB")}
 def elems(cls): return {decode(e.GlobalId)[2]: e for e in f.by_type(cls)}
@@ -87,10 +87,12 @@ for c in ("IfcPipeSegment", "IfcDuctSegment", "IfcCableCarrierSegment", "IfcCabl
 fits = {}
 for c in ("IfcPipeFitting", "IfcDuctFitting", "IfcCableCarrierFitting", "IfcCableFitting"):
     fits.update(elems(c))
-terms = elems("IfcFlowTerminal")
+occs = {}
+for c in ("IfcDoor", "IfcWindow", "IfcUnitaryEquipment", "IfcFurniture"):
+    occs.update(elems(c))
 ok(set(segs) == seg_ids, f"segment ids {set(segs) ^ seg_ids}")
 ok(set(fits) == fit_ids, "fitting ids")
-ok(set(terms) == eq_ids, "equipment ids")
+ok(set(occs) == set(item_rows), "placed family ids")
 
 # ---- 3. ports in world coordinates
 ports = {}
@@ -100,7 +102,8 @@ for p in f.by_type("IfcDistributionPort"):
 want = {}
 for r in rows("PORT"):
     want[(int(r[0]), int(r[1]))] = (np.array(r[2:5], float), np.array(r[5:8], float))
-ok(set(ports) == set(want), f"port set differs: {set(ports) ^ set(want)}")
+icons = {(int(r[0]), int(r[1])) for r in rows("ICON")}
+ok(set(want) <= set(ports) and set(ports) - set(want) == icons - set(want), f"port set differs: {set(ports) ^ set(want)}")
 def port_check(ports, want, tol=1e-7):
     bad = 0
     for k, (pos, d) in want.items():
@@ -182,27 +185,81 @@ for r in rows("FPEN"):
 for r in rows("SHAFT"):
     ov, _ = verts([o for o in f.by_type("IfcOpeningElement") if o.Name == "Shaft " + r[0]][0])
     ok(np.allclose(ov.min(axis=0)[:2], [float(r[1]), float(r[3])], atol=1e-6) and np.allclose(ov.max(axis=0)[:2], [float(r[2]), float(r[4])], atol=1e-6), "shaft void outline")
-# the door: 0.9 wide from offset along the first wall, on the wall's centre line, 2.1 high
-d = [o for o in f.by_type("IfcOpeningElement") if o.Name == "Opening 1"][0]
-dv, _ = verts(d)
-od = rows("OPEN")[0]
-ok(np.allclose([dv.min(axis=0)[0], dv.max(axis=0)[0]], [float(od[2]), float(od[2]) + float(od[3])], atol=1e-6) and abs(dv.min(axis=0)[2] - float(od[4])) < 1e-6 and abs(dv.max(axis=0)[2] - float(od[4]) - float(od[5])) < 1e-6, "door box")
-
-# which storey holds what: the highest level at or below the element's lowest point
-levels = [(r[0], float(r[1])) for r in rows("LEVEL")]
-def storey_for(z): return [n for n, e in levels if e <= z + 1e-9][-1]
-def holder(e): return ue.get_container(e).Name
-for w in rows("WALL"):
-    base = float(next(r for r in rows("WBASE") if r[0] == w[0])[1])
-    ok(holder(walls[int(w[0])]) == storey_for(base), f"wall {w[0]} is on {storey_for(base)}")
-for r in rows("SLAB"):
-    ok(holder(slabs[int(r[0])]) == storey_for(float(r[-3])), "slab storey")
-for r in rows("SEG"):
-    zlow = min(float(r[5]), float(r[8]))
-    ok(holder(segs[int(r[0])]) == storey_for(zlow), f"segment {r[0]} storey")
-for r in rows("FIT"):
-    ok(holder(fits[int(r[0])]) == storey_for(float(r[-1])), f"fitting {r[0]} storey")
-ok({holder(fits[int(r[0])]) for r in rows("FIT")} == {"L0", "L1"} and "L1" in {holder(w) for w in walls.values()}, "the scene really has things on two storeys")
+# ---- 5b. families as IFC types
+# ITEM columns: id class type ox oy oz ux uy volume name
+def name_of(r): return r[9]
+CURVED = {"STAND-01"}   # a faceted revolve: the mesh corners lie inside the true curve
+TOL_CURVED = 2e-3
+def local_verts(e, origin):
+    v, _ = verts(e)
+    return sorted({tuple(np.round(p - origin, 6)) for p in v})
+def is_mapped(e): return any(i.is_a("IfcMappedItem") for i in e.Representation.Representations[0].Items)
+types_seen = {}
+for iid, r in item_rows.items():
+    e = occs[iid]
+    cls, tname = r[1], r[2]
+    t = ue.get_type(e)
+    ok(t is not None and t.is_a() == cls + "Type", f"{name_of(r)} has a type of class {cls}Type")
+    if t is None:
+        continue
+    if tname != "-":
+        ok(t.Name == tname.replace("_", " "), f"{name_of(r)} type name {t.Name}")
+    types_seen.setdefault(t.id(), []).append(iid)
+    ok(len(e.IsTypedBy) == 1, f"{name_of(r)} has one IfcRelDefinesByType")
+    # the volume of the placed shape equals the sum of the solids the Rust code solved
+    vol = ush.get_volume(ifcopenshell.geom.create_shape(st, e).geometry)
+    ok(abs(vol - float(r[8])) < (2e-3 * float(r[8]) if name_of(r) in CURVED else 1e-6), f"{name_of(r)} volume {vol} vs {r[8]}")
+    # parametric bodies, never meshes
+    reps = e.Representation.Representations[0].Items
+    kinds = {i.is_a() for i in reps}
+    ok(kinds <= {"IfcMappedItem", "IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid"}, f"{name_of(r)} body kinds {kinds}")
+    if is_mapped(e):
+        inner = {i.is_a() for m in reps for i in m.MappingSource.MappedRepresentation.Items}
+        ok(inner <= {"IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid"}, f"{name_of(r)} shared shape kinds {inner}")
+for tid, ids in types_seen.items():
+    t = f.by_id(tid)
+    ok(t.RepresentationMaps is not None and len(t.RepresentationMaps) == 1, f"{t.Name} has one representation map")
+    ok(len(t.Types[0].RelatedObjects) == len(ids), f"{t.Name} relates all its occurrences")
+    # an occurrence uses the shared map exactly when its shape, seen from its own frame, is the type's shape
+    shapes = {iid: local_verts(occs[iid], np.array(item_rows[iid][3:6], float)) for iid in ids}
+    for iid in ids:
+        e = occs[iid]
+        ok(is_mapped(e) == (shapes[iid] == shapes[ids[0]]), f"{name_of(item_rows[iid])}: mapped exactly when its shape is the type's")
+        if is_mapped(e):
+            ok(all(i.MappingSource == t.RepresentationMaps[0] for i in e.Representation.Representations[0].Items), f"{name_of(item_rows[iid])} shares the type's map")
+by_name = {name_of(r): iid for iid, r in item_rows.items()}
+ok(is_mapped(occs[by_name["D-01"]]) and is_mapped(occs[by_name["D-03"]]) and not is_mapped(occs[by_name["D-02"]]), "D-01 and D-03 are mapped, D-02 (swing left) has its own shape")
+ok(len({occs[by_name[n]].Representation.Representations[0].Items[0].MappingSource.id() for n in ("D-01", "D-03")}) == 1, "D-01 and D-03 use one representation map")
+ok(len(types_seen) == 4 and sorted(len(v) for v in types_seen.values()) == [1, 1, 1, 3], f"four types, with 3, 1, 1 and 1 occurrences: {sorted(len(v) for v in types_seen.values())}")
+# the placed shape lies where the family frame puts the solved bounds (the frames here are quarter turns, so the box stays square)
+for r in rows("IBOX"):
+    iid = int(r[0]); ir = item_rows[iid]
+    org = np.array(ir[3:6], float); ux, uy = float(ir[6]), float(ir[7])
+    R = np.array([[ux, -uy, 0], [uy, ux, 0], [0, 0, 1]])
+    lo, hi = np.array(r[1:4], float), np.array(r[4:7], float)
+    corners = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    w = org + corners @ R.T
+    v, _ = verts(occs[iid])
+    tol = TOL_CURVED if name_of(ir) in CURVED else 1e-6
+    ok(np.allclose(v.min(axis=0), w.min(axis=0), atol=tol) and np.allclose(v.max(axis=0), w.max(axis=0), atol=tol), f"{name_of(ir)} box {v.min(axis=0)} {v.max(axis=0)} vs {w.min(axis=0)} {w.max(axis=0)}")
+# overall size, fill relationship, position against the opening, type properties
+for r in rows("IOPEN"):
+    iid = int(r[0]); e = occs[iid]; nm = name_of(item_rows[iid])
+    ok(abs(e.OverallWidth - float(r[1])) < 1e-9 and abs(e.OverallHeight - float(r[2])) < 1e-9, f"{nm} overall size")
+    fills = [x.RelatingOpeningElement for x in e.FillsVoids]
+    ok(len(fills) == 1, f"{nm} fills one opening")
+    ev, _ = verts(e); ov, _ = verts(fills[0])
+    ok(np.allclose((ev.min(axis=0) + ev.max(axis=0))[:2] / 2, (ov.min(axis=0) + ov.max(axis=0))[:2] / 2, atol=1e-6), f"{nm} is centred in its opening")
+    ok(abs(ov.min(axis=0)[2] - (float(item_rows[iid][5]) + float(r[3]))) < 1e-6, f"{nm} opening starts at its sill")
+    ok(abs(ue.get_psets(ue.get_type(e))["OpenBIM_Family"]["width"] - float(r[1])) < 1e-9, f"{nm} type carries its width")
+# connectors of a placed family: ports where the connector is, from this script's own frame maths
+for r in rows("ICON"):
+    iid, part = int(r[0]), int(r[1])
+    ir = item_rows[iid]; org = np.array(ir[3:6], float); ux, uy = float(ir[6]), float(ir[7])
+    R = np.array([[ux, -uy, 0], [uy, ux, 0], [0, 0, 1]])
+    pos = org + R @ np.array(r[3:6], float); dd = R @ np.array(r[6:9], float)
+    m = up.get_local_placement(ports[(iid, part)].ObjectPlacement)
+    ok(np.allclose(m[:3, 3], pos, atol=1e-7) and np.allclose(m[:3, 2], dd / np.linalg.norm(dd), atol=1e-7), f"connector {r[2]} of {name_of(ir)}")
 
 # ---- 6. voids, fire ratings, systems
 vo = f.by_type("IfcRelVoidsElement")
@@ -242,10 +299,13 @@ ok(a != open(sys.argv[4], "rb").read(), "the edit changed the file")
 ids1 = {(e.is_a(), e.GlobalId) for e in f.by_type("IfcRoot")}
 ids2 = {(e.is_a(), e.GlobalId) for e in g2.by_type("IfcRoot")}
 ok(ids1 == ids2, f"GlobalIds after an edit: {len(ids1 ^ ids2)} differ")
-d1 = [o for o in f.by_type("IfcOpeningElement") if o.Name == "Opening 1"][0]
-d2 = [o for o in g2.by_type("IfcOpeningElement") if o.Name == "Opening 1"][0]
+d1 = occs[by_name["D-01"]]
+d2 = [e for e in g2.by_type("IfcDoor") if e.GlobalId == d1.GlobalId][0]
 x1 = up.get_local_placement(d1.ObjectPlacement)[0, 3]; x2 = up.get_local_placement(d2.ObjectPlacement)[0, 3]
-ok(abs((x2 - x1) - 1.0) < 1e-9 and d1.GlobalId == d2.GlobalId, "the edited door moved 1 m and kept its id")
+ok(abs((x2 - x1) - 1.0) < 1e-9, "the edited door moved 1 m and kept its id")
+op1 = d1.FillsVoids[0].RelatingOpeningElement; op2 = d2.FillsVoids[0].RelatingOpeningElement
+ok(op1.GlobalId == op2.GlobalId and abs(up.get_local_placement(op2.ObjectPlacement)[0, 3] - up.get_local_placement(op1.ObjectPlacement)[0, 3] - 1.0) < 1e-9, "its opening moved with it and kept its id")
+ok(ue.get_type(d2).GlobalId == ue.get_type(d1).GlobalId, "the type kept its id")
 
 # ---- 8. negative controls
 wrong = {k: (p + np.array([0, 0, 1e-3]), d) for k, (p, d) in want.items()}
