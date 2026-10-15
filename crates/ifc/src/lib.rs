@@ -16,6 +16,8 @@
 //! The output is the same bytes for the same input: nothing in it depends on the clock or on hash order.
 mod families;
 pub mod guid;
+pub mod boundaries;
+pub mod georef;
 pub mod pset_map;
 pub mod walls;
 pub mod quantities;
@@ -128,6 +130,8 @@ pub struct Scene {
     pub wall_types: Vec<walls::WallType>,
     /// where one wall element meets another (see `walls::find_joins`)
     pub wall_joins: Vec<walls::WallJoin>,
+    /// where the project is on the earth; without it the file has no map and the site has no position
+    pub georef: Option<georef::Georef>,
     /// where family and shared parameters go; what it does not name goes to the custom sets
     pub pset_map: PsetMap,
 }
@@ -141,6 +145,7 @@ pub enum ExportError {
     /// an element number does not fit (only the lower 64 bits exist, but ids must be distinct)
     DuplicateId(u64),
     BadKey,
+    BadGeoref(georef::GeorefError),
 }
 
 impl std::fmt::Display for ExportError {
@@ -168,6 +173,8 @@ pub struct Report {
     pub space_boundaries: usize,
     pub wall_types: usize,
     pub wall_joins: usize,
+    /// 1 when the file carries a map conversion
+    pub map_conversions: usize,
     /// base quantity sets written
     pub quantity_sets: usize,
     /// parameters written in the property set the mapping table names
@@ -538,19 +545,45 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), item_entities: Vec::new() };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
-    let ctx = o.s.add(format!("IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-6,#{wcs},$)"));
+    if let Some(gr) = &scene.georef {
+        gr.check().map_err(ExportError::BadGeoref)?;
+    }
+    let north = match &scene.georef {
+        Some(gr) => {
+            let (x, y) = gr.true_north();
+            let (x, y) = (o.r(x, "true north"), o.r(y, "true north"));
+            format!("#{}", o.s.add(format!("IFCDIRECTION(({x},{y}))")))
+        }
+        None => "$".to_string(),
+    };
+    let ctx = o.s.add(format!("IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-6,#{wcs},{north})"));
     o.body_ctx = o.s.add(format!("IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#{ctx},$,.MODEL_VIEW.,$)"));
     let u_len = o.s.add("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)".into());
     let u_area = o.s.add("IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)".into());
     let u_vol = o.s.add("IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)".into());
     let u_ang = o.s.add("IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)".into());
     let units = o.s.add(format!("IFCUNITASSIGNMENT((#{u_len},#{u_area},#{u_vol},#{u_ang}))"));
+    if let Some(gr) = &scene.georef {
+        let opt = |v: &Option<String>| v.as_ref().map_or("$".to_string(), |t| string(t));
+        let crs = o.s.add(format!("IFCPROJECTEDCRS({},$,{},{},{},{},#{u_len})", string(&gr.crs.name), opt(&gr.crs.geodetic_datum), opt(&gr.crs.vertical_datum), opt(&gr.crs.map_projection), opt(&gr.crs.map_zone)));
+        let (a, b) = gr.x_axis();
+        let vals = [gr.easting, gr.northing, gr.height, a, b, gr.scale].map(|v| o.r(v, "map conversion"));
+        o.s.add(format!("IFCMAPCONVERSION(#{ctx},#{crs},{})", vals.join(",")));
+        o.report.map_conversions = 1;
+    }
     let g = o.gen_gid();
     let project = o.s.add(format!("IFCPROJECT({g},$,{},$,$,$,$,(#{ctx}),#{units})", string(&scene.project_name)));
     // spatial structure
     let site_pl = o.place(None, [0.0; 3], None, None);
     let g = o.gen_gid();
-    let site = o.s.add(format!("IFCSITE({g},$,'Site',$,$,#{site_pl},$,$,.ELEMENT.,$,$,$,$,$)"));
+    let (lat, lon, el) = match &scene.georef {
+        Some(gr) => {
+            let ang = |d: f64| format!("({})", georef::compound_angle(d).map(|v| v.to_string()).join(","));
+            (ang(gr.latitude), ang(gr.longitude), o.r(gr.elevation, "site elevation"))
+        }
+        None => ("$".to_string(), "$".to_string(), "$".to_string()),
+    };
+    let site = o.s.add(format!("IFCSITE({g},$,'Site',$,$,#{site_pl},$,$,.ELEMENT.,{lat},{lon},{el},$,$)"));
     let bld_pl = o.place(Some(site_pl), [0.0; 3], None, None);
     let g = o.gen_gid();
     let bld = o.s.add(format!("IFCBUILDING({g},$,'Building',$,$,#{bld_pl},$,$,.ELEMENT.,$,$,$)"));
@@ -833,8 +866,44 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy))];
         o.pset_mapped(sp, "IfcSpace", "OpenBIM_Space", props, &room.name);
         o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(room));
+        write_boundaries(o, r, sp);
     }
     Ok(())
+}
+
+/// The second-level space boundaries of one room: for each bounding face its own surface in the room's frame.
+fn write_boundaries(o: &mut Out, r: &RoomItem, space: u32) {
+    let scene = o.scene;
+    let (found, warnings) = boundaries::room_boundaries(scene, r);
+    o.report.warnings.extend(warnings);
+    let mut ents: Vec<u32> = Vec::new();
+    for b in &found {
+        let element = match b.target {
+            boundaries::Target::Wall(i) => o.wall_entities.get(i),
+            boundaries::Target::Slab(i) => o.slab_entities.get(i),
+            boundaries::Target::Item(i) => o.item_entities.get(i),
+        };
+        let Some(&element) = element else {
+            o.report.warnings.push(format!("room {}: a boundary element was not exported, so its boundary was left out", r.room.name));
+            ents.push(0);
+            continue;
+        };
+        let sf = &b.surface;
+        let pos = o.axis(sf.origin, Some(sf.axis), Some(sf.refdir));
+        let plane = o.s.add(format!("IFCPLANE(#{pos})"));
+        let outer = o.poly_ring(&sf.outer);
+        let inner: Vec<String> = sf.inner.iter().map(|h| format!("#{}", o.poly_ring(h))).collect();
+        let face = o.s.add(format!("IFCCURVEBOUNDEDPLANE(#{plane},#{outer},({}))", inner.join(",")));
+        let geom = o.s.add(format!("IFCCONNECTIONSURFACEGEOMETRY(#{face},$)"));
+        let parent = match b.parent.and_then(|p| ents.get(p)) {
+            Some(&e) if e != 0 => format!("#{e}"),
+            _ => "$".to_string(),
+        };
+        let g = o.gen_gid();
+        let rel = o.s.add(format!("IFCRELSPACEBOUNDARY2NDLEVEL({g},$,$,$,#{space},#{element},#{geom},.PHYSICAL.,.NOTDEFINED.,{parent},$)"));
+        ents.push(rel);
+        o.report.space_boundaries += 1;
+    }
 }
 
 /// Port entities of one piece, in port order.

@@ -323,7 +323,10 @@ for sp in f.by_type("IfcSpace"):
     if q is None: continue
     ok(abs(q["NetVolume"][1] - mesh_volume(sp, False)) < 1e-6, "space net volume equals the mesh of the room with its hole")
     ok(abs(q["NetFloorArea"][1] * q["Height"][1] - q["NetVolume"][1]) < 1e-6, "space area x height = volume")
-    ok(q["GrossFloorArea"][1] > q["NetFloorArea"][1], "the hole is taken off the net floor area")
+    if sp.Name == "Office":
+        ok(q["GrossFloorArea"][1] > q["NetFloorArea"][1], "the hole is taken off the net floor area")
+    else:
+        ok(abs(q["GrossFloorArea"][1] - q["NetFloorArea"][1]) < 1e-9, "a room without a hole has equal gross and net floor area")
     ok(sp.Decomposes[0].RelatingObject.is_a("IfcBuildingStorey"), "space sits in a storey")
 for r in rows("IOPEN"):
     o = occs[int(r[0])]
@@ -389,6 +392,149 @@ for a, ea, b, eb in mans:
     end = np.array(pa[0] if ea == "Start" else pa[-1])
     closed_b = [x for x in rows("WBASE") if int(x[0]) == b][0][2] == "1"
     ok(centre_dist(end, pb + ([pb[0]] if closed_b else [])) <= tb / 2 + 1e-6, f"wall {a} {ea} really meets wall {b}")
+
+
+# ---- 6d. second-level space boundaries, read back from the file and checked against the element meshes
+def pt_tri(p, a, b, c):
+    ab, ac, ap = b - a, c - a, p - a
+    d1, d2 = ab @ ap, ac @ ap
+    if d1 <= 0 and d2 <= 0: return np.linalg.norm(p - a)
+    bp = p - b; d3, d4 = ab @ bp, ac @ bp
+    if d3 >= 0 and d4 <= d3: return np.linalg.norm(p - b)
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0 and d1 >= 0 and d3 <= 0: return np.linalg.norm(p - (a + ab * d1 / (d1 - d3)))
+    cp = p - c; d5, d6 = ab @ cp, ac @ cp
+    if d6 >= 0 and d5 <= d6: return np.linalg.norm(p - c)
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0 and d2 >= 0 and d6 <= 0: return np.linalg.norm(p - (a + ac * d2 / (d2 - d6)))
+    va = d3 * d6 - d5 * d4
+    if va <= 0 and (d4 - d3) >= 0 and (d5 - d6) >= 0:
+        w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return np.linalg.norm(p - (b + w * (c - b)))
+    den = 1 / (va + vb + vc); v, w = vb * den, vc * den
+    return np.linalg.norm(p - (a + ab * v + ac * w))
+def tri_mesh(e):
+    v, s = verts(e)
+    return v[np.array(s.geometry.faces).reshape(-1, 3)]
+def ring_world(space_m, plane_pos, ring):
+    m = space_m @ up.get_axis2placement(plane_pos)
+    pts = [np.array(p.Coordinates) for p in ring.Points][:-1]
+    return [(m @ np.array([x, y, 0.0, 1.0]))[:3] for x, y in pts], m
+def polygon_area2(pts):
+    return abs(sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts)))) / 2
+def in_poly(pt, poly):
+    c = False
+    for i in range(len(poly)):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % len(poly)]
+        if (y1 > pt[1]) != (y2 > pt[1]) and pt[0] < (x2 - x1) * (pt[1] - y1) / (y2 - y1) + x1: c = not c
+    return c
+rels = f.by_type("IfcRelSpaceBoundary2ndLevel")
+sb_rows = {}
+for r in rows("SB"): sb_rows.setdefault(int(r[0]), []).append(r)
+ok(len(rels) == len(rows("SB")) and len(rels) > 0, f"one boundary written for each the model has: {len(rels)} vs {len(rows('SB'))}")
+room_rows = {int(r[0]): r for r in rows("ROOM")}
+spaces_by_id = {decode(s.GlobalId)[2]: s for s in f.by_type("IfcSpace")}
+by_space = {}
+for rel in rels: by_space.setdefault(decode(rel.RelatingSpace.GlobalId)[2], []).append(rel)
+mesh_cache = {}
+def mesh_of(e):
+    if e.id() not in mesh_cache: mesh_cache[e.id()] = tri_mesh(e)
+    return mesh_cache[e.id()]
+n_doors_expected = 0
+for sid, sp in spaces_by_id.items():
+    mine = by_space.get(sid, [])
+    exp_rows = sb_rows[sid]
+    ok(len(mine) == len(exp_rows), f"space {sp.Name}: {len(mine)} boundaries written, {len(exp_rows)} expected")
+    sm = up.get_local_placement(sp.ObjectPlacement)
+    q = qto(sp, "Qto_SpaceBaseQuantities")
+    kinds = []
+    for rel, row in zip(mine, exp_rows):
+        el = rel.RelatedBuildingElement
+        ok(decode(el.GlobalId)[2] == int(row[3]), f"{sp.Name}: boundary {row[1]} is on element {row[3]}")
+        ok(rel.PhysicalOrVirtualBoundary == "PHYSICAL" and rel.InternalOrExternalBoundary == "NOTDEFINED", "boundary is physical")
+        surf = rel.ConnectionGeometry.SurfaceOnRelatingElement
+        ok(surf.is_a("IfcCurveBoundedPlane"), "boundary surface is a bounded plane")
+        outer, m = ring_world(sm, surf.BasisSurface.Position, surf.OuterBoundary)
+        # the file agrees with the numbers the model gave
+        mine_pts = [np.array(row[7 + 3 * i:10 + 3 * i], float) for i in range(int(row[6]))]
+        ok(len(outer) == len(mine_pts) and all(np.linalg.norm(a - b) < 1e-9 for a, b in zip(outer, mine_pts)), f"{sp.Name}: boundary {row[1]} corners as exported")
+        holes = [ring_world(sm, surf.BasisSurface.Position, h)[0] for h in surf.InnerBoundaries or []]
+        # every corner (outer and hole) lies on the surface of the element it bounds, or on the parent face for a door or window
+        tris = mesh_of(el)
+        for p in outer + [x for h in holes for x in h]:
+            ok(min(pt_tri(p, t[0], t[1], t[2]) for t in tris) < 1e-6, f"{sp.Name}: boundary {row[1]} corner {np.round(p, 3)} lies on {el.Name or el.is_a()}")
+        # the normal points out of the room: a step into it from the middle of the face is outside the room, a step back is inside
+        nrm = m[:3, 2]
+        # a point well inside the face: the corner average of the outline, moved off any hole if needed
+        cen = np.mean(outer, axis=0)
+        rm = room_rows[sid]
+        # the room outline from the manifest, for the inside test in plan
+        poly = [(float(rm[5 + 2 * i]), float(rm[6 + 2 * i])) for i in range(int(rm[4]))]
+        z0, z1 = float(rm[2]), float(rm[2]) + float(rm[3])
+        def in_room(p):
+            return in_poly(p, poly) and z0 < p[2] < z1
+        if abs(nrm[2]) < 0.5:
+            # a wall: the face is a rectangle, so its middle is a point of it; check just off the face on both sides
+            face_mid = (outer[0] + outer[2]) / 2
+            ok(not in_room(face_mid + 0.02 * nrm) and in_room(face_mid - 0.02 * nrm), f"{sp.Name}: boundary {row[1]} faces out of the room")
+        else:
+            # floor or ceiling: one step along the normal is out of the room in height
+            below = nrm[2] < 0
+            ok((cen[2] <= z0 + 0.01) if below else (cen[2] >= z1 - 0.3), f"{sp.Name}: boundary {row[1]} is the {'floor' if below else 'ceiling'}")
+        # area: the outline less the holes
+        local = lambda pts: [(np.linalg.inv(m) @ np.append(p, 1))[:2] for p in pts]
+        area = polygon_area2(local(outer)) - sum(polygon_area2(local(h)) for h in holes)
+        ok(abs(area - float(row[5])) < 1e-9, f"{sp.Name}: boundary {row[1]} area")
+        kinds.append((row[2], area, rel, holes))
+    # the floor or ceiling of a room covers its net floor area
+    for kind, area, rel, holes in kinds:
+        if kind == "SLAB":
+            ok(abs(area - q["NetFloorArea"][1]) < 1e-9, f"{sp.Name}: the slab boundary covers the net floor area")
+    # a door or window boundary sits in its wall's boundary: same plane, inside one of its holes
+    for rel, row in zip(mine, exp_rows):
+        if row[2] == "ITEM":
+            par = rel.ParentBoundary
+            ok(par is not None and par in mine, "a door or window boundary has its wall boundary as parent")
+            ok(mine.index(par) == int(row[4]), "the parent is the one the model names")
+            if par is None: continue
+            ps = par.ConnectionGeometry.SurfaceOnRelatingElement
+            pm = sm @ up.get_axis2placement(ps.BasisSurface.Position)
+            cm = sm @ up.get_axis2placement(rel.ConnectionGeometry.SurfaceOnRelatingElement.BasisSurface.Position)
+            ok(np.allclose(pm[:3, 2], cm[:3, 2]) and abs((cm[:3, 3] - pm[:3, 3]) @ pm[:3, 2]) < 1e-9, "a door's face lies in its wall's plane")
+            cw = ring_world(sm, rel.ConnectionGeometry.SurfaceOnRelatingElement.BasisSurface.Position, rel.ConnectionGeometry.SurfaceOnRelatingElement.OuterBoundary)[0]
+            inner_local = [[(np.linalg.inv(pm) @ np.append(p, 1))[:2] for p in ring_world(sm, ps.BasisSurface.Position, h)[0]] for h in ps.InnerBoundaries]
+            door_local = [(np.linalg.inv(pm) @ np.append(p, 1))[:2] for p in cw]
+            def inside_hole(pt): return any(min(x[0] for x in h) - 1e-9 <= pt[0] <= max(x[0] for x in h) + 1e-9 and min(x[1] for x in h) - 1e-9 <= pt[1] <= max(x[1] for x in h) + 1e-9 for h in inner_local)
+            ok(all(inside_hole(p) for p in door_local), "a door or window face sits in a hole of its wall's face")
+            n_doors_expected += 1
+# D-02 and D-03 stand in the south wall between the partition and the east wall; D-01 and W-01 are on the other side of the partition
+ok(n_doors_expected == 2, f"two doors border the Office: {n_doors_expected}")
+
+
+# ---- 6e. georeferencing, read back with IfcOpenShell's own geolocation helpers
+import ifcopenshell.util.geolocation as geo
+gr = rows("GEOREF")[0]
+E, N, H, ang, scale, tn, lat, lon, elev = (float(x) for x in gr[:9])
+mc = f.by_type("IfcMapConversion")
+ok(len(mc) == 1, "one map conversion")
+mc = mc[0]
+ok(mc.SourceCRS == f.by_type("IfcProject")[0].RepresentationContexts[0], "the map conversion starts from the model's own context")
+crs = mc.TargetCRS
+ok(crs.is_a("IfcProjectedCRS") and crs.Name == gr[9] and crs.MapUnit.Name == "METRE" and crs.GeodeticDatum == "TESTDATUM" and crs.MapZone == "48N", "projected CRS names")
+ok(abs(mc.Eastings - E) < 1e-9 and abs(mc.Northings - N) < 1e-9 and abs(mc.OrthogonalHeight - H) < 1e-9 and abs(mc.Scale - scale) < 1e-12, "map conversion origin and scale")
+ok(abs(math.degrees(math.atan2(mc.XAxisOrdinate, mc.XAxisAbscissa)) - ang) < 1e-9 and abs(math.hypot(mc.XAxisAbscissa, mc.XAxisOrdinate) - 1) < 1e-12, "grid angle")
+for r in rows("GEOPT"):
+    x, y, z, me, mn, mh, bx, by, bz = (float(v) for v in r)
+    e, n, h = geo.xyz2enh(x, y, z, mc.Eastings, mc.Northings, mc.OrthogonalHeight, mc.XAxisAbscissa, mc.XAxisOrdinate, mc.Scale)
+    ok(abs(e - me) < 1e-6 and abs(n - mn) < 1e-6 and abs(h - mh) < 1e-6, f"point {x},{y},{z}: IfcOpenShell puts it at {e:.4f} {n:.4f} {h:.4f}, the model at {me:.4f} {mn:.4f} {mh:.4f}")
+    ok(abs(bx - x) < 1e-6 and abs(by - y) < 1e-6 and abs(bz - z) < 1e-6, "map point comes back to the model point")
+pts = [np.array([float(v) for v in r[3:6]]) for r in rows("GEOPT")]
+ok(abs(np.linalg.norm(pts[1] - pts[0]) - 10 * scale) < 1e-9, "a 10 m length on the map is 10 m times the scale")
+ok(abs(math.degrees(math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])) - ang) < 1e-9, "the model X axis lies at the grid angle on the map")
+ok(abs(geo.get_true_north(f) - tn) < 1e-9, f"true north {geo.get_true_north(f)} vs {tn}")
+tnd = f.by_type("IfcProject")[0].RepresentationContexts[0].TrueNorth.DirectionRatios
+ok(abs(tnd[0] + math.sin(math.radians(tn))) < 1e-12 and abs(tnd[1] - math.cos(math.radians(tn))) < 1e-12, "true north is the Y axis turned anticlockwise by the angle")
+site = f.by_type("IfcSite")[0]
+ok(abs(geo.dms2dd(*site.RefLatitude) - lat) < 1e-8 and abs(geo.dms2dd(*site.RefLongitude) - lon) < 1e-8 and abs(site.RefElevation - elev) < 1e-9, "site latitude, longitude and elevation")
 
 # ---- 7. repeatability and stable ids
 a = open(sys.argv[2], "rb").read(); b = open(sys.argv[3], "rb").read()

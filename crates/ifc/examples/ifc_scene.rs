@@ -149,6 +149,19 @@ pub fn build_scene(edit: bool) -> Scene {
     assert!(issues.is_empty());
     let partition = WallChain::new(vec![[3.5, 7.9], [3.5, 0.1]], false, 0.15, 3.0);
     let chains: Vec<&WallChain> = vec![&built.chains[0], &built.chains[1], &partition];
+    // a test position: a UTM-like map, the model turned 12.5 degrees on it, true north 3.25 degrees from the model's Y axis
+    let georef = openbim_ifc::georef::Georef {
+        crs: openbim_ifc::georef::Crs { name: "TEST:48N".into(), geodetic_datum: Some("TESTDATUM".into()), vertical_datum: Some("TESTVERT".into()), map_projection: Some("TestTM".into()), map_zone: Some("48N".into()) },
+        easting: 492_345.678,
+        northing: 1_278_901.234,
+        height: 12.5,
+        grid_angle_deg: 12.5,
+        scale: 0.9996,
+        true_north_deg: 3.25,
+        latitude: 11.556_388_9,
+        longitude: 104.928_333_3,
+        elevation: 12.5,
+    };
     let wall_joins = openbim_ifc::walls::find_joins(&chains, 0.01);
     let layer = |m: &str, t: f64| openbim_ifc::walls::Layer { material: m.into(), thickness: t };
     let wall_types = vec![
@@ -159,6 +172,7 @@ pub fn build_scene(edit: bool) -> Scene {
         project_name: "Test office".into(),
         wall_types,
         wall_joins,
+        georef: Some(georef.clone()),
         project_key: 0x0123_4567_89ab,
         timestamp: "2026-10-15T00:00:00".into(),
         levels,
@@ -170,7 +184,10 @@ pub fn build_scene(edit: bool) -> Scene {
         networks: vec![net],
         families: fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect(),
         items,
-        rooms: vec![RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[2.5, 0.2], [9.8, 0.2], [9.8, 7.8], [2.5, 7.8]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } }],
+        rooms: vec![
+            RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[3.575, 0.1], [9.9, 0.1], [9.9, 7.9], [3.575, 7.9]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } },
+            RoomItem { id: A | 961, room: Room { name: "Store".into(), usage: "store".into(), occupancy: 0.0, level: 1, outline: vec![[2.0, 3.075], [6.0, 3.075], [6.0, 7.0], [2.0, 7.0]], holes: vec![], height: 2.8 } },
+        ],
         pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
     }
 }
@@ -264,6 +281,34 @@ fn main() {
     }
     for s in &scene.slabs {
         println!("SLAB {} {} {} {} {}", s.id, s.slab.name, s.slab.top, s.slab.thickness, s.slab.fire_rating_min.unwrap_or(0));
+    }
+    if let Some(g) = &scene.georef {
+        println!("GEOREF {} {} {} {} {} {} {} {} {} {}", g.easting, g.northing, g.height, g.grid_angle_deg, g.scale, g.true_north_deg, g.latitude, g.longitude, g.elevation, g.crs.name);
+        for p in [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 8.0, 3.0], [3.5, 7.9, 1.25]] {
+            let m = g.to_map(p);
+            let back = g.to_local(m);
+            println!("GEOPT {} {} {} {} {} {} {} {} {}", p[0], p[1], p[2], m[0], m[1], m[2], back[0], back[1], back[2]);
+        }
+    }
+    for r in &scene.rooms {
+        let rm = &r.room;
+        println!("ROOM {} {} {} {} {} {}", r.id, rm.level, scene.levels.all()[rm.level].elevation, rm.height, rm.outline.len(), rm.outline.iter().map(|p| format!("{} {}", p[0], p[1])).collect::<Vec<_>>().join(" "));
+        let (bs, _) = openbim_ifc::boundaries::room_boundaries(&scene, r);
+        let elev = scene.levels.all()[r.room.level].elevation;
+        for (bi, b) in bs.iter().enumerate() {
+            let (kind, id) = match b.target {
+                openbim_ifc::boundaries::Target::Wall(i) => ("WALL", scene.walls[i].id),
+                openbim_ifc::boundaries::Target::Slab(i) => ("SLAB", scene.slabs[i].id),
+                openbim_ifc::boundaries::Target::Item(i) => ("ITEM", scene.items[i].id),
+            };
+            let world = |ring: &[[f64; 2]]| ring.iter().map(|p| { let q = b.surface.point(*p); format!("{} {} {}", q[0], q[1], q[2] + elev) }).collect::<Vec<_>>().join(" ");
+            println!("SB {} {} {} {} {} {} {} {}", r.id, bi, kind, id, b.parent.map_or(-1, |p| p as i64), b.surface.area(), b.surface.outer.len(), world(&b.surface.outer));
+            for h in &b.surface.inner {
+                println!("SBHOLE {} {} {} {}", r.id, bi, h.len(), world(h));
+            }
+            let n = b.surface.axis;
+            println!("SBNORMAL {} {} {} {} {}", r.id, bi, n[0], n[1], n[2]);
+        }
     }
     for p in &scene.wall_penetrations {
         println!("WPEN {} {} {} {} {} {}", p.id, p.cut as u8, v(p.centre), p.width, p.height, p.fire_rating_min.unwrap_or(0));

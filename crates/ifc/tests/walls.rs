@@ -26,6 +26,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
         rooms: vec![],
         wall_types: types,
         wall_joins: joins,
+        georef: None,
         pset_map: Default::default(),
     }
 }
