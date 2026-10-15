@@ -54,3 +54,11 @@ jobs:
         run: |
           cargo run -q --release -p openbim-sketch --example sketch_scene > /tmp/sketch.txt
           python spikes/s11_sketch_check/sketch_check.py /tmp/sketch.txt
+      - name: IFC written by the app (Rust writer, read back and checked)
+        run: |
+          cargo build -q --release -p openbim-ifc --example ifc_scene
+          E=target/release/examples/ifc_scene
+          $E /tmp/w1.ifc > /tmp/w.txt
+          $E /tmp/w2.ifc > /dev/null
+          $E /tmp/w3.ifc edit > /dev/null
+          python spikes/s12_ifc_writer/ifc_writer_check.py /tmp/w.txt /tmp/w1.ifc /tmp/w2.ifc /tmp/w3.ifc

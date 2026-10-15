@@ -1,0 +1,16 @@
+[package]
+name = "openbim-ifc"
+version = "0.0.1"
+edition = "2021"
+description = "IFC4 writer: walls, floors, openings, MEP runs, fittings and ports, with GlobalIds that stay the same between exports"
+publish = false
+
+[dependencies]
+openbim-geom = { path = "../geom" }
+openbim-arch = { path = "../arch" }
+openbim-family = { path = "../family" }
+openbim-place = { path = "../place" }
+openbim-route = { path = "../route" }
+
+[lints.rust]
+unsafe_code = "forbid"
