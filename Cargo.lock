@@ -292,6 +292,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-route"
+version = "0.0.1"
+dependencies = [
+ "openbim-family",
+ "openbim-geom",
+ "openbim-place",
+ "proptest",
+]
+
+[[package]]
 name = "openbim-sketch"
 version = "0.0.1"
 dependencies = [

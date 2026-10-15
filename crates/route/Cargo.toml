@@ -1,0 +1,17 @@
+[package]
+name = "openbim-route"
+version = "0.0.1"
+edition = "2021"
+description = "MEP routing: angle snaps, runs with automatic fittings, tees, transitions and connection to equipment"
+publish = false
+
+[dependencies]
+openbim-family = { path = "../family" }
+openbim-place = { path = "../place" }
+
+[dev-dependencies]
+proptest = "1"
+openbim-geom = { path = "../geom" }
+
+[lints.rust]
+unsafe_code = "forbid"
