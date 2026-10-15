@@ -204,6 +204,33 @@ impl System {
             Other => "NOTDEFINED",
         }
     }
+    /// The name of the system as a person reads it; different for every system, unlike `ifc_system`.
+    pub fn name(self) -> &'static str {
+        use System::*;
+        match self {
+            SupplyAir => "Supply air",
+            ReturnAir => "Return air",
+            ExhaustAir => "Exhaust air",
+            OutsideAir => "Outside air",
+            ChilledWaterSupply => "Chilled water supply",
+            ChilledWaterReturn => "Chilled water return",
+            HeatingWaterSupply => "Heating water supply",
+            HeatingWaterReturn => "Heating water return",
+            CondenserWaterSupply => "Condenser water supply",
+            CondenserWaterReturn => "Condenser water return",
+            DomesticCold => "Domestic cold water",
+            DomesticHot => "Domestic hot water",
+            Sanitary => "Sanitary",
+            Vent => "Vent",
+            StormWater => "Storm water",
+            Condensate => "Condensate",
+            FireProtection => "Fire protection",
+            Gas => "Gas",
+            Power => "Power",
+            Data => "Data",
+            Other => "Other",
+        }
+    }
     pub fn compatible(self, o: System) -> bool {
         self == o || self == System::Other || o == System::Other
     }
@@ -217,6 +244,21 @@ pub enum FlowDir {
 }
 
 impl FlowDir {
+    pub fn code(self) -> u8 {
+        match self {
+            FlowDir::In => 0,
+            FlowDir::Out => 1,
+            FlowDir::Both => 2,
+        }
+    }
+    pub fn from_code(c: u8) -> Option<FlowDir> {
+        match c {
+            0 => Some(FlowDir::In),
+            1 => Some(FlowDir::Out),
+            2 => Some(FlowDir::Both),
+            _ => None,
+        }
+    }
     /// IfcFlowDirectionEnum value.
     pub fn ifc(self) -> &'static str {
         match self {

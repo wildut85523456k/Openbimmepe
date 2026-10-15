@@ -291,6 +291,24 @@ for g in f.by_type("IfcRelAssignsToGroup"):
 for r in rows("SEG"):
     ok(sysmap.get(int(r[0])) == r[1], f"system of segment {r[0]}")
 
+# systems have distinct names, so a supply and a return are not mistaken for each other
+names = [sy.Name for sy in f.by_type("IfcDistributionSystem")]
+ok(len(names) == len(set(names)), f"system names are unique: {names}")
+# ports say which way the medium goes: pipes and fittings pass it both ways, the fan coil takes it in and gives it out
+flows = {}
+for p in f.by_type("IfcDistributionPort"):
+    flows.setdefault(p.Name, set()).add(p.FlowDirection)
+ok(flows.get("chw_in") == {"SINK"} and flows.get("chw_out") == {"SOURCE"}, f"fan coil port flow directions: {flows}")
+ok(flows.get("Start") == {"SOURCEANDSINK"} and flows.get("End") == {"SOURCEANDSINK"}, "run ports pass the medium both ways")
+# an elbow's angle is a plane angle in radians, not a length
+for e in f.by_type("IfcPipeFitting") + f.by_type("IfcDuctFitting"):
+    ps = ue.get_psets(e).get("OpenBIM_Mep", {})
+    if "Angle" in ps:
+        ok(0 < ps["Angle"] < 3.2, f"{e.Name}: angle {ps['Angle']} is in radians")
+        pr = [pp for d in e.IsDefinedBy if d.is_a("IfcRelDefinesByProperties") and d.RelatingPropertyDefinition.Name == "OpenBIM_Mep" for pp in d.RelatingPropertyDefinition.HasProperties if pp.Name == "Angle"]
+        ok(pr and pr[0].NominalValue.is_a("IfcPlaneAngleMeasure"), "angle is an IfcPlaneAngleMeasure")
+    ok("AngleDegrees" not in ps, "no angle written as a length")
+
 # ---- 6b. property sets and base quantities, against geometry computed here
 def qto(e, name):
     for r in e.IsDefinedBy:

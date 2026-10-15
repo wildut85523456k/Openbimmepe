@@ -6,7 +6,7 @@
 //! The graph is what the IFC export needs (ports and their connections) and what re-routing needs (which
 //! pieces move together). It is saved in a compact binary form, not JSON.
 use crate::{Branch, Fitting, FittingKind, Route};
-use openbim_family::mep::{Connector, Domain, Size, System};
+use openbim_family::mep::{Connector, Domain, FlowDir, Size, System};
 use openbim_place::penetrations::{Run, RunSize};
 
 /// Two points closer than this (metres) are the same point.
@@ -54,6 +54,8 @@ pub struct NetEquipment {
     pub connector: String,
     pub domain: Domain,
     pub system: System,
+    /// which way the medium goes through the connector (into the equipment, out of it, or both)
+    pub flow_dir: FlowDir,
     pub pos: [f64; 3],
     pub dir: [f64; 3],
     pub size: RunSize,
@@ -482,7 +484,7 @@ impl Network {
         if dist(at, conn.pos) > TOL || dot(away, unit(conn.dir)) < 1.0 - 1e-6 || conn.domain != run.domain || !conn.system.compatible(run.system) {
             return Err(GraphError::ConnectorMismatch);
         }
-        self.equipment.push(NetEquipment { element, connector: conn.name.clone(), domain: conn.domain, system: conn.system, pos: conn.pos, dir: unit(conn.dir), size });
+        self.equipment.push(NetEquipment { element, connector: conn.name.clone(), domain: conn.domain, system: conn.system, flow_dir: conn.flow_dir, pos: conn.pos, dir: unit(conn.dir), size });
         let e = self.equipment.len() - 1;
         let sp = PortRef { node: NodeRef::Segment(segment), port: if end == End::Start { 0 } else { 1 } };
         let r = self.link(PortRef { node: NodeRef::Equipment(e), port: 0 }, sp);
@@ -793,7 +795,7 @@ impl Network {
 // ---------- saving ----------
 
 const MAGIC: &[u8; 4] = b"OBNW";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const MAX_STR: usize = 4096;
 const MAX_PORTS: usize = 16;
 
@@ -967,6 +969,7 @@ impl Network {
             w.s(&e.connector);
             w.u8(e.domain.code());
             w.u8(e.system.code());
+            w.u8(e.flow_dir.code());
             w.v3(e.pos);
             w.v3(e.dir);
             w.size(e.size);
@@ -991,7 +994,8 @@ impl Network {
         if r.take(4)? != MAGIC {
             return Err(GraphError::Corrupt("not a network record"));
         }
-        if r.u8()? != VERSION {
+        let version = r.u8()?;
+        if version != VERSION && version != 1 {
             return Err(GraphError::Corrupt("unknown version"));
         }
         let mut n = Network::new(r.u64()?);
@@ -1035,9 +1039,11 @@ impl Network {
             let element = r.u64()?;
             let connector = r.s()?;
             let (domain, system) = (r.domain()?, r.system()?);
+            // version 1 did not say, and a connector that does not say passes the medium both ways
+            let flow_dir = if version >= 2 { FlowDir::from_code(r.u8()?).ok_or(GraphError::Corrupt("unknown flow direction"))? } else { FlowDir::Both };
             let (pos, dir) = (r.v3()?, r.v3()?);
             let size = r.size()?;
-            n.equipment.push(NetEquipment { element, connector, domain, system, pos, dir, size });
+            n.equipment.push(NetEquipment { element, connector, domain, system, flow_dir, pos, dir, size });
         }
         for _ in 0..r.count()? {
             let (a, bb) = (r.port()?, r.port()?);

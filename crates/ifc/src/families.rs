@@ -274,7 +274,7 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
         // connectors: ports nested in the occurrence
         let mut ports = Vec::new();
         for (c, conn) in it.instance.connectors.iter().enumerate() {
-            let p = write_port(o, (it.id, 0x2000 + c as u16), &conn.name, pl, conn.pos, unit(conn.dir), (conn.domain, conn.system));
+            let p = write_port(o, (it.id, 0x2000 + c as u16), &conn.name, pl, conn.pos, unit(conn.dir), (conn.domain, conn.system, conn.flow_dir));
             o.item_ports.insert((it.id, conn.name.clone()), p);
             ports.push(p);
         }

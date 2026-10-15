@@ -24,7 +24,7 @@ pub mod quantities;
 pub mod step;
 
 use openbim_arch::{Levels, Room};
-use openbim_family::mep::{up_for, Domain, System};
+use openbim_family::mep::{up_for, Domain, FlowDir, System};
 use openbim_family::{Compiled, Instance};
 use openbim_geom::WallChain;
 use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab};
@@ -964,13 +964,13 @@ struct PieceOut {
     ports: Vec<u32>,
 }
 
-fn write_port(o: &mut Out, key: (u64, u16), name: &str, pl_rel: u32, loc: V3, z: V3, ds: (Domain, System)) -> u32 {
-    let ((id, part), (domain, system)) = (key, ds);
+fn write_port(o: &mut Out, key: (u64, u16), name: &str, pl_rel: u32, loc: V3, z: V3, ds: (Domain, System, FlowDir)) -> u32 {
+    let ((id, part), (domain, system, flow)) = (key, ds);
     let x = perp(z);
     let pl = o.place(Some(pl_rel), loc, Some(z), Some(x));
     let g = o.gid(id, part);
     o.report.ports += 1;
-    o.s.add(format!("IFCDISTRIBUTIONPORT({g},$,{},$,$,#{pl},$,.SOURCEANDSINK.,.{}.,.{}.)", string(name), domain.ifc_port_type(), system.ifc_system()))
+    o.s.add(format!("IFCDISTRIBUTIONPORT({g},$,{},$,$,#{pl},$,.{}.,.{}.,.{}.)", string(name), flow.ifc(), domain.ifc_port_type(), system.ifc_system()))
 }
 
 fn nest(o: &mut Out, parent: u32, ports: &[u32]) {
@@ -1014,8 +1014,8 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             let mut props = size_props(r.size);
             props.push(("System", Val::Label(r.system.ifc_system().into())));
             o.pset(e, "OpenBIM_Mep", props);
-            let p0 = write_port(o, (sg.id, 0x1000), "Start", pl, [0.0; 3], [0.0, 0.0, -1.0], (r.domain, r.system));
-            let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system));
+            let p0 = write_port(o, (sg.id, 0x1000), "Start", pl, [0.0; 3], [0.0, 0.0, -1.0], (r.domain, r.system, FlowDir::Both));
+            let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system, FlowDir::Both));
             nest(o, e, &[p0, p1]);
             by_system.entry(r.system.code()).or_default().push(e);
             segs.push(PieceOut { ports: vec![p0, p1] });
@@ -1049,14 +1049,14 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
                 props.push(("BendRadius", Val::Len(f.radius)));
             }
             if let FittingKind::Elbow { angle } | FittingKind::Tee { branch_angle: angle } | FittingKind::Tap { branch_angle: angle } = f.kind {
-                props.push(("AngleDegrees", Val::Len(angle)));
+                props.push(("Angle", Val::Angle(angle)));
             }
             props.push(("Legs", Val::Int(f.ports.len() as i64)));
             o.pset(e, "OpenBIM_Mep", props);
             let mut ports = Vec::new();
             for k in 0..f.ports.len() {
                 let loc = [f.ports[k][0] * f.trim[k], f.ports[k][1] * f.trim[k], f.ports[k][2] * f.trim[k]];
-                ports.push(write_port(o, (nf.id, 0x1000 + k as u16), &format!("Leg {}", k + 1), pl, loc, unit(f.ports[k]), (nf.domain, nf.system)));
+                ports.push(write_port(o, (nf.id, 0x1000 + k as u16), &format!("Leg {}", k + 1), pl, loc, unit(f.ports[k]), (nf.domain, nf.system, FlowDir::Both)));
             }
             nest(o, e, &ports);
             by_system.entry(nf.system.code()).or_default().push(e);
@@ -1086,7 +1086,7 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             };
             let part = 0x1000 + holder.get(&eq.element).map_or(0, |h| h.3.len()) as u16;
             let loc = sub(eq.pos, base);
-            let p = write_port(o, (eq.element, part), &eq.connector, pl, loc, unit(eq.dir), (eq.domain, eq.system));
+            let p = write_port(o, (eq.element, part), &eq.connector, pl, loc, unit(eq.dir), (eq.domain, eq.system, eq.flow_dir));
             if let Some(h) = holder.get_mut(&eq.element) {
                 h.3.push(p);
             }
@@ -1113,7 +1113,7 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
         for (code, elems) in by_system {
             let sys = System::from_code(code).unwrap_or(System::Other);
             let g = o.gen_gid();
-            let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&format!("{} {}", sys.ifc_system(), ni + 1)), sys.ifc_system()));
+            let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&format!("{} {}", sys.name(), ni + 1)), sys.ifc_system()));
             let g = o.gen_gid();
             o.s.add(format!("IFCRELASSIGNSTOGROUP({g},$,$,$,({}),$,#{grp})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
         }
