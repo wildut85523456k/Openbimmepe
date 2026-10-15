@@ -144,6 +144,7 @@ fn scene(g: Option<Georef>) -> Scene {
         walls: vec![],
         wall_penetrations: vec![],
         slabs: vec![],
+        columns: vec![],
         shafts: vec![],
         floor_penetrations: vec![],
         networks: vec![],

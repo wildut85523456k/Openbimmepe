@@ -11,6 +11,8 @@ type V = [f64; 3];
 pub enum Target {
     Wall(usize),
     Slab(usize),
+    /// a column: index into `Scene::columns`
+    Column(usize),
     /// a door or window: index into `Scene::items`
     Item(usize),
     /// a room separation line: index into `Scene::separation_lines`; the boundary is virtual
@@ -245,6 +247,37 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
                     }
                 }
             }
+            // the faces of columns that a wall is attached to, where they look into the room
+            for (ci, col) in scene.columns.iter().enumerate() {
+                if !col.room_bounding || col.base_z + col.height <= z0 + 1e-6 || col.base_z >= z1 - 1e-6 || !attached_to_wall(scene, col) {
+                    continue;
+                }
+                let fp = oriented(&col.footprint, true);
+                let m = fp.len();
+                for k in 0..m {
+                    let (f0, f1) = (fp[k], fp[(k + 1) % m]);
+                    let fl = (f1[0] - f0[0]).hypot(f1[1] - f0[1]);
+                    if fl < 1e-9 {
+                        continue;
+                    }
+                    // the column is on the outer side of the room's edge: its face looks back along the edge's outward normal
+                    let face_n = [(f1[1] - f0[1]) / fl, -(f1[0] - f0[0]) / fl];
+                    let faces_room = dot2(face_n, nout) < -1.0 + 1e-6;
+                    let apart = dot2([f0[0] - a[0], f0[1] - a[1]], nout).abs();
+                    if !faces_room || apart > TOL {
+                        continue;
+                    }
+                    let (s0, s1) = (dot2([f0[0] - a[0], f0[1] - a[1]], d), dot2([f1[0] - a[0], f1[1] - a[1]], d));
+                    let (lo, hi) = (s0.min(s1).max(0.0), s0.max(s1).min(len));
+                    if hi - lo < 1e-6 {
+                        continue;
+                    }
+                    covered.push((lo, hi));
+                    let (za, zb) = (ext.floor_z.max(col.base_z), ext.ceiling_z.min(col.base_z + col.height));
+                    let surface = Surface { origin: [a[0] + d[0] * lo, a[1] + d[1] * lo, za - elev], axis: [nout[0], nout[1], 0.0], refdir: [d[0], d[1], 0.0], outer: rect(0.0, 0.0, hi - lo, zb - za), inner: vec![] };
+                    out.push(Boundary { target: Target::Column(ci), surface, parent: None });
+                }
+            }
             // room separation lines on this side bound it where there is no wall
             for (li, sl) in scene.separation_lines.iter().enumerate().filter(|(_, l)| l.level == r.level) {
                 let sd = [sl.b[0] - sl.a[0], sl.b[1] - sl.a[1]];
@@ -440,4 +473,38 @@ pub fn room_volumes(scene: &Scene, r: &RoomItem) -> RoomVolumes {
 pub fn air_changes_per_hour(flow_m3_per_s: f64, v: &RoomVolumes, with_ceiling_void: bool) -> Option<f64> {
     let vol = if with_ceiling_void { v.volume + v.ceiling_void } else { v.volume };
     (flow_m3_per_s.is_finite() && vol > 1e-9).then(|| flow_m3_per_s * 3600.0 / vol)
+}
+
+/// Is a wall attached to the column: does any wall segment's plan touch the column's footprint (within the tolerance)
+/// at a height the two share?
+fn attached_to_wall(scene: &Scene, col: &crate::ColumnItem) -> bool {
+    let fp = oriented(&col.footprint, true);
+    scene.walls.iter().any(|w| {
+        let c = &w.chain;
+        if c.base_z + c.height <= col.base_z + 1e-6 || c.base_z >= col.base_z + col.height - 1e-6 {
+            return false;
+        }
+        let Ok(plans) = c.plans() else { return false };
+        plans.iter().any(|p| near_polygons(&fp, &[p.l0, p.l1, p.r1, p.r0], TOL))
+    })
+}
+
+/// Do two convex polygons come within `tol` of each other? (No axis of either polygon's edges separates them by more.)
+fn near_polygons(a: &[P], b: &[P], tol: f64) -> bool {
+    let axes = |poly: &[P]| -> Vec<P> {
+        (0..poly.len())
+            .filter_map(|i| {
+                let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+                let l = (q[0] - p[0]).hypot(q[1] - p[1]);
+                (l > 1e-12).then(|| [-(q[1] - p[1]) / l, (q[0] - p[0]) / l])
+            })
+            .collect()
+    };
+    let span = |poly: &[P], ax: P| -> (f64, f64) {
+        poly.iter().map(|p| dot2(*p, ax)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)))
+    };
+    axes(a).into_iter().chain(axes(b)).all(|ax| {
+        let ((alo, ahi), (blo, bhi)) = (span(a, ax), span(b, ax));
+        alo <= bhi + tol && blo <= ahi + tol
+    })
 }

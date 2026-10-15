@@ -47,6 +47,18 @@ pub struct WallItem {
     pub room_bounding: bool,
 }
 
+/// A column: a straight prism on a convex plan footprint (counter-clockwise or clockwise).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnItem {
+    pub id: u64,
+    pub name: String,
+    pub footprint: Vec<[f64; 2]>,
+    pub base_z: f64,
+    pub height: f64,
+    /// Revit's Room Bounding: whether rooms are bounded by this column. It bounds a room where a wall is attached to it.
+    pub room_bounding: bool,
+}
+
 /// What a slab item is. Rooms are slab to slab by default; a floor finish or a false ceiling takes over as the
 /// room's floor or ceiling where there is one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -138,6 +150,8 @@ pub struct Scene {
     /// register of service openings in walls, by chain index into `walls`
     pub wall_penetrations: Vec<Penetration>,
     pub slabs: Vec<SlabItem>,
+    /// structural columns, each a straight prism on a convex footprint
+    pub columns: Vec<ColumnItem>,
     pub shafts: Vec<ShaftVoid>,
     /// register of openings in slabs, by slab index into `slabs`
     pub floor_penetrations: Vec<FloorPenetration>,
@@ -359,6 +373,7 @@ struct Out<'a> {
     /// entity of each wall, slab and placed family, in the order of the scene
     wall_entities: Vec<u32>,
     slab_entities: Vec<u32>,
+    column_entities: Vec<u32>,
     /// the virtual element of each separation line that a boundary used
     virtual_entities: BTreeMap<usize, u32>,
     item_entities: Vec<u32>,
@@ -566,7 +581,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new() };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new() };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {
@@ -641,6 +656,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     write_walls(&mut o)?;
     families::write_families(&mut o)?;
     write_slabs(&mut o)?;
+    write_columns(&mut o)?;
     write_spaces(&mut o)?;
     write_networks(&mut o)?;
 
@@ -808,6 +824,26 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
     Ok(())
 }
 
+fn write_columns(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for c in &scene.columns {
+        if c.footprint.len() < 3 || !c.footprint.iter().all(|p| p[0].is_finite() && p[1].is_finite()) || !(c.height.is_finite() && c.height > 0.0 && c.base_z.is_finite()) {
+            return Err(ExportError::Unsupported(format!("column {}: needs a footprint of 3 or more points and a positive height", c.name)));
+        }
+        let st = o.storey_for(c.base_z);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let prof = o.poly_profile(&c.footprint);
+        let solid = o.extrusion(prof, [0.0, 0.0, c.base_z - elev], None, None, c.height);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(c.id, 0);
+        let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},$,.COLUMN.)", string(&c.name)));
+        o.contain(st, e);
+        o.column_entities.push(e);
+    }
+    Ok(())
+}
+
 fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
     for (si, item) in scene.slabs.iter().enumerate() {
@@ -960,6 +996,7 @@ fn write_boundaries(o: &mut Out, r: &RoomItem, space: u32) {
         let element = match b.target {
             boundaries::Target::Wall(i) => o.wall_entities.get(i),
             boundaries::Target::Slab(i) => o.slab_entities.get(i),
+            boundaries::Target::Column(i) => o.column_entities.get(i),
             boundaries::Target::Item(i) => o.item_entities.get(i),
             boundaries::Target::Virtual(i) => Some(&virtual_element(o, i)),
         };

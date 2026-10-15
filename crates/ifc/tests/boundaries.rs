@@ -14,6 +14,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None, room_bounding: true }).collect(),
         wall_penetrations: vec![],
         slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true, role: Default::default() }).collect(),
+        columns: vec![],
         shafts: vec![],
         floor_penetrations: vec![],
         networks: vec![],
@@ -467,4 +468,61 @@ fn a_finish_that_does_not_stand_on_the_level_or_hangs_too_low_is_not_a_boundary(
     let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
     assert_eq!(count(&b, |t| matches!(t, Target::Slab(2) | Target::Slab(3))), 0);
     assert_eq!(count(&b, |t| matches!(t, Target::Slab(0) | Target::Slab(1))), 2);
+}
+
+fn column(id: u64, x0: f64, y0: f64, x1: f64, y1: f64) -> ColumnItem {
+    ColumnItem { id, name: format!("C{id}"), footprint: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]], base_z: 0.0, height: 3.0, room_bounding: true }
+}
+/// the enclosure room with a notch round a column sticking 0.2 into it from the south wall (finish face at y = 0.1)
+fn notched_room() -> Room {
+    room(&[[0.1, 0.1], [1.7, 0.1], [1.7, 0.3], [2.3, 0.3], [2.3, 0.1], [3.9, 0.1], [3.9, 2.9], [0.1, 2.9]], 0)
+}
+// the column stands across the south wall: x 1.7..2.3, y -0.3..0.3
+fn with_column() -> Scene {
+    let mut s = scene(vec![enclosure()], vec![], notched_room());
+    s.columns = vec![column(70, 1.7, -0.3, 2.3, 0.3)];
+    s
+}
+
+#[test]
+fn the_faces_of_a_column_with_a_wall_attached_that_look_into_the_room_are_boundaries() {
+    let s = with_column();
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert!(w.is_empty(), "{w:?}");
+    let faces: Vec<_> = b.iter().filter(|x| matches!(x.target, Target::Column(0))).collect();
+    // the three faces of the part that sticks out: 0.2 + 0.6 + 0.2 wide, 2.8 high
+    assert_eq!(faces.len(), 3);
+    let mut widths: Vec<f64> = faces.iter().map(|f| f.surface.area() / 2.8).collect();
+    widths.sort_by(f64::total_cmp);
+    assert!((widths[0] - 0.2).abs() < 1e-9 && (widths[1] - 0.2).abs() < 1e-9 && (widths[2] - 0.6).abs() < 1e-9, "{widths:?}");
+    // the south wall bounds the rest of that side: 1.6 + 1.6
+    let south: f64 = b.iter().filter(|x| matches!(x.target, Target::Wall(0)) && x.surface.axis[1] < -0.5).map(|x| x.surface.area() / 2.8).sum();
+    assert!((south - 3.2).abs() < 1e-9, "{south}");
+}
+
+#[test]
+fn a_column_with_no_wall_at_it_or_not_room_bounding_is_not_a_boundary() {
+    // the same column, away from every wall
+    let mut s = with_column();
+    s.columns[0] = column(70, 1.7, -2.3, 2.3, -1.7);
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Column(_))), 0);
+    assert!(!w.is_empty(), "the notch is bounded by nothing, and that is said");
+    // attached, but switched off
+    let mut s = with_column();
+    s.columns[0].room_bounding = false;
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Column(_))), 0);
+    assert!(!w.is_empty());
+}
+
+#[test]
+fn a_column_clockwise_or_a_storey_apart_behaves_as_stated() {
+    let mut s = with_column();
+    s.columns[0].footprint.reverse();
+    assert_eq!(count(&boundaries::room_boundaries(&s, &s.rooms[0]).0, |t| matches!(t, Target::Column(_))), 3);
+    // a column on the floor above the room's top does not bound it
+    let mut s = with_column();
+    s.columns[0].base_z = 3.0;
+    assert_eq!(count(&boundaries::room_boundaries(&s, &s.rooms[0]).0, |t| matches!(t, Target::Column(_))), 0);
 }

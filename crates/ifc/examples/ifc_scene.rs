@@ -192,6 +192,8 @@ pub fn build_scene(edit: bool) -> Scene {
         levels,
         walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0), room_bounding: true }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1), room_bounding: true }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1), room_bounding: true }],
         wall_penetrations: built.penetrations.clone(),
+        // a column in the north wall that sticks 0.2 m into the office
+        columns: vec![ColumnItem { id: A | 7, name: "C1".into(), footprint: vec![[6.7, 7.7], [7.3, 7.7], [7.3, 8.3], [6.7, 8.3]], base_z: 0.0, height: 3.0, room_bounding: true }],
         slabs: vec![
             SlabItem { id: A | 2, slab, room_bounding: true, role: SlabRole::Structure },
             // the store has a floor finish and a false ceiling: they are its floor and ceiling
@@ -204,7 +206,7 @@ pub fn build_scene(edit: bool) -> Scene {
         families: fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect(),
         items,
         rooms: vec![
-            RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[3.575, 0.1], [9.9, 0.1], [9.9, 7.9], [3.575, 7.9]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } },
+            RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[3.575, 0.1], [9.9, 0.1], [9.9, 7.9], [7.3, 7.9], [7.3, 7.7], [6.7, 7.7], [6.7, 7.9], [3.575, 7.9]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } },
             RoomItem { id: A | 961, room: Room { name: "Store".into(), usage: "store".into(), occupancy: 0.0, level: 1, outline: vec![[2.0, 3.075], [6.0, 3.075], [6.0, 7.0], [2.0, 7.0]], holes: vec![], height: 2.8 } },
         ],
         pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
@@ -325,6 +327,7 @@ fn main() {
                 openbim_ifc::boundaries::Target::Wall(i) => ("WALL", scene.walls[i].id),
                 openbim_ifc::boundaries::Target::Slab(i) => ("SLAB", scene.slabs[i].id),
                 openbim_ifc::boundaries::Target::Item(i) => ("ITEM", scene.items[i].id),
+                openbim_ifc::boundaries::Target::Column(i) => ("COLUMN", scene.columns[i].id),
                 openbim_ifc::boundaries::Target::Virtual(i) => ("VIRTUAL", scene.separation_lines[i].id),
             };
             let world = |ring: &[[f64; 2]]| ring.iter().map(|p| { let q = b.surface.point(*p); format!("{} {} {}", q[0], q[1], q[2] + elev) }).collect::<Vec<_>>().join(" ");
@@ -335,6 +338,9 @@ fn main() {
             let n = b.surface.axis;
             println!("SBNORMAL {} {} {} {} {}", r.id, bi, n[0], n[1], n[2]);
         }
+    }
+    for c in &scene.columns {
+        println!("COLUMN {} {} {} {}", c.id, c.base_z, c.height, c.footprint.iter().map(|p| format!("{} {}", p[0], p[1])).collect::<Vec<_>>().join(" "));
     }
     for p in &scene.wall_penetrations {
         println!("WPEN {} {} {} {} {} {}", p.id, p.cut as u8, v(p.centre), p.width, p.height, p.fire_rating_min.unwrap_or(0));

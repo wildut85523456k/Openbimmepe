@@ -82,6 +82,7 @@ def elems(cls): return {decode(e.GlobalId)[2]: e for e in f.by_type(cls)}
 walls = elems("IfcWall"); slabs = elems("IfcSlab")
 ok(set(walls) == wall_ids and all(decode(e.GlobalId)[1] == 0 for e in walls.values()), "wall ids")
 ok(set(slabs) == slab_ids, "slab ids")
+ok(set(elems("IfcColumn")) == {int(r[0]) for r in rows("COLUMN")} and len(rows("COLUMN")) > 0, "column ids")
 cov = elems("IfcCovering")
 ok(set(cov) == set(covering_ids) and all(cov[i].PredefinedType == {"FloorFinish": "FLOORING", "Ceiling": "CEILING"}[k] for i, k in covering_ids.items()), "floor finish and false ceiling are coverings")
 segs = {}
