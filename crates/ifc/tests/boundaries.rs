@@ -13,6 +13,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None, room_bounding: true }).collect(),
         wall_penetrations: vec![],
+        firestops: Default::default(),
         slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true, role: Default::default() }).collect(),
         columns: vec![],
         shafts: vec![],

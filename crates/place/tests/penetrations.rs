@@ -141,6 +141,7 @@ fn close_pipes_share_one_rectangular_opening() {
         Run::round("far", Domain::Pipe, System::DomesticCold, [4.0, -1.0, 1.5], [4.0, 1.0, 1.5], 0.05),
     ];
     let mut m = model(vec![wall(6.0, 0.2, 3.0)], three(0.05));
+    m.merge_gap = 0.0;
     // without a merge gap the pipes stay apart
     let p = m.build().unwrap().penetrations;
     assert_eq!(p.len(), 3);
@@ -221,7 +222,7 @@ fn fire_partitions_are_listed() {
     assert_eq!(p[1].fire_rating_min, Some(60));
     let listed: Vec<_> = p.iter().filter(|x| x.in_fire_partition()).map(|x| x.id).collect();
     assert_eq!(listed, vec![PenetrationId { chain: 1, segment: 0, seq: 0 }]);
-    assert!(close(p[1].area(), 0.01));
+    assert!(close(p[1].area(), std::f64::consts::FRAC_PI_4 * 0.01));
 }
 
 #[test]
@@ -231,17 +232,17 @@ fn the_register_exports_as_safe_csv() {
     let runs = vec![pipe([1.0, -1.0, 1.5], [1.0, 1.0, 1.5], 0.1), Run { label: "=SUM(A1),\"x\"\n+cmd".into(), ..pipe([1.1, -1.0, 1.5], [1.1, 1.0, 1.5], 0.1) }];
     let m = Model { merge_gap: 0.5, ..model(vec![fire], runs.clone()) };
     let b = m.build().unwrap();
-    let csv = register_csv(&b.penetrations, &runs);
+    let csv = register_csv(&b.penetrations, &runs, &Default::default());
     let lines: Vec<&str> = csv.lines().collect();
     assert_eq!(lines.len(), 2, "{csv}");
     assert!(lines[0].starts_with("id,wall,segment,offset_m"));
     assert!(lines[1].starts_with("W0-S0-P1,0,0,0.9500,0.2000,1.4500,0.1000"), "{}", lines[1]);
     assert!(lines[1].contains(",90,true,true,"));
     // exactly the 15 columns, whatever the labels hold; a label never begins like a formula
-    assert_eq!(lines[1].split(',').count(), 15);
+    assert_eq!(lines[1].split(',').count(), 19);
     assert!(lines[1].contains("pipe |  =SUM(A1)  x  +cmd"), "{}", lines[1]);
     // a label that starts like a formula gets a space in front
-    let first = register_csv(&b.penetrations, &[runs[1].clone(), runs[1].clone()]);
+    let first = register_csv(&b.penetrations, &[runs[1].clone(), runs[1].clone()], &Default::default());
     assert!(first.lines().nth(1).unwrap().contains(", =SUM(A1)"), "{first}");
 }
 
@@ -350,4 +351,48 @@ fn registers_do_not_depend_on_the_order_of_the_runs() {
     for (x, y) in a.penetrations.iter().zip(&b.penetrations) {
         assert_eq!((x.id, x.offset, x.width, x.sill, x.height), (y.id, y.offset, y.width, y.sill, y.height));
     }
+}
+
+#[test]
+fn one_pipe_gets_a_round_opening_and_a_group_a_rectangle() {
+    use openbim_place::penetrations::{OpeningShape, DEFAULT_GROUP_RADIUS};
+    assert!(close(DEFAULT_GROUP_RADIUS, 0.40) && close(Model::default().merge_gap, 0.40));
+    // a single round pipe square on: round, diameter 0.1 + 2 x margin
+    let one = Run::round("p", Domain::Pipe, System::ChilledWaterSupply, [3.0, -1.0, 1.5], [3.0, 1.0, 1.5], 0.1).with_margin(0.01);
+    let p = pens(vec![wall(6.0, 0.2, 3.0)], vec![one.clone()]);
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].shape, OpeningShape::Round);
+    assert!(close(p[0].width, 0.12) && close(p[0].height, 0.12) && close(p[0].area(), std::f64::consts::FRAC_PI_4 * 0.12 * 0.12));
+    // two pipes 0.3 m apart (within the default radius) share one rectangle
+    let two = Run::round("q", Domain::Pipe, System::ChilledWaterReturn, [3.3, -1.0, 1.5], [3.3, 1.0, 1.5], 0.1);
+    let p = pens(vec![wall(6.0, 0.2, 3.0)], vec![one.clone(), two.clone()]);
+    assert_eq!((p.len(), p[0].shape, p[0].runs.len()), (1, OpeningShape::Rect, 2));
+    // the radius is a parameter: with 0.1 they stay apart and each is round
+    let m = Model { merge_gap: 0.1, ..model(vec![wall(6.0, 0.2, 3.0)], vec![one.clone(), two]) };
+    let p = m.build().unwrap().penetrations;
+    assert!(p.len() == 2 && p.iter().all(|x| x.shape == OpeningShape::Round));
+    // a skewed crossing is longer than it is high: rectangle
+    let skew = Run::round("s", Domain::Pipe, System::ChilledWaterSupply, [2.0, -1.0, 1.5], [4.0, 1.0, 1.5], 0.1);
+    assert_eq!(pens(vec![wall(6.0, 0.2, 3.0)], vec![skew])[0].shape, OpeningShape::Rect);
+    // a rectangular run is a rectangle
+    let duct = Run::rect("d", Domain::Duct, System::SupplyAir, [3.0, -1.0, 1.5], [3.0, 1.0, 1.5], 0.3, 0.2);
+    assert_eq!(pens(vec![wall(6.0, 0.2, 3.0)], vec![duct])[0].shape, OpeningShape::Rect);
+}
+
+#[test]
+fn firestop_fields_sit_beside_the_wall_rating() {
+    use openbim_place::penetrations::{Firestop, Firestops};
+    let mut fire = wall(6.0, 0.2, 3.0);
+    fire.fire_rating_min = Some(120);
+    let runs = vec![pipe([1.0, -1.0, 1.5], [1.0, 1.0, 1.5], 0.1), pipe([4.0, -1.0, 1.5], [4.0, 1.0, 1.5], 0.1)];
+    let b = model(vec![fire], runs.clone()).build().unwrap();
+    assert_eq!(b.penetrations.len(), 2);
+    let mut f = Firestops::new();
+    f.insert(b.penetrations[0].id, Firestop { product: Some("Collar, \"A\"".into()), installed: Some("=2026-10-01".into()), inspected: None });
+    let csv = register_csv(&b.penetrations, &runs, &f);
+    let rows: Vec<&str> = csv.lines().collect();
+    // the opening rating is the wall's (one column, 120), the record is only what was entered; no cell breaks the row or reads as a formula
+    assert!(rows[1].contains(",120,true,true,") && rows[1].ends_with(",rect,Collar   A , =2026-10-01,") || rows[1].ends_with(",round,Collar   A , =2026-10-01,"), "{}", rows[1]);
+    assert!(rows.iter().all(|r| r.split(',').count() == 19));
+    assert!(rows[2].ends_with(",,,"), "{}", rows[2]);
 }

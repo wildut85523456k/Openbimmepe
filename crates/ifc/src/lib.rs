@@ -28,7 +28,7 @@ use openbim_family::mep::{up_for, Domain, FlowDir, System};
 use openbim_family::{Compiled, Instance};
 use openbim_geom::WallChain;
 use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab};
-use openbim_place::penetrations::{Penetration, RunSize};
+use openbim_place::penetrations::{Firestops, OpeningShape, Penetration, RunSize};
 use openbim_route::graph::{Network, NodeRef, PortRef};
 use openbim_route::{Fitting, FittingKind};
 use std::collections::BTreeMap;
@@ -149,6 +149,8 @@ pub struct Scene {
     pub walls: Vec<WallItem>,
     /// register of service openings in walls, by chain index into `walls`
     pub wall_penetrations: Vec<Penetration>,
+    /// firestop records of the wall penetrations (product, installed, inspected), entered by hand or by external software
+    pub firestops: Firestops,
     pub slabs: Vec<SlabItem>,
     /// structural columns, each a straight prism on a convex footprint
     pub columns: Vec<ColumnItem>,
@@ -746,7 +748,8 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
             o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,(#{wall}),#{u})"));
             typed[ti].push(wall);
         }
-        match quantities::wall(c) {
+        let credit: f64 = scene.wall_penetrations.iter().filter(|p| p.id.chain == wi && p.cut && p.shape == OpeningShape::Round).map(|p| p.width * p.height - p.area()).sum();
+        match quantities::wall(c, credit) {
             Ok(q) => o.qto(wall, "Qto_WallBaseQuantities", &q),
             Err(e) => o.report.warnings.push(format!("wall {}: no base quantities: {e}", w.name)),
         }
@@ -769,14 +772,15 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
                 let cs = op.offset + op.width / 2.0;
                 let centre = [p0[0] + d[0] * cs, p0[1] + d[1] * cs, c.base_z - elev + op.sill + op.height / 2.0];
                 let loc = [centre[0] - right[0] * (t / 2.0 + ov), centre[1] - right[1] * (t / 2.0 + ov), centre[2]];
-                let prof = o.rect_profile(0.0, 0.0, op.width, op.height);
+                let pen = scene.wall_penetrations.iter().find(|p| {
+                    p.id.chain == wi && p.id.segment == si && p.cut && (p.offset - op.offset).abs() < 1e-9 && (p.width - op.width).abs() < 1e-9 && (p.sill - op.sill).abs() < 1e-9 && (p.height - op.height).abs() < 1e-9
+                });
+                // one round service gets a round hole, grouped services a rectangle
+                let prof = if pen.is_some_and(|p| p.shape == OpeningShape::Round) { o.circle_profile(op.width / 2.0) } else { o.rect_profile(0.0, 0.0, op.width, op.height) };
                 let solid = o.extrusion(prof, [0.0; 3], Some([0.0, 0.0, 1.0]), Some([1.0, 0.0, 0.0]), t + 2.0 * ov);
                 // the profile plane sits at the opening: a placement of its own, relative to the wall
                 let opl = o.place(Some(pl), loc, Some(right), Some(d));
                 let shape = o.shape(&[solid]);
-                let pen = scene.wall_penetrations.iter().find(|p| {
-                    p.id.chain == wi && p.id.segment == si && p.cut && (p.offset - op.offset).abs() < 1e-9 && (p.width - op.width).abs() < 1e-9 && (p.sill - op.sill).abs() < 1e-9 && (p.height - op.height).abs() < 1e-9
-                });
                 let name = pen.map_or_else(|| format!("Opening {k}"), |p| p.id.to_string());
                 let g = o.gid(w.id, k);
                 let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&name)));
@@ -786,9 +790,18 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
                 o.opening_ids.push((wi, si, [op.offset, op.width, op.sill, op.height], oe));
                 if let Some(p) = pen {
                     let systems: Vec<&str> = p.systems.iter().map(|s| s.ifc_system()).collect();
-                    let mut props = vec![("Register", Val::Label(p.id.to_string())), ("Systems", Val::Label(systems.join(","))), ("InFirePartition", Val::Bool(p.in_fire_partition()))];
+                    let mut props = vec![("Register", Val::Label(p.id.to_string())), ("Shape", Val::Label(if p.shape == OpeningShape::Round { "ROUND" } else { "RECTANGULAR" }.to_string())), ("Systems", Val::Label(systems.join(","))), ("InFirePartition", Val::Bool(p.in_fire_partition()))];
                     if let Some(m) = p.fire_rating_min {
+                        // the opening must hold the rating of the wall it is in
                         props.push(("FireRating", Val::Label(fire_label(m))));
+                        props.push(("FireOpeningRating", Val::Label(fire_label(m))));
+                    }
+                    if let Some(f) = scene.firestops.get(&p.id) {
+                        for (k, v) in [("FirestopProduct", &f.product), ("FirestopInstalled", &f.installed), ("FirestopInspected", &f.inspected)] {
+                            if let Some(v) = v {
+                                props.push((k, Val::Label(v.clone())));
+                            }
+                        }
                     }
                     o.pset(oe, "OpenBIM_Penetration", props);
                 }

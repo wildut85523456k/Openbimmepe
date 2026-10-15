@@ -17,6 +17,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, (c, t))| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: t, room_bounding: true }).collect(),
         wall_penetrations: vec![],
+        firestops: Default::default(),
         slabs: vec![],
         columns: vec![],
         shafts: vec![],

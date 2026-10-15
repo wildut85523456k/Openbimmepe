@@ -84,7 +84,8 @@ pub fn overlap_area(a: &[P], b: &[P]) -> Option<f64> {
 }
 
 /// `Qto_WallBaseQuantities` of a wall chain. Flat tops and rectangular openings only.
-pub fn wall(c: &WallChain) -> Result<Vec<Qty>, String> {
+/// `round_credit` is the area (m2) the round openings leave in the wall compared with their bounding rectangles.
+pub fn wall(c: &WallChain, round_credit: f64) -> Result<Vec<Qty>, String> {
     if c.tops.iter().any(|t| t.is_some()) {
         return Err("sloped wall tops".into());
     }
@@ -96,7 +97,7 @@ pub fn wall(c: &WallChain) -> Result<Vec<Qty>, String> {
     let segs = if c.closed { n } else { n - 1 };
     let length: f64 = (0..segs).map(|i| (c.points[(i + 1) % n][0] - c.points[i][0]).hypot(c.points[(i + 1) % n][1] - c.points[i][1])).sum();
     let footprint: f64 = plans.iter().map(|p| ring_area(&[p.l0, p.l1, p.r1, p.r0]).abs()).sum();
-    let open_area: f64 = c.openings.iter().flatten().map(|o| o.width * o.height).sum();
+    let open_area: f64 = c.openings.iter().flatten().map(|o| o.width * o.height).sum::<f64>() - round_credit;
     let gross_side = length * c.height;
     Ok(vec![
         q("Length", Kind::Length, length),

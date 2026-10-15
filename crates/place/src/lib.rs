@@ -60,15 +60,20 @@ impl std::fmt::Display for PlaceError {
 }
 impl std::error::Error for PlaceError {}
 
-#[derive(Default)]
 pub struct Model {
     pub chains: Vec<WallChain>,
     pub families: Vec<Compiled>,
     pub placements: Vec<Placement>,
     /// straight service runs (duct, pipe, conduit, cable tray); each wall they cross gets an opening
     pub runs: Vec<Run>,
-    /// openings of different runs closer than this (metres) are merged into one penetration
+    /// openings of different runs closer than this (metres) are merged into one rectangular penetration (default 0.40, a project parameter)
     pub merge_gap: f64,
+}
+
+impl Default for Model {
+    fn default() -> Model {
+        Model { chains: vec![], families: vec![], placements: vec![], runs: vec![], merge_gap: penetrations::DEFAULT_GROUP_RADIUS }
+    }
 }
 
 pub struct Built {

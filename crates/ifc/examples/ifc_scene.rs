@@ -192,6 +192,8 @@ pub fn build_scene(edit: bool) -> Scene {
         levels,
         walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0), room_bounding: true }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1), room_bounding: true }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1), room_bounding: true }],
         wall_penetrations: built.penetrations.clone(),
+        // the first penetration is installed but not yet inspected; the second has no record at all
+        firestops: [(built.penetrations[0].id, openbim_place::penetrations::Firestop { product: Some("Collar A".into()), installed: Some("2026-10-01 site team".into()), inspected: None })].into_iter().collect(),
         // a column in the north wall that sticks 0.2 m into the office
         columns: vec![ColumnItem { id: A | 7, name: "C1".into(), footprint: vec![[6.7, 7.7], [7.3, 7.7], [7.3, 8.3], [6.7, 8.3]], base_z: 0.0, height: 3.0, room_bounding: true }],
         slabs: vec![
@@ -290,10 +292,11 @@ fn main() {
     for j in &scene.wall_joins {
         println!("WJOIN {} {:?} {} {:?}", scene.walls[j.a].id, j.a_end, scene.walls[j.b].id, j.b_end);
     }
-    for w in &scene.walls {
+    for (wi, w) in scene.walls.iter().enumerate() {
         for (si, ops) in w.chain.openings.iter().enumerate() {
             for o in ops {
-                println!("OPEN {} {} {} {} {} {}", w.id, si, o.offset, o.width, o.sill, o.height);
+                let round = scene.wall_penetrations.iter().any(|p| p.id.chain == wi && p.id.segment == si && p.cut && p.shape == openbim_place::penetrations::OpeningShape::Round && (p.offset - o.offset).abs() < 1e-9 && (p.sill - o.sill).abs() < 1e-9);
+                println!("OPEN {} {} {} {} {} {} {}", w.id, si, o.offset, o.width, o.sill, o.height, if round { "round" } else { "rect" });
             }
         }
     }
@@ -343,7 +346,7 @@ fn main() {
         println!("COLUMN {} {} {} {}", c.id, c.base_z, c.height, c.footprint.iter().map(|p| format!("{} {}", p[0], p[1])).collect::<Vec<_>>().join(" "));
     }
     for p in &scene.wall_penetrations {
-        println!("WPEN {} {} {} {} {} {}", p.id, p.cut as u8, v(p.centre), p.width, p.height, p.fire_rating_min.unwrap_or(0));
+        println!("WPEN {} {} {} {} {} {} {}", p.id, p.cut as u8, v(p.centre), p.width, p.height, p.fire_rating_min.unwrap_or(0), if p.shape == openbim_place::penetrations::OpeningShape::Round { "round" } else { "rect" });
     }
     for p in &scene.floor_penetrations {
         println!("FPEN {} {:?} {} {} {} {} {}", p.id, p.kind, p.x0, p.x1, p.y0, p.y1, p.fits as u8);

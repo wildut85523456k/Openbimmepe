@@ -165,9 +165,12 @@ for w in rows("WALL"):
         axis_x = (hi - lo)[0] > (hi - lo)[1]
         pad = np.array([0, th / 2]) if axis_x else np.array([th / 2, 0])
         box_lo, box_hi = lo - pad, hi + pad
-    cut = sum(float(r[3]) * float(r[5]) * th for r in rows("OPEN") if int(r[0]) == wid)
+    mine = [r for r in rows("OPEN") if int(r[0]) == wid]
+    # a round hole is a true circle in the model; the mesh of it is a polygon, a little smaller
+    cut = sum((np.pi / 4 if r[6] == "round" else 1.0) * float(r[3]) * float(r[5]) * th for r in mine)
+    slack = sum(0.03 * float(r[3]) * float(r[5]) * th for r in mine if r[6] == "round")
     vol = ush.get_volume(ifcopenshell.geom.create_shape(st, walls[wid]).geometry)
-    ok(abs(vol - (gross - cut)) < 1e-6, f"wall {wid} volume {vol} vs {gross - cut}")
+    ok(abs(vol - (gross - cut)) < 1e-6 + slack, f"wall {wid} volume {vol} vs {gross - cut}")
     wv, _ = verts(walls[wid])
     ok(np.allclose(wv.min(axis=0), [*box_lo, base], atol=1e-6) and np.allclose(wv.max(axis=0), [*box_hi, base + h], atol=1e-6), f"wall {wid} box {wv.min(axis=0)} {wv.max(axis=0)}")
 th = float(rows("WALL")[0][-2]); h = float(rows("WALL")[0][-1])
@@ -284,6 +287,21 @@ for r in rows("WPEN"):
         m = up.get_local_placement(o.ObjectPlacement)
         v, _ = verts(o)
         ok(np.allclose((v.min(axis=0) + v.max(axis=0))[0] / 2, float(r[2]), atol=0.2), "penetration is in the east wall")
+# a single round service gets a circular void, grouped services a rectangular one
+for r in rows("WPEN"):
+    for o in [o for o in f.by_type("IfcOpeningElement") if o.Name == r[0]]:
+        prof = o.Representation.Representations[0].Items[0].SweptArea
+        is_round = r[-1] == "round"
+        ok(prof.is_a("IfcCircleProfileDef") == is_round and prof.is_a("IfcRectangleProfileDef") != is_round, f"opening {r[0]} profile is {'circle' if is_round else 'rectangle'}")
+        ok(ue.get_psets(o)["OpenBIM_Penetration"]["Shape"] == ("ROUND" if is_round else "RECTANGULAR"), f"opening {r[0]} shape property")
+        ps = ue.get_psets(o)["OpenBIM_Penetration"]
+        ok(ps["FireOpeningRating"] == ps["FireRating"] == "60 min", f"opening {r[0]} holds the wall's rating")
+        first = r[0] == "W0-S1-P1"
+        ok(("FirestopProduct" in ps) == first and ("FirestopInstalled" in ps) == first and "FirestopInspected" not in ps, f"opening {r[0]} firestop record")
+        if first:
+            ok(ps["FirestopProduct"] == "Collar A" and ps["FirestopInstalled"] == "2026-10-01 site team", "firestop values")
+        if is_round:
+            ok(abs(prof.Radius * 2 - float(r[5])) < 1e-6, "round opening diameter")
 for r in rows("FPEN"):
     ops = [o for o in f.by_type("IfcOpeningElement") if o.Name == r[0]]
     ok(len(ops) == (1 if r[1] == "Cut" else 0), f"floor opening {r[0]} {r[1]}")
@@ -330,7 +348,8 @@ for w in f.by_type("IfcWall"):
     if q is None: continue
     ok(q["GrossVolume"][0] == "IfcQuantityVolume" and q["Length"][0] == "IfcQuantityLength" and q["NetSideArea"][0] == "IfcQuantityArea", "wall quantity kinds")
     ok(abs(q["GrossVolume"][1] - mesh_volume(w, False)) < 1e-6, f"wall gross volume {q['GrossVolume'][1]} vs mesh {mesh_volume(w, False)}")
-    ok(abs(q["NetVolume"][1] - mesh_volume(w, True)) < 1e-6, f"wall net volume {q['NetVolume'][1]} vs mesh {mesh_volume(w, True)}")
+    slack = sum(0.03 * float(r[3]) * float(r[5]) * q["Width"][1] for r in rows("OPEN") if int(r[0]) == decode(w.GlobalId)[2] and r[6] == "round")
+    ok(abs(q["NetVolume"][1] - mesh_volume(w, True)) < 1e-6 + slack, f"wall net volume {q['NetVolume'][1]} vs mesh {mesh_volume(w, True)}")
     ok(abs(q["GrossVolume"][1] - q["GrossFootprintArea"][1] * q["Height"][1]) < 1e-6, "wall gross volume = footprint x height")
 for sl in f.by_type("IfcSlab"):
     q = qto(sl, "Qto_SlabBaseQuantities")

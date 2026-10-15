@@ -143,6 +143,7 @@ fn scene(g: Option<Georef>) -> Scene {
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![],
         wall_penetrations: vec![],
+        firestops: Default::default(),
         slabs: vec![],
         columns: vec![],
         shafts: vec![],

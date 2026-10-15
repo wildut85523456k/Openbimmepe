@@ -17,7 +17,7 @@ fn wall_quantities_by_hand() {
     // 4 m long, 0.2 thick, 3 high, one 0.9 x 2.1 opening
     let mut w = WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0);
     w.openings = vec![vec![Opening { offset: 1.0, width: 0.9, sill: 0.0, height: 2.1 }]];
-    let q = quantities::wall(&w).unwrap();
+    let q = quantities::wall(&w, 0.0).unwrap();
     near(get(&q, "Length"), 4.0);
     near(get(&q, "Width"), 0.2);
     near(get(&q, "Height"), 3.0);

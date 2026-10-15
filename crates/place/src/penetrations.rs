@@ -14,6 +14,19 @@ use openbim_geom::WallChain;
 
 pub const MAX_RUNS: usize = 1_000_000;
 
+/// Default grouping distance (metres): services whose openings lie closer than this share one rectangular opening.
+/// A project can change it (`Model::merge_gap`); nothing else in the code depends on this value.
+pub const DEFAULT_GROUP_RADIUS: f64 = 0.40;
+
+/// Shape of the opening a penetration needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpeningShape {
+    /// a single round run crossing the wall square on: a round hole (diameter = `width` = `height`)
+    Round,
+    /// several services grouped, a rectangular run, or a skewed crossing: a rectangular hole
+    Rect,
+}
+
 /// Cross-section of a run (metres).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RunSize {
@@ -109,6 +122,7 @@ pub struct Penetration {
     pub centre: [f64; 3],
     /// fire rating of the wall in minutes (None = not a fire partition)
     pub fire_rating_min: Option<u32>,
+    pub shape: OpeningShape,
     /// false when the opening could not be cut (it conflicts with another opening or leaves the wall)
     pub cut: bool,
 }
@@ -119,9 +133,28 @@ impl Penetration {
     }
     /// Opening area in m2 (the clear area a firestop must fill, before the services are deducted).
     pub fn area(&self) -> f64 {
-        self.width * self.height
+        match self.shape {
+            OpeningShape::Round => std::f64::consts::FRAC_PI_4 * self.width * self.height,
+            OpeningShape::Rect => self.width * self.height,
+        }
     }
 }
+
+/// The firestop record of one penetration. The rating the opening must hold is the wall's own fire rating
+/// (`Penetration::fire_rating_min`), so it is never typed in twice. The rest is entered by hand or written by
+/// external software (a site inspection tool, say): each field is free text such as a product name, a date or
+/// a reference, and `None` means not yet done. Records are kept by `PenetrationId`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Firestop {
+    /// the firestop product or system installed
+    pub product: Option<String>,
+    /// who installed it and when (or an external reference)
+    pub installed: Option<String>,
+    /// who inspected it and when (or an external reference)
+    pub inspected: Option<String>,
+}
+
+pub type Firestops = std::collections::BTreeMap<PenetrationId, Firestop>;
 
 /// A run's problem, with the run it belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -315,6 +348,7 @@ pub fn find(chains: &[WallChain], runs: &[Run], merge_gap: f64) -> (Vec<Penetrat
                 }
                 let um = (b[0] + b[1]) / 2.0;
                 let centre = [pa[0] + (pb[0] - pa[0]) * um / len, pa[1] + (pb[1] - pa[1]) * um / len, c.base_z + (b[2] + b[3]) / 2.0];
+                let round = rs.len() == 1 && matches!(runs[rs[0]].size, RunSize::Round { .. }) && ((b[1] - b[0]) - (b[3] - b[2])).abs() < 1e-6;
                 out.push(Penetration {
                     id: PenetrationId { chain: ci, segment: si, seq },
                     runs: rs,
@@ -326,6 +360,7 @@ pub fn find(chains: &[WallChain], runs: &[Run], merge_gap: f64) -> (Vec<Penetrat
                     height: b[3] - b[2],
                     centre,
                     fire_rating_min: c.fire_rating_min,
+                    shape: if round { OpeningShape::Round } else { OpeningShape::Rect },
                     cut: true,
                 });
             }
@@ -342,16 +377,19 @@ pub(crate) fn csv_safe(label: &str) -> String {
 }
 
 /// The register as text for a schedule: one row per penetration, comma separated, metres and minutes.
-pub fn register_csv(pens: &[Penetration], runs: &[Run]) -> String {
-    let mut s = String::from("id,wall,segment,offset_m,width_m,sill_m,height_m,x_m,y_m,z_m,fire_rating_min,fire_partition,cut,runs,systems\n");
+pub fn register_csv(pens: &[Penetration], runs: &[Run], firestops: &Firestops) -> String {
+    let mut s = String::from("id,wall,segment,offset_m,width_m,sill_m,height_m,x_m,y_m,z_m,fire_rating_min,fire_partition,cut,runs,systems,shape,firestop_product,firestop_installed,firestop_inspected\n");
     for p in pens {
+        let f = firestops.get(&p.id).cloned().unwrap_or_default();
+        let cell = |v: &Option<String>| v.as_deref().map(csv_safe).unwrap_or_default();
         let labels: Vec<String> = p.runs.iter().map(|&r| csv_safe(&runs[r].label)).collect();
         let systems: Vec<String> = p.systems.iter().map(|x| format!("{x:?}")).collect();
         s.push_str(&format!(
-            "{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{}\n",
+            "{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},{},{},{},{},{},{}\n",
             p.id, p.id.chain, p.id.segment, p.offset, p.width, p.sill, p.height, p.centre[0], p.centre[1], p.centre[2],
             p.fire_rating_min.map(|m| m.to_string()).unwrap_or_default(), p.in_fire_partition(), p.cut,
-            labels.join(" | "), systems.join(" | ")
+            labels.join(" | "), systems.join(" | "), if p.shape == OpeningShape::Round { "round" } else { "rect" },
+            cell(&f.product), cell(&f.installed), cell(&f.inspected)
         ));
     }
     s
