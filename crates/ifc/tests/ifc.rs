@@ -47,7 +47,9 @@ fn reals_and_strings_follow_step_rules() {
     assert_eq!(string("a'b"), "'a''b'");
     assert_eq!(string("a\\b"), "'a\\\\b'");
     assert_eq!(string("Café"), "'Caf\\X2\\00E9\\X0\\'");
-    assert_eq!(string("😀"), "'\\X2\\D83DDE00\\X0\\'");
+    assert_eq!(string("😀"), "'\\X4\\0001F600\\X0\\'");
+    assert_eq!(string("é😀é"), "'\\X2\\00E9\\X0\\\\X4\\0001F600\\X0\\\\X2\\00E9\\X0\\'");
+    assert_eq!(string("a😀b"), "'a\\X4\\0001F600\\X0\\b'");
     assert_eq!(string("é1é"), "'\\X2\\00E9\\X0\\1\\X2\\00E9\\X0\\'");
     assert_eq!(string("a\nb"), "'a\\X2\\000A\\X0\\b'");
 }

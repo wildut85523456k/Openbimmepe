@@ -16,34 +16,46 @@ pub fn real(x: f64) -> String {
     }
 }
 
-/// A string in single quotes, with `'` and `\` doubled and anything outside printable ASCII written as `\X2\`.
+/// A string in single quotes, with `'` and `\` doubled and anything outside printable ASCII written as `\X2\`
+/// (characters of the basic plane, four hex digits each) or `\X4\` (the others, eight hex digits each), as ISO 10303-21
+/// asks. A run of one kind ends with `\X0\`.
 pub fn string(s: &str) -> String {
+    #[derive(PartialEq, Clone, Copy)]
+    enum Mode {
+        Plain,
+        Basic,
+        Wide,
+    }
     let mut out = String::from("'");
-    let mut wide = false;
+    let mut mode = Mode::Plain;
     for c in s.chars() {
-        let plain = (' '..='~').contains(&c);
-        if plain && wide {
-            out.push_str("\\X0\\");
-            wide = false;
-        }
-        if plain {
-            match c {
-                '\'' => out.push_str("''"),
-                '\\' => out.push_str("\\\\"),
-                _ => out.push(c),
-            }
+        let want = if (' '..='~').contains(&c) {
+            Mode::Plain
+        } else if (c as u32) <= 0xFFFF {
+            Mode::Basic
         } else {
-            if !wide {
-                out.push_str("\\X2\\");
-                wide = true;
+            Mode::Wide
+        };
+        if want != mode {
+            if mode != Mode::Plain {
+                out.push_str("\\X0\\");
             }
-            let mut buf = [0u16; 2];
-            for u in c.encode_utf16(&mut buf) {
-                out.push_str(&format!("{u:04X}"));
+            match want {
+                Mode::Basic => out.push_str("\\X2\\"),
+                Mode::Wide => out.push_str("\\X4\\"),
+                Mode::Plain => {}
             }
+            mode = want;
+        }
+        match (want, c) {
+            (Mode::Plain, '\'') => out.push_str("''"),
+            (Mode::Plain, '\\') => out.push_str("\\\\"),
+            (Mode::Plain, _) => out.push(c),
+            (Mode::Basic, _) => out.push_str(&format!("{:04X}", c as u32)),
+            (Mode::Wide, _) => out.push_str(&format!("{:08X}", c as u32)),
         }
     }
-    if wide {
+    if mode != Mode::Plain {
         out.push_str("\\X0\\");
     }
     out.push('\'');
