@@ -56,10 +56,10 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, pset_map: Default::default() }
+    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
-    WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None }
+    WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None, room_bounding: true }
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn walls_slabs_and_rooms_get_base_quantities() {
     use openbim_arch::Room;
     use openbim_place::floors::Slab;
     let mut s = scene(vec![wall(5)]);
-    s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 0.0, thickness: 0.2, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], fire_rating_min: None } }];
+    s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 0.0, thickness: 0.2, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], fire_rating_min: None }, room_bounding: true }];
     s.rooms = vec![RoomItem { id: 7, room: Room { name: "R".into(), usage: "office".into(), occupancy: 1.0, level: 0, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], holes: vec![vec![[1.0, 1.0], [1.0, 2.0], [2.0, 2.0], [2.0, 1.0]]], height: 2.5 } }];
     let out = export(&s).unwrap();
     assert_eq!((out.report.walls, out.report.slabs, out.report.spaces, out.report.quantity_sets), (1, 1, 1, 3));
@@ -280,7 +280,7 @@ fn slab_net_quantities_take_off_shafts_and_cut_openings() {
     s.levels = levels.clone();
     let shaft = Shaft { name: "S".into(), usage: "x".into(), outline: vec![[1.0, 1.0], [3.0, 1.0], [3.0, 2.0], [1.0, 2.0]], from: 0, to: 2 };
     s.shafts = vec![ShaftVoid::from_shaft(&shaft, &levels).unwrap()];
-    s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 3.0, thickness: 0.2, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None } }];
+    s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 3.0, thickness: 0.2, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None }, room_bounding: true }];
     let out = export(&s).unwrap();
     // 80 - 2 (shaft) = 78 net; the volume is 78 x 0.2 = 15.6
     assert!(out.text.contains("IFCQUANTITYAREA('NetArea',$,$,78.0,$)"));

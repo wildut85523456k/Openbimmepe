@@ -149,36 +149,50 @@ pub fn build_scene(edit: bool) -> Scene {
     assert!(issues.is_empty());
     let partition = WallChain::new(vec![[3.5, 7.9], [3.5, 0.1]], false, 0.15, 3.0);
     let chains: Vec<&WallChain> = vec![&built.chains[0], &built.chains[1], &partition];
-    // a test position: a UTM-like map, the model turned 12.5 degrees on it, true north 3.25 degrees from the model's Y axis
+    // a test position: a UTM-like map, project north turned 12.5 degrees counter-clockwise from true north,
+    // a survey point at (2, 1, 0.5) in the model and a project base point at (0.5, 0.25, 0); BASE=pbp|survey|shared picks the export's origin
+    let base = match std::env::var("BASE").as_deref() {
+        Ok("pbp") => openbim_ifc::georef::CoordinateBase::ProjectBasePoint,
+        Ok("survey") => openbim_ifc::georef::CoordinateBase::SurveyPoint,
+        Ok("shared") => openbim_ifc::georef::CoordinateBase::SharedCoordinates,
+        _ => openbim_ifc::georef::CoordinateBase::InternalOrigin,
+    };
     let georef = openbim_ifc::georef::Georef {
         crs: openbim_ifc::georef::Crs { name: "TEST:48N".into(), geodetic_datum: Some("TESTDATUM".into()), vertical_datum: Some("TESTVERT".into()), map_projection: Some("TestTM".into()), map_zone: Some("48N".into()) },
-        easting: 492_345.678,
-        northing: 1_278_901.234,
-        height: 12.5,
-        grid_angle_deg: 12.5,
-        scale: 0.9996,
-        true_north_deg: 3.25,
+        project_base_point: [0.5, 0.25, 0.0],
+        survey_point: [2.0, 1.0, 0.5],
+        survey_shared: [492_345.678, 1_278_901.234, 12.5],
+        angle_to_true_north_deg: 12.5,
+        scale: if base == openbim_ifc::georef::CoordinateBase::SharedCoordinates { 1.0 } else { 0.9996 },
+        coordinate_base: base,
         latitude: 11.556_388_9,
         longitude: 104.928_333_3,
         elevation: 12.5,
     };
     let wall_joins = openbim_ifc::walls::find_joins(&chains, 0.01);
-    let layer = |m: &str, t: f64| openbim_ifc::walls::Layer { material: m.into(), thickness: t };
+    use openbim_ifc::walls::{Function, Layer, WallType};
     let wall_types = vec![
-        openbim_ifc::walls::WallType { name: "Cavity 200".into(), layers: vec![layer("Brick", 0.1), layer("Insulation", 0.05), layer("Plaster", 0.05)] },
-        openbim_ifc::walls::WallType { name: "Partition 150".into(), layers: vec![layer("Gypsum", 0.05), layer("Stud void", 0.05), layer("Gypsum", 0.05)] },
+        // from the exterior face, on the left of travel
+        WallType { name: "Cavity 200".into(), layers: vec![Layer { wraps: true, ..Layer::with("Brick", 0.1, Function::Structure) }, Layer::with("Insulation", 0.05, Function::ThermalAir), Layer::with("Plaster", 0.05, Function::Finish1)], core: Some((0, 0)) },
+        WallType { name: "Partition 150".into(), layers: vec![Layer::with("Gypsum", 0.05, Function::Finish1), Layer::with("Stud void", 0.05, Function::Structure), Layer::with("Gypsum", 0.05, Function::Finish1)], core: Some((1, 1)) },
     ];
     Scene {
         project_name: "Test office".into(),
         wall_types,
         wall_joins,
         georef: Some(georef.clone()),
+        room_settings: Default::default(),
+        separation_lines: vec![
+            openbim_ifc::boundaries::SeparationLine { id: A | 970, level: 1, a: [6.0, 3.075], b: [6.0, 7.0] },
+            openbim_ifc::boundaries::SeparationLine { id: A | 971, level: 1, a: [6.0, 7.0], b: [2.0, 7.0] },
+            openbim_ifc::boundaries::SeparationLine { id: A | 972, level: 1, a: [2.0, 7.0], b: [2.0, 3.075] },
+        ],
         project_key: 0x0123_4567_89ab,
         timestamp: "2026-10-15T00:00:00".into(),
         levels,
-        walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0) }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1) }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1) }],
+        walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0), room_bounding: true }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1), room_bounding: true }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1), room_bounding: true }],
         wall_penetrations: built.penetrations.clone(),
-        slabs: vec![SlabItem { id: A | 2, slab }],
+        slabs: vec![SlabItem { id: A | 2, slab, room_bounding: true }],
         shafts: vec![void],
         floor_penetrations: floor_pens,
         networks: vec![net],
@@ -256,8 +270,10 @@ fn main() {
         }
     }
     for (ti, t) in scene.wall_types.iter().enumerate() {
-        let layers: Vec<String> = t.layers.iter().map(|l| format!("{}={}", l.material.replace(' ', "_"), l.thickness)).collect();
-        println!("WTYPE {} {} {}", ti, t.name.replace(' ', "_"), layers.join(","));
+        let layers: Vec<String> = t.layers.iter().map(|l| format!("{}={}={}", l.material.replace(' ', "_"), l.thickness, l.function.name().replace(' ', "_"))).collect();
+        let (ca, cb) = t.core_range();
+        let wraps: Vec<String> = t.layers.iter().enumerate().filter(|(_, l)| l.wraps).map(|(i, _)| (i + 1).to_string()).collect();
+        println!("WTYPE {} {} {} {} {} {}", ti, t.name.replace(' ', "_"), layers.join(","), ca + 1, cb + 1, if wraps.is_empty() { "-".to_string() } else { wraps.join(",") });
     }
     for w in &scene.walls {
         if let Some(t) = w.wall_type {
@@ -283,11 +299,15 @@ fn main() {
         println!("SLAB {} {} {} {} {}", s.id, s.slab.name, s.slab.top, s.slab.thickness, s.slab.fire_rating_min.unwrap_or(0));
     }
     if let Some(g) = &scene.georef {
-        println!("GEOREF {} {} {} {} {} {} {} {} {} {}", g.easting, g.northing, g.height, g.grid_angle_deg, g.scale, g.true_north_deg, g.latitude, g.longitude, g.elevation, g.crs.name);
-        for p in [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 8.0, 3.0], [3.5, 7.9, 1.25]] {
-            let m = g.to_map(p);
-            let back = g.to_local(m);
-            println!("GEOPT {} {} {} {} {} {} {} {} {}", p[0], p[1], p[2], m[0], m[1], m[2], back[0], back[1], back[2]);
+        let (o, (a, b)) = g.map_conversion();
+        let t = g.file_true_north();
+        println!("GEOREF {} {} {} {} {} {} {} {} {} {a} {b} {} {}", g.angle_to_true_north_deg, g.scale, g.latitude, g.longitude, g.elevation, g.crs.name, o[0], o[1], o[2], t.0, t.1);
+        println!("GEOPOINTS {} {} {} {} {} {} {} {} {}", g.survey_point[0], g.survey_point[1], g.survey_point[2], g.survey_shared[0], g.survey_shared[1], g.survey_shared[2], g.project_base_point[0], g.project_base_point[1], g.project_base_point[2]);
+        for p in [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 8.0, 3.0], [3.5, 7.9, 1.25], [10.0, 8.0, 3.0]] {
+            let m = g.to_shared(p);
+            let back = g.to_model(m);
+            let f = g.to_file(p);
+            println!("GEOPT {} {} {} {} {} {} {} {} {} {} {} {}", p[0], p[1], p[2], m[0], m[1], m[2], back[0], back[1], back[2], f[0], f[1], f[2]);
         }
     }
     for r in &scene.rooms {
@@ -300,6 +320,7 @@ fn main() {
                 openbim_ifc::boundaries::Target::Wall(i) => ("WALL", scene.walls[i].id),
                 openbim_ifc::boundaries::Target::Slab(i) => ("SLAB", scene.slabs[i].id),
                 openbim_ifc::boundaries::Target::Item(i) => ("ITEM", scene.items[i].id),
+                openbim_ifc::boundaries::Target::Virtual(i) => ("VIRTUAL", scene.separation_lines[i].id),
             };
             let world = |ring: &[[f64; 2]]| ring.iter().map(|p| { let q = b.surface.point(*p); format!("{} {} {}", q[0], q[1], q[2] + elev) }).collect::<Vec<_>>().join(" ");
             println!("SB {} {} {} {} {} {} {} {}", r.id, bi, kind, id, b.parent.map_or(-1, |p| p as i64), b.surface.area(), b.surface.outer.len(), world(&b.surface.outer));

@@ -11,9 +11,9 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         project_key: 1,
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }]).unwrap(),
-        walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None }).collect(),
+        walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None, room_bounding: true }).collect(),
         wall_penetrations: vec![],
-        slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab }).collect(),
+        slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true }).collect(),
         shafts: vec![],
         floor_penetrations: vec![],
         networks: vec![],
@@ -23,6 +23,8 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         wall_types: vec![],
         wall_joins: vec![],
         georef: None,
+        room_settings: Default::default(),
+        separation_lines: vec![],
         pset_map: Default::default(),
     }
 }
@@ -143,7 +145,7 @@ fn the_floor_and_ceiling_need_a_slab_that_covers_the_room_and_sits_at_the_right_
     let s = scene(vec![], vec![slab(4.0, 0.2, 5.0, 4.0)], room(&INSIDE, 0));
     let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
     assert!(b.is_empty());
-    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(w.iter().filter(|m| m.contains("slab")).count(), 1, "{w:?}");
     // of two slabs above, the lower is the ceiling
     let s = scene(vec![], vec![slab(3.5, 0.2, 5.0, 4.0), slab(2.9, 0.2, 5.0, 4.0)], room(&INSIDE, 0));
     let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
@@ -309,7 +311,7 @@ fn a_slab_inside_the_height_of_the_room_is_neither_floor_nor_ceiling() {
     // a mezzanine deck 1.0 m up across the whole room
     let s = scene(vec![], vec![slab(1.0, 0.2, 5.0, 4.0)], room(&INSIDE, 0));
     let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
-    assert!(b.is_empty() && w.is_empty(), "{w:?}");
+    assert!(b.is_empty() && !w.iter().any(|m| m.contains("slab")), "{w:?}");
 }
 
 #[test]
@@ -327,4 +329,60 @@ fn the_ceiling_of_a_room_with_a_hole_has_the_hole_too() {
         let q = b[0].surface.point(*p);
         assert!((1.0 - 1e-9..=2.0 + 1e-9).contains(&q[0]) && (1.0 - 1e-9..=2.0 + 1e-9).contains(&q[1]) && near(q[2], 2.8), "{q:?}");
     }
+}
+
+#[test]
+fn a_wall_that_does_not_bound_rooms_makes_no_boundary_and_the_side_is_reported() {
+    let mut s = scene(vec![enclosure()], vec![], room(&INSIDE, 0));
+    s.walls[0].room_bounding = false;
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Wall(_))), 0);
+    assert_eq!(w.iter().filter(|m| m.contains("no wall and no separation line")).count(), 4, "{w:?}");
+}
+
+#[test]
+fn a_separation_line_bounds_a_side_without_a_wall_and_is_virtual() {
+    let one_wall = WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0);
+    let mut s = scene(vec![one_wall], vec![], room(&INSIDE, 0));
+    // the other three sides are lines on the room's edges
+    s.separation_lines = vec![
+        SeparationLine { id: 1, level: 0, a: [3.9, 0.1], b: [3.9, 2.9] },
+        SeparationLine { id: 2, level: 0, a: [3.9, 2.9], b: [0.1, 2.9] },
+        SeparationLine { id: 3, level: 0, a: [0.1, 2.9], b: [0.1, 0.1] },
+    ];
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(count(&b, |t| matches!(t, Target::Wall(0))), 1);
+    assert_eq!(count(&b, |t| matches!(t, Target::Virtual(_))), 3);
+    for x in b.iter().filter(|x| matches!(x.target, Target::Virtual(_))) {
+        assert!((x.surface.area() - x.surface.outer[2][0] * 2.8).abs() < 1e-9);
+        assert_eq!(x.surface.axis[2], 0.0);
+    }
+    // a line on another level does nothing
+    s.separation_lines[0].level = 1;
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Virtual(_))), 2);
+    assert_eq!(w.len(), 1, "{w:?}");
+}
+
+#[test]
+fn the_boundary_location_moves_the_boundary_to_the_centre_line() {
+    let mut s = scene(vec![enclosure()], vec![], room(&[[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]], 0));
+    // the finish faces are not on the room's edges, so nothing bounds it
+    let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Wall(_))), 0);
+    s.room_settings.boundary_location = BoundaryLocation::WallCentre;
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Wall(_))), 4, "{w:?}");
+    let walls: f64 = b.iter().map(|x| x.surface.area()).sum();
+    assert!((walls - 2.0 * (4.0 + 3.0) * 2.8).abs() < 1e-6, "{walls}");
+}
+
+#[test]
+fn without_volumes_the_floor_and_ceiling_are_not_boundaries() {
+    let mut s = scene(vec![enclosure()], vec![slab(0.0, 0.2, 5.0, 4.0), slab(2.9, 0.2, 5.0, 4.0)], room(&INSIDE, 0));
+    s.room_settings.volumes = false;
+    let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Slab(_))), 0);
+    assert_eq!(b.len(), 4);
 }

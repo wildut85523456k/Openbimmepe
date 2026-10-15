@@ -62,3 +62,7 @@ jobs:
           $E /tmp/w2.ifc > /dev/null
           $E /tmp/w3.ifc edit > /dev/null
           python spikes/s12_ifc_writer/ifc_writer_check.py /tmp/w.txt /tmp/w1.ifc /tmp/w2.ifc /tmp/w3.ifc
+          for B in pbp survey shared; do
+            BASE=$B $E /tmp/g_$B.ifc > /tmp/g_$B.txt
+            python spikes/s12_ifc_writer/georef_base_check.py /tmp/g_$B.txt /tmp/g_$B.ifc $B
+          done

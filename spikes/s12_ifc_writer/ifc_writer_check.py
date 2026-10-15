@@ -347,7 +347,12 @@ ok(len(walls_by_id) == len(rows("WALL")), "one IfcWall per drawn wall, not per s
 wtypes = {int(r[0]): r for r in rows("WTYPE")}
 for r in rows("WTYPED"):
     w = walls_by_id[int(r[0])]
-    name, layers = wtypes[int(r[1])][1], [(x.split("=")[0].replace("_", " "), float(x.split("=")[1])) for x in wtypes[int(r[1])][2].split(",")]
+    name = wtypes[int(r[1])][1]
+    # the type lists its layers from the exterior (the left of travel); IFC counts from the right, so the file has them the other way round
+    layers_ext = [(x.split("=")[0].replace("_", " "), float(x.split("=")[1]), x.split("=")[2].replace("_", " ")) for x in wtypes[int(r[1])][2].split(",")]
+    core_a, core_b = int(wtypes[int(r[1])][3]), int(wtypes[int(r[1])][4])
+    wrap_idx = [] if wtypes[int(r[1])][5] == "-" else [int(i) for i in wtypes[int(r[1])][5].split(",")]
+    layers = [(m, t_) for m, t_, _ in reversed(layers_ext)]
     t = ue.get_type(w)
     ok(t is not None and t.is_a("IfcWallType") and t.Name == name.replace("_", " "), f"wall {r[0]} has its type")
     use = ue.get_material(w, should_skip_usage=False)
@@ -358,6 +363,15 @@ for r in rows("WTYPED"):
     ok(tm is not None and tm.is_a("IfcMaterialLayerSet") and tm.id() == ls.id(), "the usage points at the layer set of the type")
     got = [(l.Material.Name, l.LayerThickness) for l in ls.MaterialLayers]
     ok(len(got) == len(layers) and all(a[0] == b[0] and abs(a[1] - b[1]) < 1e-9 for a, b in zip(got, layers)), f"layers of {name}: {got}")
+    # function, priority (Revit's numbers), and the core, layer by layer; the left face is the first layer of the type
+    prio = {"Structure": 1, "Substrate": 2, "Thermal/Air Layer": 3, "Membrane Layer": 4, "Finish 1": 5, "Finish 2": 6}
+    for k, l in enumerate(reversed(list(ls.MaterialLayers))):
+        m_, t_, fn = layers_ext[k]
+        ok(l.Category == fn and l.Priority == prio[fn], f"layer {k + 1} of {name} is {l.Category} with priority {l.Priority}")
+        ok((l.Description == "Core") == (core_a <= k + 1 <= core_b), f"layer {k + 1} of {name} core flag {l.Description}")
+    tps = ue.get_psets(t).get("OpenBIM_WallType", {})
+    ok(tps.get("CoreFirstLayer") == core_a and tps.get("CoreLastLayer") == core_b, f"core boundaries of {name} {tps}")
+    ok([int(i) for i in tps.get("WrappingLayers", "").split(",") if i] == wrap_idx, f"wrapping layers of {name} {tps}")
     thick = float([x for x in rows("WALL") if x[0] == r[0]][0][-2])
     ok(abs(sum(l[1] for l in got) - thick) < 1e-9, "the layers add up to the wall thickness")
     ok(use.LayerSetDirection == "AXIS2" and use.DirectionSense == "POSITIVE" and abs(use.OffsetFromReferenceLine + thick / 2) < 1e-9, "usage offset puts the first layer on the right face")
@@ -376,6 +390,19 @@ got = set()
 for rel in f.by_type("IfcRelConnectsPathElements"):
     got.add((decode(rel.RelatingElement.GlobalId)[2], rel.RelatingConnectionType.replace("AT", "", 1).title(), decode(rel.RelatedElement.GlobalId)[2], rel.RelatedConnectionType.replace("AT", "", 1).title()))
 ok(got == mans, f"joins written and read back: {got} vs {mans}")
+# priorities: where both walls have layers, each side lists its layers' Revit priorities as they are in the file (from the right of travel)
+typed_of = {int(r[0]): int(r[1]) for r in rows("WTYPED")}
+prio = {"Structure": 1, "Substrate": 2, "Thermal/Air_Layer": 3, "Membrane_Layer": 4, "Finish_1": 5, "Finish_2": 6}
+def prios(wid): return [prio[x.split("=")[2]] for x in reversed(wtypes[typed_of[wid]][2].split(","))]
+n_with = 0
+for rel in f.by_type("IfcRelConnectsPathElements"):
+    a, b = decode(rel.RelatingElement.GlobalId)[2], decode(rel.RelatedElement.GlobalId)[2]
+    if a in typed_of and b in typed_of:
+        n_with += 1
+        ok(list(rel.RelatingPriorities) == prios(a) and list(rel.RelatedPriorities) == prios(b), f"join {a}-{b} priorities {rel.RelatingPriorities} {rel.RelatedPriorities}")
+    else:
+        ok(not rel.RelatingPriorities and not rel.RelatedPriorities, "an untyped wall's join has no priorities")
+ok(n_with > 0, "the scene has a join between two walls with layers")
 ok(len(mans) > 0, "the scene has joins")
 # each join is real on the plan: the end of the first wall is on the second wall's centre line (or its end), within half its thickness
 def centre_dist(pt, pts):
@@ -449,8 +476,12 @@ for sid, sp in spaces_by_id.items():
     kinds = []
     for rel, row in zip(mine, exp_rows):
         el = rel.RelatedBuildingElement
-        ok(decode(el.GlobalId)[2] == int(row[3]), f"{sp.Name}: boundary {row[1]} is on element {row[3]}")
-        ok(rel.PhysicalOrVirtualBoundary == "PHYSICAL" and rel.InternalOrExternalBoundary == "NOTDEFINED", "boundary is physical")
+        virtual = row[2] == "VIRTUAL"
+        if virtual:
+            ok(el.is_a("IfcVirtualElement") and decode(el.GlobalId)[2] == int(row[3]) and rel.PhysicalOrVirtualBoundary == "VIRTUAL", f"{sp.Name}: boundary {row[1]} on a separation line is virtual, on its virtual element")
+        else:
+            ok(decode(el.GlobalId)[2] == int(row[3]), f"{sp.Name}: boundary {row[1]} is on element {row[3]}")
+            ok(rel.PhysicalOrVirtualBoundary == "PHYSICAL" and rel.InternalOrExternalBoundary == "NOTDEFINED", "boundary is physical")
         surf = rel.ConnectionGeometry.SurfaceOnRelatingElement
         ok(surf.is_a("IfcCurveBoundedPlane"), "boundary surface is a bounded plane")
         outer, m = ring_world(sm, surf.BasisSurface.Position, surf.OuterBoundary)
@@ -459,8 +490,8 @@ for sid, sp in spaces_by_id.items():
         ok(len(outer) == len(mine_pts) and all(np.linalg.norm(a - b) < 1e-9 for a, b in zip(outer, mine_pts)), f"{sp.Name}: boundary {row[1]} corners as exported")
         holes = [ring_world(sm, surf.BasisSurface.Position, h)[0] for h in surf.InnerBoundaries or []]
         # every corner (outer and hole) lies on the surface of the element it bounds, or on the parent face for a door or window
-        tris = mesh_of(el)
-        for p in outer + [x for h in holes for x in h]:
+        tris = [] if virtual else mesh_of(el)
+        for p in ([] if virtual else outer + [x for h in holes for x in h]):
             ok(min(pt_tri(p, t[0], t[1], t[2]) for t in tris) < 1e-6, f"{sp.Name}: boundary {row[1]} corner {np.round(p, 3)} lies on {el.Name or el.is_a()}")
         # the normal points out of the room: a step into it from the middle of the face is outside the room, a step back is inside
         nrm = m[:3, 2]
@@ -513,26 +544,30 @@ ok(n_doors_expected == 2, f"two doors border the Office: {n_doors_expected}")
 # ---- 6e. georeferencing, read back with IfcOpenShell's own geolocation helpers
 import ifcopenshell.util.geolocation as geo
 gr = rows("GEOREF")[0]
-E, N, H, ang, scale, tn, lat, lon, elev = (float(x) for x in gr[:9])
+ang, scale, lat, lon, elev = (float(x) for x in gr[:5])
+E, N, H = (float(x) for x in gr[6:9])
+ax, ay, tnx, tny = (float(x) for x in gr[9:13])
 mc = f.by_type("IfcMapConversion")
 ok(len(mc) == 1, "one map conversion")
 mc = mc[0]
 ok(mc.SourceCRS == f.by_type("IfcProject")[0].RepresentationContexts[0], "the map conversion starts from the model's own context")
 crs = mc.TargetCRS
-ok(crs.is_a("IfcProjectedCRS") and crs.Name == gr[9] and crs.MapUnit.Name == "METRE" and crs.GeodeticDatum == "TESTDATUM" and crs.MapZone == "48N", "projected CRS names")
+ok(crs.is_a("IfcProjectedCRS") and crs.Name == gr[5] and crs.MapUnit.Name == "METRE" and crs.GeodeticDatum == "TESTDATUM" and crs.MapZone == "48N", "projected CRS names")
 ok(abs(mc.Eastings - E) < 1e-9 and abs(mc.Northings - N) < 1e-9 and abs(mc.OrthogonalHeight - H) < 1e-9 and abs(mc.Scale - scale) < 1e-12, "map conversion origin and scale")
-ok(abs(math.degrees(math.atan2(mc.XAxisOrdinate, mc.XAxisAbscissa)) - ang) < 1e-9 and abs(math.hypot(mc.XAxisAbscissa, mc.XAxisOrdinate) - 1) < 1e-12, "grid angle")
+ok(abs(math.degrees(math.atan2(mc.XAxisOrdinate, mc.XAxisAbscissa)) - ang) < 1e-9 and abs(math.hypot(mc.XAxisAbscissa, mc.XAxisOrdinate) - 1) < 1e-12, "the model's X axis lies at the angle to true north on the map")
 for r in rows("GEOPT"):
-    x, y, z, me, mn, mh, bx, by, bz = (float(v) for v in r)
-    e, n, h = geo.xyz2enh(x, y, z, mc.Eastings, mc.Northings, mc.OrthogonalHeight, mc.XAxisAbscissa, mc.XAxisOrdinate, mc.Scale)
+    x, y, z, me, mn, mh, bx, by, bz, fx, fy, fz = (float(v) for v in r)
+    e, n, h = geo.xyz2enh(fx, fy, fz, mc.Eastings, mc.Northings, mc.OrthogonalHeight, mc.XAxisAbscissa, mc.XAxisOrdinate, mc.Scale)
     ok(abs(e - me) < 1e-6 and abs(n - mn) < 1e-6 and abs(h - mh) < 1e-6, f"point {x},{y},{z}: IfcOpenShell puts it at {e:.4f} {n:.4f} {h:.4f}, the model at {me:.4f} {mn:.4f} {mh:.4f}")
-    ok(abs(bx - x) < 1e-6 and abs(by - y) < 1e-6 and abs(bz - z) < 1e-6, "map point comes back to the model point")
+    ok(abs(bx - x) < 1e-6 and abs(by - y) < 1e-6 and abs(bz - z) < 1e-6, "shared coordinates come back to the model point")
 pts = [np.array([float(v) for v in r[3:6]]) for r in rows("GEOPT")]
-ok(abs(np.linalg.norm(pts[1] - pts[0]) - 10 * scale) < 1e-9, "a 10 m length on the map is 10 m times the scale")
-ok(abs(math.degrees(math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])) - ang) < 1e-9, "the model X axis lies at the grid angle on the map")
-ok(abs(geo.get_true_north(f) - tn) < 1e-9, f"true north {geo.get_true_north(f)} vs {tn}")
+ok(abs(np.linalg.norm(pts[1] - pts[0]) - 10 * scale) < 1e-9 or abs(np.linalg.norm(pts[1][:2] - pts[0][:2]) - 10 * scale) < 1e-9, "a 10 m length on the map is 10 m times the scale")
+ok(abs(math.degrees(math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])) - ang) < 1e-9, "the model X axis lies at the angle on the map")
+ok(abs(geo.get_true_north(f) + ang) < 1e-9, f"true north {geo.get_true_north(f)} for angle {ang}")
 tnd = f.by_type("IfcProject")[0].RepresentationContexts[0].TrueNorth.DirectionRatios
-ok(abs(tnd[0] + math.sin(math.radians(tn))) < 1e-12 and abs(tnd[1] - math.cos(math.radians(tn))) < 1e-12, "true north is the Y axis turned anticlockwise by the angle")
+ok(abs(tnd[0] - tnx) < 1e-12 and abs(tnd[1] - tny) < 1e-12, "true north in the model plan")
+# map north, brought back into the model by the conversion, is the true north the file states
+ok(abs(tnd[0] - math.sin(math.radians(ang))) < 1e-12 and abs(tnd[1] - math.cos(math.radians(ang))) < 1e-12, "true north is map north turned back by the angle")
 site = f.by_type("IfcSite")[0]
 ok(abs(geo.dms2dd(*site.RefLatitude) - lat) < 1e-8 and abs(geo.dms2dd(*site.RefLongitude) - lon) < 1e-8 and abs(site.RefElevation - elev) < 1e-9, "site latitude, longitude and elevation")
 

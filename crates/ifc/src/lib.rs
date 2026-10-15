@@ -43,11 +43,15 @@ pub struct WallItem {
     pub chain: WallChain,
     /// index into `Scene::wall_types`; its layers must add up to the thickness of the chain
     pub wall_type: Option<usize>,
+    /// Revit's Room Bounding: whether rooms are bounded by this wall
+    pub room_bounding: bool,
 }
 
 pub struct SlabItem {
     pub id: u64,
     pub slab: Slab,
+    /// Revit's Room Bounding: whether rooms are bounded by this slab (floor and ceiling)
+    pub room_bounding: bool,
 }
 
 /// A compiled family with the number it keeps for life (it is part of the GlobalId of each of its types).
@@ -132,6 +136,10 @@ pub struct Scene {
     pub wall_joins: Vec<walls::WallJoin>,
     /// where the project is on the earth; without it the file has no map and the site has no position
     pub georef: Option<georef::Georef>,
+    /// how rooms are bounded and measured, for the whole project (Revit's Area and Volume Computations)
+    pub room_settings: boundaries::RoomSettings,
+    /// lines that bound rooms where there is no wall
+    pub separation_lines: Vec<boundaries::SeparationLine>,
     /// where family and shared parameters go; what it does not name goes to the custom sets
     pub pset_map: PsetMap,
 }
@@ -337,6 +345,8 @@ struct Out<'a> {
     /// entity of each wall, slab and placed family, in the order of the scene
     wall_entities: Vec<u32>,
     slab_entities: Vec<u32>,
+    /// the virtual element of each separation line that a boundary used
+    virtual_entities: BTreeMap<usize, u32>,
     item_entities: Vec<u32>,
 }
 
@@ -542,7 +552,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), item_entities: Vec::new() };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new() };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {
@@ -550,7 +560,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     }
     let north = match &scene.georef {
         Some(gr) => {
-            let (x, y) = gr.true_north();
+            let (x, y) = gr.file_true_north();
             let (x, y) = (o.r(x, "true north"), o.r(y, "true north"));
             format!("#{}", o.s.add(format!("IFCDIRECTION(({x},{y}))")))
         }
@@ -566,15 +576,26 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if let Some(gr) = &scene.georef {
         let opt = |v: &Option<String>| v.as_ref().map_or("$".to_string(), |t| string(t));
         let crs = o.s.add(format!("IFCPROJECTEDCRS({},$,{},{},{},{},#{u_len})", string(&gr.crs.name), opt(&gr.crs.geodetic_datum), opt(&gr.crs.vertical_datum), opt(&gr.crs.map_projection), opt(&gr.crs.map_zone)));
-        let (a, b) = gr.x_axis();
-        let vals = [gr.easting, gr.northing, gr.height, a, b, gr.scale].map(|v| o.r(v, "map conversion"));
+        let (origin, (a, b)) = gr.map_conversion();
+        let vals = [origin[0], origin[1], origin[2], a, b, gr.scale].map(|v| o.r(v, "map conversion"));
         o.s.add(format!("IFCMAPCONVERSION(#{ctx},#{crs},{})", vals.join(",")));
         o.report.map_conversions = 1;
     }
     let g = o.gen_gid();
     let project = o.s.add(format!("IFCPROJECT({g},$,{},$,$,$,$,(#{ctx}),#{units})", string(&scene.project_name)));
     // spatial structure
-    let site_pl = o.place(None, [0.0; 3], None, None);
+    // the site carries the whole model, so it is where the file's origin is moved to
+    let site_pl = match &scene.georef {
+        Some(gr) if gr.coordinate_base == georef::CoordinateBase::SharedCoordinates => {
+            let (a, b) = gr.x_axis();
+            o.place(None, gr.origin_shared(), Some([0.0, 0.0, 1.0]), Some([a, b, 0.0]))
+        }
+        Some(gr) => {
+            let b = gr.base().0;
+            o.place(None, [0.0 - b[0], 0.0 - b[1], 0.0 - b[2]], None, None)
+        }
+        None => o.place(None, [0.0; 3], None, None),
+    };
     let g = o.gen_gid();
     let (lat, lon, el) = match &scene.georef {
         Some(gr) => {
@@ -633,8 +654,10 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
     let mut type_ids: Vec<(u32, u32)> = Vec::new(); // (type entity, layer set)
     for (ti, t) in scene.wall_types.iter().enumerate() {
         t.check().map_err(|e| ExportError::Unsupported(format!("wall type {}: {e}", t.name)))?;
+        // IFC counts the layers across the wall from the right of travel to the left; the type lists them from the exterior, on the left
+        let (core_a, core_b) = t.core_range();
         let mut layers = Vec::new();
-        for l in &t.layers {
+        for (li, l) in t.layers.iter().enumerate().rev() {
             let m = match materials.get(l.material.as_str()) {
                 Some(m) => *m,
                 None => {
@@ -644,11 +667,14 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
                 }
             };
             let th = o.r(l.thickness, "layer thickness");
-            layers.push(format!("#{}", o.s.add(format!("IFCMATERIALLAYER(#{m},{th},$,{},$,$,$)", string(&l.material)))));
+            let core = if (core_a..=core_b).contains(&li) { "'Core'" } else { "$" };
+            layers.push(format!("#{}", o.s.add(format!("IFCMATERIALLAYER(#{m},{th},$,{},{core},{},{})", string(&l.material), string(l.function.name()), l.function.priority()))));
         }
         let ls = o.s.add(format!("IFCMATERIALLAYERSET(({}),{},$)", layers.join(","), string(&t.name)));
+        let wraps: Vec<String> = t.layers.iter().enumerate().filter(|(_, l)| l.wraps).map(|(i, _)| (i + 1).to_string()).collect();
+        let tps = o.pset_entity("OpenBIM_WallType", vec![("CoreFirstLayer", Val::Int(core_a as i64 + 1)), ("CoreLastLayer", Val::Int(core_b as i64 + 1)), ("WrappingLayers", Val::Text(wraps.join(","))), ("LayersRunFrom", Val::Label("exterior, on the left of travel".into()))]);
         let g = o.gid((0xFFFF_FFFDu64 << 32) | ti as u64, 0);
-        let te = o.s.add(format!("IFCWALLTYPE({g},$,{},$,$,$,$,$,$,.STANDARD.)", string(&t.name)));
+        let te = o.s.add(format!("IFCWALLTYPE({g},$,{},$,$,(#{tps}),$,$,$,.STANDARD.)", string(&t.name)));
         let g = o.gen_gid();
         o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,(#{te}),#{ls})"));
         type_ids.push((te, ls));
@@ -683,7 +709,7 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
             if (t.thickness() - c.thickness).abs() > 1e-9 {
                 return Err(ExportError::Unsupported(format!("wall {}: the layers of type {} add up to {} m but the wall is {} m thick", w.name, t.name, t.thickness(), c.thickness)));
             }
-            // the layers run across the wall from the right of travel to the left, from the face on the right
+            // IFC counts the layers from the face on the right of travel, which is where the centre line is half the thickness from
             let off = o.r(-c.thickness / 2.0, "layer offset");
             let u = o.s.add(format!("IFCMATERIALLAYERSETUSAGE(#{ls},.AXIS2.,.POSITIVE.,{off},$)"));
             let g = o.gen_gid();
@@ -753,8 +779,16 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         if j.a == j.b {
             return Err(ExportError::Unsupported(format!("wall join {}: a wall cannot be joined to itself", j.a)));
         }
+        // where both walls have layers, each layer's priority (Revit's: structure first) says which runs through which
+        let prios = |wi: usize| -> String {
+            match scene.walls[wi].wall_type.and_then(|ti| scene.wall_types.get(ti)) {
+                Some(t) => format!("({})", t.layers.iter().rev().map(|l| l.function.priority().to_string()).collect::<Vec<_>>().join(",")),
+                None => "()".to_string(),
+            }
+        };
+        let (pa, pb) = if scene.walls[j.a].wall_type.is_some() && scene.walls[j.b].wall_type.is_some() { (prios(j.a), prios(j.b)) } else { ("()".to_string(), "()".to_string()) };
         let g = o.gen_gid();
-        o.s.add(format!("IFCRELCONNECTSPATHELEMENTS({g},$,$,$,$,#{a},#{b},(),(),{},{})", j.b_end.ifc(), j.a_end.ifc()));
+        o.s.add(format!("IFCRELCONNECTSPATHELEMENTS({g},$,$,$,$,#{a},#{b},{pa},{pb},{},{})", j.b_end.ifc(), j.a_end.ifc()));
         o.report.wall_joins += 1;
     }
     Ok(())
@@ -871,6 +905,21 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
     Ok(())
 }
 
+/// The element a virtual boundary is related to (IFC4 wants one): an IfcVirtualElement for the separation line, made once.
+fn virtual_element(o: &mut Out, line: usize) -> u32 {
+    if !o.virtual_entities.contains_key(&line) {
+        let sl = &o.scene.separation_lines[line];
+        let (id, level) = (sl.id, sl.level);
+        let g = o.gid(id, 0);
+        let e = o.s.add(format!("IFCVIRTUALELEMENT({g},$,'Room separation line',$,$,$,$,$)"));
+        let elev = o.scene.levels.all().get(level).map_or(0.0, |l| l.elevation);
+        let st = o.storey_for(elev);
+        o.contain(st, e);
+        o.virtual_entities.insert(line, e);
+    }
+    o.virtual_entities[&line]
+}
+
 /// The second-level space boundaries of one room: for each bounding face its own surface in the room's frame.
 fn write_boundaries(o: &mut Out, r: &RoomItem, space: u32) {
     let scene = o.scene;
@@ -878,10 +927,12 @@ fn write_boundaries(o: &mut Out, r: &RoomItem, space: u32) {
     o.report.warnings.extend(warnings);
     let mut ents: Vec<u32> = Vec::new();
     for b in &found {
+        let virt = matches!(b.target, boundaries::Target::Virtual(_));
         let element = match b.target {
             boundaries::Target::Wall(i) => o.wall_entities.get(i),
             boundaries::Target::Slab(i) => o.slab_entities.get(i),
             boundaries::Target::Item(i) => o.item_entities.get(i),
+            boundaries::Target::Virtual(i) => Some(&virtual_element(o, i)),
         };
         let Some(&element) = element else {
             o.report.warnings.push(format!("room {}: a boundary element was not exported, so its boundary was left out", r.room.name));
@@ -900,7 +951,9 @@ fn write_boundaries(o: &mut Out, r: &RoomItem, space: u32) {
             _ => "$".to_string(),
         };
         let g = o.gen_gid();
-        let rel = o.s.add(format!("IFCRELSPACEBOUNDARY2NDLEVEL({g},$,$,$,#{space},#{element},#{geom},.PHYSICAL.,.NOTDEFINED.,{parent},$)"));
+        let kind = if virt { "VIRTUAL" } else { "PHYSICAL" };
+        let related = format!("#{element}");
+        let rel = o.s.add(format!("IFCRELSPACEBOUNDARY2NDLEVEL({g},$,$,$,#{space},{related},#{geom},.{kind}.,.NOTDEFINED.,{parent},$)"));
         ents.push(rel);
         o.report.space_boundaries += 1;
     }

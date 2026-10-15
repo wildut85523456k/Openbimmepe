@@ -1,7 +1,7 @@
 //! Second-level space boundaries: for every room, the faces of walls, slabs, doors and windows that bound it, each
 //! with its own surface. Worked out from the model, not drawn. Coordinates are in the frame of the storey the room
 //! is on (x, y as in the plan, z from the storey's elevation), which is the frame the room is written in.
-use crate::{Scene, RoomItem};
+use crate::{RoomItem, Scene};
 
 type P = [f64; 2];
 type V = [f64; 3];
@@ -13,6 +13,44 @@ pub enum Target {
     Slab(usize),
     /// a door or window: index into `Scene::items`
     Item(usize),
+    /// a room separation line: index into `Scene::separation_lines`; the boundary is virtual
+    Virtual(usize),
+}
+
+/// Where a room's boundary lies in a wall, as in Revit's Area and Volume Computations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoundaryLocation {
+    /// the faces of the wall (the default)
+    #[default]
+    WallFinish,
+    /// the centre line of the wall
+    WallCentre,
+    /// the faces of the wall's core
+    WallCore,
+    /// the centre line of the wall's core
+    WallCoreCentre,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoomSettings {
+    pub boundary_location: BoundaryLocation,
+    /// compute volumes as well as areas: the floor and ceiling are boundaries of the room
+    pub volumes: bool,
+}
+
+impl Default for RoomSettings {
+    fn default() -> Self {
+        RoomSettings { boundary_location: BoundaryLocation::WallFinish, volumes: true }
+    }
+}
+
+/// A line that bounds rooms where there is no wall (Revit's room separation line), on one level.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeparationLine {
+    pub id: u64,
+    pub level: usize,
+    pub a: [f64; 2],
+    pub b: [f64; 2],
 }
 
 /// A planar face (rings are open: the last point is not repeated): the plane (origin, normal pointing out of the room, direction of the face's u axis) and the
@@ -128,9 +166,11 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
             }
             let d = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
             let nout = [d[1], -d[0]]; // the right of the edge points out of the room
+            // the parts of the side that something bounds, along the side from its start
+            let mut covered: Vec<(f64, f64)> = Vec::new();
             for (wi, w) in scene.walls.iter().enumerate() {
                 let c = &w.chain;
-                if c.tops.iter().any(|t| t.is_some()) || c.base_z + c.height <= z0 + 1e-6 || c.base_z >= z1 - 1e-6 {
+                if !w.room_bounding || c.tops.iter().any(|t| t.is_some()) || c.base_z + c.height <= z0 + 1e-6 || c.base_z >= z1 - 1e-6 {
                     continue;
                 }
                 let Ok(plans) = c.plans() else { continue };
@@ -139,10 +179,10 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
                     let (c0, c1) = (c.points[si], c.points[(si + 1) % np]);
                     // the wall has to stand outside the room, beside the edge
                     let mid = [(c0[0] + c1[0]) / 2.0, (c0[1] + c1[1]) / 2.0];
-                    if dot2([mid[0] - a[0], mid[1] - a[1]], nout) <= 0.0 {
+                    if dot2([mid[0] - a[0], mid[1] - a[1]], nout) < -TOL {
                         continue;
                     }
-                    for (f0, f1) in [(p.l0, p.l1), (p.r0, p.r1)] {
+                    for (f0, f1) in wall_lines(scene, wi, c, p, c0, c1) {
                         let fl = (f1[0] - f0[0]).hypot(f1[1] - f0[1]);
                         if fl < 1e-9 {
                             continue;
@@ -157,6 +197,7 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
                         if hi - lo < 1e-6 {
                             continue;
                         }
+                        covered.push((lo, hi));
                         let (za, zb) = (z0.max(c.base_z), z1.min(c.base_z + c.height));
                         let origin = [a[0] + d[0] * lo, a[1] + d[1] * lo, za - elev];
                         let axis = [nout[0], nout[1], 0.0];
@@ -191,13 +232,53 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
                     }
                 }
             }
+            // room separation lines on this side bound it where there is no wall
+            for (li, sl) in scene.separation_lines.iter().enumerate().filter(|(_, l)| l.level == r.level) {
+                let sd = [sl.b[0] - sl.a[0], sl.b[1] - sl.a[1]];
+                let sl_len = sd.iter().map(|x| x * x).sum::<f64>().sqrt();
+                if sl_len < 1e-9 {
+                    continue;
+                }
+                let sdn = [sd[0] / sl_len, sd[1] / sl_len];
+                let parallel = (sdn[0] * d[1] - sdn[1] * d[0]).abs() <= 1e-6;
+                if !parallel || dot2([sl.a[0] - a[0], sl.a[1] - a[1]], nout).abs() > TOL {
+                    continue;
+                }
+                let (s0, s1) = (dot2([sl.a[0] - a[0], sl.a[1] - a[1]], d), dot2([sl.b[0] - a[0], sl.b[1] - a[1]], d));
+                let (lo, hi) = (s0.min(s1).max(0.0), s0.max(s1).min(len));
+                if hi - lo < 1e-6 {
+                    continue;
+                }
+                covered.push((lo, hi));
+                let surface = Surface { origin: [a[0] + d[0] * lo, a[1] + d[1] * lo, 0.0], axis: [nout[0], nout[1], 0.0], refdir: [d[0], d[1], 0.0], outer: rect(0.0, 0.0, hi - lo, r.height), inner: vec![] };
+                out.push(Boundary { target: Target::Virtual(li), surface, parent: None });
+            }
+            // what nothing bounds is said, since a room has no side without a wall or a separation line
+            covered.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut reach = 0.0;
+            let mut gaps = 0.0;
+            for (lo, hi) in &covered {
+                if *lo > reach + 1e-6 {
+                    gaps += lo - reach;
+                }
+                reach = reach.max(*hi);
+            }
+            if len > reach + 1e-6 {
+                gaps += len - reach;
+            }
+            if gaps > 1e-6 {
+                warn.push(format!("room {}: {:.2} m of the side from ({:.2}, {:.2}) to ({:.2}, {:.2}) is bounded by no wall and no separation line", r.name, gaps, a[0], a[1], b[0], b[1]));
+            }
         }
     }
 
     // ---- floor and ceiling
     let ring_uv = |ring: &[P], origin: V, refdir: V, vdir: V, z: f64| -> Vec<P> { ring.iter().map(|p| uv(origin, refdir, vdir, [p[0], p[1], z])).collect() };
     let mut ceiling: Option<(usize, f64)> = None;
-    for (si, item) in scene.slabs.iter().enumerate() {
+    for (si, item) in scene.slabs.iter().enumerate().filter(|_| scene.room_settings.volumes) {
+        if !item.room_bounding {
+            continue;
+        }
         let s = &item.slab;
         let covered = covers(&s.outline, &outline);
         let bottom = s.top - s.thickness;
@@ -226,4 +307,38 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
         None => {}
     }
     (out, warn)
+}
+
+/// The lines of a wall segment that can be a room's boundary, as the two end points of each: the faces of the wall,
+/// its centre line, or the faces or centre line of its core, as the project's setting says.
+fn wall_lines(scene: &Scene, wi: usize, c: &openbim_geom::WallChain, p: &openbim_geom::SegmentPlan, c0: P, c1: P) -> Vec<(P, P)> {
+    let t = c.thickness;
+    let (before, core) = match scene.walls[wi].wall_type.and_then(|ti| scene.wall_types.get(ti)) {
+        Some(wt) if (wt.thickness() - t).abs() < 1e-9 => {
+            let (a, b) = wt.core_range();
+            (wt.layers[..a].iter().map(|l| l.thickness).sum::<f64>(), wt.layers[a..=b].iter().map(|l| l.thickness).sum::<f64>())
+        }
+        _ => (0.0, t),
+    };
+    // offsets to the left of the centre line; the exterior (first layer) is on the left
+    let offsets: Vec<f64> = match scene.room_settings.boundary_location {
+        BoundaryLocation::WallFinish => return vec![(p.l0, p.l1), (p.r0, p.r1)],
+        BoundaryLocation::WallCentre => vec![0.0],
+        BoundaryLocation::WallCore => vec![t / 2.0 - before, t / 2.0 - before - core],
+        BoundaryLocation::WallCoreCentre => vec![t / 2.0 - before - core / 2.0],
+    };
+    let len = (c1[0] - c0[0]).hypot(c1[1] - c0[1]);
+    if len < 1e-9 {
+        return vec![];
+    }
+    let (u, n) = ([(c1[0] - c0[0]) / len, (c1[1] - c0[1]) / len], [-(c1[1] - c0[1]) / len, (c1[0] - c0[0]) / len]);
+    offsets
+        .into_iter()
+        .map(|o| {
+            // the ends of a line between the faces lie between the ends of the faces (mitres and stops are straight across)
+            let w = (o + t / 2.0) / t;
+            let (s0, s1) = (p.s_r0 + (p.s_l0 - p.s_r0) * w, p.s_r1 + (p.s_l1 - p.s_r1) * w);
+            ([c0[0] + u[0] * s0 + n[0] * o, c0[1] + u[1] * s0 + n[1] * o], [c0[0] + u[0] * s1 + n[0] * o, c0[1] + u[1] * s1 + n[1] * o])
+        })
+        .collect()
 }
