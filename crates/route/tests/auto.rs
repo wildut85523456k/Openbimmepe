@@ -284,7 +284,9 @@ fn dirv(d: usize) -> Ix {
 /// Dijkstra over (position, direction, run) on whole units of the pitch, written separately from the search. The costs are in
 /// hundredths of a metre: a step is 10, a vertical step `vf`, a bend `bend`. Boxes are in units, widened by 3/4 of a unit.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-fn reference(start_dir: usize, goal: Ix, goal_dir: usize, boxes: &[(Ix, Ix)], vertical: bool, k: usize, margin: i32, vf: i64, bend: i64) -> Option<i64> {
+fn reference(start_dir: usize, goal: Ix, goal_dir: usize, boxes: &[(Ix, Ix)], vertical: bool, k: usize, margin: i32, vf: i64, bend: i64, stub: i32) -> Option<i64> {
+    // a path that never bends is a straight line between the two stubs, which have to fit in it side by side, with a point between them
+    let straight_fits = goal.iter().map(|x| x.abs()).sum::<i32>() > 2 * stub;
     let lo = [goal[0].min(0) - margin, goal[1].min(0) - margin, if vertical { goal[2].min(0) - margin } else { 0 }];
     let hi = [goal[0].max(0) + margin, goal[1].max(0) + margin, if vertical { goal[2].max(0) + margin } else { 0 }];
     let blocked = |p: Ix, q: Ix| -> bool {
@@ -295,15 +297,15 @@ fn reference(start_dir: usize, goal: Ix, goal_dir: usize, boxes: &[(Ix, Ix)], ve
             })
         })
     };
-    let mut dist: HashMap<(Ix, usize, usize), i64> = HashMap::new();
+    let mut dist: HashMap<(Ix, usize, usize, bool), i64> = HashMap::new();
     let mut heap = BinaryHeap::new();
-    dist.insert(([0, 0, 0], start_dir, 0), 0);
-    heap.push(Reverse((0i64, [0, 0, 0], start_dir, 0usize)));
-    while let Some(Reverse((c, p, d, run))) = heap.pop() {
-        if dist.get(&(p, d, run)).is_some_and(|&x| c > x) {
+    dist.insert(([0, 0, 0], start_dir, 0, false), 0);
+    heap.push(Reverse((0i64, [0, 0, 0], start_dir, 0usize, false)));
+    while let Some(Reverse((c, p, d, run, bent))) = heap.pop() {
+        if dist.get(&(p, d, run, bent)).is_some_and(|&x| c > x) {
             continue;
         }
-        if p == goal && d == goal_dir && run == k {
+        if p == goal && d == goal_dir && run == k && (bent || straight_fits) {
             return Some(c);
         }
         for nd in 0..6 {
@@ -320,10 +322,11 @@ fn reference(start_dir: usize, goal: Ix, goal_dir: usize, boxes: &[(Ix, Ix)], ve
             }
             let nc = c + if nd / 2 == 2 { vf } else { 10 } + if nd != d { bend } else { 0 };
             let nrun = if nd == d { (run + 1).min(k) } else { 1.min(k) };
-            let e = dist.entry((q, nd, nrun)).or_insert(i64::MAX);
+            let nb = bent || nd != d;
+            let e = dist.entry((q, nd, nrun, nb)).or_insert(i64::MAX);
             if nc < *e {
                 *e = nc;
-                heap.push(Reverse((nc, q, nd, nrun)));
+                heap.push(Reverse((nc, q, nd, nrun, nb)));
             }
         }
     }
@@ -358,7 +361,7 @@ proptest! {
         let (a, b) = (conn([0.0; 3], unit_dir(d1), 0.05), conn(unit_pos(g), unit_dir(d2), 0.05));
         let o = AutoOptions { allow_vertical: vertical, min_leg: Some(0.5), search_margin: 1.0, vertical_factor: vf as f64 / 10.0, bend_cost: bc as f64 / 100.0, ..Default::default() };
         let zones: Vec<Zone> = bx.iter().map(|(l, h)| Zone::hard("b", unit_pos(*l), unit_pos(*h)).unwrap()).collect();
-        let expect = reference(d1, g, d2 ^ 1, &bx, vertical, 5, 10, vf, bc);
+        let expect = reference(d1, g, d2 ^ 1, &bx, vertical, 5, 10, vf, bc, 3);
         let p = prefs();
         let got = auto_route(&run_req(&a, &b, round(0.05), &p, &zones, &[], &[], &o));
         match (expect, got) {
@@ -460,4 +463,22 @@ fn the_exemption_only_covers_the_way_out_of_the_connector_not_the_line_behind_it
     let o = AutoOptions { search_margin: 1.5, ..Default::default() };
     let p = prefs();
     assert_eq!(auto_route(&run_req(&a, &b, round(0.05), &p, &body, &[0], &[], &o)), Err(AutoError::NoPath));
+}
+
+#[test]
+fn two_facing_connectors_too_close_for_both_stubs_are_not_joined_by_a_straight_pipe() {
+    let o = AutoOptions { allow_vertical: false, min_leg: Some(0.5), ..Default::default() };
+    let p = prefs(); // the stubs are 0.3 long
+    let (a, b) = (conn([0.0; 3], PY, 0.05), conn([0.0, 0.5, 0.0], NY, 0.05));
+    // 0.5 m between them cannot hold two stubs of 0.3 m in a straight line; whatever comes back has to be buildable
+    match auto_route(&run_req(&a, &b, round(0.05), &p, &[], &[], &[], &o)) {
+        Err(AutoError::NoPath) => {}
+        Ok(r) => assert!(bends(&r) >= 2, "{:?}", r.waypoints),
+        Err(e) => panic!("{e:?}"),
+    }
+    // far enough apart it is a straight pipe
+    let b2 = conn([0.0, 0.8, 0.0], NY, 0.05);
+    let r = auto_route(&run_req(&a, &b2, round(0.05), &p, &[], &[], &[], &o)).unwrap();
+    assert_eq!(bends(&r), 0);
+    assert!(close(r.cost, 0.8));
 }

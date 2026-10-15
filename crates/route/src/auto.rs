@@ -17,7 +17,7 @@
 //! code refuses it. The search is exact on the grid (A* with an admissible heuristic) and does the same thing
 //! every time. Nothing here is a standard value: every number is the author's.
 use super::catalogue::FittingClass;
-use super::{conn_run_size, ref_dim, route_inner, same_size, transition_len, Opts, Route, RouteError, RoutingPrefs};
+use super::{conn_run_size, dist, ref_dim, route_inner, same_size, transition_len, Opts, Route, RouteError, RoutingPrefs};
 use crate::snaps::{SnapSettings, Snaps};
 use openbim_family::mep::Connector;
 use openbim_geom::WallChain;
@@ -450,8 +450,11 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
 
     let goal_dir = d2 ^ 1;
     let node_id = |ix: [usize; 3]| ((ix[2] * n[1] + ix[1]) * n[0] + ix[0]) as u64;
-    let key_of = |node: u64, d: usize, run: usize| (node * 6 + d as u64) * (k as u64 + 1) + run as u64;
+    // the state also says whether the path has bent yet: one that has not is a straight line between the two stubs,
+    // which have to fit in it side by side
+    let key_of = |node: u64, d: usize, run: usize, bent: bool| (((node * 6 + d as u64) * (k as u64 + 1)) + run as u64) * 2 + u64::from(bent);
     let decode = |key: u64| -> ([usize; 3], usize, usize) {
+        let key = key / 2;
         let run = (key % (k as u64 + 1)) as usize;
         let rest = key / (k as u64 + 1);
         let d = (rest % 6) as usize;
@@ -508,7 +511,8 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
         }
     }
 
-    let start_key = key_of(node_id(start), d1, 0);
+    let start_key = key_of(node_id(start), d1, 0, false);
+    let straight_fits = dist(a, b) > 2.0 * stub + 1e-9;
     let goal_node = node_id(goal);
     let mut best: HashMap<u64, (f64, u64)> = HashMap::new();
     best.insert(start_key, (0.0, u64::MAX));
@@ -526,7 +530,7 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
             return Err(AutoError::TooLarge);
         }
         let (ix, d, run) = decode(key);
-        if node_id(ix) == goal_node && d == goal_dir && run == k {
+        if node_id(ix) == goal_node && d == goal_dir && run == k && (key % 2 == 1 || straight_fits) {
             found = Some((key, g));
             break;
         }
@@ -561,7 +565,7 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
             }
             let gained = (step / o.pitch + 1e-9).floor() as usize;
             let nrun = if nd == d { (run + gained).min(k) } else { gained.min(k) };
-            let nkey = key_of(node_id(jx), nd, nrun);
+            let nkey = key_of(node_id(jx), nd, nrun, key % 2 == 1 || nd != d);
             let ng = g + c;
             let better = best.get(&nkey).is_none_or(|e| ng < e.0 - 1e-12);
             if better {
