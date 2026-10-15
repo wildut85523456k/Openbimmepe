@@ -1,4 +1,6 @@
-//! Tiny formula language: numbers, names, + - * /, unary -, comparisons, && || !, and a few functions.
+//! Tiny formula language: numbers (with units such as `1000 mm`), names (letters in any language, digits, underscores
+//! and single spaces, as in `Rough Width`), + - * /, unary -, comparisons (`=`, `==`, `<>`, `!=`, `<`, `>`, `<=`, `>=`),
+//! && || !, and(...) or(...) not(...), and a few functions.
 //! Every formula is parsed once (names resolved to slots) and then evaluated many times without allocation.
 //! Hard limits keep hostile input cheap: length, nesting depth and node count.
 
@@ -7,6 +9,8 @@ use std::fmt;
 pub const MAX_LEN: usize = 1024;
 pub const MAX_DEPTH: usize = 48;
 pub const MAX_NODES: usize = 512;
+/// most conditions in one and(...) / or(...)
+pub const MAX_LOGIC_ARGS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprError {
@@ -78,7 +82,7 @@ impl Expr {
 
     pub fn parse(src: &str, resolve: &dyn Fn(&str) -> Option<usize>) -> Result<Expr, ExprError> {
         if src.len() > MAX_LEN { return Err(ExprError::TooLong); }
-        let toks = lex(src)?;
+        let toks = lex(src, resolve)?;
         let mut p = Parser { toks: &toks, i: 0, resolve, nodes: 0, deps: Vec::new() };
         let root = p.or(0)?;
         if p.i != toks.len() { return Err(ExprError::Syntax(format!("unexpected '{}'", toks[p.i].text()))); }
@@ -157,7 +161,25 @@ impl Tok {
     }
 }
 
-fn lex(src: &str) -> Result<Vec<Tok>, ExprError> {
+/// Length units a number may carry, as metres; angles are kept in degrees.
+fn unit_factor(w: &str) -> Option<f64> {
+    Some(match w {
+        "mm" => 0.001, "cm" => 0.01, "m" => 1.0, "km" => 1000.0, "in" => 0.0254, "ft" => 0.3048,
+        "deg" => 1.0, "rad" => 180.0 / std::f64::consts::PI,
+        _ => return None,
+    })
+}
+
+fn is_word(ch: char) -> bool { ch.is_alphanumeric() || ch == '_' }
+fn starts_word(ch: char) -> bool { ch.is_alphabetic() || ch == '_' }
+
+/// End of the name part starting at `i`. A '.' joins two parts (choice.option) only when a letter or underscore follows.
+fn word_end(c: &[char], mut i: usize) -> usize {
+    while i < c.len() && (is_word(c[i]) || (c[i] == '.' && i + 1 < c.len() && starts_word(c[i + 1]))) { i += 1; }
+    i
+}
+
+fn lex(src: &str, resolve: &dyn Fn(&str) -> Option<usize>) -> Result<Vec<Tok>, ExprError> {
     let c: Vec<char> = src.chars().collect();
     let mut i = 0;
     let mut out = Vec::new();
@@ -173,22 +195,35 @@ fn lex(src: &str) -> Result<Vec<Tok>, ExprError> {
                 if j < c.len() && c[j].is_ascii_digit() { while j < c.len() && c[j].is_ascii_digit() { j += 1; } i = j; }
             }
             let t: String = c[s..i].iter().collect();
-            let v: f64 = t.parse().map_err(|_| ExprError::Syntax(format!("bad number '{t}'")))?;
+            let mut v: f64 = t.parse().map_err(|_| ExprError::Syntax(format!("bad number '{t}'")))?;
+            // a unit straight after the number, with or without a space: 1000 mm, 2.5cm
+            let mut j = i;
+            while j < c.len() && c[j] == ' ' { j += 1; }
+            if j < c.len() && starts_word(c[j]) {
+                let e = { let mut e = j; while e < c.len() && is_word(c[e]) { e += 1; } e };
+                let w: String = c[j..e].iter().collect();
+                if let Some(f) = unit_factor(&w) { v *= f; i = e; }
+            }
             if !v.is_finite() { return Err(ExprError::NotFinite); }
             out.push(Tok::Num(v));
-        } else if ch.is_ascii_alphabetic() || ch == '_' {
-            let s = i;
-            // a '.' joins two name parts (choice.option) only when a letter or underscore follows it
-            while i < c.len() && (c[i].is_ascii_alphanumeric() || c[i] == '_'
-                || (c[i] == '.' && i + 1 < c.len() && (c[i + 1].is_ascii_alphabetic() || c[i + 1] == '_'))) { i += 1; }
-            out.push(Tok::Id(c[s..i].iter().collect()));
+        } else if starts_word(ch) {
+            // the longest run of words separated by single spaces that is a known name ("Rough Width"), else one word
+            let first = word_end(&c, i);
+            let mut ends = vec![first];
+            while ends.len() < 32 {
+                let j = *ends.last().unwrap();
+                if j + 1 < c.len() && c[j] == ' ' && starts_word(c[j + 1]) { ends.push(word_end(&c, j + 1)); } else { break; }
+            }
+            let end = ends.iter().rev().copied().find(|&e| { let cand: String = c[i..e].iter().collect(); resolve(&cand).is_some() }).unwrap_or(first);
+            out.push(Tok::Id(c[i..end].iter().collect()));
+            i = end;
         } else {
             let two: String = c[i..(i + 2).min(c.len())].iter().collect();
-            let op2: Option<&'static str> = match two.as_str() { "<=" => Some("<="), ">=" => Some(">="), "==" => Some("=="), "!=" => Some("!="), "&&" => Some("&&"), "||" => Some("||"), _ => None };
+            let op2: Option<&'static str> = match two.as_str() { "<=" => Some("<="), ">=" => Some(">="), "==" => Some("=="), "!=" => Some("!="), "<>" => Some("!="), "&&" => Some("&&"), "||" => Some("||"), _ => None };
             if let Some(o) = op2 { out.push(Tok::Op(o)); i += 2; continue; }
             let t = match ch {
                 '+' => Tok::Op("+"), '-' => Tok::Op("-"), '*' => Tok::Op("*"), '/' => Tok::Op("/"),
-                '<' => Tok::Op("<"), '>' => Tok::Op(">"), '!' => Tok::Op("!"),
+                '<' => Tok::Op("<"), '>' => Tok::Op(">"), '!' => Tok::Op("!"), '=' => Tok::Op("=="),
                 '(' => Tok::LP, ')' => Tok::RP, ',' => Tok::Comma,
                 _ => return Err(ExprError::Syntax(format!("unexpected character '{ch}'"))),
             };
@@ -275,7 +310,8 @@ impl Parser<'_> {
             Tok::Id(name) => {
                 if matches!(self.peek(), Some(Tok::LP)) {
                     self.i += 1;
-                    let (f, arity) = Fun::from_name(&name).ok_or_else(|| ExprError::UnknownFunction(name.clone()))?;
+                    let logic = match name.as_str() { "and" => Some(Bin::And), "or" => Some(Bin::Or), "not" => Some(Bin::Eq /* only a marker: not() has no binary operator */), _ => None };
+                    let (f, arity) = if logic.is_some() { (Fun::Pi, 0) } else { Fun::from_name(&name).ok_or_else(|| ExprError::UnknownFunction(name.clone()))? };
                     let mut args = Vec::new();
                     if !matches!(self.peek(), Some(Tok::RP)) {
                         loop {
@@ -285,6 +321,18 @@ impl Parser<'_> {
                     }
                     if !matches!(self.peek(), Some(Tok::RP)) { return Err(ExprError::Syntax("missing ')'".into())); }
                     self.i += 1;
+                    if let Some(op) = logic {
+                        // and(a, b, ...) / or(a, b, ...) take two to sixteen conditions; not(a) takes one
+                        if name == "not" {
+                            if args.len() != 1 { return Err(ExprError::Arity { name, expected: 1, got: args.len() }); }
+                            return Ok(Node::Not(Box::new(args.remove(0))));
+                        }
+                        if args.len() < 2 { return Err(ExprError::Arity { name, expected: 2, got: args.len() }); }
+                        if args.len() > MAX_LOGIC_ARGS { return Err(ExprError::TooManyNodes); }
+                        let mut it = args.into_iter();
+                        let first = it.next().expect("two arguments");
+                        return Ok(it.fold(first, |l, r| Node::Bin(op, Box::new(l), Box::new(r))));
+                    }
                     if args.len() != arity { return Err(ExprError::Arity { name, expected: arity, got: args.len() }); }
                     Ok(Node::Call(f, args))
                 } else {

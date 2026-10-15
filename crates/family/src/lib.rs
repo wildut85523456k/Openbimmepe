@@ -383,9 +383,15 @@ pub struct Inner {
 pub struct Compiled(Arc<Inner>);
 impl Deref for Compiled { type Target = Inner; fn deref(&self) -> &Inner { &self.0 } }
 
+/// Names start with a letter (any language) or underscore, then letters, digits, underscores and single spaces
+/// ("Rough Width", "Largeur_allège"); at most 64 characters, no space at the end.
 pub(crate) fn valid_name(n: &str) -> bool {
     let mut c = n.chars();
-    matches!(c.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_') && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') && n.len() <= 64
+    matches!(c.next(), Some(ch) if ch.is_alphabetic() || ch == '_')
+        && n.chars().all(|ch| ch.is_alphanumeric() || ch == '_' || ch == ' ')
+        && !n.contains("  ")
+        && !n.ends_with(' ')
+        && n.chars().count() <= 64
 }
 
 pub(crate) fn clean_text(name: &str, s: &str, max: usize) -> Result<(), FamilyError> {
