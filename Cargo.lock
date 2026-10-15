@@ -285,6 +285,7 @@ dependencies = [
 name = "openbim-place"
 version = "0.0.1"
 dependencies = [
+ "openbim-arch",
  "openbim-family",
  "openbim-geom",
  "proptest",

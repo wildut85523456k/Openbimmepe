@@ -9,6 +9,7 @@
 
 use openbim_family::{Compiled, FamilyError, Instance, Request, Scope};
 use openbim_geom::{GeomError, Opening, WallChain};
+pub mod floors;
 pub mod penetrations;
 use penetrations::{Penetration, Run, RunProblem};
 use rayon::prelude::*;

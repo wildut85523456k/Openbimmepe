@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 openbim-geom = { path = "../geom" }
 openbim-family = { path = "../family" }
+openbim-arch = { path = "../arch" }
 rayon = "1.10"
 
 [dev-dependencies]

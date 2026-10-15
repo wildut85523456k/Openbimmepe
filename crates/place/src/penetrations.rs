@@ -57,6 +57,10 @@ pub enum RunProblem {
     InsideWall,
     /// the run starts or ends inside a wall
     EndsInWall,
+    /// the run lies inside the thickness of a floor slab
+    InsideSlab,
+    /// the run starts or ends inside a floor slab
+    EndsInSlab,
 }
 
 impl RunProblem {
@@ -65,6 +69,8 @@ impl RunProblem {
             RunProblem::BadData => "the run has bad data (not finite, no length, or a size or margin that is not allowed)",
             RunProblem::InsideWall => "the run lies inside a wall",
             RunProblem::EndsInWall => "the run starts or ends inside a wall",
+            RunProblem::InsideSlab => "the run lies inside a floor slab",
+            RunProblem::EndsInSlab => "the run starts or ends inside a floor slab",
         }
     }
 }
