@@ -89,15 +89,15 @@ impl SharedSet {
             let num = |s: &str, why: &'static str| -> Result<f64, (usize, FamilyError)> { s.parse::<f64>().ok().filter(|v| v.is_finite()).ok_or_else(|| e(why)) };
             let def = match f[2] {
                 // number is the older word for length
-                "number" | "length" | "ratio" | "angle" | "area" | "volume" | "count" => {
+                "number" | "length" | "ratio" | "angle" | "area" | "volume" | "count" | "time" | "mass" | "temperature" | "flow" | "force" | "pressure" | "energy" | "power" | "u_value" => {
                     let d = ValueDef::input(name, num(f[4], "the default is not a number")?, num(f[5], "the minimum is not a number")?, num(f[6], "the maximum is not a number")?, scope);
-                    match f[2] { "ratio" => d.with_dim(crate::NUMBER), "angle" => d.with_dim(crate::ANGLE), "area" => d.with_dim(crate::AREA), "volume" => d.with_dim(crate::VOLUME), _ => d }
+                    match f[2] { "ratio" => d.with_dim(crate::NUMBER), "angle" => d.with_dim(crate::ANGLE), "area" => d.with_dim(crate::AREA), "volume" => d.with_dim(crate::VOLUME), k => match crate::Dim::from_code(k) { Some(dim) if k != "number" && k != "length" && k != "count" => d.with_dim(dim), _ => d } }
                 }
                 "flag" => match f[4] { "0" | "false" => ValueDef::flag(name, false, scope), "1" | "true" => ValueDef::flag(name, true, scope), _ => return Err(e("a flag default is 0 or 1")) },
                 "choice" => { let o: Vec<&str> = f[7].split('|').collect(); ValueDef::choice(name, &o, f[4], scope) }
                 "text" => ValueDef::text(name, f[4], scope),
                 "material" => ValueDef::material(name, f[4], scope),
-                _ => return Err(e("kind must be length, angle, area, volume, ratio, count, flag, choice, text or material")),
+                _ => return Err(e("kind must be length, angle, area, volume, time, mass, temperature, flow, force, pressure, energy, power, u_value, ratio, count, flag, choice, text or material")),
             };
             let def = if f[2] == "count" { match def.kind { ValueKind::Input { default, min, max, scope, .. } => ValueDef::count(name, default, min, max, scope), _ => def } } else { def };
             set.params.push(SharedParam { id, group: f[8].into(), description: f[9].into(), def });

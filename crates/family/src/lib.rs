@@ -22,7 +22,7 @@ pub mod library;
 
 use expr::{Expr, ANG, LEN, NUM};
 pub use expr::ExprError;
-pub use expr::{Dim, Want, ANGLE, AREA, LENGTH, NUMBER, VOLUME};
+pub use expr::{Dim, Want, ANGLE, AREA, ENERGY, FLOW, FORCE, LENGTH, MASS, NUMBER, POWER, PRESSURE, TEMPERATURE, TIME, U_VALUE, VOLUME};
 pub use shared::{SharedParam, SharedSet};
 pub use forms::{Form, FormDef, FormGeom, FormKind, Loop, ProfileDef};
 pub use mep::{Category, Connector, ConnectorDef, Dir, Domain, FlowDir, Host, MateError, PlanDef, PlanShape, Pose, Resize, ShapeDef, System};

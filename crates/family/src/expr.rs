@@ -99,36 +99,69 @@ impl Expr {
     }
 }
 
-/// What a value measures: powers of length and of angle. Lengths are metres and angles degrees inside the program,
-/// so the dimension is only used to check formulas; it never changes a number.
+/// What a value measures: powers of length, angle, time, mass and temperature difference. Inside the program lengths
+/// are metres, angles degrees, times seconds, masses kilograms and temperature differences kelvin, so the dimension
+/// is only used to check formulas; it never changes a number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Dim { pub len: i8, pub ang: i8 }
-pub const NUMBER: Dim = Dim { len: 0, ang: 0 };
-pub const LENGTH: Dim = Dim { len: 1, ang: 0 };
-pub const AREA: Dim = Dim { len: 2, ang: 0 };
-pub const VOLUME: Dim = Dim { len: 3, ang: 0 };
-pub const ANGLE: Dim = Dim { len: 0, ang: 1 };
+pub struct Dim { pub len: i8, pub ang: i8, pub time: i8, pub mass: i8, pub temp: i8 }
+pub const NUMBER: Dim = Dim { len: 0, ang: 0, time: 0, mass: 0, temp: 0 };
+pub const LENGTH: Dim = Dim { len: 1, ..NUMBER };
+pub const AREA: Dim = Dim { len: 2, ..NUMBER };
+pub const VOLUME: Dim = Dim { len: 3, ..NUMBER };
+pub const ANGLE: Dim = Dim { ang: 1, ..NUMBER };
+pub const TIME: Dim = Dim { time: 1, ..NUMBER };
+pub const MASS: Dim = Dim { mass: 1, ..NUMBER };
+/// a temperature difference (kelvin and degrees Celsius are the same size)
+pub const TEMPERATURE: Dim = Dim { temp: 1, ..NUMBER };
+/// m3/s
+pub const FLOW: Dim = Dim { len: 3, time: -1, ..NUMBER };
+/// kg m/s2
+pub const FORCE: Dim = Dim { len: 1, time: -2, mass: 1, ..NUMBER };
+/// kg/(m s2)
+pub const PRESSURE: Dim = Dim { len: -1, time: -2, mass: 1, ..NUMBER };
+/// kg m2/s2
+pub const ENERGY: Dim = Dim { len: 2, time: -2, mass: 1, ..NUMBER };
+/// kg m2/s3
+pub const POWER: Dim = Dim { len: 2, time: -3, mass: 1, ..NUMBER };
+/// W/(m2 K): the U-value of a wall or window
+pub const U_VALUE: Dim = Dim { time: -3, mass: 1, temp: -1, ..NUMBER };
 const MAX_POWER: i8 = 6;
 
 impl Dim {
-    fn mul(self, o: Dim) -> Result<Dim, ExprError> { Dim { len: self.len + o.len, ang: self.ang + o.ang }.limited() }
-    fn div(self, o: Dim) -> Result<Dim, ExprError> { Dim { len: self.len - o.len, ang: self.ang - o.ang }.limited() }
+    fn mul(self, o: Dim) -> Result<Dim, ExprError> {
+        Dim { len: self.len + o.len, ang: self.ang + o.ang, time: self.time + o.time, mass: self.mass + o.mass, temp: self.temp + o.temp }.limited()
+    }
+    fn div(self, o: Dim) -> Result<Dim, ExprError> {
+        Dim { len: self.len - o.len, ang: self.ang - o.ang, time: self.time - o.time, mass: self.mass - o.mass, temp: self.temp - o.temp }.limited()
+    }
+    fn powers(self) -> [i8; 5] { [self.len, self.ang, self.time, self.mass, self.temp] }
     fn limited(self) -> Result<Dim, ExprError> {
-        if self.len.abs() > MAX_POWER || self.ang.abs() > MAX_POWER { Err(ExprError::Units(format!("{} is beyond what a formula may build", self.name()))) } else { Ok(self) }
+        if self.powers().iter().any(|p| p.abs() > MAX_POWER) { Err(ExprError::Units(format!("{} is beyond what a formula may build", self.name()))) } else { Ok(self) }
     }
-    /// Words for a message: length, area, volume, angle, number, or powers of them.
+    /// Words for a message: length, area, volume, angle, number, time, mass, flow, pressure and so on, or powers of them.
     pub fn name(self) -> String {
-        match (self.len, self.ang) {
-            (0, 0) => "a number".into(), (1, 0) => "a length".into(), (2, 0) => "an area".into(), (3, 0) => "a volume".into(), (0, 1) => "an angle".into(),
-            (l, 0) => format!("length^{l}"), (0, a) => format!("angle^{a}"), (l, a) => format!("length^{l} x angle^{a}"),
+        if let Some(c) = self.code() {
+            return match c {
+                "number" => "a number", "length" => "a length", "area" => "an area", "volume" => "a volume", "angle" => "an angle", "time" => "a time",
+                "mass" => "a mass", "temperature" => "a temperature difference", "flow" => "a flow rate", "force" => "a force", "pressure" => "a pressure",
+                "energy" => "an energy", "power" => "a power", _ => "a U-value",
+            }
+            .into();
         }
+        let names = ["length", "angle", "time", "mass", "temperature"];
+        let parts: Vec<String> = self.powers().iter().zip(names).filter(|(p, _)| **p != 0).map(|(p, n)| if *p == 1 { n.to_string() } else { format!("{n}^{p}") }).collect();
+        parts.join(" x ")
     }
-    /// Short name used in files: number, length, area, volume, angle.
+    const CODES: [(&'static str, Dim); 14] = [
+        ("number", NUMBER), ("length", LENGTH), ("area", AREA), ("volume", VOLUME), ("angle", ANGLE), ("time", TIME), ("mass", MASS), ("temperature", TEMPERATURE),
+        ("flow", FLOW), ("force", FORCE), ("pressure", PRESSURE), ("energy", ENERGY), ("power", POWER), ("u_value", U_VALUE),
+    ];
+    /// Short name used in files: number, length, area, volume, angle, time, mass, temperature, flow, force, pressure, energy, power, u_value.
     pub fn code(self) -> Option<&'static str> {
-        Some(match (self.len, self.ang) { (0, 0) => "number", (1, 0) => "length", (2, 0) => "area", (3, 0) => "volume", (0, 1) => "angle", _ => return None })
+        Self::CODES.iter().find(|(_, d)| *d == self).map(|(c, _)| *c)
     }
     pub fn from_code(s: &str) -> Option<Dim> {
-        Some(match s { "number" => NUMBER, "length" => LENGTH, "area" => AREA, "volume" => VOLUME, "angle" => ANGLE, _ => return None })
+        Self::CODES.iter().find(|(c, _)| *c == s).map(|(_, d)| *d)
     }
 }
 
@@ -194,8 +227,8 @@ fn ty(n: &Node, slots: &dyn Fn(usize) -> Dim) -> Result<Ty, ExprError> {
                 Fun::Abs | Fun::Floor | Fun::Ceil | Fun::Round => t[0],
                 Fun::Sqrt => {
                     let d = t[0].dim;
-                    if d.len % 2 != 0 || d.ang % 2 != 0 { return Err(ExprError::Units(format!("sqrt of {} has no whole dimension", d.name()))); }
-                    Ty { dim: Dim { len: d.len / 2, ang: d.ang / 2 }, bare: t[0].bare, zero: t[0].zero }
+                    if d.powers().iter().any(|p| p % 2 != 0) { return Err(ExprError::Units(format!("sqrt of {} has no whole dimension", d.name()))); }
+                    Ty { dim: Dim { len: d.len / 2, ang: d.ang / 2, time: d.time / 2, mass: d.mass / 2, temp: d.temp / 2 }, bare: t[0].bare, zero: t[0].zero }
                 }
                 Fun::If => { cond("if", t[0])?; unify("choose between", t[1], t[2])? }
                 Fun::Clamp => { let m = unify("clamp", t[1], t[2])?; unify("clamp", t[0], m)? }
@@ -283,11 +316,19 @@ impl Tok {
     }
 }
 
-/// Length units a number may carry, as metres; angles are kept in degrees.
+/// Units a number may carry, as the program's own: metres, degrees, seconds, kilograms, kelvin.
 fn unit_factor(w: &str) -> Option<(f64, Dim)> {
     Some(match w {
         "mm" => (0.001, LENGTH), "cm" => (0.01, LENGTH), "m" => (1.0, LENGTH), "km" => (1000.0, LENGTH), "in" => (0.0254, LENGTH), "ft" => (0.3048, LENGTH),
         "deg" => (1.0, ANGLE), "rad" => (180.0 / std::f64::consts::PI, ANGLE),
+        "s" => (1.0, TIME), "min" => (60.0, TIME), "h" => (3600.0, TIME),
+        "g" => (0.001, MASS), "kg" => (1.0, MASS), "t" => (1000.0, MASS),
+        "K" => (1.0, TEMPERATURE),
+        "L" => (0.001, VOLUME),
+        "N" => (1.0, FORCE), "kN" => (1000.0, FORCE),
+        "Pa" => (1.0, PRESSURE), "kPa" => (1000.0, PRESSURE), "bar" => (100000.0, PRESSURE),
+        "J" => (1.0, ENERGY), "kJ" => (1000.0, ENERGY),
+        "W" => (1.0, POWER), "kW" => (1000.0, POWER),
         _ => return None,
     })
 }

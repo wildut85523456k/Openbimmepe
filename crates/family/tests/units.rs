@@ -56,7 +56,7 @@ fn dimensions_follow_the_arithmetic() {
     assert_eq!(dim_of("Width / Width"), NUMBER);
     assert_eq!(dim_of("Width * Width / Width"), LENGTH);
     assert_eq!(dim_of("sqrt(Width * Width)"), LENGTH);
-    assert_eq!(dim_of("1 / Width"), Dim { len: -1, ang: 0 });
+    assert_eq!(dim_of("1 / Width"), Dim { len: -1, ..NUMBER });
     assert_eq!(dim_of("30 deg"), ANGLE);
     assert_eq!(dim_of("atan(Width / Width)"), ANGLE);
     assert_eq!(dim_of("atan2(Width, 2 * Width)"), ANGLE);
@@ -193,10 +193,10 @@ fn the_library_still_compiles_and_says_its_units() {
     assert_eq!(window.value_dim("width"), Some(LENGTH));
     assert_eq!(window.value_dim("window_area"), Some(AREA));
     assert_eq!(window.value_dim("mullions"), Some(NUMBER));
-    // u-values per area and per length, so that the window's own u-value works out as per area
-    assert_eq!(window.value_dim("ug"), Some(Dim { len: -2, ang: 0 }));
-    assert_eq!(window.value_dim("psi"), Some(Dim { len: -1, ang: 0 }));
-    assert_eq!(window.value_dim("u_window"), Some(Dim { len: -2, ang: 0 }));
+    // u-values per area and per length (W/m2K and W/mK), so that the window's own u-value works out as W/m2K
+    assert_eq!(window.value_dim("ug"), Some(U_VALUE));
+    assert_eq!(window.value_dim("psi"), Some(Dim { len: 1, time: -3, mass: 1, temp: -1, ..NUMBER }));
+    assert_eq!(window.value_dim("u_window"), Some(U_VALUE));
     let door = &lib[1];
     assert_eq!(door.value_dim("open_angle"), Some(ANGLE));
 }
@@ -224,6 +224,58 @@ fn shared_parameters_carry_their_unit_through_the_text_file() {
     assert_eq!(again.to_text(), set.to_text());
     // a dimension that has no word in the file is refused
     let mut odd = set.clone();
-    odd.params[0].def = odd.params[0].def.clone().with_dim(Dim { len: -2, ang: 0 });
+    odd.params[0].def = odd.params[0].def.clone().with_dim(Dim { len: -2, ..NUMBER });
     assert!(odd.check().is_err());
+}
+
+#[test]
+fn time_mass_temperature_and_what_is_built_from_them_have_dimensions_and_units() {
+    // each unit scales to the program's own: seconds, kilograms, kelvin, pascals, watts
+    assert!((value("2 h / 1 s") - 7200.0).abs() < 1e-9);
+    assert!((value("1 min / 1 s") - 60.0).abs() < 1e-9);
+    assert!((value("1 t / 1 kg") - 1000.0).abs() < 1e-9);
+    assert!((value("500 g / 1 kg") - 0.5).abs() < 1e-12);
+    assert!((value("2 kPa / 1 Pa") - 2000.0).abs() < 1e-9);
+    assert!((value("1 bar / 1 kPa") - 100.0).abs() < 1e-9);
+    assert!((value("3 kW / 1 W") - 3000.0).abs() < 1e-9);
+    assert!((value("2 kJ / 1 J") - 2000.0).abs() < 1e-9);
+    assert!((value("36 L / 1 s / (1 m * 1 m * 1 m / 1 s)") - 0.036).abs() < 1e-12);
+    // the dimensions
+    assert_eq!(dim_of("2 h"), TIME);
+    assert_eq!(dim_of("3 kg"), MASS);
+    assert_eq!(dim_of("5 K"), TEMPERATURE);
+    assert_eq!(dim_of("10 L / 1 s"), FLOW);
+    assert_eq!(dim_of("1 N"), FORCE);
+    assert_eq!(dim_of("1 Pa"), PRESSURE);
+    assert_eq!(dim_of("1 N / (1 m * 1 m)"), PRESSURE);
+    assert_eq!(dim_of("1 W * 1 s"), ENERGY);
+    assert_eq!(dim_of("1 J / 1 s"), POWER);
+    assert_eq!(dim_of("1 W / (1 m * 1 m) / 1 K"), U_VALUE);
+    assert_eq!(dim_of("sqrt(4 kg * 1 kg)"), MASS);
+}
+
+#[test]
+fn quantities_of_different_kinds_are_not_mixed() {
+    assert!(units_error("1 kg + 1 s").contains("cannot add a mass and a time"));
+    assert!(units_error("1 kW + 1 kJ").contains("cannot add a power and an energy"));
+    assert!(units_error("2 h + 5").contains("bare number"));
+    assert!(units_error("1 Pa - 1 K").contains("cannot subtract a pressure and a temperature difference"));
+    // odd powers cannot be square-rooted
+    assert!(units_error("sqrt(1 kg)").contains("no whole dimension"));
+    // a dimension that has no name of its own is spelled with its powers
+    let mixed = Dim { len: 1, time: -1, ..NUMBER };
+    assert_eq!(Dim::from_code("pressure"), Some(PRESSURE));
+    assert_eq!(mixed.code(), None);
+}
+
+#[test]
+fn the_new_dimensions_go_through_the_shared_parameter_file() {
+    let id = |n: u128| format!("{n:032x}");
+    let text = format!("{}	flow_rate	flow	type	1	0	9		G	d
+{}	dp	pressure	type	1	0	9		G	d
+{}	u	u_value	type	1	0	9		G	d
+", id(1), id(2), id(3));
+    let set = SharedSet::from_text(&text).unwrap();
+    assert_eq!(SharedSet::from_text(&set.to_text()).unwrap().to_text(), set.to_text());
+    assert!(set.to_text().contains("\tflow\t") && set.to_text().contains("\tpressure\t") && set.to_text().contains("\tu_value\t"));
 }

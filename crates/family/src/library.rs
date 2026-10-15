@@ -1,7 +1,7 @@
 //! Authored families used to test the solver. Dimensions are illustrative defaults, not values from any standard.
 //! Use `all()` to compile them together: the door nests the lever handle.
 
-use crate::{compile_library, Dim, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dir, Domain, Family, FlowDir, PlanDef, ShapeDef, System, FamilyError, NestedDef, OpeningDef, Scope::*, SolidDef, TextSrc, TypeDef, ValueDef as V};
+use crate::{compile_library, Dim, NUMBER, U_VALUE, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dir, Domain, Family, FlowDir, PlanDef, ShapeDef, System, FamilyError, NestedDef, OpeningDef, Scope::*, SolidDef, TextSrc, TypeDef, ValueDef as V};
 
 fn chk(name: &str, expr: &str) -> CheckDef { CheckDef { name: name.into(), expr: expr.into() } }
 fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
@@ -168,9 +168,9 @@ pub fn window() -> Family {
             V::input("frame", 0.05, 0.02, 0.2, Type),
             V::input("glass_t", 0.024, 0.004, 0.05, Type),
             V::input("mullion_w", 0.03, 0.01, 0.1, Type),
-            V::input("ug", 1.1, 0.1, 8.0, Type).with_dim(Dim { len: -2, ang: 0 }),
-            V::input("uf", 2.0, 0.1, 10.0, Type).with_dim(Dim { len: -2, ang: 0 }),
-            V::input("psi", 0.06, 0.0, 1.0, Type).with_dim(Dim { len: -1, ang: 0 }),
+            V::input("ug", 1.1, 0.1, 8.0, Type).with_dim(U_VALUE),
+            V::input("uf", 2.0, 0.1, 10.0, Type).with_dim(U_VALUE),
+            V::input("psi", 0.06, 0.0, 1.0, Type).with_dim(Dim { len: 1, time: -3, mass: 1, temp: -1, ..NUMBER }),
             V::number("g_value", 0.6, 0.0, 1.0, Type),
             V::input("sill", 0.9, 0.0, 2.0, Instance),
             V::count("mullions", 1.0, 0.0, 20.0, Instance),
