@@ -14,6 +14,7 @@
 //! rejected when it is compiled. All lengths are metres.
 
 pub mod expr;
+pub mod display;
 pub mod mep;
 pub mod forms;
 pub mod shared;
