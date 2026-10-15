@@ -486,7 +486,7 @@ fn nested_connectors_and_plan_move_with_the_child() {
 
 #[test]
 fn repeated_and_hidden_nested_families() {
-    let lib = parent(NestedDef::new("n", "Stub", ("_i", "0", "0")).repeat("3"));
+    let lib = parent(NestedDef::new("n", "Stub", ("_i * 1 m", "0", "0")).repeat("3"));
     let i = lib[1].solve(&Request::default()).unwrap();
     let names: Vec<_> = i.connectors.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["own", "n#0/p", "n#1/p", "n#2/p"]);

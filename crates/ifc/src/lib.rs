@@ -197,6 +197,7 @@ fn perp(d: V3) -> V3 {
     unit(cross(d, h))
 }
 
+#[derive(Debug, Clone, PartialEq)]
 enum Val {
     Label(String),
     Text(String),
@@ -208,29 +209,64 @@ enum Val {
     LenAny(f64),
     Area(f64),
     Vol(f64),
+    /// degrees; written in radians
+    Angle(f64),
     Int(i64),
     Real(f64),
 }
 
 /// A value written as the kind a mapping row asks for; the reason when it cannot be.
 fn convert(v: &Val, kind: PropKind) -> Result<Val, &'static str> {
-    Ok(match (v, kind) {
-        (Val::Real(x), PropKind::Real) => Val::Real(*x),
-        (Val::Real(x), PropKind::Length) => Val::LenAny(*x),
-        (Val::Real(x), PropKind::PositiveLength) if *x > 0.0 => Val::Len(*x),
-        (Val::Real(_), PropKind::PositiveLength) => return Err("a positive length must be above 0"),
-        (Val::Real(x), PropKind::Area) => Val::Area(*x),
-        (Val::Real(x), PropKind::Volume) => Val::Vol(*x),
-        (Val::Real(x), PropKind::Integer) if x.fract() == 0.0 && x.abs() < 1e15 => Val::Int(*x as i64),
-        (Val::Real(_), PropKind::Integer) => return Err("an integer must be a whole number"),
-        (Val::Real(x), PropKind::Boolean) if *x == 0.0 || *x == 1.0 => Val::Bool(*x == 1.0),
-        (Val::Real(_), PropKind::Boolean) => return Err("a boolean must be 0 or 1"),
-        (Val::Bool(b), PropKind::Boolean) => Val::Bool(*b),
-        (Val::Int(i), PropKind::Integer) => Val::Int(*i),
-        (Val::Label(t), PropKind::Label) => Val::Label(t.clone()),
-        (Val::Label(t), PropKind::Text) => Val::Text(t.clone()),
-        (Val::Label(t), PropKind::Identifier) => Val::Ident(t.clone()),
-        _ => return Err("the value is not of a kind that can be written like that"),
+    // what the value measures: none (a plain number), a length, an area, a volume or an angle
+    #[derive(PartialEq)]
+    enum Of { Plain, Length, Area, Volume, Angle }
+    let (x, of) = match v {
+        Val::Real(x) => (*x, Of::Plain),
+        Val::Len(x) | Val::LenAny(x) => (*x, Of::Length),
+        Val::Area(x) => (*x, Of::Area),
+        Val::Vol(x) => (*x, Of::Volume),
+        Val::Angle(x) => (*x, Of::Angle),
+        Val::Int(i) => (*i as f64, Of::Plain),
+        Val::Bool(b) => (f64::from(u8::from(*b)), Of::Plain),
+        Val::Label(t) | Val::Text(t) | Val::Ident(t) => {
+            return Ok(match kind {
+                PropKind::Label => Val::Label(t.clone()),
+                PropKind::Text => Val::Text(t.clone()),
+                PropKind::Identifier => Val::Ident(t.clone()),
+                _ => return Err("the value is text"),
+            });
+        }
+    };
+    let want = match kind {
+        PropKind::Length | PropKind::PositiveLength => Of::Length,
+        PropKind::Area => Of::Area,
+        PropKind::Volume => Of::Volume,
+        PropKind::Angle => Of::Angle,
+        PropKind::Real | PropKind::Integer | PropKind::Boolean => Of::Plain,
+        PropKind::Label | PropKind::Text | PropKind::Identifier => return Err("the value is a number"),
+    };
+    if of != want {
+        return Err(match of {
+            Of::Plain => "the value is a plain number, not a quantity with a unit",
+            Of::Length => "the value is a length",
+            Of::Area => "the value is an area",
+            Of::Volume => "the value is a volume",
+            Of::Angle => "the value is an angle",
+        });
+    }
+    Ok(match kind {
+        PropKind::Real => Val::Real(x),
+        PropKind::Length => Val::LenAny(x),
+        PropKind::PositiveLength if x > 0.0 => Val::Len(x),
+        PropKind::PositiveLength => return Err("a positive length must be above 0"),
+        PropKind::Area => Val::Area(x),
+        PropKind::Volume => Val::Vol(x),
+        PropKind::Angle => Val::Angle(x),
+        PropKind::Integer if x.fract() == 0.0 && x.abs() < 1e15 => Val::Int(x as i64),
+        PropKind::Integer => return Err("an integer must be a whole number"),
+        PropKind::Boolean if x == 0.0 || x == 1.0 => Val::Bool(x == 1.0),
+        PropKind::Boolean => return Err("a boolean must be 0 or 1"),
+        PropKind::Label | PropKind::Text | PropKind::Identifier => unreachable!(),
     })
 }
 
@@ -386,6 +422,7 @@ impl<'a> Out<'a> {
                 Val::LenAny(x) => format!("IFCLENGTHMEASURE({})", self.r(x, "property")),
                 Val::Area(x) => format!("IFCAREAMEASURE({})", self.r(x, "property")),
                 Val::Vol(x) => format!("IFCVOLUMEMEASURE({})", self.r(x, "property")),
+                Val::Angle(x) => format!("IFCPLANEANGLEMEASURE({})", self.r(x.to_radians(), "property")),
                 Val::Int(i) => format!("IFCINTEGER({i})"),
                 Val::Real(x) => format!("IFCREAL({})", self.r(x, "property")),
             };
@@ -888,4 +925,43 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_is_written_as_the_kind_it_measures() {
+        use PropKind::*;
+        assert_eq!(convert(&Val::LenAny(2.0), Length), Ok(Val::LenAny(2.0)));
+        assert_eq!(convert(&Val::LenAny(2.0), PositiveLength), Ok(Val::Len(2.0)));
+        assert!(convert(&Val::LenAny(0.0), PositiveLength).unwrap_err().contains("above 0"));
+        assert!(convert(&Val::LenAny(-1.0), PositiveLength).is_err());
+        assert_eq!(convert(&Val::Area(2.0), Area), Ok(Val::Area(2.0)));
+        assert_eq!(convert(&Val::Vol(2.0), Volume), Ok(Val::Vol(2.0)));
+        assert_eq!(convert(&Val::Angle(90.0), Angle), Ok(Val::Angle(90.0)));
+        // a quantity only goes where its own kind goes
+        for (v, k) in [(Val::LenAny(1.0), Area), (Val::LenAny(1.0), Angle), (Val::LenAny(1.0), Real), (Val::Area(1.0), Length), (Val::Vol(1.0), Area), (Val::Angle(1.0), Length), (Val::Angle(1.0), Real), (Val::LenAny(1.0), Integer), (Val::Angle(1.0), Boolean)] {
+            assert!(convert(&v, k).is_err(), "{v:?} as {k:?}");
+        }
+        // a plain number is a real, a whole number or a yes/no, and nothing with a unit
+        assert_eq!(convert(&Val::Real(2.5), Real), Ok(Val::Real(2.5)));
+        assert_eq!(convert(&Val::Real(2.0), Integer), Ok(Val::Int(2)));
+        assert!(convert(&Val::Real(2.5), Integer).unwrap_err().contains("whole"));
+        assert_eq!(convert(&Val::Real(1.0), Boolean), Ok(Val::Bool(true)));
+        assert_eq!(convert(&Val::Real(0.0), Boolean), Ok(Val::Bool(false)));
+        assert!(convert(&Val::Real(2.0), Boolean).unwrap_err().contains("0 or 1"));
+        for k in [Length, PositiveLength, Area, Volume, Angle] {
+            assert!(convert(&Val::Real(1.0), k).is_err(), "{k:?}");
+        }
+        assert_eq!(convert(&Val::Int(3), Integer), Ok(Val::Int(3)));
+        assert_eq!(convert(&Val::Bool(true), Boolean), Ok(Val::Bool(true)));
+        // text goes to the three text kinds and nowhere else
+        assert_eq!(convert(&Val::Label("a".into()), Identifier), Ok(Val::Ident("a".into())));
+        assert_eq!(convert(&Val::Label("a".into()), Text), Ok(Val::Text("a".into())));
+        assert_eq!(convert(&Val::Text("a".into()), Label), Ok(Val::Label("a".into())));
+        assert!(convert(&Val::Label("a".into()), Real).is_err());
+        assert!(convert(&Val::Real(1.0), Label).is_err());
+    }
 }

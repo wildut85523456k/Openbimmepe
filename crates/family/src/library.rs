@@ -1,7 +1,7 @@
 //! Authored families used to test the solver. Dimensions are illustrative defaults, not values from any standard.
 //! Use `all()` to compile them together: the door nests the lever handle.
 
-use crate::{compile_library, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dir, Domain, Family, FlowDir, PlanDef, ShapeDef, System, FamilyError, NestedDef, OpeningDef, Scope::*, SolidDef, TextSrc, TypeDef, ValueDef as V};
+use crate::{compile_library, Dim, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dir, Domain, Family, FlowDir, PlanDef, ShapeDef, System, FamilyError, NestedDef, OpeningDef, Scope::*, SolidDef, TextSrc, TypeDef, ValueDef as V};
 
 fn chk(name: &str, expr: &str) -> CheckDef { CheckDef { name: name.into(), expr: expr.into() } }
 fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
@@ -62,7 +62,7 @@ pub fn door() -> Family {
             V::input("wall_t", 0.2, 0.05, 1.0, Instance),
             V::choice("swing", &["left", "right"], "right", Instance),
             V::flag("has_handle", true, Instance),
-            V::input("open_angle", 0.0, 0.0, 170.0, Instance),
+            V::angle("open_angle", 0.0, 0.0, 170.0, Instance),
             V::input("handle_height", 1.0, 0.6, 1.5, Type),
             V::text("mark", "", Instance),
             V::text("remarks", "", Type),
@@ -89,7 +89,7 @@ pub fn door() -> Family {
                 .rotate_about("if(swing.left, open_angle, -open_angle)", "if(swing.left, x_in_left, x_in_right)", "0"),
         ],
         nested: vec![
-            NestedDef::new("handle", "Lever handle", ("if(swing.left, x_in_right - 0.07, x_in_left + 0.07)", "0", "handle_height"))
+            NestedDef::new("handle", "Lever handle", ("if(swing.left, x_in_right - 70 mm, x_in_left + 70 mm)", "0", "handle_height"))
                 .set("leaf_t", "leaf_t")
                 .set("lever_right", "swing.right")
                 .set_text("finish", TextSrc::Param("handle_finish".into()))
@@ -100,7 +100,7 @@ pub fn door() -> Family {
             chk("opening wider than four frames", "width > 4 * frame"),
             chk("opening higher than four frames", "height > 4 * frame"),
             chk("leaf thinner than the wall", "leaf_t < wall_t"),
-            chk("handle fits on the leaf", "!has_handle || (width - 2 * frame > 0.35 && handle_height < height - frame - 0.15)"),
+            chk("handle fits on the leaf", "!has_handle || (width - 2 * frame > 350 mm && handle_height < height - frame - 150 mm)"),
         ],
         opening: Some(OpeningDef::new("width", "height", "0")),
         types: vec![ty("Type A", &[("width", 0.8)]), ty("Type B", &[("width", 1.2), ("height", 2.4)])],
@@ -143,7 +143,7 @@ pub fn arched_door() -> Family {
         ],
         checks: vec![
             chk("rise at most half the width", "rise <= width / 2"),
-            chk("rise less than the height", "rise < height - 0.5"),
+            chk("rise less than the height", "rise < height - 500 mm"),
             chk("leaf thinner than the wall", "leaf_t < wall_t"),
         ],
         opening: Some(OpeningDef::new("width", "height", "0").arched("rise")),
@@ -168,10 +168,10 @@ pub fn window() -> Family {
             V::input("frame", 0.05, 0.02, 0.2, Type),
             V::input("glass_t", 0.024, 0.004, 0.05, Type),
             V::input("mullion_w", 0.03, 0.01, 0.1, Type),
-            V::input("ug", 1.1, 0.1, 8.0, Type),
-            V::input("uf", 2.0, 0.1, 10.0, Type),
-            V::input("psi", 0.06, 0.0, 1.0, Type),
-            V::input("g_value", 0.6, 0.0, 1.0, Type),
+            V::input("ug", 1.1, 0.1, 8.0, Type).with_dim(Dim { len: -2, ang: 0 }),
+            V::input("uf", 2.0, 0.1, 10.0, Type).with_dim(Dim { len: -2, ang: 0 }),
+            V::input("psi", 0.06, 0.0, 1.0, Type).with_dim(Dim { len: -1, ang: 0 }),
+            V::number("g_value", 0.6, 0.0, 1.0, Type),
             V::input("sill", 0.9, 0.0, 2.0, Instance),
             V::count("mullions", 1.0, 0.0, 20.0, Instance),
             V::input("wall_t", 0.2, 0.05, 1.0, Instance),
@@ -214,7 +214,7 @@ pub fn window() -> Family {
             chk("opening wider than four frames", "width > 4 * frame"),
             chk("opening higher than four frames", "height > 4 * frame"),
             chk("glass thinner than the wall", "glass_t < wall_t"),
-            chk("each pane at least 1 cm wide", "narrowest_pane >= 0.01"),
+            chk("each pane at least 1 cm wide", "narrowest_pane >= 10 mm"),
         ],
         opening: Some(OpeningDef::new("width", "height", "sill")),
         types: vec![ty("Type A", &[("width", 1.8), ("height", 1.5)])],
@@ -240,14 +240,14 @@ pub fn fan_coil() -> Family {
             V::input("length", 1.0, 0.4, 3.0, Instance),
             V::input("depth", 0.6, 0.3, 1.5, Instance),
             V::input("height", 0.25, 0.15, 0.8, Instance),
-            V::input("air_flow", 0.1, 0.01, 5.0, Type),
-            V::input("water_flow", 0.0003, 0.00001, 0.05, Type),
+            V::number("air_flow", 0.1, 0.01, 5.0, Type),
+            V::number("water_flow", 0.0003, 0.00001, 0.05, Type),
             V::input("water_pipe", 0.022, 0.01, 0.1, Type),
             V::input("condensate_pipe", 0.02, 0.01, 0.05, Type),
             V::input("duct_w", 0.4, 0.1, 1.5, Type),
             V::input("duct_h", 0.2, 0.1, 1.0, Type),
-            V::input("voltage", 230.0, 12.0, 1000.0, Type),
-            V::input("power", 80.0, 1.0, 5000.0, Type),
+            V::number("voltage", 230.0, 12.0, 1000.0, Type),
+            V::number("power", 80.0, 1.0, 5000.0, Type),
             V::flag("with_return_duct", true, Instance),
             V::material("casing", "Casing", Type),
             V::plane("x0", X, "-length / 2"),
@@ -268,7 +268,7 @@ pub fn fan_coil() -> Family {
             ConnectorDef::new("chw_in", Pipe, ChilledWaterSupply, In, ("length / 2", "depth / 4", "height / 3"), PlusX, ShapeDef::Round("water_pipe".into())).flow("water_flow"),
             ConnectorDef::new("chw_out", Pipe, ChilledWaterReturn, Out, ("length / 2", "-depth / 4", "height / 3"), PlusX, ShapeDef::Round("water_pipe".into())).flow("water_flow"),
             ConnectorDef::new("condensate", Pipe, Condensate, Out, ("length / 2", "0", "height / 6"), PlusX, ShapeDef::Round("condensate_pipe".into())),
-            ConnectorDef::new("power", Electrical, Power, In, ("length / 2", "depth / 2 - 0.05", "2 * height / 3"), PlusX, ShapeDef::Electrical { voltage: "voltage".into(), poles: "1".into() }).flow("power"),
+            ConnectorDef::new("power", Electrical, Power, In, ("length / 2", "depth / 2 - 50 mm", "2 * height / 3"), PlusX, ShapeDef::Electrical { voltage: "voltage".into(), poles: "1".into() }).flow("power"),
         ],
         plan: vec![
             PlanDef::line(("x0", "y0"), ("x1", "y0")),

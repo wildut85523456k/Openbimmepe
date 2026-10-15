@@ -24,6 +24,7 @@ pub enum ExprError {
     DivByZero,
     NotFinite,
     Domain(&'static str),
+    Units(String),
 }
 
 impl fmt::Display for ExprError {
@@ -39,6 +40,7 @@ impl fmt::Display for ExprError {
             ExprError::DivByZero => write!(f, "division by zero"),
             ExprError::NotFinite => write!(f, "result is not a finite number"),
             ExprError::Domain(s) => write!(f, "{s}"),
+            ExprError::Units(s) => write!(f, "units: {s}"),
         }
     }
 }
@@ -64,7 +66,8 @@ impl Fun {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Node {
-    Num(f64),
+    /// a number; the dimension is set when it was written with a unit (`50 mm`, `30 deg`)
+    Num(f64, Option<Dim>),
     Var(usize),
     Neg(Box<Node>),
     Not(Box<Node>),
@@ -96,12 +99,131 @@ impl Expr {
     }
 }
 
+/// What a value measures: powers of length and of angle. Lengths are metres and angles degrees inside the program,
+/// so the dimension is only used to check formulas; it never changes a number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Dim { pub len: i8, pub ang: i8 }
+pub const NUMBER: Dim = Dim { len: 0, ang: 0 };
+pub const LENGTH: Dim = Dim { len: 1, ang: 0 };
+pub const AREA: Dim = Dim { len: 2, ang: 0 };
+pub const VOLUME: Dim = Dim { len: 3, ang: 0 };
+pub const ANGLE: Dim = Dim { len: 0, ang: 1 };
+const MAX_POWER: i8 = 6;
+
+impl Dim {
+    fn mul(self, o: Dim) -> Result<Dim, ExprError> { Dim { len: self.len + o.len, ang: self.ang + o.ang }.limited() }
+    fn div(self, o: Dim) -> Result<Dim, ExprError> { Dim { len: self.len - o.len, ang: self.ang - o.ang }.limited() }
+    fn limited(self) -> Result<Dim, ExprError> {
+        if self.len.abs() > MAX_POWER || self.ang.abs() > MAX_POWER { Err(ExprError::Units(format!("{} is beyond what a formula may build", self.name()))) } else { Ok(self) }
+    }
+    /// Words for a message: length, area, volume, angle, number, or powers of them.
+    pub fn name(self) -> String {
+        match (self.len, self.ang) {
+            (0, 0) => "a number".into(), (1, 0) => "a length".into(), (2, 0) => "an area".into(), (3, 0) => "a volume".into(), (0, 1) => "an angle".into(),
+            (l, 0) => format!("length^{l}"), (0, a) => format!("angle^{a}"), (l, a) => format!("length^{l} x angle^{a}"),
+        }
+    }
+    /// Short name used in files: number, length, area, volume, angle.
+    pub fn code(self) -> Option<&'static str> {
+        Some(match (self.len, self.ang) { (0, 0) => "number", (1, 0) => "length", (2, 0) => "area", (3, 0) => "volume", (0, 1) => "angle", _ => return None })
+    }
+    pub fn from_code(s: &str) -> Option<Dim> {
+        Some(match s { "number" => NUMBER, "length" => LENGTH, "area" => AREA, "volume" => VOLUME, "angle" => ANGLE, _ => return None })
+    }
+}
+
+/// What a place in a family needs: any quantity, or one dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Want { Any, Is(Dim) }
+pub const LEN: Want = Want::Is(LENGTH);
+pub const ANG: Want = Want::Is(ANGLE);
+pub const NUM: Want = Want::Is(NUMBER);
+
+/// A checked sub-formula: its dimension, whether it is only bare numbers (no unit anywhere), and whether it is a
+/// plain zero.
+#[derive(Debug, Clone, Copy)]
+struct Ty { dim: Dim, bare: bool, zero: bool }
+
+fn plain(dim: Dim) -> Ty { Ty { dim, bare: false, zero: false } }
+
+/// The dimension two terms must share. A bare number next to a quantity is refused (it could be metres or
+/// millimetres); a plain 0 is the exception.
+fn unify(op: &str, a: Ty, b: Ty) -> Result<Ty, ExprError> {
+    if a.dim == b.dim { return Ok(Ty { dim: a.dim, bare: a.bare && b.bare, zero: a.zero && b.zero }); }
+    for (bare, other) in [(a, b), (b, a)] {
+        if bare.bare && bare.dim == NUMBER {
+            if bare.zero { return Ok(plain(other.dim)); }
+            return Err(ExprError::Units(format!("a bare number cannot be {op} {}: write it with a unit, such as 50 mm or 30 deg", other.dim.name())));
+        }
+    }
+    Err(ExprError::Units(format!("cannot {op} {} and {}", a.dim.name(), b.dim.name())))
+}
+
+fn need(what: &str, t: Ty, d: Dim) -> Result<(), ExprError> {
+    if t.dim == d { return Ok(()); }
+    // a number written without a unit that stands alone takes the dimension of the place: metres, or degrees
+    if t.bare { return Ok(()); }
+    Err(ExprError::Units(format!("{what} needs {}, not {}", d.name(), t.dim.name())))
+}
+
+fn cond(what: &str, t: Ty) -> Result<(), ExprError> {
+    if t.dim == NUMBER { Ok(()) } else { Err(ExprError::Units(format!("{what} needs a yes/no or a number, not {}", t.dim.name()))) }
+}
+
+fn ty(n: &Node, slots: &dyn Fn(usize) -> Dim) -> Result<Ty, ExprError> {
+    Ok(match n {
+        Node::Num(x, d) => match d { Some(d) => plain(*d), None => Ty { dim: NUMBER, bare: true, zero: *x == 0.0 } },
+        Node::Var(i) => plain(slots(*i)),
+        Node::Neg(a) => ty(a, slots)?,
+        Node::Not(a) => { cond("not", ty(a, slots)?)?; plain(NUMBER) }
+        Node::Bin(op, l, r) => {
+            let (a, b) = (ty(l, slots)?, ty(r, slots)?);
+            match op {
+                Bin::Add => unify("add", a, b)?,
+                Bin::Sub => unify("subtract", a, b)?,
+                Bin::Mul => Ty { dim: a.dim.mul(b.dim)?, bare: a.bare && b.bare, zero: a.zero || b.zero },
+                Bin::Div => Ty { dim: a.dim.div(b.dim)?, bare: a.bare && b.bare, zero: a.zero },
+                Bin::Lt | Bin::Le | Bin::Gt | Bin::Ge | Bin::Eq | Bin::Ne => { unify("compare", a, b)?; plain(NUMBER) }
+                Bin::And | Bin::Or => { cond("and/or", a)?; cond("and/or", b)?; plain(NUMBER) }
+            }
+        }
+        Node::Call(f, args) => {
+            let t: Vec<Ty> = args.iter().map(|a| ty(a, slots)).collect::<Result<_, _>>()?;
+            match f {
+                Fun::Min | Fun::Max => unify("compare", t[0], t[1])?,
+                Fun::Abs | Fun::Floor | Fun::Ceil | Fun::Round => t[0],
+                Fun::Sqrt => {
+                    let d = t[0].dim;
+                    if d.len % 2 != 0 || d.ang % 2 != 0 { return Err(ExprError::Units(format!("sqrt of {} has no whole dimension", d.name()))); }
+                    Ty { dim: Dim { len: d.len / 2, ang: d.ang / 2 }, bare: t[0].bare, zero: t[0].zero }
+                }
+                Fun::If => { cond("if", t[0])?; unify("choose between", t[1], t[2])? }
+                Fun::Clamp => { let m = unify("clamp", t[1], t[2])?; unify("clamp", t[0], m)? }
+                Fun::Sin | Fun::Cos | Fun::Tan => { need("sin, cos and tan", t[0], ANGLE)?; plain(NUMBER) }
+                Fun::Asin | Fun::Acos | Fun::Atan => { need("asin, acos and atan", t[0], NUMBER)?; plain(ANGLE) }
+                Fun::Atan2 => { unify("compare", t[0], t[1])?; plain(ANGLE) }
+                Fun::Pi => plain(NUMBER),
+            }
+        }
+    })
+}
+
+impl Expr {
+    /// The dimension of the result, or the first place where units do not fit. `slots` gives the dimension of each
+    /// name; `want` is what the place that uses the formula needs.
+    pub fn check(&self, slots: &dyn Fn(usize) -> Dim, want: Want) -> Result<Dim, ExprError> {
+        let t = ty(&self.root, slots)?;
+        if let Want::Is(d) = want { need("this place", t, d)?; return Ok(d); }
+        Ok(t.dim)
+    }
+}
+
 fn b(x: bool) -> f64 { if x { 1.0 } else { 0.0 } }
 
 fn ev(n: &Node, vals: &[f64]) -> Result<f64, ExprError> {
     let fin = |v: f64| if v.is_finite() { Ok(v) } else { Err(ExprError::NotFinite) };
     match n {
-        Node::Num(x) => Ok(*x),
+        Node::Num(x, _) => Ok(*x),
         Node::Var(i) => Ok(vals[*i]),
         Node::Neg(a) => Ok(-ev(a, vals)?),
         Node::Not(a) => Ok(b(ev(a, vals)? == 0.0)),
@@ -153,19 +275,19 @@ fn ev(n: &Node, vals: &[f64]) -> Result<f64, ExprError> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Tok { Num(f64), Id(String), Op(&'static str), LP, RP, Comma }
+enum Tok { Num(f64, Option<Dim>), Id(String), Op(&'static str), LP, RP, Comma }
 
 impl Tok {
     fn text(&self) -> String {
-        match self { Tok::Num(x) => x.to_string(), Tok::Id(s) => s.clone(), Tok::Op(s) => (*s).into(), Tok::LP => "(".into(), Tok::RP => ")".into(), Tok::Comma => ",".into() }
+        match self { Tok::Num(x, _) => x.to_string(), Tok::Id(s) => s.clone(), Tok::Op(s) => (*s).into(), Tok::LP => "(".into(), Tok::RP => ")".into(), Tok::Comma => ",".into() }
     }
 }
 
 /// Length units a number may carry, as metres; angles are kept in degrees.
-fn unit_factor(w: &str) -> Option<f64> {
+fn unit_factor(w: &str) -> Option<(f64, Dim)> {
     Some(match w {
-        "mm" => 0.001, "cm" => 0.01, "m" => 1.0, "km" => 1000.0, "in" => 0.0254, "ft" => 0.3048,
-        "deg" => 1.0, "rad" => 180.0 / std::f64::consts::PI,
+        "mm" => (0.001, LENGTH), "cm" => (0.01, LENGTH), "m" => (1.0, LENGTH), "km" => (1000.0, LENGTH), "in" => (0.0254, LENGTH), "ft" => (0.3048, LENGTH),
+        "deg" => (1.0, ANGLE), "rad" => (180.0 / std::f64::consts::PI, ANGLE),
         _ => return None,
     })
 }
@@ -198,14 +320,15 @@ fn lex(src: &str, resolve: &dyn Fn(&str) -> Option<usize>) -> Result<Vec<Tok>, E
             let mut v: f64 = t.parse().map_err(|_| ExprError::Syntax(format!("bad number '{t}'")))?;
             // a unit straight after the number, with or without a space: 1000 mm, 2.5cm
             let mut j = i;
+            let mut dim = None;
             while j < c.len() && c[j] == ' ' { j += 1; }
             if j < c.len() && starts_word(c[j]) {
                 let e = { let mut e = j; while e < c.len() && is_word(c[e]) { e += 1; } e };
                 let w: String = c[j..e].iter().collect();
-                if let Some(f) = unit_factor(&w) { v *= f; i = e; }
+                if let Some((f, d)) = unit_factor(&w) { v *= f; dim = Some(d); i = e; }
             }
             if !v.is_finite() { return Err(ExprError::NotFinite); }
-            out.push(Tok::Num(v));
+            out.push(Tok::Num(v, dim));
         } else if starts_word(ch) {
             // the longest run of words separated by single spaces that is a known name ("Rough Width"), else one word
             let first = word_end(&c, i);
@@ -301,7 +424,7 @@ impl Parser<'_> {
         let t = self.peek().cloned().ok_or_else(|| ExprError::Syntax("formula ends too early".into()))?;
         self.i += 1;
         match t {
-            Tok::Num(x) => Ok(Node::Num(x)),
+            Tok::Num(x, d) => Ok(Node::Num(x, d)),
             Tok::LP => {
                 let e = self.or(d + 1)?;
                 if !matches!(self.peek(), Some(Tok::RP)) { return Err(ExprError::Syntax("missing ')'".into())); }

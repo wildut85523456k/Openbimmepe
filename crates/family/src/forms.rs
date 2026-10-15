@@ -9,7 +9,7 @@
 //! Profile coordinates (u, v) of a work plane with normal Z are (x, y); with normal X they are (y, z); with normal Y
 //! they are (z, x). Every number is a formula. Lengths are metres, angles degrees.
 //! The solved form gives exact volume and bounds; no mesh is made here.
-use crate::expr::Expr;
+use crate::expr::{Expr, Want, ANG, LEN, NUM};
 use crate::{Axis, FamilyError, Xf};
 
 pub const MAX_FORMS: usize = 200;
@@ -115,7 +115,7 @@ impl FormDef {
 
 // ---------- compiled ----------
 
-pub(crate) type Parse<'a> = &'a dyn Fn(&str, &str, bool) -> Result<Expr, FamilyError>;
+pub(crate) type Parse<'a> = &'a dyn Fn(&str, &str, bool, Want) -> Result<Expr, FamilyError>;
 
 pub(crate) enum CCon {
     Rel(openbim_sketch::Constraint),
@@ -153,7 +153,8 @@ pub(crate) struct CForm {
 fn bad(name: &str, why: &'static str) -> FamilyError { FamilyError::Form { name: name.into(), why } }
 
 fn compile_loop(name: &str, what: &str, p: &ProfileDef, parse: Parse) -> Result<CLoop, FamilyError> {
-    let pe = |part: String, s: &str| parse(&format!("form {name}.{what}.{part}"), s, false);
+    let pe = |part: String, s: &str| parse(&format!("form {name}.{what}.{part}"), s, false, LEN);
+    let pa = |part: String, s: &str| parse(&format!("form {name}.{what}.{part}"), s, false, ANG);
     match p {
         ProfileDef::Polygon(pts) => {
             if pts.len() < 3 { return Err(bad(name, "a polygon profile needs at least 3 points")); }
@@ -172,13 +173,14 @@ fn compile_loop(name: &str, what: &str, p: &ProfileDef, parse: Parse) -> Result<
             let mut cons = Vec::with_capacity(sk.constraints.len());
             for (k, c) in sk.constraints.iter().enumerate() {
                 let e = |part: &str, s: &str| pe(format!("c{k}.{part}"), s);
+                let ea = |part: &str, s: &str| pa(format!("c{k}.{part}"), s);
                 cons.push(match c {
                     SketchCon::Rel(r) => CCon::Rel(*r),
                     SketchCon::Fixed { p, x, y } => CCon::Fixed(*p, e("x", x)?, e("y", y)?),
                     SketchCon::Distance { a, b, d } => CCon::Distance(*a, *b, e("d", d)?),
                     SketchCon::DistanceX { a, b, d } => CCon::DistanceX(*a, *b, e("d", d)?),
                     SketchCon::DistanceY { a, b, d } => CCon::DistanceY(*a, *b, e("d", d)?),
-                    SketchCon::Angle { l1, l2, degrees } => CCon::Angle(*l1, *l2, e("degrees", degrees)?),
+                    SketchCon::Angle { l1, l2, degrees } => CCon::Angle(*l1, *l2, ea("degrees", degrees)?),
                 });
             }
             Ok(CLoop::Sketch(CSketch { points, loop_len: sk.loop_len, lines: sk.lines.clone(), cons }))
@@ -193,10 +195,12 @@ pub(crate) fn compile(forms: &[FormDef], parse: Parse, material_slot: &dyn Fn(&s
     for f in forms {
         if !crate::valid_name(&f.name) { return Err(FamilyError::BadName(f.name.clone())); }
         if out.iter().any(|o| o.name == f.name) { return Err(FamilyError::DuplicateName(f.name.clone())); }
-        let pe = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false);
+        let pe = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false, LEN);
+        let pa = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false, ANG);
+        let pn = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false, NUM);
         let kind = match &f.kind {
             FormKind::Extrusion { plane, from, to } => CKind::Extrusion { plane: *plane, from: pe("from", from)?, to: pe("to", to)? },
-            FormKind::Revolve { plane, offset, about_v, at, angle } => CKind::Revolve { plane: *plane, offset: pe("offset", offset)?, about_v: *about_v, at: pe("at", at)?, angle: pe("angle", angle)? },
+            FormKind::Revolve { plane, offset, about_v, at, angle } => CKind::Revolve { plane: *plane, offset: pe("offset", offset)?, about_v: *about_v, at: pe("at", at)?, angle: pa("angle", angle)? },
             FormKind::Sweep { z, path } => {
                 if path.len() < 2 { return Err(bad(&f.name, "a sweep path needs at least 2 points")); }
                 if path.len() > MAX_PATH { return Err(FamilyError::TooMany("points in a sweep path")); }
@@ -210,7 +214,7 @@ pub(crate) fn compile(forms: &[FormDef], parse: Parse, material_slot: &dyn Fn(&s
         let mut holes = Vec::new();
         for (i, h) in f.holes.iter().enumerate() { holes.push(compile_loop(&f.name, &format!("hole{i}"), h, parse)?); }
         let material = match &f.material { Some(m) => Some(material_slot(&f.name, m)?), None => None };
-        let visible = match &f.visible { Some(v) => Some(pe("visible", v)?), None => None };
+        let visible = match &f.visible { Some(v) => Some(pn("visible", v)?), None => None };
         out.push(CForm { name: f.name.clone(), kind, outer, holes, material, visible });
     }
     Ok(out)

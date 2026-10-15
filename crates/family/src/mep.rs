@@ -3,7 +3,7 @@
 //! Units follow the rest of the engine: lengths in metres. Connector flow is m3/s for ducts and
 //! pipes and watts for electrical connectors; pressure drop is in pascals; voltage in volts.
 //! No standard values are shipped here: every size, flow and code comes from the family author.
-use crate::expr::{cos_deg, sin_deg, Expr};
+use crate::expr::{cos_deg, sin_deg, Expr, Want, ANG, LEN, NUM};
 use crate::FamilyError;
 
 pub const MAX_CONNECTORS: usize = 64;
@@ -340,7 +340,7 @@ impl PlanDef {
 
 // ---------- compiled ----------
 
-pub(crate) type Parse<'a> = &'a dyn Fn(&str, &str, bool) -> Result<Expr, FamilyError>;
+pub(crate) type Parse<'a> = &'a dyn Fn(&str, &str, bool, Want) -> Result<Expr, FamilyError>;
 
 pub(crate) struct CConnector {
     name: String,
@@ -390,7 +390,10 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
             return Err(bad(&c.name, "the system does not belong to this kind of connector"));
         }
         let lbl = |p: &str| format!("connector {}.{}", c.name, p);
-        let p = |part: &str, s: &str| parse(&lbl(part), s, false);
+        let p = |part: &str, s: &str| {
+            let w = match part { "diameter" | "width" | "height" | "x" | "y" | "z" => LEN, "azimuth" | "elevation" | "roll" => ANG, "poles" | "visible" | "power_factor" => NUM, _ => Want::Any };
+            parse(&lbl(part), s, false, w)
+        };
         let shape = match (&c.shape, c.domain) {
             (ShapeDef::Round(d), Domain::Duct | Domain::Pipe | Domain::Conduit) => CShape::Round(p("diameter", d)?),
             (ShapeDef::Rect(w, h), Domain::Duct | Domain::CableTray) => CShape::Rect(p("width", w)?, p("height", h)?),
@@ -424,7 +427,7 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
     }
     let mut cp = Vec::new();
     for (i, d) in plan.iter().enumerate() {
-        let p = |part: &str, s: &str| parse(&format!("plan {i}.{part}"), s, false);
+        let p = |part: &str, s: &str| parse(&format!("plan {i}.{part}"), s, false, if part == "visible" { NUM } else { LEN });
         let vis = |v: &Option<String>| -> Result<Option<Expr>, FamilyError> { match v { Some(f) => Ok(Some(p("visible", f)?)), None => Ok(None) } };
         cp.push(match d {
             PlanDef::Line { a, b, visible } => CPlan::Line([p("x1", &a.0)?, p("y1", &a.1)?, p("x2", &b.0)?, p("y2", &b.1)?], vis(visible)?),

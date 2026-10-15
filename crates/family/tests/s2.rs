@@ -236,7 +236,7 @@ fn loops_unknown_names_and_duplicates_are_refused_when_compiling() {
     let mut f = two("1", "2"); f.values[1].name = "9bad".into();
     assert!(matches!(cd(&f), Err(FamilyError::BadName(_))));
     // chain a <- b <- c in reverse listing order is fine
-    let f = Family { name: "t".into(), values: vec![ValueDef::formula("c", "b * 2"), ValueDef::formula("b", "a + 1"), ValueDef::input("a", 1.0, 0.0, 5.0, Scope::Type)], ..Default::default() };
+    let f = Family { name: "t".into(), values: vec![ValueDef::formula("c", "b * 2"), ValueDef::formula("b", "a + 1 m"), ValueDef::input("a", 1.0, 0.0, 5.0, Scope::Type)], ..Default::default() };
     let c = cd(&f).unwrap();
     assert_eq!(c.value(&c.solve(&Request::default()).unwrap(), "c"), Some(4.0));
 }
@@ -365,7 +365,7 @@ fn inputs_below_their_minimum_and_bad_repeat_counts_are_refused() {
 fn hostile_families_are_bounded() {
     // 10,000 chained values: compiled and solved in dependency order without recursion
     let mut values = vec![ValueDef::input("v0", 1.0, 0.0, 10.0, Scope::Type)];
-    for k in 1..10_000 { values.push(ValueDef::formula(&format!("v{k}"), &format!("v{} + 1", k - 1))); }
+    for k in 1..10_000 { values.push(ValueDef::formula(&format!("v{k}"), &format!("v{} + 1 m", k - 1))); }
     let t = std::time::Instant::now();
     let c = Family { name: "chain".into(), values, ..Default::default() }.compile().unwrap();
     let i = c.solve(&Request::default()).unwrap();

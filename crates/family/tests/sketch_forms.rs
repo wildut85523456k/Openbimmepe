@@ -59,7 +59,7 @@ fn an_angle_parameter_makes_a_parallelogram() {
         .line(0, 3)
         .fixed(0, "0", "0").rel(Constraint::Horizontal { a: 0, b: 1 }).distance(0, 1, "w").distance(0, 3, "s").angle(0, 4, "theta")
         .rel(Constraint::Parallel { l1: 0, l2: 2 }).rel(Constraint::Parallel { l1: 1, l2: 3 });
-    let f = fam(vec![inp("w", 2.0), inp("s", 1.0), ValueDef::input("theta", 60.0, 5.0, 175.0, Scope::Instance)], vec![FormDef::extrusion("p", Axis::Z, "0", "1", ProfileDef::sketch(sk))]);
+    let f = fam(vec![inp("w", 2.0), inp("s", 1.0), ValueDef::angle("theta", 60.0, 5.0, 175.0, Scope::Instance)], vec![FormDef::extrusion("p", Axis::Z, "0", "1", ProfileDef::sketch(sk))]);
     for th in [60.0f64, 90.0, 45.0, 120.0] {
         let forms = solve(&f, vec![("theta", th)]).unwrap();
         assert!(close(forms[0].profile_area(), 2.0 * 1.0 * th.to_radians().sin()), "{th}: {}", forms[0].profile_area());
@@ -80,9 +80,9 @@ fn an_under_constrained_sketch_keeps_what_was_drawn() {
 fn bad_sketches_are_refused_with_a_reason() {
     let ext = |sk: SketchDef| fam(vec![inp("w", 1.0), inp("d", 1.0)], vec![FormDef::extrusion("e", Axis::Z, "0", "1", ProfileDef::sketch(sk))]);
     // conflicting dimensions
-    assert!(why(&ext(rect_sketch().distance(0, 1, "w + 1")), vec![]).contains("conflict"));
+    assert!(why(&ext(rect_sketch().distance(0, 1, "w + 1 m")), vec![]).contains("conflict"));
     // dimension below zero
-    assert!(why(&ext(rect_sketch().distance(0, 1, "w - 1")), vec![]).contains("not a usable number"));
+    assert!(why(&ext(rect_sketch().distance(0, 1, "w - 1 m")), vec![]).contains("not a usable number"));
     assert!(why(&ext(rect_sketch().distance(0, 1, "0 - w")), vec![]).contains("not a usable number"));
     // an index that is not there
     assert!(why(&ext(rect_sketch().rel(Constraint::Horizontal { a: 0, b: 9 })), vec![]).contains("not there"));

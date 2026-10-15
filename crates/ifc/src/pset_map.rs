@@ -29,10 +29,12 @@ pub enum PropKind {
     Area,
     /// cubic metres
     Volume,
+    /// a plane angle (the file holds radians)
+    Angle,
 }
 
 impl PropKind {
-    pub const ALL: [PropKind; 10] = [PropKind::Label, PropKind::Text, PropKind::Identifier, PropKind::Boolean, PropKind::Integer, PropKind::Real, PropKind::Length, PropKind::PositiveLength, PropKind::Area, PropKind::Volume];
+    pub const ALL: [PropKind; 11] = [PropKind::Label, PropKind::Text, PropKind::Identifier, PropKind::Boolean, PropKind::Integer, PropKind::Real, PropKind::Length, PropKind::PositiveLength, PropKind::Area, PropKind::Volume, PropKind::Angle];
     pub fn code(self) -> &'static str {
         match self {
             PropKind::Label => "label",
@@ -45,6 +47,7 @@ impl PropKind {
             PropKind::PositiveLength => "positive_length",
             PropKind::Area => "area",
             PropKind::Volume => "volume",
+            PropKind::Angle => "angle",
         }
     }
     pub fn from_code(s: &str) -> Option<PropKind> {
@@ -123,7 +126,7 @@ impl PsetMap {
     }
 
     /// Rows from the groups of a shared parameter set: a parameter with a group goes to the property set of that
-    /// name, under its own name, as the kind of its input (numbers as reals, whole numbers as integers).
+    /// name, under its own name, as the kind of its input (a length as a length, an angle as an angle, whole numbers as integers, other numbers as reals).
     pub fn from_shared(set: &SharedSet) -> PsetMap {
         let mut rows = Vec::new();
         for p in &set.params {
@@ -132,7 +135,14 @@ impl PsetMap {
             }
             let kind = match &p.def.kind {
                 ValueKind::Input { integer: true, .. } => PropKind::Integer,
-                ValueKind::Input { .. } => PropKind::Real,
+                ValueKind::Input { .. } => match p.def.dim {
+                    None => PropKind::Length,
+                    Some(d) if d == openbim_family::LENGTH => PropKind::Length,
+                    Some(d) if d == openbim_family::ANGLE => PropKind::Angle,
+                    Some(d) if d == openbim_family::AREA => PropKind::Area,
+                    Some(d) if d == openbim_family::VOLUME => PropKind::Volume,
+                    Some(_) => PropKind::Real,
+                },
                 ValueKind::Flag { .. } => PropKind::Boolean,
                 ValueKind::Choice { .. } | ValueKind::Text { .. } | ValueKind::Material { .. } => PropKind::Label,
                 ValueKind::Formula(_) => continue,

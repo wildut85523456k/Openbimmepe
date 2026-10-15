@@ -312,7 +312,7 @@ fn nested_families_carry_their_forms() {
     let s = 0.5f64.sqrt();
     assert!(close3(lo, [-s, 0.0, 0.0]) && close3(hi, [2.0 * s, 3.0 * s, 1.0]), "{lo:?} {hi:?}");
     // repeated
-    let c = p(NestedDef::new("n", "Child", ("_i * 3", "0", "0")).repeat("3"));
+    let c = p(NestedDef::new("n", "Child", ("_i * 3 m", "0", "0")).repeat("3"));
     let i = c.solve(&Request::default()).unwrap();
     assert_eq!(i.forms.len(), 7);
     assert_eq!(i.forms.iter().map(|f| f.index).collect::<Vec<_>>(), vec![0, 1, 2, 1, 2, 1, 2]);

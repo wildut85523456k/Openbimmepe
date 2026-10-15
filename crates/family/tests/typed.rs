@@ -186,7 +186,7 @@ fn fence() -> Family {
             ValueDef::input("spacing", 0.5, 0.1, 2.0, Scope::Instance),
             ValueDef::material("timber", "Fence timber", Scope::Type),
         ],
-        nested: vec![NestedDef::new("post", "Post", ("_i * spacing", "0", "0")).repeat("n").set("size", "0.04 + 0.002 * _i").set_text("mat", TextSrc::Param("timber".into()))],
+        nested: vec![NestedDef::new("post", "Post", ("_i * spacing", "0", "0")).repeat("n").set("size", "0.04 m + 2 mm * _i").set_text("mat", TextSrc::Param("timber".into()))],
         ..Default::default()
     }
 }
@@ -267,7 +267,7 @@ fn nested_work_and_size_are_bounded() {
         name: name.into(),
         values: vec![ValueDef::plane("x0", Axis::X, "0"), ValueDef::plane("x1", Axis::X, "1"), ValueDef::plane("y0", Axis::Y, "0"), ValueDef::plane("y1", Axis::Y, "1"), ValueDef::plane("z0", Axis::Z, "0"), ValueDef::plane("z1", Axis::Z, "1")],
         solids: if child.is_none() { vec![SolidDef::new("b", ("x0", "x1"), ("y0", "y1"), ("z0", "z1"))] } else { vec![] },
-        nested: child.map(|c| vec![NestedDef::new("c", c, ("_i", "0", "0")).repeat(count)]).unwrap_or_default(),
+        nested: child.map(|c| vec![NestedDef::new("c", c, ("_i * 1 m", "0", "0")).repeat(count)]).unwrap_or_default(),
         ..Default::default()
     };
     // 1000 x 1000 x 1000 instances would never finish: the work budget stops it quickly

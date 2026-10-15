@@ -55,7 +55,7 @@ fn marker(name: &str, rot: Option<RotateDef>, nested: Vec<NestedDef>) -> Family 
     let mut f = Family {
         name: name.into(),
         values: vec![ValueDef::plane("x0", Axis::X, "1"), ValueDef::plane("x1", Axis::X, "2"), ValueDef::plane("y0", Axis::Y, "0"), ValueDef::plane("y1", Axis::Y, "1"), ValueDef::plane("z0", Axis::Z, "0"), ValueDef::plane("z1", Axis::Z, "1"),
-                     ValueDef::input("a", 90.0, -720.0, 720.0, Scope::Instance)],
+                     ValueDef::angle("a", 90.0, -720.0, 720.0, Scope::Instance)],
         solids: vec![SolidDef::new("b", ("x0", "x1"), ("y0", "y1"), ("z0", "z1"))],
         nested,
         ..Default::default()
@@ -69,7 +69,7 @@ fn turns_add_up_through_nested_families() {
     // child box x 1..2, y 0..1 turned 90 about the origin: (x, y) -> (-y, x)
     let child = marker("Child", Some(RotateDef::new("a", "0", "0")), vec![]);
     // parent puts it at (1, 0, 0) and turns the whole thing 90 about the origin: total (x, y) -> (-x, -y) + (0, 1)
-    let parent = Family { name: "Parent".into(), values: vec![ValueDef::input("a", 90.0, -720.0, 720.0, Scope::Instance)], nested: vec![NestedDef::new("c", "Child", ("1", "0", "0")).rotate_about("a", "0", "0")], ..Default::default() };
+    let parent = Family { name: "Parent".into(), values: vec![ValueDef::angle("a", 90.0, -720.0, 720.0, Scope::Instance)], nested: vec![NestedDef::new("c", "Child", ("1", "0", "0")).rotate_about("a", "0", "0")], ..Default::default() };
     let v = compile_library(&[parent, child]).unwrap();
     let i = v[0].solve(&Request::default()).unwrap();
     let cs = corners(&i, 0);
@@ -80,7 +80,7 @@ fn turns_add_up_through_nested_families() {
     let cs = corners(&v[0].solve(&Request::default()).unwrap(), 0);
     for (x, y) in [(1.0, 1.0), (1.0, 2.0), (0.0, 2.0), (0.0, 1.0)] { assert!(has(&cs, x, y), "{x},{y} not in {cs:?}"); }
     // only the parent turns, the child box is not turned: box corners (1,0)..(2,1) shifted by (1,0) -> (2,0)..(3,1), then turned 90 about origin: (x, y) -> (-y, x)
-    let parent = Family { name: "Parent".into(), values: vec![ValueDef::input("a", 90.0, -720.0, 720.0, Scope::Instance)], nested: vec![NestedDef::new("c", "Child", ("1", "0", "0")).rotate_about("a", "0", "0")], ..Default::default() };
+    let parent = Family { name: "Parent".into(), values: vec![ValueDef::angle("a", 90.0, -720.0, 720.0, Scope::Instance)], nested: vec![NestedDef::new("c", "Child", ("1", "0", "0")).rotate_about("a", "0", "0")], ..Default::default() };
     let v = compile_library(&[parent, marker("Child", None, vec![])]).unwrap();
     let cs = corners(&v[0].solve(&Request::default()).unwrap(), 0);
     for (x, y) in [(0.0, 2.0), (0.0, 3.0), (-1.0, 2.0), (-1.0, 3.0)] { assert!(has(&cs, x, y), "{x},{y} not in {cs:?}"); }
@@ -90,7 +90,7 @@ fn turns_add_up_through_nested_families() {
 fn rotation_formulas_are_checked() {
     let mut f = marker("T", Some(RotateDef::new("a", "0", "nope")), vec![]);
     assert!(matches!(f.compile(), Err(FamilyError::Formula { .. })));
-    f.solids[0].rotate = Some(RotateDef::new("1 / (a - a)", "0", "0"));
+    f.solids[0].rotate = Some(RotateDef::new("a * a / (a - a)", "0", "0"));
     let c = f.compile().unwrap();
     assert!(matches!(c.solve(&Request::default()), Err(FamilyError::Formula { .. })));
     // arrays: every bar carries the turn

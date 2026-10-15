@@ -140,7 +140,14 @@ fn props_of<'a>(fam: &'a Compiled, inst: &'a Instance, scope: openbim_family::Sc
     let mut v: Vec<(&str, Val)> = Vec::new();
     for (n, x) in fam.input_values(inst) {
         if fam.input_scope(n) == Some(scope) {
-            v.push((n, Val::Real(x)));
+            // what the value measures decides how it is written: a length as a length, an angle as an angle in radians
+            v.push((n, match fam.value_dim(n) {
+                Some(d) if d == openbim_family::LENGTH => Val::LenAny(x),
+                Some(d) if d == openbim_family::AREA => Val::Area(x),
+                Some(d) if d == openbim_family::VOLUME => Val::Vol(x),
+                Some(d) if d == openbim_family::ANGLE => Val::Angle(x),
+                _ => Val::Real(x),
+            }));
         }
     }
     for (n, t) in fam.input_texts(inst) {

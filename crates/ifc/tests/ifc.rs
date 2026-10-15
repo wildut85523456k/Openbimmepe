@@ -184,7 +184,7 @@ fn occurrences_differing_only_in_a_form_or_a_turn_keep_their_own_bodies() {
         name: "Bench".into(),
         values: vec![
             ValueDef::input("w", 0.4, 0.1, 1.0, Scope::Instance),
-            ValueDef::input("a", 0.0, 0.0, 90.0, Scope::Instance),
+            ValueDef::angle("a", 0.0, 0.0, 90.0, Scope::Instance),
             ValueDef::plane("x0", Axis::X, "0"), ValueDef::plane("x1", Axis::X, "0.5"),
             ValueDef::plane("y0", Axis::Y, "0"), ValueDef::plane("y1", Axis::Y, "0.2"),
             ValueDef::plane("z0", Axis::Z, "0"), ValueDef::plane("z1", Axis::Z, "0.1"),
@@ -210,13 +210,13 @@ fn occurrences_differing_only_in_a_form_or_a_turn_keep_their_own_bodies() {
 fn mapped_parameters_go_to_their_standard_set_and_the_rest_stay_custom() {
     use openbim_ifc::pset_map::PsetMap;
     let mut s = library_scene(&[(Some("Type A"), "D1")]);
-    s.pset_map = PsetMap::from_text("IfcDoor\thandle_height\tPset_DoorCommon\tHandleHeight\tpositive_length\nIfcDoor\topen_angle\tPset_DoorCommon\tAngle\tlength\n").unwrap();
+    s.pset_map = PsetMap::from_text("IfcDoor\thandle_height\tPset_DoorCommon\tHandleHeight\tpositive_length\nIfcDoor\topen_angle\tPset_DoorCommon\tAngle\tangle\n").unwrap();
     let out = export(&s).unwrap();
     assert_eq!(out.report.mapped_properties, 2);
     assert!(out.report.warnings.is_empty(), "{:?}", out.report.warnings);
     assert!(out.text.contains("IFCPROPERTYSET(") && out.text.contains("'Pset_DoorCommon'"));
     assert!(out.text.contains("'HandleHeight',$,IFCPOSITIVELENGTHMEASURE(1.0)"));
-    assert!(out.text.contains("'Angle',$,IFCLENGTHMEASURE(0.)"));
+    assert!(out.text.contains("'Angle',$,IFCPLANEANGLEMEASURE(0.)"));
     // the mapped one is gone from the custom type set
     assert!(!out.text.contains("'handle_height'"));
     assert!(out.text.contains("'OpenBIM_Family'"));
@@ -230,13 +230,13 @@ fn mapped_parameters_go_to_their_standard_set_and_the_rest_stay_custom() {
 fn a_value_that_does_not_fit_its_row_stays_custom_with_a_warning() {
     use openbim_ifc::pset_map::PsetMap;
     let mut s = library_scene(&[(Some("Type A"), "D1")]);
-    // 'frame' is 0.05: not a whole number
+    // 'frame' is a length, not a count; 'open_angle' is an angle, not a length
     s.pset_map = PsetMap::from_text("IfcDoor\tframe\tPset_DoorCommon\tFrameCount\tinteger\n*\topen_angle\tPset_X\tLen\tpositive_length\n").unwrap();
     let out = export(&s).unwrap();
     assert_eq!(out.report.mapped_properties, 0);
     assert_eq!(out.report.warnings.len(), 2, "{:?}", out.report.warnings);
-    assert!(out.report.warnings.iter().any(|w| w.contains("frame") && w.contains("whole number")));
-    assert!(out.report.warnings.iter().any(|w| w.contains("open_angle") && w.contains("above 0")));
+    assert!(out.report.warnings.iter().any(|w| w.contains("frame") && w.contains("is a length")));
+    assert!(out.report.warnings.iter().any(|w| w.contains("open_angle") && w.contains("is an angle")));
     assert!(out.text.contains("'frame'") && !out.text.contains("'FrameCount'"));
 }
 
@@ -286,4 +286,17 @@ fn slab_net_quantities_take_off_shafts_and_cut_openings() {
     assert!(out.text.contains("IFCQUANTITYAREA('NetArea',$,$,78.0,$)"));
     assert!(out.text.contains("IFCQUANTITYVOLUME('NetVolume',$,$,15.6"));
     assert!(out.text.contains("IFCQUANTITYVOLUME('GrossVolume',$,$,16.0,$)"));
+}
+
+#[test]
+fn quantities_with_a_unit_are_written_as_that_measure() {
+    use openbim_family::{library, Request};
+    let fams = library::all().unwrap();
+    let mut s = library_scene(&[(Some("Type A"), "D1")]);
+    s.items[0].instance = fams[1].solve(&Request { type_name: Some("Type A"), overrides: vec![("open_angle", 90.0)], ..Default::default() }).unwrap();
+    let out = export(&s).unwrap();
+    // the angle is held in degrees and written in radians; lengths are lengths
+    assert!(out.text.contains(&format!("'open_angle',$,IFCPLANEANGLEMEASURE({})", real(std::f64::consts::FRAC_PI_2))), "{}", out.text.lines().filter(|l| l.contains("open_angle")).collect::<Vec<_>>().join("\n"));
+    assert!(out.text.contains("'handle_height',$,IFCLENGTHMEASURE(1.0)"));
+    assert!(!out.text.contains("'handle_height',$,IFCREAL"));
 }

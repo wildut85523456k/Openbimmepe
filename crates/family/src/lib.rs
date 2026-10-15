@@ -20,7 +20,9 @@ pub mod shared;
 pub mod catalogue;
 pub mod library;
 
-use expr::{Expr, ExprError};
+use expr::{Expr, ANG, LEN, NUM};
+pub use expr::ExprError;
+pub use expr::{Dim, Want, ANGLE, AREA, LENGTH, NUMBER, VOLUME};
 pub use shared::{SharedParam, SharedSet};
 pub use forms::{Form, FormDef, FormGeom, FormKind, Loop, ProfileDef};
 pub use mep::{Category, Connector, ConnectorDef, Dir, Domain, FlowDir, Host, MateError, PlanDef, PlanShape, Pose, Resize, ShapeDef, System};
@@ -68,13 +70,25 @@ pub enum ValueKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct ValueDef { pub name: String, pub kind: ValueKind, pub axis: Option<Axis> }
+pub struct ValueDef {
+    pub name: String,
+    pub kind: ValueKind,
+    pub axis: Option<Axis>,
+    /// what the value measures. An input is a length unless it is a count or says otherwise; a formula takes the
+    /// dimension of its result, and when one is given here the formula must produce it.
+    pub dim: Option<Dim>,
+}
 
 impl ValueDef {
-    fn new(name: &str, kind: ValueKind) -> Self { ValueDef { name: name.into(), kind, axis: None } }
+    fn new(name: &str, kind: ValueKind) -> Self { ValueDef { name: name.into(), kind, axis: None, dim: None } }
     pub fn input(name: &str, default: f64, min: f64, max: f64, scope: Scope) -> Self {
         Self::new(name, ValueKind::Input { default, min, max, integer: false, scope })
     }
+    /// An angle in degrees.
+    pub fn angle(name: &str, default: f64, min: f64, max: f64, scope: Scope) -> Self { Self::input(name, default, min, max, scope).with_dim(ANGLE) }
+    /// A number that is not a length (a ratio, a factor).
+    pub fn number(name: &str, default: f64, min: f64, max: f64, scope: Scope) -> Self { Self::input(name, default, min, max, scope).with_dim(NUMBER) }
+    pub fn with_dim(mut self, d: Dim) -> Self { self.dim = Some(d); self }
     pub fn count(name: &str, default: f64, min: f64, max: f64, scope: Scope) -> Self {
         Self::new(name, ValueKind::Input { default, min, max, integer: true, scope })
     }
@@ -85,7 +99,7 @@ impl ValueDef {
     pub fn text(name: &str, default: &str, scope: Scope) -> Self { Self::new(name, ValueKind::Text { default: default.into(), scope }) }
     pub fn material(name: &str, default: &str, scope: Scope) -> Self { Self::new(name, ValueKind::Material { default: default.into(), scope }) }
     pub fn formula(name: &str, f: &str) -> Self { Self::new(name, ValueKind::Formula(f.into())) }
-    pub fn plane(name: &str, axis: Axis, f: &str) -> Self { ValueDef { name: name.into(), kind: ValueKind::Formula(f.into()), axis: Some(axis) } }
+    pub fn plane(name: &str, axis: Axis, f: &str) -> Self { ValueDef { name: name.into(), kind: ValueKind::Formula(f.into()), axis: Some(axis), dim: None } }
 }
 
 #[derive(Debug, Clone)]
@@ -357,6 +371,8 @@ pub struct Inner {
     /// per choice value: (slot of the choice, slot of its first option flag)
     choice_flags: Vec<(usize, usize)>,
     formulas: Vec<Option<Expr>>,
+    /// what each slot measures
+    dims: Vec<Dim>,
     /// slots of calculated numbers that are not planes, in declaration order
     derived: Vec<usize>,
     order: Vec<usize>,
@@ -524,13 +540,29 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
     let res = |s: &str| index.get(s).copied();
     // text and material values carry no number, so a formula may not read them
     let is_text = |slot: usize| matches!(inputs[slot].as_ref().map(|t| &t.spec), Some(Spec::Text { .. }) | Some(Spec::Material { .. }));
-    let parse = |label: &str, src: &str, extra: bool| -> Result<Expr, FamilyError> {
+    // what each slot measures: inputs say so, calculated values are worked out below, in dependency order
+    let dims: std::cell::RefCell<Vec<Dim>> = std::cell::RefCell::new(vec![NUMBER; n]);
+    for (i, v) in fam.values.iter().enumerate() {
+        if let ValueKind::Input { integer, .. } = &v.kind {
+            dims.borrow_mut()[i] = v.dim.unwrap_or(if *integer { NUMBER } else { LENGTH });
+        } else if !matches!(v.kind, ValueKind::Formula(_)) && v.dim.is_some_and(|d| d != NUMBER) {
+            return Err(FamilyError::BadInput { name: v.name.clone(), why: "only a number input or a formula has a dimension" });
+        }
+    }
+    let parse_raw = |label: &str, src: &str, extra: bool| -> Result<Expr, FamilyError> {
         let e = Expr::parse(src, &|s| if extra && s == INDEX_NAME { Some(n) } else { res(s) }).map_err(|err| FamilyError::Formula { name: label.into(), err })?;
         for &d in e.deps() { if d < n && is_text(d) { return Err(FamilyError::TextInFormula(names[d].clone())); } }
         Ok(e)
     };
+    // a formula in a place that needs a certain dimension: the units must fit
+    let parse = |label: &str, src: &str, extra: bool, want: Want| -> Result<Expr, FamilyError> {
+        let e = parse_raw(label, src, extra)?;
+        let d = dims.borrow();
+        e.check(&|slot| d.get(slot).copied().unwrap_or(NUMBER), want).map_err(|err| FamilyError::Formula { name: label.into(), err })?;
+        Ok(e)
+    };
     let mut formulas: Vec<Option<Expr>> = vec![None; n];
-    for i in 0..n { if let Some(src) = formula_src[i] { formulas[i] = Some(parse(&names[i], src, false)?); } }
+    for i in 0..n { if let Some(src) = formula_src[i] { formulas[i] = Some(parse_raw(&names[i], src, false)?); } }
     // dependency order (Kahn). Inputs and choice flags have no formula.
     let mut indeg = vec![0usize; n];
     let mut users: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -549,6 +581,16 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
         cyc.sort();
         return Err(FamilyError::Cycle(cyc));
     }
+    for &i in &order {
+        let v = &fam.values[i];
+        let want = if v.axis.is_some() { LEN } else { v.dim.map_or(Want::Any, Want::Is) };
+        let d = {
+            let d = dims.borrow();
+            formulas[i].as_ref().expect("a formula").check(&|slot| d.get(slot).copied().unwrap_or(NUMBER), want)
+        };
+        dims.borrow_mut()[i] = d.map_err(|err| FamilyError::Formula { name: names[i].clone(), err })?;
+    }
+    let dims_v: Vec<Dim> = dims.borrow().clone();
     let plane = |solid: &str, p: &str, axis: Axis| -> Result<usize, FamilyError> {
         let i = *index.get(p).ok_or_else(|| FamilyError::UnknownPlane { solid: solid.into(), plane: p.into() })?;
         if i >= nvalues || fam.values[i].axis != Some(axis) { return Err(FamilyError::WrongAxis { solid: solid.into(), plane: p.into() }); }
@@ -571,19 +613,19 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
             (plane(&s.name, &s.y.0, Axis::Y)?, plane(&s.name, &s.y.1, Axis::Y)?),
             (plane(&s.name, &s.z.0, Axis::Z)?, plane(&s.name, &s.z.1, Axis::Z)?),
         ];
-        let pe = |part: &str, f: &str| parse(&format!("{}.{}", s.name, part), f, false);
-        let array = match &s.array { Some(a) => Some((a.axis.i(), pe("count", &a.count)?, pe("bar", &a.bar)?)), None => None };
-        let visible = match &s.visible { Some(v) => Some(pe("visible", v)?), None => None };
+        let pe = |part: &str, f: &str, w: Want| parse(&format!("{}.{}", s.name, part), f, false, w);
+        let array = match &s.array { Some(a) => Some((a.axis.i(), pe("count", &a.count, NUM)?, pe("bar", &a.bar, LEN)?)), None => None };
+        let visible = match &s.visible { Some(v) => Some(pe("visible", v, NUM)?), None => None };
         let material = match &s.material { Some(m) => Some(material_slot(&s.name, m)?), None => None };
-        let rotate = match &s.rotate { Some(r) => Some([pe("rotate.angle", &r.angle)?, pe("rotate.x", &r.pivot.0)?, pe("rotate.y", &r.pivot.1)?]), None => None };
+        let rotate = match &s.rotate { Some(r) => Some([pe("rotate.angle", &r.angle, ANG)?, pe("rotate.x", &r.pivot.0, LEN)?, pe("rotate.y", &r.pivot.1, LEN)?]), None => None };
         solids.push(CSolid { name: s.name.clone(), span, array, visible, material, rotate });
     }
     let mut checks = Vec::new();
-    for c in &fam.checks { checks.push((c.name.clone(), parse(&c.name, &c.expr, false)?)); }
+    for c in &fam.checks { checks.push((c.name.clone(), parse(&c.name, &c.expr, false, NUM)?)); }
     let opening = match &fam.opening {
         Some(o) => Some((
-            parse("opening.width", &o.width, false)?, parse("opening.height", &o.height, false)?, parse("opening.sill", &o.sill, false)?,
-            match &o.rise { Some(r) => Some(parse("opening.rise", r, false)?), None => None },
+            parse("opening.width", &o.width, false, LEN)?, parse("opening.height", &o.height, false, LEN)?, parse("opening.sill", &o.sill, false, LEN)?,
+            match &o.rise { Some(r) => Some(parse("opening.rise", r, false, LEN)?), None => None },
         )),
         None => None,
     };
@@ -600,7 +642,7 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
         let bad = |why: &'static str| FamilyError::BadNested { nested: nd.name.clone(), why };
         if let Some(t) = &nd.type_name { if !child.types.iter().any(|(nm, _, _)| nm == t) { return Err(bad("the nested family has no such type")); } }
         let lbl = |part: &str| format!("{}.{}", nd.name, part);
-        let at = [parse(&lbl("x"), &nd.at.0, true)?, parse(&lbl("y"), &nd.at.1, true)?, parse(&lbl("z"), &nd.at.2, true)?];
+        let at = [parse(&lbl("x"), &nd.at.0, true, LEN)?, parse(&lbl("y"), &nd.at.1, true, LEN)?, parse(&lbl("z"), &nd.at.2, true, LEN)?];
         let mut values = Vec::new();
         let mut set_seen = std::collections::HashSet::new();
         for (cn, src) in &nd.values {
@@ -610,7 +652,7 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
                 Some(Spec::Num { .. }) | Some(Spec::Flag { .. }) => {}
                 _ => return Err(bad("a number can only be tied to a number or yes/no input")),
             }
-            values.push((slot, parse(&lbl(cn), src, true)?));
+            values.push((slot, parse(&lbl(cn), src, true, Want::Is(child.dims[slot]))?));
         }
         let mut texts = Vec::new();
         for (cn, src) in &nd.texts {
@@ -636,9 +678,9 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
                 }
             }
         }
-        let count = match &nd.count { Some(c) => Some(parse(&lbl("count"), c, true)?), None => None };
-        let visible = match &nd.visible { Some(v) => Some(parse(&lbl("visible"), v, true)?), None => None };
-        let rotate = match &nd.rotate { Some(r) => Some([parse(&lbl("rotate.angle"), &r.angle, true)?, parse(&lbl("rotate.x"), &r.pivot.0, true)?, parse(&lbl("rotate.y"), &r.pivot.1, true)?]), None => None };
+        let count = match &nd.count { Some(c) => Some(parse(&lbl("count"), c, true, NUM)?), None => None };
+        let visible = match &nd.visible { Some(v) => Some(parse(&lbl("visible"), v, true, NUM)?), None => None };
+        let rotate = match &nd.rotate { Some(r) => Some([parse(&lbl("rotate.angle"), &r.angle, true, ANG)?, parse(&lbl("rotate.x"), &r.pivot.0, true, LEN)?, parse(&lbl("rotate.y"), &r.pivot.1, true, LEN)?]), None => None };
         let offset = solid_names.len();
         let form_offset = form_names.len();
         for fnm in &child.form_names { form_names.push(format!("{}/{}", nd.name, fnm)); }
@@ -685,7 +727,7 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
     let (connectors, plan) = mep::compile(&fam.connectors, &fam.plan, &parse)?;
     let forms = forms::compile(&fam.forms, &parse, &material_slot)?;
     let derived: Vec<usize> = (0..nvalues).filter(|&i| formulas[i].is_some() && fam.values[i].axis.is_none()).collect();
-    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids, forms, form_names })))
+    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, dims: dims_v, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids, forms, form_names })))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -759,6 +801,8 @@ impl Inner {
     pub fn type_names(&self) -> Vec<&str> { self.types.iter().map(|t| t.0.as_str()).collect() }
     pub fn classification(&self) -> &[(String, String)] { &self.classification }
     pub fn slot(&self, name: &str) -> Option<usize> { self.index.get(name).copied() }
+    /// What a value measures: a length, an area, an angle, a plain number. Calculated values take it from their formula.
+    pub fn value_dim(&self, name: &str) -> Option<Dim> { self.slot(name).map(|i| self.dims[i]) }
     pub fn value(&self, inst: &Instance, name: &str) -> Option<f64> { self.slot(name).map(|i| inst.values[i]) }
 
     /// Text of a choice, text or material value in `inst`.

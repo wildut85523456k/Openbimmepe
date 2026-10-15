@@ -98,16 +98,23 @@ fn map_errors() {
 fn map_from_shared_parameters_and_overlay() {
     let id = |n: u128| format!("{n:032x}");
     let text = format!(
-        "{}\tfire_load\tnumber\ttype\t1\t0\t9\t\tPset_Fire\tload\n{}\tzones\tcount\tinstance\t1\t0\t9\t\tPset_Fire\tn\n{}\tnote\ttext\ttype\tx\t\t\t\t\tfree\n{}\tflag\tflag\ttype\t1\t\t\t\tPset_Fire\tf\n",
+        "{}\tfire_load\tnumber\ttype\t1\t0\t9\t\tPset_Fire\tload\n{}\tzones\tcount\tinstance\t1\t0\t9\t\tPset_Fire\tn\n{}\tnote\ttext\ttype\tx\t\t\t\t\tfree\n{}\tflag\tflag\ttype\t1\t\t\t\tPset_Fire\tf\n{}\tslope\tangle\ttype\t5\t0\t90\t\tPset_Fire\ta\n{}\tarea_x\tarea\ttype\t1\t0\t9\t\tPset_Fire\ta\n{}\tvol_x\tvolume\ttype\t1\t0\t9\t\tPset_Fire\ta\n{}\tratio_x\tratio\ttype\t1\t0\t9\t\tPset_Fire\ta\n",
         id(1),
         id(2),
         id(3),
-        id(4)
+        id(4),
+        id(5),
+        id(6),
+        id(7),
+        id(8)
     );
     let set = SharedSet::from_text(&text).unwrap();
     let m = PsetMap::from_shared(&set);
-    assert_eq!(m.rows.len(), 3, "a parameter without a group has no row");
-    assert_eq!(m.find("IfcDoor", "fire_load").unwrap().kind, PropKind::Real);
+    assert_eq!(m.rows.len(), 7, "a parameter without a group has no row");
+    for (n, k) in [("slope", PropKind::Angle), ("area_x", PropKind::Area), ("vol_x", PropKind::Volume), ("ratio_x", PropKind::Real)] {
+        assert_eq!(m.find("IfcWall", n).unwrap().kind, k, "{n}");
+    }
+    assert_eq!(m.find("IfcDoor", "fire_load").unwrap().kind, PropKind::Length); // number is the older word for length
     assert_eq!(m.find("IfcDoor", "zones").unwrap().kind, PropKind::Integer);
     assert_eq!(m.find("IfcDoor", "flag").unwrap().kind, PropKind::Boolean);
     assert!(m.find("IfcDoor", "note").is_none());
@@ -117,5 +124,5 @@ fn map_from_shared_parameters_and_overlay() {
     let both = m.overlaid(&over);
     assert_eq!(both.find("IfcDoor", "fire_load").unwrap().property, "FireLoad");
     assert_eq!(both.find("IfcWall", "fire_load").unwrap().property, "fire_load");
-    assert_eq!(both.rows.len(), 4);
+    assert_eq!(both.rows.len(), 8);
 }
