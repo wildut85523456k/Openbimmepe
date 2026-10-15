@@ -210,8 +210,8 @@ fn profile_errors() {
     assert!(matches!(one(ext(ProfileDef::polygon(&[("0", "0"), ("1", "0")]))).compile(), Err(FamilyError::Form { .. })));
     assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("1", "1"), ("1", "0"), ("0", "1")]))).contains("crosses or touches itself"));
     assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("1", "0"), ("1", "0"), ("1", "1")]))).contains("crosses or touches itself"));
-    assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("1", "0"), ("2", "0")]))).contains("crosses or touches itself"));
-    assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("1", "0"), ("0.5", "0")]))).contains("crosses or touches itself"));
+    assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("1", "0"), ("2", "0")]))).contains("no area"));
+    assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("1", "0"), ("0.5", "0")]))).contains("no area"));
     // a spike that folds back on itself
     assert!(why(ext(ProfileDef::polygon(&[("0", "0"), ("2", "0"), ("1", "0"), ("1", "1")]))).contains("crosses or touches itself"));
     // a vertex touching an edge
@@ -340,4 +340,111 @@ fn nested_materials_and_limits() {
     };
     assert_eq!(big(false).solve(&Request::default()).unwrap().forms.len(), 5000);
     assert_eq!(big(true).solve(&Request::default()).err(), Some(FamilyError::TooMany("forms in one placement")));
+}
+
+#[test]
+fn values_other_than_profile_points_are_limited_to_100_m_too() {
+    assert!(solve(FormDef::extrusion("e", Axis::Z, "99", "100", rect("0", "0", "1", "1"))).is_ok());
+    assert!(why(FormDef::extrusion("e", Axis::Z, "99", "100.5", rect("0", "0", "1", "1"))).contains("100 m"));
+    assert!(why(FormDef::extrusion("e", Axis::Z, "-101", "0", rect("0", "0", "1", "1"))).contains("100 m"));
+    assert!(solve(FormDef::extrusion("e", Axis::Z, "0", "100", rect("0", "0", "1", "1"))).is_ok());
+    assert!(matches!(solve(FormDef::extrusion("e", Axis::Z, "0", "1e308 * 10", rect("0", "0", "1", "1"))), Err(FamilyError::Formula { .. })));
+    assert!(why(FormDef::revolve("r", Axis::Z, "100.5", true, "0", "360", rect("0", "0", "1", "1"))).contains("100 m"));
+    assert!(solve(FormDef::revolve("r", Axis::Z, "100", true, "0", "360", rect("0", "0", "1", "1"))).is_ok());
+}
+
+#[test]
+fn sweep_corner_clearance_uses_the_widest_side_and_circles() {
+    // the profile reaches 0.5 to the right and 0.1 to the left: the right side counts
+    fn two(len: &str) -> [(&str, &str); 4] { [("0", "0"), ("4", "0"), ("4", len), ("8", len)] }
+    assert!(why(sweep(&two("0.9"), rect("-0.5", "-0.05", "0.1", "0.05"))).contains("too wide"));
+    // a circle off centre: its far edge is 0.35 from the path
+    let c = ProfileDef::circle("0.3", "0", "0.05");
+    assert!(why(sweep(&two("0.6"), c.clone())).contains("too wide"));
+    assert!(solve(sweep(&two("0.8"), c)).is_ok());
+}
+
+#[test]
+fn a_path_whose_third_segment_cuts_the_first_is_refused() {
+    let p = [("0", "0"), ("4", "0"), ("3", "2"), ("2", "-1")];
+    assert_eq!(why(sweep(&p, rect("-0.01", "-0.01", "0.01", "0.01"))), "the path crosses itself");
+}
+
+#[test]
+fn revolving_about_a_line_away_from_the_origin() {
+    // about the u direction at v = -1: the profile (0..3 by 1..3) has its centre 3 above the axis
+    let f = ok(FormDef::revolve("r", Axis::Z, "0", false, "-1", "360", rect("0", "1", "3", "3")));
+    assert!(close(f.volume(), 2.0 * PI * 6.0 * 3.0));
+    // about v at u = 0.5: bounds reach 1.5 either side of the axis
+    let f = ok(FormDef::revolve("r", Axis::Z, "0", true, "0.5", "360", rect("1", "0", "2", "2")));
+    let (lo, hi) = f.bounds_local();
+    assert!(close3(lo, [-1.0, 0.0, -1.5]) && close3(hi, [2.0, 2.0, 1.5]), "{lo:?} {hi:?}");
+    // about u at v = 0.5: reach 1.5 either side of the axis
+    let f = ok(FormDef::revolve("r", Axis::Z, "0", false, "0.5", "360", rect("0", "1", "3", "2")));
+    let (lo, hi) = f.bounds_local();
+    assert!(close3(lo, [0.0, -1.0, -1.5]) && close3(hi, [3.0, 2.0, 1.5]), "{lo:?} {hi:?}");
+    // a hole counts with its own moment about the axis
+    let f = ok(FormDef::revolve("r", Axis::Z, "0", false, "0", "360", rect("0", "1", "4", "5")).hole(rect("1", "2", "2", "3")));
+    assert!(close(f.volume(), 2.0 * PI * (16.0 * 3.0 - 1.0 * 2.5)));
+    // profile and hole of different centroids in u and v
+    let f = ok(FormDef::revolve("r", Axis::Z, "0", true, "0", "360", rect("1", "0", "5", "2")).hole(rect("2", "0.5", "3", "1.5")));
+    assert!(close(f.volume(), 2.0 * PI * (8.0 * 3.0 - 1.0 * 2.5)));
+}
+
+#[test]
+fn partial_turns_match_the_independent_check() {
+    // figures from the OpenCASCADE cross-check (spikes/s10_forms_ifc)
+    let bounds = |f: FormDef, vol: f64, lo: [f64; 3], hi: [f64; 3]| {
+        let f = ok(f);
+        let (l, h) = f.bounds_local();
+        assert!(close(f.volume(), vol), "{}", f.volume());
+        assert!(close3(l, lo) && close3(h, hi), "{l:?} {h:?}");
+    };
+    let rv = |p: Axis, off: &str, v: bool, at: &str, ang: &str, pr: ProfileDef| FormDef::revolve("r", p, off, v, at, ang, pr);
+    bounds(rv(Axis::X, "4", true, "0.5", "60", rect("1", "0", "2", "2")), 2.094395102, [2.700961894, 0.75, 0.0], [4.0, 2.0, 2.0]);
+    bounds(rv(Axis::Z, "0.5", false, "-1", "100", rect("0", "0", "3", "2")), 20.943951024, [0.0, -1.520944533, 0.5], [3.0, 2.0, 3.5]);
+    bounds(rv(Axis::Y, "9", true, "0", "300", rect("0", "0", "1", "2")), 5.235987756, [0.0, 8.0, -1.0], [2.0, 10.0, 1.0]);
+    bounds(rv(Axis::Z, "0", true, "0", "120", ProfileDef::circle("1", "0", "0.1")), 0.065797363, [-0.55, -0.1, -1.1], [1.1, 0.1, 0.0]);
+    bounds(rv(Axis::Z, "0", true, "0", "200", rect("0", "0", "0.5", "2")), 0.872664626, [-0.5, 0.0, -0.5], [0.5, 2.0, 0.171010072]);
+    bounds(rv(Axis::Z, "0", true, "0", "250", rect("0.2", "0", "1", "2")).hole(rect("0.4", "0.5", "0.8", "1.5")), PI, [-1.0, 0.0, -1.0], [1.0, 2.0, 0.939692621]);
+}
+
+#[test]
+fn a_sharp_corner_pushes_the_bounds_out_to_the_mitre_tip() {
+    // 120 degree left turn, profile on the outside (right) side: the tip is 0.2 / cos(60) from the corner
+    let p = [("0", "0"), ("4", "0"), ("2", "3.4641016151377544")];
+    let f = ok(sweep(&p, rect("-0.2", "-0.05", "0", "0.05")));
+    let (lo, hi) = f.bounds_local();
+    assert!((hi[0] - (4.0 + 0.2 * 3f64.sqrt())).abs() < 1e-9, "{hi:?}");
+    assert!((lo[1] + 0.2).abs() < 1e-9 && close(lo[2], 0.95) && close(hi[2], 1.05), "{lo:?}");
+    // the mitre tip is symmetric: the same corner on the inside (left) pulls the other way
+    let f = ok(sweep(&p, rect("0", "-0.05", "0.2", "0.05")));
+    let (_, hi) = f.bounds_local();
+    assert!((hi[0] - 4.0).abs() < 1e-9, "{hi:?}");
+}
+
+#[test]
+fn polygons_whose_corner_lies_on_a_later_edge_are_refused() {
+    let ext = |pts: &[(&str, &str)]| FormDef::extrusion("e", Axis::Z, "0", "1", ProfileDef::polygon(pts));
+    assert!(why(ext(&[("0", "0"), ("1", "1"), ("0", "2"), ("2", "0")])).contains("crosses or touches itself"));
+}
+
+#[test]
+fn holes_that_only_touch_are_refused() {
+    let ext = |holes: Vec<ProfileDef>, outer: ProfileDef| { let mut f = FormDef::extrusion("e", Axis::Z, "0", "1", outer); f.holes = holes; f };
+    let big = || rect("0", "0", "4", "4");
+    // two circles touching at one point
+    assert!(why(ext(vec![ProfileDef::circle("1", "1", "0.5"), ProfileDef::circle("2", "1", "0.5")], big())).contains("holes must not"));
+    // a circle touching the side of a rectangle hole
+    assert!(why(ext(vec![ProfileDef::circle("1", "1", "0.5"), rect("1.5", "0.5", "2.5", "1.5")], big())).contains("holes must not"));
+    // the small one first, the big one second
+    assert!(why(ext(vec![rect("1.5", "1.5", "2", "2"), rect("1", "1", "3", "3")], big())).contains("holes must not"));
+    // a polygon hole with a corner exactly on the circle outline
+    assert!(why(ext(vec![ProfileDef::polygon(&[("0", "0.2"), ("1", "0"), ("0", "-0.2")])], ProfileDef::circle("0", "0", "1"))).contains("must lie inside"));
+}
+
+#[test]
+fn a_circle_profile_crossing_the_axis_is_refused() {
+    assert!(why(FormDef::revolve("r", Axis::Z, "0", true, "0", "360", ProfileDef::circle("0.05", "0.5", "0.1"))).contains("crosses the axis"));
+    assert!(solve(FormDef::revolve("r", Axis::Z, "0", true, "0", "360", ProfileDef::circle("0.1", "0.5", "0.1"))).is_ok());
 }

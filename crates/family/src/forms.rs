@@ -237,15 +237,11 @@ fn poly_simple(p: &[P2]) -> bool {
     let n = p.len();
     for i in 0..n {
         let (a, b) = (p[i], p[(i + 1) % n]);
-        if a == b { return false; }
         for j in i + 1..n {
             let (c, d) = (p[j], p[(j + 1) % n]);
             let adjacent = j == i + 1 || (i == 0 && j == n - 1);
-            if adjacent {
-                // neighbours may only share their common end point
-                let (shared, o1, o2) = if j == i + 1 { (b, a, d) } else { (a, b, c) };
-                if orient(o1, shared, o2) == 0.0 && dot(sub(o1, shared), sub(o2, shared)) > 0.0 { return false; } // folded back
-            } else if segs_touch(a, b, c, d) { return false; }
+            if adjacent { continue; }
+            if segs_touch(a, b, c, d) { return false; }
         }
     }
     true
@@ -282,13 +278,13 @@ fn loop_inside(inner: &Loop, outer: &Loop) -> bool {
 fn solve_loop(name: &str, c: &CLoop, vals: &[f64]) -> Result<Loop, FamilyError> {
     let ev = |e: &Expr, part: &str| -> Result<f64, FamilyError> {
         let v = e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.{part}"), err })?;
-        if !v.is_finite() || v.abs() > MAX_COORD { return Err(bad(name, "a coordinate is not a finite number within 100 m")); }
+        if v.abs() > MAX_COORD { return Err(bad(name, "a coordinate is not a finite number within 100 m")); }
         Ok(v)
     };
     match c {
         CLoop::Circle(ce, r) => {
             let (cu, cv, rr) = (ev(&ce[0], "cu")?, ev(&ce[1], "cv")?, ev(r, "r")?);
-            if rr <= 0.0 || std::f64::consts::PI * rr * rr < MIN_AREA { return Err(bad(name, "the circle is too small")); }
+            if rr < 0.0 || std::f64::consts::PI * rr * rr < MIN_AREA { return Err(bad(name, "the circle is too small")); }
             Ok(Loop::Circle { c: [cu, cv], r: rr })
         }
         CLoop::Poly(pts) => {
@@ -336,7 +332,7 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
         let name = f.name.as_str();
         let ev = |e: &Expr, part: &str| -> Result<f64, FamilyError> {
             let v = e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.{part}"), err })?;
-            if !v.is_finite() || v.abs() > MAX_COORD { return Err(bad(name, "a value is not a finite number within 100 m")); }
+            if v.abs() > MAX_COORD { return Err(bad(name, "a value is not a finite number within 100 m")); }
             Ok(v)
         };
         let (outer, holes) = solve_profile(name, &f.outer, &f.holes, vals)?;
