@@ -256,11 +256,17 @@ pub struct ConnectorDef {
     /// Pa; not for electrical connectors
     pub pressure_drop: Option<String>,
     pub visible: Option<String>,
+    /// azimuth and elevation in degrees; when set they replace `dir` (45 degree fittings, slopes)
+    pub aim: Option<(String, String)>,
+    /// turn of a rectangular connector about its own axis, degrees (0 = default up)
+    pub roll: Option<String>,
+    /// electrical only: power factor, more than 0 and at most 1 (default 1)
+    pub power_factor: Option<String>,
 }
 
 impl ConnectorDef {
     pub fn new(name: &str, domain: Domain, system: System, flow_dir: FlowDir, at: (&str, &str, &str), dir: Dir, shape: ShapeDef) -> Self {
-        ConnectorDef { name: name.into(), domain, system, flow_dir, at: (at.0.into(), at.1.into(), at.2.into()), dir, shape, flow: None, pressure_drop: None, visible: None }
+        ConnectorDef { name: name.into(), domain, system, flow_dir, at: (at.0.into(), at.1.into(), at.2.into()), dir, shape, flow: None, pressure_drop: None, visible: None, aim: None, roll: None, power_factor: None }
     }
     pub fn flow(mut self, f: &str) -> Self {
         self.flow = Some(f.into());
@@ -272,6 +278,19 @@ impl ConnectorDef {
     }
     pub fn visible_if(mut self, f: &str) -> Self {
         self.visible = Some(f.into());
+        self
+    }
+    /// Face along azimuth (counter-clockwise from +X in plan) and elevation (up from the horizontal), in degrees.
+    pub fn aim(mut self, azimuth: &str, elevation: &str) -> Self {
+        self.aim = Some((azimuth.into(), elevation.into()));
+        self
+    }
+    pub fn roll(mut self, degrees: &str) -> Self {
+        self.roll = Some(degrees.into());
+        self
+    }
+    pub fn power_factor(mut self, f: &str) -> Self {
+        self.power_factor = Some(f.into());
         self
     }
 }
@@ -313,6 +332,9 @@ pub(crate) struct CConnector {
     flow: Option<Expr>,
     pdrop: Option<Expr>,
     visible: Option<Expr>,
+    aim: Option<[Expr; 2]>,
+    roll: Option<Expr>,
+    pf: Option<Expr>,
 }
 enum CShape {
     Round(Expr),
@@ -357,6 +379,12 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
         if c.domain == Domain::Electrical && c.pressure_drop.is_some() {
             return Err(bad(&c.name, "an electrical connector has no pressure drop"));
         }
+        if c.power_factor.is_some() && c.domain != Domain::Electrical {
+            return Err(bad(&c.name, "only an electrical connector has a power factor"));
+        }
+        if c.roll.is_some() && !matches!(c.shape, ShapeDef::Rect(..)) {
+            return Err(bad(&c.name, "only a rectangular connector can be rolled"));
+        }
         out.push(CConnector {
             name: c.name.clone(),
             domain: c.domain,
@@ -368,6 +396,9 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
             flow: match &c.flow { Some(f) => Some(p("flow", f)?), None => None },
             pdrop: match &c.pressure_drop { Some(f) => Some(p("pressure_drop", f)?), None => None },
             visible: match &c.visible { Some(f) => Some(p("visible", f)?), None => None },
+            aim: match &c.aim { Some((a, e)) => Some([p("azimuth", a)?, p("elevation", e)?]), None => None },
+            roll: match &c.roll { Some(f) => Some(p("roll", f)?), None => None },
+            pf: match &c.power_factor { Some(f) => Some(p("power_factor", f)?), None => None },
         });
     }
     let mut cp = Vec::new();
@@ -401,9 +432,31 @@ pub struct Connector {
     pub flow_dir: FlowDir,
     pub pos: [f64; 3],
     pub dir: [f64; 3],
+    /// the direction of the height of a rectangular connector (unit, square to `dir`)
+    pub up: [f64; 3],
     pub size: Size,
+    /// m3/s, or real power in W for an electrical connector
     pub flow: f64,
     pub pressure_drop: f64,
+    /// electrical only; 1 elsewhere
+    pub power_factor: f64,
+}
+
+impl Connector {
+    /// Apparent power in VA of an electrical connector (real power over power factor).
+    pub fn apparent_power(&self) -> f64 {
+        self.flow / self.power_factor
+    }
+    /// Line current in A: single pole S/V; two or more poles are taken as three-phase S/(sqrt(3) V) when `poles` is 3 or 4, else S/V.
+    pub fn current(&self) -> Option<f64> {
+        match self.size {
+            Size::Electrical { voltage, poles } => {
+                let s = self.apparent_power();
+                Some(if poles >= 3 { s / (3f64.sqrt() * voltage) } else { s / voltage })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A 2D symbol shape in the family's plan frame.
@@ -418,6 +471,23 @@ fn flag(e: &Option<Expr>, vals: &[f64], label: &str) -> Result<bool, FamilyError
         None => Ok(true),
         Some(e) => Ok(e.eval(vals).map_err(|err| FamilyError::Formula { name: label.into(), err })? != 0.0),
     }
+}
+
+fn unit(v: [f64; 3]) -> [f64; 3] {
+    let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    [v[0] / n, v[1] / n, v[2] / n]
+}
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+/// Default up for a connector facing `d`: +Z, or +Y when `d` is vertical, made square to `d`; then turned by `roll` degrees about `d`.
+pub fn up_for(d: [f64; 3], roll: f64) -> [f64; 3] {
+    let base = if d[0].abs() < 1e-9 && d[1].abs() < 1e-9 { [0.0, 1.0, 0.0] } else { [0.0, 0.0, 1.0] };
+    let k = base[0] * d[0] + base[1] * d[1] + base[2] * d[2];
+    let u = unit([base[0] - k * d[0], base[1] - k * d[1], base[2] - k * d[2]]);
+    let w = cross(d, u);
+    let (s, c) = (sin_deg(roll), cos_deg(roll));
+    unit([c * u[0] + s * w[0], c * u[1] + s * w[1], c * u[2] + s * w[2]])
 }
 
 pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Connector>, FamilyError> {
@@ -465,16 +535,48 @@ pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Co
                 }
             }
         };
+        let dir = match &c.aim {
+            None => c.dir.vec(),
+            Some([a, e]) => {
+                let (az, el) = (ev("azimuth", a)?, ev("elevation", e)?);
+                if !(az.is_finite() && el.is_finite() && el.abs() <= 90.0) {
+                    return Err(bad(&c.name, "elevation must be from -90 to 90 degrees"));
+                }
+                unit([cos_deg(el) * cos_deg(az), cos_deg(el) * sin_deg(az), sin_deg(el)])
+            }
+        };
+        let roll = match &c.roll {
+            None => 0.0,
+            Some(r) => {
+                let v = ev("roll", r)?;
+                if !v.is_finite() {
+                    return Err(bad(&c.name, "roll is not a finite angle"));
+                }
+                v
+            }
+        };
+        let power_factor = match &c.pf {
+            None => 1.0,
+            Some(f) => {
+                let v = ev("power_factor", f)?;
+                if !(v > 0.0 && v <= 1.0) {
+                    return Err(bad(&c.name, "power factor must be more than 0 and at most 1"));
+                }
+                v
+            }
+        };
         out.push(Connector {
             name: c.name.clone(),
             domain: c.domain,
             system: c.system,
             flow_dir: c.flow_dir,
             pos,
-            dir: c.dir.vec(),
+            dir,
+            up: up_for(dir, roll),
             size,
             flow: nonneg("flow", &c.flow)?,
             pressure_drop: nonneg("pressure_drop", &c.pdrop)?,
+            power_factor,
         });
     }
     Ok(out)
@@ -536,6 +638,7 @@ impl Connector {
         let mut out = self.clone();
         out.pos = [r[0] + p.x, r[1] + p.y, r[2] + p.z];
         out.dir = rot(self.dir);
+        out.up = rot(self.up);
         out
     }
 }
@@ -559,6 +662,8 @@ pub enum MateError {
     Size,
     Voltage,
     Poles,
+    /// rectangular sizes cannot line up: the heights are neither parallel nor square
+    Orientation,
 }
 
 /// Can connector `a` join connector `b`? Both are in model coordinates. `tol` is the largest gap (metres).
@@ -587,6 +692,15 @@ pub fn mate(a: &Connector, b: &Connector, tol: f64, resize: Resize) -> Result<()
             }
         }
         (Size::Rect { width: w1, height: h1 }, Size::Rect { width: w2, height: h2 }) => {
+            let c = (a.up[0] * b.up[0] + a.up[1] * b.up[1] + a.up[2] * b.up[2]).abs();
+            let crossed = if c > 1.0 - 1e-6 {
+                false
+            } else if c < 1e-6 {
+                true
+            } else {
+                return Err(MateError::Orientation);
+            };
+            let (w2, h2) = if crossed { (h2, w2) } else { (w2, h2) };
             if ((w1 - w2).abs() > 1e-9 || (h1 - h2).abs() > 1e-9) && resize == Resize::Strict {
                 return Err(MateError::Size);
             }

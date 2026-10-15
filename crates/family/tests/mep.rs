@@ -542,3 +542,101 @@ fn nested_direction_turns_both_components_and_limit_is_exact() {
     assert_eq!(with("500")[1].solve(&Request::default()).unwrap().connectors.len(), 2000);
     assert!(with("501")[1].solve(&Request::default()).is_err());
 }
+
+// ---------- connector upgrade: aim, up/roll, power factor ----------
+
+fn rect(name: &str, d: Dir, w: &str, h: &str) -> ConnectorDef {
+    ConnectorDef::new(name, Domain::Duct, System::SupplyAir, FlowDir::Out, ("0", "0", "0"), d, ShapeDef::Rect(w.into(), h.into()))
+}
+fn inn(mut c: Connector) -> Connector { c.flow_dir = FlowDir::In; c }
+fn at_pose(c: &Connector, x: f64, ang: f64) -> Connector { c.world(&Pose { x, y: 0.0, z: 0.0, angle: ang }) }
+
+#[test]
+fn aim_gives_arbitrary_directions() {
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let i = run(duct("a").aim("45", "0")).unwrap();
+    assert!(close3(i.connectors[0].dir, [s, s, 0.0]));
+    let i = run(duct("a").aim("0", "45")).unwrap();
+    assert!(close3(i.connectors[0].dir, [s, 0.0, s]));
+    let i = run(duct("a").aim("90", "-90")).unwrap();
+    assert!(close3(i.connectors[0].dir, [0.0, 0.0, -1.0]));
+    // formulas may use family parameters, and the result is a unit vector
+    let i = run(duct("a").aim("30 + 15", "10 deg")).unwrap();
+    let d = i.connectors[0].dir;
+    assert!(close(d[0] * d[0] + d[1] * d[1] + d[2] * d[2], 1.0));
+    assert!(matches!(run(duct("a").aim("0", "91")), Err(FamilyError::Connector { .. })));
+    assert!(matches!(run(duct("a").aim("0", "-90.5")), Err(FamilyError::Connector { .. })));
+    // two 45 degree connectors facing each other mate
+    let a = run(duct("a").aim("45", "0")).unwrap().connectors[0].clone();
+    let b = inn(run(duct("a").aim("225", "0")).unwrap().connectors[0].clone());
+    assert_eq!(mate(&a, &b, 1e-6, Resize::Strict), Ok(()));
+    let c = inn(run(duct("a").aim("180", "0")).unwrap().connectors[0].clone());
+    assert_eq!(mate(&a, &c, 1e-6, Resize::Strict), Err(MateError::Facing));
+}
+
+#[test]
+fn up_defaults_and_roll() {
+    let up = |d: Dir| run(rect("r", d, "0.4", "0.2")).unwrap().connectors[0].up;
+    assert!(close3(up(Dir::PlusY), [0.0, 0.0, 1.0]));
+    assert!(close3(up(Dir::MinusX), [0.0, 0.0, 1.0]));
+    assert!(close3(up(Dir::PlusZ), [0.0, 1.0, 0.0]));
+    assert!(close3(up(Dir::MinusZ), [0.0, 1.0, 0.0]));
+    // rolled a quarter turn about +Y: up goes from +Z to +X (right hand about the axis)
+    let r = run(rect("r", Dir::PlusY, "0.4", "0.2").roll("90")).unwrap().connectors[0].up;
+    assert!(close3(r, [1.0, 0.0, 0.0]));
+    let r = run(rect("r", Dir::PlusY, "0.4", "0.2").roll("180")).unwrap().connectors[0].up;
+    assert!(close3(r, [0.0, 0.0, -1.0]));
+    // up is always square to dir and unit length, also for aimed connectors
+    let i = run(rect("r", Dir::PlusX, "0.4", "0.2").aim("30", "50").roll("33")).unwrap();
+    let c = &i.connectors[0];
+    assert!(close(c.dir[0] * c.up[0] + c.dir[1] * c.up[1] + c.dir[2] * c.up[2], 0.0));
+    assert!(close(c.up.iter().map(|v| v * v).sum::<f64>(), 1.0));
+    // roll only for rectangular connectors; power factor only for electrical ones
+    assert!(matches!(with_conn(duct("a").roll("10")).compile(), Err(FamilyError::Connector { .. })));
+    assert!(matches!(with_conn(duct("a").power_factor("0.9")).compile(), Err(FamilyError::Connector { .. })));
+    // placing the family turns up with it
+    let w = at_pose(&run(rect("r", Dir::PlusY, "0.4", "0.2")).unwrap().connectors[0], 1.0, 90.0);
+    assert!(close3(w.up, [0.0, 0.0, 1.0]) && close3(w.dir, [-1.0, 0.0, 0.0]));
+}
+
+#[test]
+fn rectangular_mate_follows_orientation() {
+    let a = run(rect("a", Dir::PlusY, "0.4", "0.2")).unwrap().connectors[0].clone();
+    let face = |ang: f64| -> Connector { at_pose(&inn(run(rect("b", Dir::MinusY, "0.4", "0.2")).unwrap().connectors[0].clone()), 0.0, ang) };
+    // the same way up
+    assert_eq!(mate(&a, &face(0.0), 1e-6, Resize::Strict), Ok(()));
+    // turned a quarter about its own axis: widths and heights are crossed, so equal sizes no longer fit
+    let b90 = inn(run(rect("b", Dir::MinusY, "0.4", "0.2").roll("90")).unwrap().connectors[0].clone());
+    assert_eq!(mate(&a, &b90, 1e-6, Resize::Strict), Err(MateError::Size));
+    assert_eq!(mate(&a, &b90, 1e-6, Resize::Allow), Ok(()));
+    // crossed but with swapped sizes it fits
+    let sw = inn(run(rect("b", Dir::MinusY, "0.2", "0.4").roll("90")).unwrap().connectors[0].clone());
+    assert_eq!(mate(&a, &sw, 1e-6, Resize::Strict), Ok(()));
+    // upside down is parallel, so aligned
+    let b180 = inn(run(rect("b", Dir::MinusY, "0.4", "0.2").roll("180")).unwrap().connectors[0].clone());
+    assert_eq!(mate(&a, &b180, 1e-6, Resize::Strict), Ok(()));
+    // a 45 degree roll cannot line up
+    let b45 = inn(run(rect("b", Dir::MinusY, "0.4", "0.2").roll("45")).unwrap().connectors[0].clone());
+    assert_eq!(mate(&a, &b45, 1e-6, Resize::Allow), Err(MateError::Orientation));
+}
+
+#[test]
+fn power_factor_apparent_power_and_current() {
+    let el = |v: &str, p: &str| ConnectorDef::new("e", Domain::Electrical, System::Power, FlowDir::In, ("0", "0", "0"), Dir::PlusX, ShapeDef::Electrical { voltage: v.into(), poles: p.into() }).flow("9000");
+    let c = run(el("230", "1")).unwrap().connectors[0].clone();
+    assert!(close(c.power_factor, 1.0) && close(c.apparent_power(), 9000.0));
+    assert!((c.current().unwrap() - 9000.0 / 230.0).abs() < 1e-9);
+    let c = run(el("230", "1").power_factor("0.9")).unwrap().connectors[0].clone();
+    assert!(close(c.apparent_power(), 10000.0) && close(c.flow, 9000.0));
+    let c = run(el("400", "3").power_factor("0.9")).unwrap().connectors[0].clone();
+    assert!((c.current().unwrap() - 10000.0 / (3f64.sqrt() * 400.0)).abs() < 1e-9);
+    let c = run(el("400", "4")).unwrap().connectors[0].clone();
+    assert!((c.current().unwrap() - 9000.0 / (3f64.sqrt() * 400.0)).abs() < 1e-9);
+    let c = run(el("400", "2")).unwrap().connectors[0].clone();
+    assert!((c.current().unwrap() - 9000.0 / 400.0).abs() < 1e-9);
+    for bad in ["0", "-0.5", "1.01"] {
+        assert!(matches!(run(el("230", "1").power_factor(bad)), Err(FamilyError::Connector { .. })), "{bad}");
+    }
+    assert!(run(el("230", "1").power_factor("1")).is_ok());
+    assert_eq!(run(duct("a")).unwrap().connectors[0].current(), None);
+}
