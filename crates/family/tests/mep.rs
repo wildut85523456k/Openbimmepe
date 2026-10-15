@@ -446,3 +446,99 @@ fn direction_vectors_and_system_domain_matrix() {
         assert_eq!(run(c).unwrap().connectors[0].dir, d.vec());
     }
 }
+
+fn stub() -> Family {
+    Family {
+        name: "Stub".into(),
+        connectors: vec![ConnectorDef::new("p", Domain::Pipe, System::DomesticCold, FlowDir::Out, ("0.1", "0", "0.2"), Dir::PlusX, ShapeDef::Round("0.05".into())).flow("0.001")],
+        plan: vec![PlanDef::line(("0", "0"), ("1", "0")), PlanDef::circle(("0.5", "0"), "0.1")],
+        ..Default::default()
+    }
+}
+fn parent(nd: NestedDef) -> Vec<Compiled> {
+    let p = Family { name: "Parent".into(), nested: vec![nd], connectors: vec![duct("own")], ..Default::default() };
+    compile_library(&[stub(), p]).unwrap()
+}
+
+#[test]
+fn nested_connectors_and_plan_move_with_the_child() {
+    let lib = parent(NestedDef::new("n", "Stub", ("1", "2", "0.5")));
+    let i = lib[1].solve(&Request::default()).unwrap();
+    assert_eq!(i.connectors.len(), 2);
+    assert_eq!(i.connectors[0].name, "own");
+    let c = &i.connectors[1];
+    assert_eq!(c.name, "n/p");
+    assert!(close3(c.pos, [1.1, 2.0, 0.7]) && c.dir == [1.0, 0.0, 0.0] && close(c.flow, 0.001));
+    assert_eq!(i.plan, vec![PlanShape::Line([1.0, 2.0, 2.0, 2.0]), PlanShape::Circle { c: [1.5, 2.0], r: 0.1 }]);
+    // turned 90 degrees about the origin
+    let lib = parent(NestedDef::new("n", "Stub", ("1", "2", "0.5")).rotate_about("90", "0", "0"));
+    let i = lib[1].solve(&Request::default()).unwrap();
+    let c = &i.connectors[1];
+    assert!(close3(c.pos, [-2.0, 1.1, 0.7]), "{:?}", c.pos);
+    assert!(close3(c.dir, [0.0, 1.0, 0.0]));
+    assert_eq!(i.plan[0], PlanShape::Line([-2.0, 1.0, -2.0, 2.0]));
+    match i.plan[1] { PlanShape::Circle { c, r } => { assert!(close(c[0], -2.0) && close(c[1], 1.5) && close(r, 0.1)); } _ => panic!() }
+    // a turn about a point that is not the origin
+    let lib = parent(NestedDef::new("n", "Stub", ("0", "0", "0")).rotate_about("180", "1", "1"));
+    let i = lib[1].solve(&Request::default()).unwrap();
+    assert!(close3(i.connectors[1].pos, [1.9, 2.0, 0.2]) && close3(i.connectors[1].dir, [-1.0, 0.0, 0.0]));
+}
+
+#[test]
+fn repeated_and_hidden_nested_families() {
+    let lib = parent(NestedDef::new("n", "Stub", ("_i", "0", "0")).repeat("3"));
+    let i = lib[1].solve(&Request::default()).unwrap();
+    let names: Vec<_> = i.connectors.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["own", "n#0/p", "n#1/p", "n#2/p"]);
+    assert!(close(i.connectors[3].pos[0], 2.1));
+    assert_eq!(i.plan.len(), 6);
+    let lib = parent(NestedDef::new("n", "Stub", ("0", "0", "0")).visible_if("0"));
+    let i = lib[1].solve(&Request::default()).unwrap();
+    assert_eq!(i.connectors.len(), 1);
+    assert!(i.plan.is_empty());
+    // a family nested two levels deep passes its connectors all the way up
+    let mid = Family { name: "Mid".into(), nested: vec![NestedDef::new("s", "Stub", ("1", "0", "0"))], ..Default::default() };
+    let top = Family { name: "Top".into(), nested: vec![NestedDef::new("m", "Mid", ("0", "5", "0")).rotate_about("90", "0", "0")], ..Default::default() };
+    let lib = compile_library(&[stub(), mid, top]).unwrap();
+    let i = lib[2].solve(&Request::default()).unwrap();
+    assert_eq!(i.connectors.len(), 1);
+    assert_eq!(i.connectors[0].name, "m/s/p");
+    // stub connector (0.1,0,0.2) -> in Mid (1.1,0) -> in Top shifted (1.1,5) -> turned 90: (-5, 1.1)
+    assert!(close3(i.connectors[0].pos, [-5.0, 1.1, 0.2]) && close3(i.connectors[0].dir, [0.0, 1.0, 0.0]));
+}
+
+#[test]
+fn total_limits_with_nesting() {
+    let three = Family {
+        name: "Three".into(),
+        connectors: (0..3).map(|i| duct(&format!("c{i}"))).collect(),
+        plan: (0..5).map(|_| PlanDef::line(("0", "0"), ("1", "0"))).collect(),
+        ..Default::default()
+    };
+    let big = |n: &str| compile_library(&[three.clone(), Family { name: "P".into(), nested: vec![NestedDef::new("n", "Three", ("0", "0", "0")).repeat(n)], ..Default::default() }]).unwrap();
+    assert_eq!(big("666")[1].solve(&Request::default()).unwrap().connectors.len(), 1998);
+    assert_eq!(big("667")[1].solve(&Request::default()).err(), Some(FamilyError::TooMany("connectors in one placement")));
+    let p = Family { name: "Q".into(), nested: vec![NestedDef::new("n", "Five", ("0", "0", "0")).repeat("1000"), NestedDef::new("m", "Five", ("0", "0", "0"))], ..Default::default() };
+    let five = Family { name: "Five".into(), plan: (0..5).map(|_| PlanDef::line(("0", "0"), ("1", "0"))).collect(), ..Default::default() };
+    let lib = compile_library(&[five.clone(), p]).unwrap();
+    assert_eq!(lib[1].solve(&Request::default()).err(), Some(FamilyError::TooMany("plan symbol lines in one placement")));
+    let p = Family { name: "Q".into(), nested: vec![NestedDef::new("n", "Five", ("0", "0", "0")).repeat("1000")], ..Default::default() };
+    let lib = compile_library(&[five, p]).unwrap();
+    assert_eq!(lib[1].solve(&Request::default()).unwrap().plan.len(), 5000);
+}
+
+#[test]
+fn nested_direction_turns_both_components_and_limit_is_exact() {
+    let up = Family {
+        name: "Up".into(),
+        connectors: vec![ConnectorDef::new("q", Domain::Pipe, System::DomesticCold, FlowDir::In, ("0", "0", "0"), Dir::PlusY, ShapeDef::Round("0.05".into()))],
+        ..Default::default()
+    };
+    let p = Family { name: "P".into(), nested: vec![NestedDef::new("u", "Up", ("0", "0", "0")).rotate_about("90", "0", "0")], ..Default::default() };
+    let lib = compile_library(&[up, p]).unwrap();
+    assert!(close3(lib[1].solve(&Request::default()).unwrap().connectors[0].dir, [-1.0, 0.0, 0.0]));
+    let four = Family { name: "Four".into(), connectors: (0..4).map(|i| duct(&format!("c{i}"))).collect(), ..Default::default() };
+    let with = |n: &str| compile_library(&[four.clone(), Family { name: "P".into(), nested: vec![NestedDef::new("n", "Four", ("0", "0", "0")).repeat(n)], ..Default::default() }]).unwrap();
+    assert_eq!(with("500")[1].solve(&Request::default()).unwrap().connectors.len(), 2000);
+    assert!(with("501")[1].solve(&Request::default()).is_err());
+}

@@ -904,6 +904,28 @@ impl Inner {
                         Some(Xf::about(e(0, "rotate.angle")?, e(1, "rotate.x")?, e(2, "rotate.y")?))
                     }
                 };
+                // connectors of the nested family, moved and turned like its solids
+                if inst.connectors.len() + ci.connectors.len() > mep::MAX_CONNECTORS_TOTAL { return Err(FamilyError::TooMany("connectors in one placement")); }
+                if inst.plan.len() + ci.plan.len() > mep::MAX_PLAN_TOTAL { return Err(FamilyError::TooMany("plan symbol lines in one placement")); }
+                for s in &ci.plan {
+                    let mv = |x: f64, y: f64| { let (x, y) = (x + at[0], y + at[1]); match turn { Some(tf) => { let p = tf.apply([x, y]); (p[0], p[1]) } None => (x, y) } };
+                    inst.plan.push(match *s {
+                        PlanShape::Line([x1, y1, x2, y2]) => { let (a, b) = (mv(x1, y1), mv(x2, y2)); PlanShape::Line([a.0, a.1, b.0, b.1]) }
+                        PlanShape::Circle { c, r } => { let p = mv(c[0], c[1]); PlanShape::Circle { c: [p.0, p.1], r } }
+                    });
+                }
+                for c in &ci.connectors {
+                    let mut c = c.clone();
+                    c.name = if nd.count.is_some() { format!("{}#{}/{}", nd.name, rep, c.name) } else { format!("{}/{}", nd.name, c.name) };
+                    c.pos = [c.pos[0] + at[0], c.pos[1] + at[1], c.pos[2] + at[2]];
+                    if let Some(tf) = turn {
+                        let p = tf.apply([c.pos[0], c.pos[1]]);
+                        c.pos[0] = p[0]; c.pos[1] = p[1];
+                        let (s, co) = (expr::sin_deg(tf.angle), expr::cos_deg(tf.angle));
+                        c.dir = [co * c.dir[0] - s * c.dir[1], s * c.dir[0] + co * c.dir[1], c.dir[2]];
+                    }
+                    inst.connectors.push(c);
+                }
                 for (k, (si, b)) in ci.solids.iter().enumerate() {
                     let mut bb = *b;
                     bb.min[2] += at[2]; bb.max[2] += at[2];
@@ -930,8 +952,12 @@ impl Inner {
             }
             None => None,
         };
-        inst.connectors = mep::solve_connectors(&self.connectors, &vals)?;
-        inst.plan = mep::solve_plan(&self.plan, &vals)?;
+        let mut own = mep::solve_connectors(&self.connectors, &vals)?;
+        own.append(&mut inst.connectors);
+        inst.connectors = own;
+        let mut own = mep::solve_plan(&self.plan, &vals)?;
+        own.append(&mut inst.plan);
+        inst.plan = own;
         vals.truncate(n);
         inst.values = vals;
         inst.texts = texts;

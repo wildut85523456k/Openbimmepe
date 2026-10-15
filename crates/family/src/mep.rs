@@ -8,6 +8,10 @@ use crate::FamilyError;
 
 pub const MAX_CONNECTORS: usize = 64;
 pub const MAX_PLAN: usize = 200;
+/// Most connectors in one placement, nested families included.
+pub const MAX_CONNECTORS_TOTAL: usize = 2000;
+/// Most plan symbol shapes in one placement, nested families included.
+pub const MAX_PLAN_TOTAL: usize = 5000;
 pub const MAX_CLASSIFICATIONS: usize = 8;
 /// Largest connector size or plan length accepted (metres).
 pub const MAX_DIM: f64 = 100.0;
