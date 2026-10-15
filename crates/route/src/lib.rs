@@ -10,6 +10,7 @@
 //! The straight runs are `openbim_place::penetrations::Run`, so walls crossed by a route get their openings
 //! in the penetration register. No standard values live here: radii, angles, stubs and margins are the
 //! author's routing preferences.
+pub mod auto;
 pub mod catalogue;
 pub mod graph;
 pub mod snaps;
@@ -547,6 +548,20 @@ pub fn branch_from_run(main: &Run, branch_points: &[[f64; 3]], branch_sizes: &[R
 
 // ---------- equipment ----------
 
+/// The run section a connector takes, rolled so a rectangular section's height lies along the connector's own up.
+fn conn_run_size(conn: &Connector) -> Result<RunSize, RouteError> {
+    Ok(match conn.size {
+        Size::Round { diameter } => RunSize::Round { diameter },
+        Size::Rect { width, height } => {
+            let base = up_for(conn.dir, 0.0);
+            let w = cross(conn.dir, base);
+            let roll = dot(conn.up, w).atan2(dot(conn.up, base)).to_degrees();
+            RunSize::Rect { width, height, roll }
+        }
+        Size::Electrical { .. } => return Err(RouteError::ConnectorMismatch),
+    })
+}
+
 /// Start a route at an equipment connector (in model coordinates). It leaves the connector straight, along
 /// the way the connector faces, for the connector stub at the connector's own size; the rest of the path
 /// follows in `size`, with a transition where the sizes differ. `points` are the points after the connector.
@@ -555,17 +570,7 @@ pub fn route_from_connector(conn: &Connector, points: &[[f64; 3]], size: RunSize
     if conn.domain != prefs.domain || !conn.system.compatible(prefs.system) {
         return Err(RouteError::ConnectorMismatch);
     }
-    let csize = match conn.size {
-        Size::Round { diameter } => RunSize::Round { diameter },
-        Size::Rect { width, height } => {
-            // roll the section so its height lies along the connector's own up
-            let base = up_for(conn.dir, 0.0);
-            let w = cross(conn.dir, base);
-            let roll = dot(conn.up, w).atan2(dot(conn.up, base)).to_degrees();
-            RunSize::Rect { width, height, roll }
-        }
-        Size::Electrical { .. } => return Err(RouteError::ConnectorMismatch),
-    };
+    let csize = conn_run_size(conn)?;
     if points.is_empty() {
         return Err(RouteError::BadInput("a route needs at least one point after the connector"));
     }

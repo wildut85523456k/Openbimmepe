@@ -8,10 +8,10 @@ publish = false
 [dependencies]
 openbim-family = { path = "../family" }
 openbim-place = { path = "../place" }
+openbim-geom = { path = "../geom" }
 
 [dev-dependencies]
 proptest = "1"
-openbim-geom = { path = "../geom" }
 
 [lints.rust]
 unsafe_code = "forbid"
