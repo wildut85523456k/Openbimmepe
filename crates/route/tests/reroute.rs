@@ -327,3 +327,42 @@ fn removing_pieces_renumbers_the_rest_and_keeps_their_links() {
     assert_eq!(linked, 2);
     assert!(n.equipment.len() == 1 && n.link_of(PortRef { node: NodeRef::Equipment(0), port: 0 }).is_none());
 }
+
+/// two units joined by an automatic route round a post (several pieces), in pipe of `size`
+fn two_units(size: f64, post: bool) -> (Network, Connector, Connector) {
+    let p = prefs(Junction::Tee);
+    let o = AutoOptions::default();
+    let (a, b) = (conn("a", [0.0, 0.0, 1.0], PX), conn("b", [6.0, 0.0, 1.0], NX));
+    let zones = if post { vec![Zone::hard("post", [2.5, -1.0, 0.0], [3.0, 1.0, 3.0]).unwrap()] } else { vec![] };
+    let r = auto_route(&AutoRequest { from: &a, to: &b, size: round(size), prefs: &p, zones: &zones, from_own: &[], to_own: &[], opts: &o }).unwrap();
+    let mut n = Network::new(1);
+    n.add_route(&r.route).unwrap();
+    n.attach_equipment(1, &a, 0, End::Start).unwrap();
+    n.attach_equipment(2, &b, n.segments.len() - 1, End::End).unwrap();
+    n.validate().unwrap();
+    (n, a, b)
+}
+
+#[test]
+fn the_pipe_keeps_its_size_and_a_shorter_way_retires_the_pieces_it_no_longer_needs() {
+    // pipe larger than the connectors: the body is 0.08, only the two stubs are 0.05
+    let (mut n, a, _) = two_units(0.08, true);
+    let before = n.clone();
+    let old_count = n.segments.len() + n.fittings.len();
+    assert!(old_count > 6);
+    let p = prefs(Junction::Tee);
+    let o = AutoOptions::default();
+    // the same place again, post gone: a straight pipe, far fewer pieces
+    let r = reroute_equipment(&mut n, &request(0, &a, &p, &[], &o)).unwrap();
+    n.validate().unwrap();
+    let body: Vec<f64> = n.segments.iter().map(|s| if let RunSize::Round { diameter } = s.run.size { diameter } else { 0.0 }).collect();
+    assert!(body.iter().any(|d| (*d - 0.08).abs() < 1e-9), "the body keeps the larger size: {body:?}");
+    assert!(!r.retired.is_empty());
+    assert_eq!(r.kept + r.retired.len(), old_count);
+    let now = ids(&n);
+    for id in &r.retired {
+        assert!(!now.contains(id));
+        assert!(ids(&before).contains(id));
+    }
+    assert_eq!(now.len(), old_count - r.retired.len());
+}
