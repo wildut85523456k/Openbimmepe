@@ -338,6 +338,58 @@ ok("Reference" not in ps.get("OpenBIM_Instance", {}), "mapped parameter is not a
 tp = ue.get_psets(ue.get_type(occs[by_name["D-01"]]))
 ok("OpenBIM_Family" in tp, "unmapped type values stay in OpenBIM_Family")
 
+# ---- 6c. wall types, layer sets and joins
+walls_by_id = elems("IfcWall")
+ok(len(walls_by_id) == len(rows("WALL")), "one IfcWall per drawn wall, not per segment")
+wtypes = {int(r[0]): r for r in rows("WTYPE")}
+for r in rows("WTYPED"):
+    w = walls_by_id[int(r[0])]
+    name, layers = wtypes[int(r[1])][1], [(x.split("=")[0].replace("_", " "), float(x.split("=")[1])) for x in wtypes[int(r[1])][2].split(",")]
+    t = ue.get_type(w)
+    ok(t is not None and t.is_a("IfcWallType") and t.Name == name.replace("_", " "), f"wall {r[0]} has its type")
+    use = ue.get_material(w, should_skip_usage=False)
+    ok(use is not None and use.is_a("IfcMaterialLayerSetUsage"), f"wall {r[0]} has a layer set usage")
+    if use is None or t is None: continue
+    ls = use.ForLayerSet
+    tm = ue.get_material(t)
+    ok(tm is not None and tm.is_a("IfcMaterialLayerSet") and tm.id() == ls.id(), "the usage points at the layer set of the type")
+    got = [(l.Material.Name, l.LayerThickness) for l in ls.MaterialLayers]
+    ok(len(got) == len(layers) and all(a[0] == b[0] and abs(a[1] - b[1]) < 1e-9 for a, b in zip(got, layers)), f"layers of {name}: {got}")
+    thick = float([x for x in rows("WALL") if x[0] == r[0]][0][-2])
+    ok(abs(sum(l[1] for l in got) - thick) < 1e-9, "the layers add up to the wall thickness")
+    ok(use.LayerSetDirection == "AXIS2" and use.DirectionSense == "POSITIVE" and abs(use.OffsetFromReferenceLine + thick / 2) < 1e-9, "usage offset puts the first layer on the right face")
+    # the solid is as thick as the layers say: measured on the mesh of straight walls
+    pts = [(float(a[1]), float(a[2])) for a in rows("WPT") if a[0] == r[0]]
+    closed = [x for x in rows("WBASE") if x[0] == r[0]][0][2] == "1"
+    if len(pts) == 2 and not closed:
+        v, _ = verts(w)
+        d = np.array(pts[1]) - np.array(pts[0]); d /= np.linalg.norm(d)
+        n = np.array([-d[1], d[0]])
+        across = v[:, :2] @ n
+        ok(abs((across.max() - across.min()) - thick) < 1e-6, f"mesh thickness of wall {r[0]} equals its layers")
+ok(all(len(set(w.IsTypedBy[0].RelatingType.id() for _ in [0])) == 1 for w in walls_by_id.values() if w.IsTypedBy), "typed walls have one type")
+mans = {(int(a), ea, int(b), eb) for a, ea, b, eb in rows("WJOIN")}
+got = set()
+for rel in f.by_type("IfcRelConnectsPathElements"):
+    got.add((decode(rel.RelatingElement.GlobalId)[2], rel.RelatingConnectionType.replace("AT", "", 1).title(), decode(rel.RelatedElement.GlobalId)[2], rel.RelatedConnectionType.replace("AT", "", 1).title()))
+ok(got == mans, f"joins written and read back: {got} vs {mans}")
+ok(len(mans) > 0, "the scene has joins")
+# each join is real on the plan: the end of the first wall is on the second wall's centre line (or its end), within half its thickness
+def centre_dist(pt, pts):
+    best = 1e9
+    for i in range(len(pts) - 1):
+        a, b = np.array(pts[i]), np.array(pts[i + 1])
+        t = np.clip(np.dot(pt - a, b - a) / np.dot(b - a, b - a), 0, 1)
+        best = min(best, np.linalg.norm(pt - (a + t * (b - a))))
+    return best
+for a, ea, b, eb in mans:
+    pa = [(float(x[1]), float(x[2])) for x in rows("WPT") if int(x[0]) == a]
+    pb = [(float(x[1]), float(x[2])) for x in rows("WPT") if int(x[0]) == b]
+    tb = float([x for x in rows("WALL") if int(x[0]) == b][0][-2])
+    end = np.array(pa[0] if ea == "Start" else pa[-1])
+    closed_b = [x for x in rows("WBASE") if int(x[0]) == b][0][2] == "1"
+    ok(centre_dist(end, pb + ([pb[0]] if closed_b else [])) <= tb / 2 + 1e-6, f"wall {a} {ea} really meets wall {b}")
+
 # ---- 7. repeatability and stable ids
 a = open(sys.argv[2], "rb").read(); b = open(sys.argv[3], "rb").read()
 ok(a == b, "two exports are byte for byte the same")

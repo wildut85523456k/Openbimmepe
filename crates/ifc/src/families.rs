@@ -245,6 +245,7 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
         let g = o.gid(it.id, 0);
         let occ = o.s.add(format!("{}({g},$,{},$,$,#{pl},{rep},{tail})", upper(cat.ifc_class()), string(&it.name)));
         o.contain(st, occ);
+        o.item_entities.push(occ);
         o.report.items += 1;
         let props = props_of(fam, &it.instance, openbim_family::Scope::Instance);
         if !props.is_empty() {

@@ -56,10 +56,10 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], pset_map: Default::default() }
+    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], slabs: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
-    WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0) }
+    WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None }
 }
 
 #[test]

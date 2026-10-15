@@ -147,12 +147,22 @@ pub fn build_scene(edit: bool) -> Scene {
     let slab = Slab { name: "L1 floor".into(), top: 3.0, thickness: 0.25, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: Some(60) };
     let (floor_pens, issues) = find_floor(std::slice::from_ref(&slab), std::slice::from_ref(&void), &runs, 0.1);
     assert!(issues.is_empty());
+    let partition = WallChain::new(vec![[3.5, 7.9], [3.5, 0.1]], false, 0.15, 3.0);
+    let chains: Vec<&WallChain> = vec![&built.chains[0], &built.chains[1], &partition];
+    let wall_joins = openbim_ifc::walls::find_joins(&chains, 0.01);
+    let layer = |m: &str, t: f64| openbim_ifc::walls::Layer { material: m.into(), thickness: t };
+    let wall_types = vec![
+        openbim_ifc::walls::WallType { name: "Cavity 200".into(), layers: vec![layer("Brick", 0.1), layer("Insulation", 0.05), layer("Plaster", 0.05)] },
+        openbim_ifc::walls::WallType { name: "Partition 150".into(), layers: vec![layer("Gypsum", 0.05), layer("Stud void", 0.05), layer("Gypsum", 0.05)] },
+    ];
     Scene {
         project_name: "Test office".into(),
+        wall_types,
+        wall_joins,
         project_key: 0x0123_4567_89ab,
         timestamp: "2026-10-15T00:00:00".into(),
         levels,
-        walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone() }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone() }],
+        walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0) }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1) }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1) }],
         wall_penetrations: built.penetrations.clone(),
         slabs: vec![SlabItem { id: A | 2, slab }],
         shafts: vec![void],
@@ -227,6 +237,18 @@ fn main() {
         for p in &w.chain.points {
             println!("WPT {} {} {}", w.id, p[0], p[1]);
         }
+    }
+    for (ti, t) in scene.wall_types.iter().enumerate() {
+        let layers: Vec<String> = t.layers.iter().map(|l| format!("{}={}", l.material.replace(' ', "_"), l.thickness)).collect();
+        println!("WTYPE {} {} {}", ti, t.name.replace(' ', "_"), layers.join(","));
+    }
+    for w in &scene.walls {
+        if let Some(t) = w.wall_type {
+            println!("WTYPED {} {}", w.id, t);
+        }
+    }
+    for j in &scene.wall_joins {
+        println!("WJOIN {} {:?} {} {:?}", scene.walls[j.a].id, j.a_end, scene.walls[j.b].id, j.b_end);
     }
     for w in &scene.walls {
         for (si, ops) in w.chain.openings.iter().enumerate() {

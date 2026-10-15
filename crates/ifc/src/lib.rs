@@ -17,6 +17,7 @@
 mod families;
 pub mod guid;
 pub mod pset_map;
+pub mod walls;
 pub mod quantities;
 pub mod step;
 
@@ -38,6 +39,8 @@ pub struct WallItem {
     pub name: String,
     /// the built chain, every opening included
     pub chain: WallChain,
+    /// index into `Scene::wall_types`; its layers must add up to the thickness of the chain
+    pub wall_type: Option<usize>,
 }
 
 pub struct SlabItem {
@@ -122,6 +125,9 @@ pub struct Scene {
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
     pub rooms: Vec<RoomItem>,
+    pub wall_types: Vec<walls::WallType>,
+    /// where one wall element meets another (see `walls::find_joins`)
+    pub wall_joins: Vec<walls::WallJoin>,
     /// where family and shared parameters go; what it does not name goes to the custom sets
     pub pset_map: PsetMap,
 }
@@ -159,6 +165,9 @@ pub struct Report {
     /// occurrences whose shape is a mapped item of their type's shared shape
     pub mapped: usize,
     pub spaces: usize,
+    pub space_boundaries: usize,
+    pub wall_types: usize,
+    pub wall_joins: usize,
     /// base quantity sets written
     pub quantity_sets: usize,
     /// parameters written in the property set the mapping table names
@@ -318,6 +327,10 @@ struct Out<'a> {
     opening_ids: Vec<(usize, usize, [f64; 4], u32)>,
     /// connector ports of placed families: (item, connector name) to port entity
     item_ports: BTreeMap<(u64, String), u32>,
+    /// entity of each wall, slab and placed family, in the order of the scene
+    wall_entities: Vec<u32>,
+    slab_entities: Vec<u32>,
+    item_entities: Vec<u32>,
 }
 
 impl<'a> Out<'a> {
@@ -522,7 +535,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new() };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), item_entities: Vec::new() };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     let ctx = o.s.add(format!("IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-6,#{wcs},$)"));
@@ -582,6 +595,33 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
 
 fn write_walls(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
+    // wall types: materials, layer sets and the type entities, before the walls that use them
+    let mut materials: BTreeMap<&str, u32> = BTreeMap::new();
+    let mut type_ids: Vec<(u32, u32)> = Vec::new(); // (type entity, layer set)
+    for (ti, t) in scene.wall_types.iter().enumerate() {
+        t.check().map_err(|e| ExportError::Unsupported(format!("wall type {}: {e}", t.name)))?;
+        let mut layers = Vec::new();
+        for l in &t.layers {
+            let m = match materials.get(l.material.as_str()) {
+                Some(m) => *m,
+                None => {
+                    let m = o.s.add(format!("IFCMATERIAL({})", string(&l.material)));
+                    materials.insert(l.material.as_str(), m);
+                    m
+                }
+            };
+            let th = o.r(l.thickness, "layer thickness");
+            layers.push(format!("#{}", o.s.add(format!("IFCMATERIALLAYER(#{m},{th},$,{},$,$,$)", string(&l.material)))));
+        }
+        let ls = o.s.add(format!("IFCMATERIALLAYERSET(({}),{},$)", layers.join(","), string(&t.name)));
+        let g = o.gid((0xFFFF_FFFDu64 << 32) | ti as u64, 0);
+        let te = o.s.add(format!("IFCWALLTYPE({g},$,{},$,$,$,$,$,$,.STANDARD.)", string(&t.name)));
+        let g = o.gen_gid();
+        o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,(#{te}),#{ls})"));
+        type_ids.push((te, ls));
+        o.report.wall_types += 1;
+    }
+    let mut typed: Vec<Vec<u32>> = vec![Vec::new(); scene.wall_types.len()];
     for (wi, w) in scene.walls.iter().enumerate() {
         let c = &w.chain;
         if c.tops.iter().any(|t| t.is_some()) {
@@ -604,6 +644,19 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         let wall = o.s.add(format!("IFCWALL({g},$,{},$,$,#{pl},#{shape},$,.STANDARD.)", string(&w.name)));
         o.contain(st, wall);
         o.report.walls += 1;
+        o.wall_entities.push(wall);
+        if let Some(ti) = w.wall_type {
+            let (t, (_, ls)) = (scene.wall_types.get(ti).ok_or_else(|| ExportError::Unsupported(format!("wall {}: no wall type {ti}", w.name)))?, type_ids[ti]);
+            if (t.thickness() - c.thickness).abs() > 1e-9 {
+                return Err(ExportError::Unsupported(format!("wall {}: the layers of type {} add up to {} m but the wall is {} m thick", w.name, t.name, t.thickness(), c.thickness)));
+            }
+            // the layers run across the wall from the right of travel to the left, from the face on the right
+            let off = o.r(-c.thickness / 2.0, "layer offset");
+            let u = o.s.add(format!("IFCMATERIALLAYERSETUSAGE(#{ls},.AXIS2.,.POSITIVE.,{off},$)"));
+            let g = o.gen_gid();
+            o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,(#{wall}),#{u})"));
+            typed[ti].push(wall);
+        }
         match quantities::wall(c) {
             Ok(q) => o.qto(wall, "Qto_WallBaseQuantities", &q),
             Err(e) => o.report.warnings.push(format!("wall {}: no base quantities: {e}", w.name)),
@@ -653,6 +706,24 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
             }
         }
     }
+    for (ti, ws) in typed.iter().enumerate() {
+        if !ws.is_empty() {
+            let g = o.gen_gid();
+            o.s.add(format!("IFCRELDEFINESBYTYPE({g},$,$,$,({}),#{})", ws.iter().map(|w| format!("#{w}")).collect::<Vec<_>>().join(","), type_ids[ti].0));
+        }
+    }
+    // joins between wall elements
+    for j in &scene.wall_joins {
+        let (Some(a), Some(b)) = (o.wall_entities.get(j.a).copied(), o.wall_entities.get(j.b).copied()) else {
+            return Err(ExportError::Unsupported(format!("wall join {}-{}: no such wall", j.a, j.b)));
+        };
+        if j.a == j.b {
+            return Err(ExportError::Unsupported(format!("wall join {}: a wall cannot be joined to itself", j.a)));
+        }
+        let g = o.gen_gid();
+        o.s.add(format!("IFCRELCONNECTSPATHELEMENTS({g},$,$,$,$,#{a},#{b},(),(),{},{})", j.b_end.ifc(), j.a_end.ifc()));
+        o.report.wall_joins += 1;
+    }
     Ok(())
 }
 
@@ -671,6 +742,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let g = o.gid(item.id, 0);
         let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,.FLOOR.)", string(&s.name)));
         o.contain(st, slab);
+        o.slab_entities.push(slab);
         o.report.slabs += 1;
         let mut void_area = 0.0;
         for sh in scene.shafts.iter().filter(|sh| s.top > sh.z_bottom + 1e-6 && s.top < sh.z_top - 1e-6) {
