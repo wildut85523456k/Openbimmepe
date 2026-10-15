@@ -10,10 +10,12 @@
 //! The straight runs are `openbim_place::penetrations::Run`, so walls crossed by a route get their openings
 //! in the penetration register. No standard values live here: radii, angles, stubs and margins are the
 //! author's routing preferences.
+pub mod catalogue;
 pub mod snaps;
 
 use openbim_family::mep::{up_for, Connector, Domain, Size, System};
 use openbim_place::penetrations::{Run, RunSize};
+use catalogue::{Catalogue, CatalogueError, FittingClass, FittingType, PickError};
 use snaps::{SnapError, Snaps};
 
 pub const MAX_POINTS: usize = 1000;
@@ -75,10 +77,18 @@ pub struct RoutingPrefs {
     pub connector_stub: f64,
     /// space added all round the run (insulation, clearance), metres; used for wall openings
     pub margin: f64,
+    /// the fittings catalogue. When set, every fitting is picked from it (first match wins) and the elbow, tee and
+    /// transition fields above are not used; when None they describe one generic fitting of each class.
+    pub catalogue: Option<Catalogue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RouteError {
+    BadCatalogue(CatalogueError),
+    /// the catalogue has no fitting of this class for the size here (or at the vertex)
+    NoFitting { class: FittingClass, vertex: usize },
+    /// the catalogue has tees but none takes a branch of this size
+    NoBranchSize,
     Snap(SnapError),
     BadPrefs(&'static str),
     BadInput(&'static str),
@@ -118,6 +128,9 @@ pub enum FittingKind {
 /// A fitting: where the centrelines meet, the ports (unit directions leaving the fitting) and their sizes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fitting {
+    /// the catalogue type this fitting is made of
+    pub type_name: String,
+    pub part_code: String,
     pub kind: FittingKind,
     pub at: [f64; 3],
     pub ports: Vec<[f64; 3]>,
@@ -243,24 +256,32 @@ impl RoutingPrefs {
         if !self.system.domain_ok(self.domain) {
             return bad("the system does not belong to this domain");
         }
-        if let AngleSet::List(v) = &self.elbow_angles {
-            if v.is_empty() || v.len() > 64 || v.iter().any(|a| !(a.is_finite() && *a > 0.0 && *a < 180.0)) {
-                return bad("elbow angles must be 1 to 64 angles between 0 and 180");
+        match &self.catalogue {
+            Some(c) => c.check().map_err(RouteError::BadCatalogue)?,
+            None => {
+                if let AngleSet::List(v) = &self.elbow_angles {
+                    if v.is_empty() || v.len() > 64 || v.iter().any(|a| !(a.is_finite() && *a > 0.0 && *a < 180.0)) {
+                        return bad("elbow angles must be 1 to 64 angles between 0 and 180");
+                    }
+                }
+                if let AngleSet::List(v) = &self.tee_angles {
+                    if v.is_empty() || v.len() > 64 || v.iter().any(|a| !(a.is_finite() && *a > 0.0 && *a < 180.0)) {
+                        return bad("tee angles must be 1 to 64 angles between 0 and 180");
+                    }
+                }
+                if !pos(self.bend_radius_factor) {
+                    return bad("bend radius factor must be more than 0");
+                }
+                if !nonneg(self.min_straight) || !nonneg(self.pick_tolerance) || !nonneg(self.min_transition_len) || !nonneg(self.connector_stub) || !nonneg(self.tee_half_factor) || !nonneg(self.branch_stub_factor) {
+                    return bad("lengths and factors cannot be negative or infinite");
+                }
+                if !(self.transition_angle_deg.is_finite() && self.transition_angle_deg > 0.0 && self.transition_angle_deg < 180.0) {
+                    return bad("transition angle must be more than 0 and less than 180 degrees");
+                }
             }
         }
-        if let AngleSet::List(v) = &self.tee_angles {
-            if v.is_empty() || v.len() > 64 || v.iter().any(|a| !(a.is_finite() && *a > 0.0 && *a < 180.0)) {
-                return bad("tee angles must be 1 to 64 angles between 0 and 180");
-            }
-        }
-        if !pos(self.bend_radius_factor) {
-            return bad("bend radius factor must be more than 0");
-        }
-        if !nonneg(self.min_straight) || !nonneg(self.pick_tolerance) || !nonneg(self.min_transition_len) || !nonneg(self.connector_stub) || !nonneg(self.tee_half_factor) || !nonneg(self.branch_stub_factor) {
-            return bad("lengths and factors cannot be negative or infinite");
-        }
-        if !(self.transition_angle_deg.is_finite() && self.transition_angle_deg > 0.0 && self.transition_angle_deg < 180.0) {
-            return bad("transition angle must be more than 0 and less than 180 degrees");
+        if !nonneg(self.min_straight) || !nonneg(self.pick_tolerance) || !nonneg(self.connector_stub) {
+            return bad("lengths cannot be negative or infinite");
         }
         if !(self.margin.is_finite() && (0.0..=10.0).contains(&self.margin)) {
             return bad("margin must be from 0 to 10 metres");
@@ -272,14 +293,31 @@ impl RoutingPrefs {
         Run { label: format!("{}-{}", self.label, idx + 1), domain: self.domain, system: self.system, a, b, size, margin: self.margin }
     }
 
-    fn transition_len(&self, from: RunSize, to: RunSize) -> Option<f64> {
-        let delta = match (from, to) {
-            (RunSize::Round { diameter: a }, RunSize::Round { diameter: b }) => (a - b).abs(),
-            (RunSize::Rect { width: w1, height: h1, .. }, RunSize::Rect { width: w2, height: h2, .. }) => (w1 - w2).abs().max((h1 - h2).abs()),
-            _ => return None,
-        };
-        Some(self.min_transition_len.max(delta / (2.0 * (self.transition_angle_deg.to_radians() / 2.0).tan())))
+    /// The catalogue in force: the author's, or one generic fitting of each class built from the plain fields.
+    pub fn effective_catalogue(&self) -> std::borrow::Cow<'_, Catalogue> {
+        match &self.catalogue {
+            Some(c) => std::borrow::Cow::Borrowed(c),
+            None => {
+                let d = self.domain;
+                std::borrow::Cow::Owned(Catalogue::new(vec![
+                    FittingType::new("Elbow", FittingClass::Elbow, d).angles(self.elbow_angles.clone()).radius(self.bend_radius_factor),
+                    FittingType::new("Tee", FittingClass::Tee, d).angles(self.tee_angles.clone()).tee_lengths(self.tee_half_factor, self.branch_stub_factor),
+                    FittingType::new("Tap", FittingClass::Tap, d).angles(self.tee_angles.clone()).tee_lengths(self.tee_half_factor, self.branch_stub_factor),
+                    FittingType::new("Transition", FittingClass::Transition, d).transition(self.transition_angle_deg, self.min_transition_len),
+                ]))
+            }
+        }
     }
+}
+
+/// Length of a transition between two sections of the same shape, by the type's included angle and minimum length.
+fn transition_len(t: &FittingType, from: RunSize, to: RunSize) -> Option<f64> {
+    let delta = match (from, to) {
+        (RunSize::Round { diameter: a }, RunSize::Round { diameter: b }) => (a - b).abs(),
+        (RunSize::Rect { width: w1, height: h1, .. }, RunSize::Rect { width: w2, height: h2, .. }) => (w1 - w2).abs().max((h1 - h2).abs()),
+        _ => return None,
+    };
+    Some(t.min_len.max(delta / (2.0 * (t.transition_angle_deg.to_radians() / 2.0).tan())))
 }
 
 // ---------- drawing ----------
@@ -328,6 +366,7 @@ fn route_inner(points: &[[f64; 3]], sizes: &[RunSize], prefs: &RoutingPrefs, sna
         return Err(RouteError::BadInput("a point or size is not a finite number within range"));
     }
     let snapped = snap_points(points, snaps, o.keep_first)?;
+    let cat = prefs.effective_catalogue();
     // merge legs that continue straight on in the same size
     let mut pts = vec![snapped[0]];
     let mut szs: Vec<RunSize> = Vec::new();
@@ -359,22 +398,27 @@ fn route_inner(points: &[[f64; 3]], sizes: &[RunSize], prefs: &RoutingPrefs, sna
         }
         if theta < 1e-4 {
             // straight on, so the size must differ (equal sizes were merged): a transition
-            let l = prefs.transition_len(szs[v - 1], szs[v]).ok_or(RouteError::MixedTransition { vertex: v })?;
+            if matches!((szs[v - 1], szs[v]), (RunSize::Round { .. }, RunSize::Rect { .. }) | (RunSize::Rect { .. }, RunSize::Round { .. })) {
+                return Err(RouteError::MixedTransition { vertex: v });
+            }
+            let ty = cat.pick_transition(prefs.domain, prefs.system, szs[v - 1], szs[v]).map_err(|_| RouteError::NoFitting { class: FittingClass::Transition, vertex: v })?;
+            let l = transition_len(ty, szs[v - 1], szs[v]).ok_or(RouteError::MixedTransition { vertex: v })?;
             trim_s[v] += l;
-            fittings.push(Fitting { kind: FittingKind::Transition, at: pts[v], ports: vec![neg(din), dout], port_sizes: vec![szs[v - 1], szs[v]], radius: 0.0, trim: vec![0.0, l] });
+            fittings.push(Fitting { type_name: ty.name.clone(), part_code: ty.part_code.clone(), kind: FittingKind::Transition, at: pts[v], ports: vec![neg(din), dout], port_sizes: vec![szs[v - 1], szs[v]], radius: 0.0, trim: vec![0.0, l] });
             continue;
         }
         if !same_size(szs[v - 1], szs[v]) {
             return Err(RouteError::SizeChangeAtBend { vertex: v });
         }
-        if !prefs.elbow_angles.allows(theta) {
-            return Err(RouteError::BendNotAvailable { vertex: v, angle: theta });
-        }
-        let r = prefs.bend_radius_factor * ref_dim(szs[v]);
+        let ty = cat.pick_elbow(prefs.domain, prefs.system, szs[v], theta).map_err(|e| match e {
+            PickError::NoAngle => RouteError::BendNotAvailable { vertex: v, angle: theta },
+            _ => RouteError::NoFitting { class: FittingClass::Elbow, vertex: v },
+        })?;
+        let r = ty.radius_factor * ref_dim(szs[v]);
         let t = r * (theta.to_radians() / 2.0).tan();
         trim_e[v - 1] += t;
         trim_s[v] += t;
-        fittings.push(Fitting { kind: FittingKind::Elbow { angle: theta }, at: pts[v], ports: vec![neg(din), dout], port_sizes: vec![szs[v], szs[v]], radius: r, trim: vec![t, t] });
+        fittings.push(Fitting { type_name: ty.name.clone(), part_code: ty.part_code.clone(), kind: FittingKind::Elbow { angle: theta }, at: pts[v], ports: vec![neg(din), dout], port_sizes: vec![szs[v], szs[v]], radius: r, trim: vec![t, t] });
     }
     let mut runs = Vec::with_capacity(n - 1);
     for i in 0..n - 1 {
@@ -431,11 +475,16 @@ pub fn branch_from_run(main: &Run, branch_points: &[[f64; 3]], branch_sizes: &[R
     if !(1.0..=179.0).contains(&alpha) {
         return Err(RouteError::BadInput("the branch runs along the run"));
     }
-    if !(prefs.tee_angles.allows(alpha) || prefs.tee_angles.allows(180.0 - alpha)) {
-        return Err(RouteError::TeeAngleNotAvailable { angle: alpha });
-    }
-    let half = prefs.tee_half_factor * ref_dim(main.size);
-    let stub = prefs.branch_stub_factor * ref_dim(main.size);
+    let class = if prefs.junction == Junction::Tee { FittingClass::Tee } else { FittingClass::Tap };
+    let cat = prefs.effective_catalogue();
+    let ty = cat.pick_junction(class, prefs.domain, prefs.system, main.size, branch_sizes[0], alpha).map_err(|e| match e {
+        PickError::NoAngle => RouteError::TeeAngleNotAvailable { angle: alpha },
+        PickError::NoBranchSize => RouteError::NoBranchSize,
+        PickError::NoType => RouteError::NoFitting { class, vertex: 0 },
+    })?;
+    let half = ty.half_factor * ref_dim(main.size);
+    let stub = ty.stub_factor * ref_dim(main.size);
+    let (type_name, part_code) = (ty.name.clone(), ty.part_code.clone());
     let route = route_inner(&pts, branch_sizes, prefs, snaps, &Opts { lead_start: stub, keep_first: false })?;
     let (mut runs, fitting) = match prefs.junction {
         Junction::Tee => {
@@ -449,6 +498,8 @@ pub fn branch_from_run(main: &Run, branch_points: &[[f64; 3]], branch_sizes: &[R
             r1.label = format!("{}.1", main.label);
             r2.label = format!("{}.2", main.label);
             let f = Fitting {
+                type_name,
+                part_code,
                 kind: FittingKind::Tee { branch_angle: alpha },
                 at: foot,
                 ports: vec![neg(dm), dm, d0],
@@ -459,7 +510,7 @@ pub fn branch_from_run(main: &Run, branch_points: &[[f64; 3]], branch_sizes: &[R
             (vec![r1, r2], f)
         }
         Junction::Tap => {
-            let f = Fitting { kind: FittingKind::Tap { branch_angle: alpha }, at: foot, ports: vec![d0], port_sizes: vec![branch_sizes[0]], radius: 0.0, trim: vec![stub] };
+            let f = Fitting { type_name, part_code, kind: FittingKind::Tap { branch_angle: alpha }, at: foot, ports: vec![d0], port_sizes: vec![branch_sizes[0]], radius: 0.0, trim: vec![stub] };
             (vec![main.clone()], f)
         }
     };

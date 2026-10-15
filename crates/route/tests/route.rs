@@ -26,6 +26,7 @@ fn prefs() -> RoutingPrefs {
         min_transition_len: 0.1,
         connector_stub: 0.3,
         margin: 0.0,
+        catalogue: None,
     }
 }
 fn off() -> Snaps { Snaps::new(SnapSettings::off()) }
