@@ -15,12 +15,14 @@
 
 pub mod expr;
 pub mod mep;
+pub mod forms;
 pub mod shared;
 pub mod catalogue;
 pub mod library;
 
 use expr::{Expr, ExprError};
 pub use shared::{SharedParam, SharedSet};
+pub use forms::{Form, FormDef, FormGeom, FormKind, Loop, ProfileDef};
 pub use mep::{Category, Connector, ConnectorDef, Dir, Domain, FlowDir, Host, MateError, PlanDef, PlanShape, Pose, Resize, ShapeDef, System};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -213,6 +215,8 @@ pub struct Family {
     pub plan: Vec<PlanDef>,
     /// names of shared parameters this family uses; they come before its own values
     pub shared: Vec<String>,
+    /// extrusions, revolves and sweeps
+    pub forms: Vec<FormDef>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +254,7 @@ pub enum FamilyError {
     Nested { path: String, err: Box<FamilyError> },
     BadMeta(&'static str),
     Shared { name: String, why: &'static str },
+    Form { name: String, why: &'static str },
     UnknownShared(String),
     Connector { name: String, why: &'static str },
     Plan { index: usize, why: &'static str },
@@ -291,6 +296,7 @@ impl fmt::Display for FamilyError {
             BadNested { nested, why } => write!(f, "nested family '{nested}': {why}"),
             Nested { path, err } => write!(f, "in {path}: {err}"),
             BadMeta(why) => write!(f, "family data: {why}"),
+            Form { name, why } => write!(f, "form '{name}': {why}"),
             Shared { name, why } => write!(f, "shared parameter '{name}': {why}"),
             UnknownShared(n) => write!(f, "shared parameter '{n}' is not in the shared set"),
             Connector { name, why } => write!(f, "connector '{name}': {why}"),
@@ -334,6 +340,7 @@ struct CNested {
     rotate: Option<[Expr; 3]>,
     /// index of the first of this nested family's solids in the flattened solid list
     solid_offset: usize,
+    form_offset: usize,
 }
 
 /// a type: name, numeric overrides by slot, text overrides by slot
@@ -366,6 +373,8 @@ pub struct Inner {
     connectors: Vec<mep::CConnector>,
     plan: Vec<mep::CPlan>,
     shared_ids: Vec<(String, u128)>,
+    forms: Vec<forms::CForm>,
+    form_names: Vec<String>,
 }
 
 /// A family that has passed every structural check. Solving it cannot hit a missing name or a loop.
@@ -574,6 +583,7 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
     };
     // nested families
     let mut solid_names: Vec<String> = solids.iter().map(|s| s.name.clone()).collect();
+    let mut form_names: Vec<String> = fam.forms.iter().map(|f| f.name.clone()).collect();
     let mut nested = Vec::new();
     let mut nseen = std::collections::HashSet::new();
     let mut depth = 0;
@@ -624,10 +634,13 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
         let visible = match &nd.visible { Some(v) => Some(parse(&lbl("visible"), v, true)?), None => None };
         let rotate = match &nd.rotate { Some(r) => Some([parse(&lbl("rotate.angle"), &r.angle, true)?, parse(&lbl("rotate.x"), &r.pivot.0, true)?, parse(&lbl("rotate.y"), &r.pivot.1, true)?]), None => None };
         let offset = solid_names.len();
+        let form_offset = form_names.len();
+        for fnm in &child.form_names { form_names.push(format!("{}/{}", nd.name, fnm)); }
+        if form_names.len() > forms::MAX_FORMS * 10 { return Err(FamilyError::TooMany("forms including nested families")); }
         for sn in &child.solid_names { solid_names.push(format!("{}/{}", nd.name, sn)); }
         if solid_names.len() > MAX_SOLIDS { return Err(FamilyError::TooMany("solids including nested families")); }
         depth = depth.max(child.depth + 1);
-        nested.push(CNested { name: nd.name.clone(), child, type_name: nd.type_name.clone(), at, values, texts, count, visible, rotate, solid_offset: offset });
+        nested.push(CNested { name: nd.name.clone(), child, type_name: nd.type_name.clone(), at, values, texts, count, visible, rotate, solid_offset: offset, form_offset });
     }
     if depth > MAX_NEST_DEPTH { return Err(FamilyError::NestTooDeep); }
     let mut types = Vec::new();
@@ -664,8 +677,9 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
     }
     for (i, (s, _)) in fam.classification.iter().enumerate() { if fam.classification[..i].iter().any(|(o, _)| o == s) { return Err(FamilyError::BadMeta("a classification system is listed twice")); } }
     let (connectors, plan) = mep::compile(&fam.connectors, &fam.plan, &parse)?;
+    let forms = forms::compile(&fam.forms, &parse, &material_slot)?;
     let derived: Vec<usize> = (0..nvalues).filter(|&i| formulas[i].is_some() && fam.values[i].axis.is_none()).collect();
-    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids })))
+    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids, forms, form_names })))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -697,6 +711,10 @@ pub struct Instance {
     pub connectors: Vec<Connector>,
     /// solved plan symbol
     pub plan: Vec<PlanShape>,
+    /// solved extrusions, revolves and sweeps; `Form::index` refers to `Inner::form_name`
+    pub forms: Vec<Form>,
+    /// for each entry of `forms`: index into `strings` of its material, if it has one
+    pub form_materials: Vec<Option<u32>>,
 }
 
 impl Instance {
@@ -759,6 +777,7 @@ impl Inner {
         self.derived.iter().map(|&i| (self.names[i].as_str(), inst.values[i])).collect()
     }
     pub fn solid_name(&self, solid: usize) -> &str { &self.solid_names[solid] }
+    pub fn form_name(&self, form: usize) -> &str { &self.form_names[form] }
 
     pub fn solve(&self, req: &Request) -> Result<Instance, FamilyError> {
         let mut r = Resolved { type_name: req.type_name, nums: Vec::with_capacity(req.overrides.len()), texts: Vec::with_capacity(req.texts.len()) };
@@ -851,7 +870,7 @@ impl Inner {
                 Err(err) => return Err(FamilyError::CheckError { name: nm.clone(), err }),
             }
         }
-        let mut inst = Instance { values: Vec::new(), solids: Vec::with_capacity(self.solids.len() + 8), materials: Vec::with_capacity(self.solids.len() + 8), xf: Vec::with_capacity(self.solids.len() + 8), strings: Vec::new(), texts: Vec::new(), opening: None, opening_rise: 0.0, connectors: Vec::new(), plan: Vec::new() };
+        let mut inst = Instance { values: Vec::new(), solids: Vec::with_capacity(self.solids.len() + 8), materials: Vec::with_capacity(self.solids.len() + 8), xf: Vec::with_capacity(self.solids.len() + 8), strings: Vec::new(), texts: Vec::new(), opening: None, opening_rise: 0.0, connectors: Vec::new(), plan: Vec::new(), forms: Vec::new(), form_materials: Vec::new() };
         // own solids
         for (si, s) in self.solids.iter().enumerate() {
             if let Some(v) = &s.visible {
@@ -898,6 +917,21 @@ impl Inner {
                 }
             }
         }
+        // own forms (extrusions, revolves, sweeps)
+        for fm in forms::solve_forms(&self.forms, &vals)? {
+            let mat = match self.forms[fm.index].material {
+                None => None,
+                Some(slot) => {
+                    let t = match &self.inputs[slot].as_ref().expect("material slot is an input").spec {
+                        Spec::Choice { options, .. } => options[vals[slot] as usize].clone(),
+                        _ => texts.iter().find(|(x, _)| *x == slot).expect("text slot").1.clone(),
+                    };
+                    Some(inst.intern(&t))
+                }
+            };
+            inst.forms.push(fm);
+            inst.form_materials.push(mat);
+        }
         // nested families
         for nd in &self.nested {
             if let Some(v) = &nd.visible {
@@ -939,6 +973,15 @@ impl Inner {
                         Some(Xf::about(e(0, "rotate.angle")?, e(1, "rotate.x")?, e(2, "rotate.y")?))
                     }
                 };
+                // forms of the nested family, moved and turned like its solids
+                if inst.forms.len() + ci.forms.len() > forms::MAX_FORMS_TOTAL { return Err(FamilyError::TooMany("forms in one placement")); }
+                for (k, fm) in ci.forms.iter().enumerate() {
+                    let mut x = fm.xf.then(&Xf::translate(at[0], at[1]));
+                    if let Some(t) = turn { x = x.then(&t); }
+                    let m = match ci.form_materials[k] { Some(i) => Some(inst.intern(&ci.strings[i as usize])), None => None };
+                    inst.forms.push(Form { index: nd.form_offset + fm.index, geom: fm.geom.clone(), outer: fm.outer.clone(), holes: fm.holes.clone(), xf: x, dz: fm.dz + at[2] });
+                    inst.form_materials.push(m);
+                }
                 // connectors of the nested family, moved and turned like its solids
                 if inst.connectors.len() + ci.connectors.len() > mep::MAX_CONNECTORS_TOTAL { return Err(FamilyError::TooMany("connectors in one placement")); }
                 if inst.plan.len() + ci.plan.len() > mep::MAX_PLAN_TOTAL { return Err(FamilyError::TooMany("plan symbol lines in one placement")); }

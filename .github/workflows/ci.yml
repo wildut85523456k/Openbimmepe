@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ifcopenshell numpy
+      - run: pip install ifcopenshell numpy scipy
       - name: Wall, family and placement scene against IFC
         run: |
           cargo run -q --release -p openbim-place --example place_scene > /tmp/scene.txt
@@ -46,3 +46,7 @@ jobs:
         run: |
           cargo run -q --release -p openbim-family --example fan_scene > /tmp/fan.txt
           python spikes/s9_connectors_ifc/connectors_ifc.py /tmp/fan.txt
+      - name: Extrusions, revolves and sweeps
+        run: |
+          cargo run -q --release -p openbim-family --example forms_scene > /tmp/forms.txt
+          python spikes/s10_forms_ifc/forms_ifc.py /tmp/forms.txt
