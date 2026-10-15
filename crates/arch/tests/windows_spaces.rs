@@ -242,6 +242,8 @@ fn bad_shafts_are_refused() {
 proptest! {
     #[test]
     fn window_u_lies_between_glass_and_frame_values_when_psi_is_zero(w in 0.4f64..4.0, h in 0.4f64..4.0, fw in 0.02f64..0.15, bars in 0u32..5, ug in 0.3f64..5.0, uf in 0.5f64..8.0) {
+        // the frame and bars must leave some glass, otherwise the window is (rightly) refused
+        prop_assume!(w - 2.0 * fw - f64::from(bars) * 0.03 > 0.05 && h - 2.0 * fw > 0.05);
         let g = WindowGeometry { width: w, height: h, frame_width: fw, bars, bar_width: 0.03 };
         let fr = Frame { name: "f".into(), uf, psi: 0.0 };
         let r = window_u(g, ug, &fr).unwrap();
