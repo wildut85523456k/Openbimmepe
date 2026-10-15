@@ -559,7 +559,7 @@ pub fn conn_run_size(conn: &Connector) -> Result<RunSize, RouteError> {
             let roll = dot(conn.up, w).atan2(dot(conn.up, base)).to_degrees();
             RunSize::Rect { width, height, roll }
         }
-        Size::Electrical { .. } => return Err(RouteError::ConnectorMismatch),
+        Size::Electrical { .. } | Size::Signal => return Err(RouteError::ConnectorMismatch),
     })
 }
 

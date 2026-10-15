@@ -25,7 +25,7 @@ fn conn<'a>(i: &'a Instance, n: &str) -> &'a Connector {
 #[test]
 fn fan_coil_connectors_match_hand_figures() {
     let i = solved(&[]);
-    assert_eq!(i.connectors.len(), 6);
+    assert_eq!(i.connectors.len(), 7);
     let s = conn(&i, "supply");
     assert!(close3(s.pos, [0.0, 0.3, 0.125]) && s.dir == [0.0, 1.0, 0.0]);
     assert_eq!(
@@ -72,6 +72,67 @@ fn fan_coil_connectors_match_hand_figures() {
             && close(p.flow, 80.0)
     );
     assert_eq!(p.pressure_drop, 0.0);
+    // BMS link: depth 0.6 -> y = 0.3 - 0.12 = 0.18, height 0.25 -> z = 0.25 * 2 / 3
+    let b = conn(&i, "bms");
+    assert!(close3(b.pos, [0.5, 0.18, 0.5 / 3.0]) && b.dir == [1.0, 0.0, 0.0]);
+    assert!(b.size == Size::Signal && b.system == System::Controls && b.domain == Domain::Electrical && b.flow_dir == FlowDir::Both);
+    assert!(b.flow == 0.0 && b.current().is_none());
+}
+
+#[test]
+fn fan_coil_has_the_specified_connector_set() {
+    // the agreed set (15 Oct 2026): 2 chilled water, 2 air ductwork, 1 drainage, 1 power, 1 BMS
+    let i = solved(&[]);
+    let count = |f: &dyn Fn(&Connector) -> bool| i.connectors.iter().filter(|c| f(c)).count();
+    assert_eq!(i.connectors.len(), 7);
+    assert_eq!(count(&|c| matches!(c.system, System::ChilledWaterSupply | System::ChilledWaterReturn) && c.domain == Domain::Pipe), 2);
+    assert_eq!(count(&|c| c.domain == Domain::Duct), 2);
+    assert_eq!(count(&|c| c.system == System::Condensate), 1);
+    assert_eq!(count(&|c| c.system == System::Power), 1);
+    assert_eq!(count(&|c| c.system == System::Controls), 1);
+    // no two connectors at the same point
+    for (k, a) in i.connectors.iter().enumerate() {
+        for b in &i.connectors[k + 1..] {
+            let d = (0..3).map(|j| (a.pos[j] - b.pos[j]).powi(2)).sum::<f64>().sqrt();
+            assert!(d > 0.01, "{} and {} are {d} m apart", a.name, b.name);
+        }
+    }
+}
+
+#[test]
+fn signal_connectors() {
+    use Domain::*;
+    let sig = |d: Domain, s: System| ConnectorDef::new("s", d, s, FlowDir::Both, ("0", "0", "0"), Dir::PlusX, ShapeDef::Signal);
+    let run = |c: ConnectorDef| Family { name: "F".into(), connectors: vec![c], ..Default::default() }.compile();
+    // accepted on an electrical connector of a controls, data or other system
+    for s in [System::Controls, System::Data, System::Other] {
+        assert!(run(sig(Electrical, s)).is_ok(), "{s:?}");
+    }
+    // refused: power system, non-electrical domains, power or flow figures
+    assert!(run(sig(Electrical, System::Power)).is_err());
+    for d in [Duct, Pipe, CableTray, Conduit] {
+        assert!(run(sig(d, System::Other)).is_err(), "{d:?}");
+    }
+    assert!(run(sig(Electrical, System::Controls).flow("10")).is_err());
+    assert!(run(sig(Electrical, System::Controls).power_factor("0.9")).is_err());
+    assert!(run(sig(Electrical, System::Controls).pressure_drop("1")).is_err());
+    // the controls system takes the same domains as power and data, and maps to IFC CONTROL
+    assert!(System::Controls.domain_ok(Electrical) && System::Controls.domain_ok(CableTray) && System::Controls.domain_ok(Conduit));
+    assert!(!System::Controls.domain_ok(Duct) && !System::Controls.domain_ok(Pipe));
+    assert_eq!(System::Controls.ifc_system(), "CONTROL");
+    // mating: signal joins signal only; not a power connector at the same point
+    let i = solved(&[]);
+    let b = conn(&i, "bms").clone();
+    let mut facing = b.clone();
+    facing.dir = [-1.0, 0.0, 0.0];
+    assert_eq!(mate(&b, &facing, 1e-6, Resize::Strict), Ok(()));
+    let mut power = facing.clone();
+    power.system = System::Controls;
+    power.size = Size::Electrical { voltage: 230.0, poles: 1 };
+    assert_eq!(mate(&b, &power, 1e-6, Resize::Strict), Err(MateError::ShapeKind));
+    let mut data = facing;
+    data.system = System::Data;
+    assert_eq!(mate(&b, &data, 1e-6, Resize::Strict), Err(MateError::System));
 }
 
 #[test]
@@ -82,7 +143,7 @@ fn connectors_follow_the_family_size_and_can_be_hidden() {
         ("height", 0.4),
         ("with_return_duct", 0.0),
     ]);
-    assert_eq!(i.connectors.len(), 5);
+    assert_eq!(i.connectors.len(), 6);
     assert!(i.connectors.iter().all(|c| c.name != "return"));
     assert!(close3(conn(&i, "supply").pos, [0.0, 0.5, 0.2]));
     assert!(close(conn(&i, "chw_in").pos[0], 1.0));
@@ -826,7 +887,7 @@ fn direction_vectors_and_system_domain_matrix() {
     let allowed = |s: System| -> Vec<Domain> {
         match s {
             SupplyAir | ReturnAir | ExhaustAir | OutsideAir => vec![Duct],
-            Power | Data => vec![CableTray, Conduit, Electrical],
+            Power | Data | Controls => vec![CableTray, Conduit, Electrical],
             Other => doms.to_vec(),
             _ => vec![Pipe],
         }
@@ -852,6 +913,7 @@ fn direction_vectors_and_system_domain_matrix() {
         Gas,
         Power,
         Data,
+        Controls,
         Other,
     ] {
         for d in doms {

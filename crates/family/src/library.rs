@@ -419,6 +419,16 @@ pub fn fan_coil() -> Family {
                 },
             )
             .flow("power"),
+            // BMS link to the unit controller (signal both ways)
+            ConnectorDef::new(
+                "bms",
+                Electrical,
+                Controls,
+                Both,
+                ("length / 2", "depth / 2 - 120 mm", "2 * height / 3"),
+                PlusX,
+                ShapeDef::Signal,
+            ),
         ],
         plan: vec![
             PlanDef::line(("x0", "y0"), ("x1", "y0")),

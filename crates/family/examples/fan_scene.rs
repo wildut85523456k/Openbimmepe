@@ -8,6 +8,7 @@ fn size(s: &Size) -> String {
         Size::Round { diameter } => format!("round {diameter:.9}"),
         Size::Rect { width, height } => format!("rect {width:.9} {height:.9}"),
         Size::Electrical { voltage, poles } => format!("elec {voltage:.9} {poles}"),
+        Size::Signal => "signal".to_string(),
     }
 }
 fn line(tag: &str, c: &Connector) {
@@ -55,6 +56,7 @@ fn main() {
         Gas,
         Power,
         Data,
+        Controls,
         Other,
     ] {
         println!("SYS {:?} {}", s, s.ifc_system());

@@ -139,7 +139,7 @@ impl Desktop {
             Mark::Source => data.endpoints.push(MepEndpoint { port, role: EndRole::Source, demand: EndDemand::None, required_pressure_pa: 0.0 }),
             Mark::Terminal if d.kind == 4 => {
                 let (domain, at) = (if self.document.get(match port.node { MepNode::Run(id) => id, _ => ElementId(0) }).is_some_and(|e| e.category == Category::Pipe) { openbim_family::mep::Domain::Pipe } else { openbim_family::mep::Domain::Duct }, port_pos(&self.document, port).unwrap_or(at));
-                let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, at, 0.6, domain) else { self.message = "End point: no equipment connector of this kind within 0.6 m of that end".into(); return };
+                let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, at, 0.6, domain, None) else { self.message = "End point: no equipment connector of this kind within 0.6 m of that end".into(); return };
                 if c.flow <= 0.0 { self.message = format!("The connector '{}' of {} has no flow", c.name, self.document.get(el).map_or("the equipment", |e| e.name.as_str())); return; }
                 data.equip_links.push(openbim_document::EquipLink { port, element: el, connector: c.name.clone() });
                 data.endpoints.push(MepEndpoint { port, role: EndRole::Terminal, demand: EndDemand::Flow(c.flow), required_pressure_pa: c.pressure_drop });

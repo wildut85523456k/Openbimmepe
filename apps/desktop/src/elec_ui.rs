@@ -5,7 +5,7 @@ use eframe::egui::{self, Color32, Pos2, Stroke};
 use openbim_calc as calc;
 use openbim_document::compute_elec::{self, ElecComputeError, ElecComputeSettings, ElecReport};
 use openbim_document::{Category, Command, ElecCable, ElecKind, ElecNode, Document, ElementId, Geometry};
-use openbim_family::mep::{Connector, Domain, Pose};
+use openbim_family::mep::{Connector, Domain, Pose, System};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode { Place, Edit, Remove }
@@ -99,10 +99,11 @@ pub(crate) fn instance_connectors(doc: &Document, id: ElementId) -> Vec<Connecto
     inst.connectors.iter().map(|c| c.world(&pose)).collect()
 }
 
-/// The family instance nearest a plan point (within `tol`) that has a connector of `domain`, with that connector.
-pub(crate) fn equipment_connector_near(doc: &Document, level: ElementId, at: [f64; 2], tol: f64, domain: Domain) -> Option<(ElementId, Connector)> {
+/// The family instance nearest a plan point (within `tol`) that has a connector of `domain`
+/// (and of `system`, when given), with that connector.
+pub(crate) fn equipment_connector_near(doc: &Document, level: ElementId, at: [f64; 2], tol: f64, domain: Domain, system: Option<System>) -> Option<(ElementId, Connector)> {
     doc.elements().filter(|e| e.category == Category::Family && matches!(e.geometry, Some(Geometry::Placed { level: l, .. }) if l == level)).flat_map(|e| {
-        instance_connectors(doc, e.id).into_iter().filter(|c| c.domain == domain).map(move |c| (e.id, c))
+        instance_connectors(doc, e.id).into_iter().filter(|c| c.domain == domain && system.is_none_or(|s| c.system == s)).map(move |c| (e.id, c))
     }).map(|(id, c)| ((c.pos[0] - at[0]).hypot(c.pos[1] - at[1]), id, c)).filter(|(d, _, _)| *d <= tol).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, id, c)| (id, c))
 }
 
@@ -164,7 +165,7 @@ impl Desktop {
         if hit.is_some() { self.message = "There is a node there already".into(); return; }
         let d = self.elec_draft.clone();
         if d.from_equipment && d.kind == ElecKind::Load {
-            let Some((el, c)) = equipment_connector_near(&self.document, level, at, 1.5, Domain::Electrical) else { self.message = "No equipment with an electrical connector within 1.5 m of the click".into(); return };
+            let Some((el, c)) = equipment_connector_near(&self.document, level, at, 1.5, Domain::Electrical, Some(System::Power)) else { self.message = "No equipment with an electrical power connector within 1.5 m of the click".into(); return };
             if data.elec_nodes.iter().any(|n| n.element == Some(el) && n.connector == c.name) { self.message = "That connector feeds a load already".into(); return; }
             let name = self.document.get(el).map_or("Equipment".into(), |e| e.name.clone());
             let mut node = ElecNode::new(data.next_node_id(), &name, ElecKind::Load, [c.pos[0], c.pos[1]], level);

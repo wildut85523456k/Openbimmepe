@@ -113,7 +113,7 @@ impl Desktop {
             if self.run_opts.inherit_size {
                 if let Some(run) = self.document.mep_run(id) { self.take_size(&run.size); }
             }
-        } else if let Some((_, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, point, 0.5, self.run_domain()) {
+        } else if let Some((_, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, point, 0.5, self.run_domain(), None) {
             if self.run_opts.inherit_elevation { self.elevation_mm = ((c.pos[2] - level_z) * 1000.0).round(); }
             if self.run_opts.inherit_size {
                 if let Ok(size) = openbim_route::conn_run_size(&c) { self.take_size(&size); }
@@ -185,7 +185,7 @@ impl Desktop {
         let n = self.run_points.len();
         let from_conn = if self.run_opts.auto_connect {
             [(0usize, false), (n - 1, true)].into_iter().find_map(|(i, rev)| {
-                crate::elec_ui::equipment_connector_near(&self.document, level, self.run_points[i], 0.5, self.run_domain()).map(|(_, c)| (c, rev))
+                crate::elec_ui::equipment_connector_near(&self.document, level, self.run_points[i], 0.5, self.run_domain(), None).map(|(_, c)| (c, rev))
             })
         } else { None };
         if let Some((c, rev)) = from_conn {
@@ -289,7 +289,7 @@ impl Desktop {
         for (id, port, p, away, sys) in [(ids[0], 0usize, first.a, [first.a[0] - first.b[0], first.a[1] - first.b[1], first.a[2] - first.b[2]], first.system), (ids[ids.len() - 1], 1usize, last.b, [last.b[0] - last.a[0], last.b[1] - last.a[1], last.b[2] - last.a[2]], last.system)] {
             let mp = openbim_document::MepPort { node: openbim_document::MepNode::Run(id), port };
             if data.partner(mp).is_some() || data.equip_links.iter().any(|q| q.port == mp) { continue; }
-            let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, [p[0], p[1]], 0.15, domain).filter(|(_, c)| c.system.compatible(sys)) else { continue };
+            let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, [p[0], p[1]], 0.15, domain, None).filter(|(_, c)| c.system.compatible(sys)) else { continue };
             // the run must arrive along the connector's axis: its outward direction opposes the way the connector faces
             let (n, k) = ((away[0] * away[0] + away[1] * away[1] + away[2] * away[2]).sqrt(), (c.dir[0] * c.dir[0] + c.dir[1] * c.dir[1] + c.dir[2] * c.dir[2]).sqrt());
             if n < 1e-9 || k < 1e-9 || -(away[0] * c.dir[0] + away[1] * c.dir[1] + away[2] * c.dir[2]) / (n * k) < 10f64.to_radians().cos() { continue; }

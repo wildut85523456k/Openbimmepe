@@ -164,7 +164,7 @@ impl Discipline {
     pub fn of_system(system: System) -> Option<Discipline> {
         use System::*;
         match system {
-            Power | Data => Some(Discipline::Electrical),
+            Power | Data | Controls => Some(Discipline::Electrical),
             SupplyAir | ReturnAir | ExhaustAir | OutsideAir => Some(Discipline::AirDistribution),
             ChilledWaterSupply | ChilledWaterReturn | HeatingWaterSupply | HeatingWaterReturn
             | CondenserWaterSupply | CondenserWaterReturn => Some(Discipline::ChilledWater),

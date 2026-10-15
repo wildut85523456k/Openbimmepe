@@ -186,6 +186,8 @@ pub enum System {
     Gas,
     Power,
     Data,
+    /// building management (BMS) and other control wiring
+    Controls,
     Other,
 }
 
@@ -225,7 +227,7 @@ impl System {
         match self {
             Other => true,
             SupplyAir | ReturnAir | ExhaustAir | OutsideAir => d == Domain::Duct,
-            Power | Data => matches!(d, Domain::Electrical | Domain::CableTray | Domain::Conduit),
+            Power | Data | Controls => matches!(d, Domain::Electrical | Domain::CableTray | Domain::Conduit),
             _ => d == Domain::Pipe,
         }
     }
@@ -248,6 +250,7 @@ impl System {
             Gas => "GAS",
             Power => "ELECTRICAL",
             Data => "DATA",
+            Controls => "CONTROL",
             Other => "NOTDEFINED",
         }
     }
@@ -275,6 +278,7 @@ impl System {
             Gas => "Gas",
             Power => "Power",
             Data => "Data",
+            Controls => "Controls",
             Other => "Other",
         }
     }
@@ -356,6 +360,8 @@ pub enum ShapeDef {
         voltage: String,
         poles: String,
     },
+    /// a control or data link (BMS, network) on an electrical connector: no size, voltage, poles or power
+    Signal,
 }
 
 #[derive(Clone, Debug)]
@@ -513,6 +519,7 @@ enum CShape {
     Round(Expr),
     Rect(Expr, Expr),
     Elec(Expr, Expr),
+    Signal,
 }
 pub(crate) enum CPlan {
     Line([Expr; 4], Option<Expr>),
@@ -572,6 +579,7 @@ pub(crate) fn compile(
             (ShapeDef::Electrical { voltage, poles }, Domain::Electrical) => {
                 CShape::Elec(p("voltage", voltage)?, p("poles", poles)?)
             }
+            (ShapeDef::Signal, Domain::Electrical) => CShape::Signal,
             _ => {
                 return Err(bad(
                     &c.name,
@@ -579,6 +587,14 @@ pub(crate) fn compile(
                 ))
             }
         };
+        if matches!(c.shape, ShapeDef::Signal) {
+            if !matches!(c.system, System::Controls | System::Data | System::Other) {
+                return Err(bad(&c.name, "a signal connector belongs to a controls or data system"));
+            }
+            if c.flow.is_some() || c.power_factor.is_some() {
+                return Err(bad(&c.name, "a signal connector carries no power"));
+            }
+        }
         if c.domain == Domain::Electrical && c.pressure_drop.is_some() {
             return Err(bad(&c.name, "an electrical connector has no pressure drop"));
         }
@@ -689,6 +705,8 @@ pub enum Size {
     Round { diameter: f64 },
     Rect { width: f64, height: f64 },
     Electrical { voltage: f64, poles: u8 },
+    /// control or data link
+    Signal,
 }
 
 /// A solved connector in the family's own frame, or (after `world`) in the model.
@@ -841,6 +859,7 @@ pub(crate) fn solve_connectors(
                     poles: poles as u8,
                 }
             }
+            CShape::Signal => Size::Signal,
         };
         let nonneg = |part: &str, e: &Option<Expr>| -> Result<f64, FamilyError> {
             match e {
@@ -1122,6 +1141,7 @@ pub fn mate(a: &Connector, b: &Connector, tol: f64, resize: Resize) -> Result<()
                 return Err(MateError::Poles);
             }
         }
+        (Size::Signal, Size::Signal) => {}
         _ => return Err(MateError::ShapeKind),
     }
     Ok(())

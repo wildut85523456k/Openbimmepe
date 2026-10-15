@@ -105,7 +105,7 @@ def compare(path, pose_key):
 
 for k in poses:
     bad, n = compare(build(k), k)
-    ok(n == 6 and bad == 0, f"ifc ports pose {k}: {n} ports, {bad} mismatches")
+    ok(n == 7 and bad == 0, f"ifc ports pose {k}: {n} ports, {bad} mismatches")
     nb, _ = compare(build(k, perturb=0.01), k)   # negative control
     ok(nb > 0, f"negative control pose {k} must report mismatches")
 
@@ -119,6 +119,8 @@ def mate(a, b, tol=0.001):
     if a["size"][0] != b["size"][0]: return "ShapeKind"
     if a["size"][0] in ("round", "rect"):
         if any(abs(float(x) - float(y)) > 1e-9 for x, y in zip(a["size"][1:], b["size"][1:])): return "Size"
+    elif a["size"][0] == "signal":
+        pass
     else:
         if abs(float(a["size"][1]) - float(b["size"][1])) > 1e-9: return "Voltage"
         if a["size"][2] != b["size"][2]: return "Poles"
@@ -136,7 +138,18 @@ for r in rows:
         a = w0[r[1]]
         f = dict(a); f["dir"] = tuple(-v for v in a["dir"]); f["fd"] = {"In": "Out", "Out": "In", "Both": "Both"}[a["fd"]]
         ok(mate(a, f) == "Ok" and r[2] == "Ok(())", f"self {r[1]}")
-ok(cnt == 36, f"expected 36 mate lines, got {cnt}")
+ok(cnt == 49, f"expected 49 mate lines, got {cnt}")
+# the agreed connector set (15 Oct 2026), written out independently of the Rust family:
+# 2 chilled water, 2 air ductwork, 1 drainage, 1 power, 1 BMS
+want = {"chw_in": ("Pipe", "ChilledWaterSupply"), "chw_out": ("Pipe", "ChilledWaterReturn"),
+        "supply": ("Duct", "SupplyAir"), "return": ("Duct", "ReturnAir"),
+        "condensate": ("Pipe", "Condensate"), "power": ("Electrical", "Power"), "bms": ("Electrical", "Controls")}
+got = {n: (c["dom"], c["sys"]) for (k, n), c in local.items() if k == "0"}
+ok(got == want, f"fan coil connector set: {got}")
+bms = local.get(("0", "bms"), {})
+ok(bms.get("size") == ["signal"] and bms.get("fd") == "Both", "bms is a two-way signal link")
+sysmap = {r[1]: r[2] for r in rows if r[0] == "SYS"}
+ok(sysmap.get("Controls") == "CONTROL", "Controls maps to IfcDistributionSystemEnum CONTROL")
 # negative control for the mate logic: a connector must not join the unmoved original of a different pose
 ok(mate(w0["supply"], w1["supply"]) != "Ok", "negative control mate")
 print(f"{checks} checks, {fails} failures")
