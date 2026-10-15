@@ -25,6 +25,10 @@ pub enum GeomError {
     TooFewPoints,
     ZeroLengthSegment(usize),
     Parallel(usize),
+    /// segment `0` turns straight back over the previous one
+    FoldedBack(usize),
+    /// segments `0` and `1` touch or cross (not counting neighbours meeting at their shared point)
+    SelfIntersecting(usize, usize),
     TooMany(&'static str),
     OpeningOutside { wall: usize, opening: usize },
     OpeningsOverlap { wall: usize },
@@ -148,6 +152,14 @@ fn sub(a: P, b: P) -> P { [a[0] - b[0], a[1] - b[1]] }
 fn add(a: P, b: P) -> P { [a[0] + b[0], a[1] + b[1]] }
 fn mul(a: P, s: f64) -> P { [a[0] * s, a[1] * s] }
 fn len(a: P) -> f64 { (a[0] * a[0] + a[1] * a[1]).sqrt() }
+/// Do two segments share at least one point?
+fn seg_touch(a: P, b: P, c: P, d: P) -> bool {
+    let o = |p: P, q: P, r: P| cross2(sub(q, p), sub(r, p));
+    let (o1, o2, o3, o4) = (o(a, b, c), o(a, b, d), o(c, d, a), o(c, d, b));
+    if ((o1 > 0.0 && o2 < 0.0) || (o1 < 0.0 && o2 > 0.0)) && ((o3 > 0.0 && o4 < 0.0) || (o3 < 0.0 && o4 > 0.0)) { return true; }
+    let on = |p: P, q: P, r: P| o(p, q, r) == 0.0 && r[0] >= p[0].min(q[0]) && r[0] <= p[0].max(q[0]) && r[1] >= p[1].min(q[1]) && r[1] <= p[1].max(q[1]);
+    on(a, b, c) || on(a, b, d) || on(c, d, a) || on(c, d, b)
+}
 fn cross2(a: P, b: P) -> f64 { a[0] * b[1] - a[1] * b[0] }
 
 /// Intersection of lines p + t*d and q + s*e.
@@ -222,6 +234,38 @@ impl WallChain {
 
     fn seg(&self, i: usize) -> (P, P) { (self.points[i], self.points[(i + 1) % self.points.len()]) }
 
+    /// A chain may not fold back over itself or touch or cross itself away from its own corners.
+    fn check_simple(&self) -> Result<(), GeomError> {
+        let n = self.segment_count();
+        let segs: Vec<(P, P)> = (0..n).map(|i| self.seg(i)).collect();
+        // neighbours: meeting at the shared corner is fine, running back along each other is not
+        for i in 0..n {
+            let j = (i + 1) % n;
+            if !self.closed && j == 0 { continue; }
+            let (a, b) = segs[i];
+            let (c, d) = segs[j];
+            let (u, v) = (sub(b, a), sub(d, c));
+            if cross2(u, v) == 0.0 && u[0] * v[0] + u[1] * v[1] < 0.0 { return Err(GeomError::FoldedBack(j)); }
+        }
+        // everything else: sweep along x
+        let mut order: Vec<usize> = (0..n).collect();
+        let (lo, hi) = (|k: usize| segs[k].0[0].min(segs[k].1[0]), |k: usize| segs[k].0[0].max(segs[k].1[0]));
+        order.sort_by(|&x, &y| lo(x).total_cmp(&lo(y)));
+        for (oi, &i) in order.iter().enumerate() {
+            let (ylo, yhi) = (segs[i].0[1].min(segs[i].1[1]), segs[i].0[1].max(segs[i].1[1]));
+            for &j in &order[oi + 1..] {
+                if lo(j) > hi(i) { break; }
+                let (ylo2, yhi2) = (segs[j].0[1].min(segs[j].1[1]), segs[j].0[1].max(segs[j].1[1]));
+                if ylo2 > yhi || ylo > yhi2 { continue; }
+                let (x, y) = (i.min(j), i.max(j));
+                let neighbours = y == x + 1 || (self.closed && x == 0 && y == n - 1);
+                if neighbours { continue; }
+                if seg_touch(segs[x].0, segs[x].1, segs[y].0, segs[y].1) { return Err(GeomError::SelfIntersecting(x, y)); }
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), GeomError> {
         if self.points.len() < 2 || (self.closed && self.points.len() < 3) { return Err(GeomError::TooFewPoints); }
         if self.points.len() > MAX_WALLS { return Err(GeomError::TooMany("points")); }
@@ -237,6 +281,7 @@ impl WallChain {
             let (a, b) = self.seg(i);
             if len(sub(b, a)) < EPS { return Err(GeomError::ZeroLengthSegment(i)); }
         }
+        self.check_simple()?;
         for s in [&self.start_stop, &self.end_stop].into_iter().flatten() {
             fin(s.point[0], "stop")?; fin(s.point[1], "stop")?; fin(s.dir[0], "stop")?; fin(s.dir[1], "stop")?;
             if len(s.dir) < EPS { return Err(GeomError::BadStop("zero direction")); }

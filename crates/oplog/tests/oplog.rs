@@ -225,8 +225,9 @@ fn merge_reports_clashes_and_a_wins() {
     let a3 = vec![tx(1, vec![Op::Create { id: 50, kind: 1 }])];
     let b3 = vec![tx(8, vec![Op::Create { id: 50, kind: 2 }, Op::Set { id: 50, prop: 1, value: num(1.0) }])];
     let m = merge(&base, &a3, &b3).unwrap();
-    assert_eq!(m.conflicts.len(), 2);
+    assert_eq!(m.conflicts, vec![(8, Key::Element(50))]);
     assert_eq!(m.state.elements[&50].kind, 1);
+    assert!(m.state.elements[&50].props.is_empty(), "the other transaction's property did not slip in");
     // an error from base replay is reported with its seq
     assert_eq!(merge(&base, &[tx(3, vec![Op::Delete { id: 77 }])], &[]).unwrap_err(), (3, OpError::Missing(77)));
     assert_eq!(merge(&base, &[], &[tx(4, vec![Op::Delete { id: 77 }])]).unwrap_err(), (4, OpError::Missing(77)));
@@ -342,4 +343,67 @@ fn fingerprint_is_stable_across_versions() {
     let mut s = State::default();
     s.apply(&Op::Create { id: 1, kind: 2 }).unwrap();
     assert_ne!(s.fingerprint(), State::default().fingerprint());
+}
+
+#[test]
+fn a_transaction_is_merged_or_left_out_as_a_whole() {
+    let base = sample().state;
+    let a = vec![tx(1, vec![Op::Set { id: 1, prop: 1, value: num(1.0) }])];
+    // one op clashes, the others do not: none of them is applied
+    let b = vec![tx(5, vec![Op::Create { id: 60, kind: 3 }, Op::Set { id: 2, prop: 1, value: Some(Value::Bool(true)) }, Op::Set { id: 1, prop: 1, value: num(2.0) }])];
+    let m = merge(&base, &a, &b).unwrap();
+    assert_eq!(m.conflicts, vec![(5, Key::Prop(1, 1))]);
+    assert!(!m.state.elements.contains_key(&60));
+    assert_eq!(m.state.elements[&2], base.elements[&2]);
+    // a later transaction that builds on the one left out is left out too, one that does not is kept
+    let b = vec![
+        tx(5, vec![Op::Create { id: 60, kind: 3 }, Op::Set { id: 1, prop: 1, value: num(2.0) }]),
+        tx(6, vec![Op::Set { id: 60, prop: 1, value: num(3.0) }]),
+        tx(7, vec![Op::Set { id: 2, prop: 1, value: Some(Value::Bool(false)) }]),
+    ];
+    let m = merge(&base, &a, &b).unwrap();
+    assert_eq!(m.conflicts, vec![(5, Key::Prop(1, 1)), (6, Key::Prop(60, 1))]);
+    assert!(!m.state.elements.contains_key(&60));
+    assert_eq!(m.state.elements[&2].props[&1], Value::Bool(false));
+}
+
+#[test]
+fn what_is_written_can_always_be_read_back() {
+    let mut d = Doc::new(1);
+    d.edit("first", vec![Op::Create { id: 1, kind: 1 }]).unwrap();
+    let big = "x".repeat(MAX_TEXT + 1);
+    assert_eq!(d.edit(&big, vec![Op::Create { id: 2, kind: 1 }]), Err(OpError::TooLong));
+    let ok = "x".repeat(MAX_TEXT);
+    d.edit(&ok, vec![Op::Create { id: 3, kind: 1 }]).unwrap();
+    let many: Vec<Op> = (0..=MAX_OPS as u64).map(|i| Op::Create { id: 1000 + i, kind: 1 }).collect();
+    assert_eq!(d.edit("many", many), Err(OpError::TooManyOps));
+    assert!(!d.state.elements.contains_key(&2) && !d.state.elements.contains_key(&1000));
+    d.edit("last", vec![Op::Create { id: 4, kind: 1 }]).unwrap();
+    // all three logged edits come back
+    let (back, tail) = read_log(&d.log);
+    assert_eq!(tail, Tail::Clean);
+    assert_eq!(back.len(), 3);
+    assert_eq!(back[1].label.len(), MAX_TEXT);
+}
+
+#[test]
+fn authors_never_hand_out_the_same_element_number() {
+    let mut a = Doc::new(1);
+    let mut b = Doc::new(2);
+    let ids_a: Vec<u64> = (0..100).map(|_| a.new_id()).collect();
+    let ids_b: Vec<u64> = (0..100).map(|_| b.new_id()).collect();
+    assert!(ids_a.iter().all(|i| i >> 32 == 1) && ids_b.iter().all(|i| i >> 32 == 2));
+    assert!(ids_a.iter().all(|i| !ids_b.contains(i)));
+    assert_eq!(ids_a.iter().collect::<std::collections::BTreeSet<_>>().len(), 100);
+    // an id already in use is skipped
+    let mut c = Doc::new(0);
+    c.edit("hand", vec![Op::Create { id: 1, kind: 1 }, Op::Create { id: 2, kind: 1 }]).unwrap();
+    let id = c.new_id();
+    assert!(id != 1 && id != 2);
+    // two users each create elements and merge: nothing is lost
+    let base = State::default();
+    let ta = Transaction { seq: 1, author: 1, label: String::new(), ops: ids_a.iter().map(|i| Op::Create { id: *i, kind: 1 }).collect() };
+    let tb = Transaction { seq: 1, author: 2, label: String::new(), ops: ids_b.iter().map(|i| Op::Create { id: *i, kind: 1 }).collect() };
+    let m = merge(&base, &[ta], &[tb]).unwrap();
+    assert!(m.conflicts.is_empty() && m.state.elements.len() == 200);
 }

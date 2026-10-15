@@ -44,6 +44,8 @@ pub enum OpError {
     Missing(u64),
     NotFinite(u64, u32),
     TooLong,
+    /// more operations in one edit than the log can read back
+    TooManyOps,
 }
 
 /// A group of ops applied or undone together.
@@ -447,6 +449,7 @@ pub struct Doc {
     pub state: State,
     pub log: Vec<u8>,
     next_seq: u64,
+    next_id: u32,
     author: u32,
     undo: Vec<Vec<Op>>, // inverse op lists, most recent last
     redo: Vec<Vec<Op>>,
@@ -463,8 +466,21 @@ impl Doc {
         self.log.extend_from_slice(&frame(&t));
     }
 
-    /// Run one edit. Nothing is logged if it fails.
+    /// A fresh element number that cannot collide with another author's: the author number is the high half.
+    /// Numbers already present (for example typed by hand) are skipped.
+    pub fn new_id(&mut self) -> u64 {
+        loop {
+            self.next_id = self.next_id.wrapping_add(1);
+            let id = (u64::from(self.author) << 32) | u64::from(self.next_id);
+            if !self.state.elements.contains_key(&id) { return id; }
+        }
+    }
+
+    /// Run one edit. Nothing is logged if it fails. The same size limits as the reader apply, so what is written
+    /// can always be read back.
     pub fn edit(&mut self, label: &str, ops: Vec<Op>) -> Result<(), OpError> {
+        if label.len() > MAX_TEXT { return Err(OpError::TooLong); }
+        if ops.len() > MAX_OPS { return Err(OpError::TooManyOps); }
         let inv = self.state.apply_all(&ops)?;
         self.commit(label, ops);
         self.undo.push(inv);
@@ -523,12 +539,13 @@ fn clashes(a: &BTreeSet<Key>, k: Key) -> bool {
 #[derive(Debug, PartialEq)]
 pub struct Merged {
     pub state: State,
-    /// Transactions of B (by seq) with ops that were skipped because A touched the same thing.
+    /// Transactions of B (by seq) that were left out whole, with the first thing that clashed.
     pub conflicts: Vec<(u64, Key)>,
 }
 
-/// Apply A fully, then B's ops except those whose target A already touched (A wins, the
-/// conflict is reported). The result does not depend on the order of two non-clashing ops.
+/// Apply A fully, then each transaction of B as a whole: if any of its ops touches something A touched, or
+/// something an earlier skipped transaction of B touched, the whole transaction is left out and reported (A wins).
+/// A transaction is never applied in part. The result does not depend on the order of two non-clashing ops.
 pub fn merge(base: &State, a: &[Transaction], b: &[Transaction]) -> Result<Merged, (u64, OpError)> {
     let mut s = replay(base.clone(), a)?;
     let mut touched = BTreeSet::new();
@@ -537,18 +554,17 @@ pub fn merge(base: &State, a: &[Transaction], b: &[Transaction]) -> Result<Merge
             touched.extend(keys_of(op));
         }
     }
+    let mut dropped = BTreeSet::new();
     let mut conflicts = Vec::new();
     for t in b {
-        for op in &t.ops {
-            let ks = keys_of(op);
-            if let Some(k) = ks.iter().find(|k| clashes(&touched, **k)) {
-                conflicts.push((t.seq, *k));
-                continue;
-            }
-            // an op of B that depends on an element B created earlier is fine; one that depends
-            // on an element A deleted was caught above (Element key touched)
-            s.apply(op).map_err(|e| (t.seq, e))?;
+        let keys: Vec<Key> = t.ops.iter().flat_map(keys_of).collect();
+        let bad = keys.iter().find(|k| clashes(&touched, **k)).or_else(|| keys.iter().find(|k| clashes(&dropped, **k)));
+        if let Some(k) = bad {
+            conflicts.push((t.seq, *k));
+            dropped.extend(keys);
+            continue;
         }
+        s.apply_all(&t.ops).map_err(|e| (t.seq, e))?;
     }
     Ok(Merged { state: s, conflicts })
 }

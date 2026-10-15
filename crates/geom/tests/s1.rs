@@ -445,3 +445,53 @@ fn openings_inside_the_far_mitre_zone_are_rejected() {
     c.poly_openings = vec![vec![vec![[5.0, 0.5], [5.85, 0.5], [5.85, 1.5], [5.0, 1.5]]]];
     assert!(matches!(err_of(&c), GeomError::OpeningOutside { .. }));
 }
+
+fn chain(pts: &[[f64; 2]], closed: bool) -> WallChain { WallChain::new(pts.to_vec(), closed, 0.2, 3.0) }
+
+#[test]
+fn a_chain_that_doubles_back_is_refused() {
+    let c = chain(&[[0., 0.], [5., 0.], [2., 0.]], false);
+    assert!(matches!(c.validate(), Err(GeomError::FoldedBack(1))));
+    assert!(matches!(c.plans(), Err(GeomError::FoldedBack(1))));
+    // continuing the same way, or turning a little, is fine
+    assert!(chain(&[[0., 0.], [5., 0.], [7., 0.]], false).validate().is_ok());
+    // closing segment of a closed chain folds back on the first
+    assert!(matches!(chain(&[[0., 0.], [5., 0.], [5., 3.], [2., 0.]], true).validate(), Err(GeomError::FoldedBack(0))));
+    // an open chain does not compare its end with its start
+    assert!(matches!(chain(&[[0., 0.], [5., 0.], [5., 3.], [2., 0.]], false).validate(), Err(GeomError::SelfIntersecting(0, 2))));
+    assert!(chain(&[[0., 0.], [5., 0.], [5., 3.], [2., 1.]], false).validate().is_ok());
+}
+
+#[test]
+fn a_chain_that_crosses_or_touches_itself_is_refused() {
+    let bow = chain(&[[0., 0.], [4., 3.], [4., 0.], [0., 3.]], true);
+    assert!(matches!(bow.validate(), Err(GeomError::SelfIntersecting(0, 2))));
+    // open chain crossing itself
+    let x = chain(&[[0., 0.], [4., 0.], [4., 2.], [2., 2.], [2., -1.]], false);
+    assert!(matches!(x.validate(), Err(GeomError::SelfIntersecting(0, 3))));
+    // touching at a point (end of one on the side of another)
+    let t = chain(&[[0., 0.], [4., 0.], [4., 2.], [2., 2.], [2., 0.]], false);
+    assert!(matches!(t.validate(), Err(GeomError::SelfIntersecting(0, 3))));
+    // two collinear segments that overlap
+    let o = chain(&[[0., 0.], [4., 0.], [4., 1.], [8., 1.], [8., 0.], [3., 0.]], false);
+    assert!(matches!(o.validate(), Err(GeomError::SelfIntersecting(0, 4))));
+    // an open chain whose end lands on its own start
+    assert!(matches!(chain(&[[0., 0.], [4., 0.], [4., 3.], [0., 3.], [0., 0.]], false).validate(), Err(GeomError::SelfIntersecting(0, 3))));
+    // valid shapes
+    assert!(chain(&[[0., 0.], [4., 0.], [4., 3.], [0., 3.]], true).validate().is_ok());
+    assert!(chain(&[[0., 0.], [4., 0.], [4., 3.], [0., 3.]], false).validate().is_ok());
+    assert!(chain(&[[0., 0.], [4., 0.], [4., 3.], [1., 3.], [1., 1.]], false).validate().is_ok());
+    // collinear neighbours (a straight run) in a closed chain
+    assert!(chain(&[[0., 0.], [2., 0.], [4., 0.], [4., 3.], [0., 3.]], true).validate().is_ok());
+    // segments that miss each other but share a bounding box
+    assert!(chain(&[[0., 0.], [4., 4.], [5., 4.], [1., 0.]], false).validate().is_ok());
+}
+
+#[test]
+fn a_long_chain_is_checked_quickly() {
+    // a zig-zag of 100 000 segments going right
+    let pts: Vec<[f64; 2]> = (0..100_000).map(|i| [i as f64 * 0.01, if i % 2 == 0 { 0.0 } else { 0.5 }]).collect();
+    let t = std::time::Instant::now();
+    assert!(chain(&pts, false).validate().is_ok());
+    assert!(t.elapsed().as_secs_f64() < 3.0, "{:?}", t.elapsed());
+}
