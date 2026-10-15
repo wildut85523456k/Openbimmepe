@@ -1,0 +1,15 @@
+[package]
+name = "openbim-sheets"
+version = "0.0.1"
+edition = "2021"
+description = "Sheets, title blocks, discipline view visibility, vector PDF/DXF printing and Excel sheet-set import"
+publish = false
+
+[dependencies]
+calamine = "0.26"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unsafe_code = "forbid"

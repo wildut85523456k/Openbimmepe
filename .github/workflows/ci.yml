@@ -66,3 +66,8 @@ jobs:
             BASE=$B $E /tmp/g_$B.ifc > /tmp/g_$B.txt
             python spikes/s12_ifc_writer/georef_base_check.py /tmp/g_$B.txt /tmp/g_$B.ifc $B
           done
+      - name: Sheets, printing and Excel sheet sets (PDF/DXF read back independently)
+        run: |
+          pip install pypdf pypdfium2 ezdxf openpyxl reportlab pillow
+          sudo apt-get install -y qpdf poppler-utils
+          python -I spikes/s13_sheets_check/check_sheets.py
