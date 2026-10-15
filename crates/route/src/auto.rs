@@ -53,7 +53,8 @@ impl std::error::Error for AutoError {}
 enum Shape {
     Hard { lo: [f64; 3], hi: [f64; 3] },
     /// convex prism: `nx * x + ny * y >= c` for every plane, between two heights
-    Soft { planes: Vec<[f64; 3]>, z0: f64, z1: f64, cost: f64 },
+    /// `lo` and `hi` are the box round the prism, to look at it only where it can matter
+    Soft { planes: Vec<[f64; 3]>, z0: f64, z1: f64, cost: f64, lo: [f64; 3], hi: [f64; 3] },
 }
 
 /// Something the path must avoid (hard) or may cross at a price (soft).
@@ -103,7 +104,9 @@ impl Zone {
             let nrm = [-d[1] / l, d[0] / l];
             planes.push([nrm[0], nrm[1], nrm[0] * a[0] + nrm[1] * a[1]]);
         }
-        Ok(Zone { label: label.into(), shape: Shape::Soft { planes, z0, z1, cost } })
+        let lo = [pts.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min), pts.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min), z0];
+        let hi = [pts.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max), pts.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max), z1];
+        Ok(Zone { label: label.into(), shape: Shape::Soft { planes, z0, z1, cost, lo, hi } })
     }
 
     /// The box a straight run takes up (its section and margin all round), never entered.
@@ -271,6 +274,11 @@ fn clip_box(p: [f64; 3], q: [f64; 3], lo: [f64; 3], hi: [f64; 3]) -> Option<(f64
 }
 
 /// The same for a convex prism widened by `r` all round.
+/// Can the segment p-q come within `r` of the box? A quick no before the exact test.
+fn near(p: [f64; 3], q: [f64; 3], lo: &[f64; 3], hi: &[f64; 3], r: f64) -> bool {
+    (0..3).all(|i| p[i].min(q[i]) <= hi[i] + r && p[i].max(q[i]) >= lo[i] - r)
+}
+
 fn clip_prism(p: [f64; 3], q: [f64; 3], planes: &[[f64; 3]], z0: f64, z1: f64, r: f64) -> Option<(f64, f64)> {
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
     let mut limit = |s0: f64, s1: f64| -> bool {
@@ -400,7 +408,7 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
     for (i, z) in rq.zones.iter().enumerate() {
         let touches = match &z.shape {
             Shape::Hard { lo, hi } => (0..3).all(|j| lo[j] - r <= bounds_hi[j] && hi[j] + r >= bounds_lo[j]),
-            Shape::Soft { .. } => true,
+            Shape::Soft { lo, hi, .. } => (0..3).all(|j| lo[j] - r <= bounds_hi[j] && hi[j] + r >= bounds_lo[j]),
         };
         if touches {
             zs.push(Z { shape: &z.shape, from_own: rq.from_own.contains(&i), to_own: rq.to_own.contains(&i), label: &z.label });
@@ -420,7 +428,7 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
     };
     let inside_soft = |p: [f64; 3]| -> bool {
         zs.iter().any(|z| match z.shape {
-            Shape::Soft { planes, z0, z1, .. } => clip_prism(p, p, planes, *z0, *z1, r).is_some(),
+            Shape::Soft { planes, z0, z1, lo, hi, .. } => near(p, p, lo, hi, r) && clip_prism(p, p, planes, *z0, *z1, r).is_some(),
             Shape::Hard { .. } => false,
         })
     };
@@ -429,7 +437,10 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
         let len = (0..3).map(|i| (q[i] - p[i]).powi(2)).sum::<f64>().sqrt();
         let mut extra = 0.0;
         for z in &zs {
-            if let Shape::Soft { planes, z0, z1, cost } = z.shape {
+            if let Shape::Soft { planes, z0, z1, cost, lo, hi } = z.shape {
+                if !near(p, q, lo, hi, r) {
+                    continue;
+                }
                 if (z.from_own && on_ray(p, q, a, d1)) || (z.to_own && on_ray(p, q, b, d2)) {
                     continue;
                 }

@@ -482,3 +482,24 @@ fn two_facing_connectors_too_close_for_both_stubs_are_not_joined_by_a_straight_p
     assert_eq!(bends(&r), 0);
     assert!(close(r.cost, 0.8));
 }
+
+#[test]
+fn walls_far_from_the_search_change_nothing() {
+    let (a, b) = (conn([0.0, 0.0, 1.0], PX, 0.05), conn([8.0, 3.0, 1.0], NX, 0.05));
+    let o = AutoOptions::default();
+    let base = go(&a, &b, &[], &o).unwrap();
+    let mut zones = Vec::new();
+    for i in 0..600 {
+        let (x, y) = (50.0 + (i % 30) as f64 * 2.0, -40.0 + (i / 30) as f64 * 2.0);
+        zones.push(Zone::soft("far", &[[x, y], [x + 1.8, y], [x + 1.8, y + 0.2], [x, y + 0.2]], 0.0, 3.0, 3.0).unwrap());
+    }
+    // one wall that does cross, among them
+    zones.push(Zone::soft("near", &[[4.0, -1.0], [4.2, -1.0], [4.2, 6.0], [4.0, 6.0]], 0.0, 3.0, 3.0).unwrap());
+    let with_far = go(&a, &b, &zones, &o).unwrap();
+    let only_near = go(&a, &b, &zones[600..], &o).unwrap();
+    assert_eq!(with_far.waypoints, only_near.waypoints);
+    assert_eq!(with_far.crossed, only_near.crossed);
+    assert!(close(with_far.cost, only_near.cost));
+    assert!(with_far.cost > base.cost, "the wall that crosses is paid for");
+    assert_eq!(with_far.expansions, only_near.expansions);
+}
