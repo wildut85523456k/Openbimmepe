@@ -4,7 +4,7 @@ Used by the egui desktop app (`apps/desktop`). They are embedded in the executab
 
 ## `ribbon/` — discipline icons (PNG, 64 × 64, transparent)
 
-100 icons, cut from the reference sheet supplied by the project owner on 15 Oct 2026 (`ribbon/source-sheet.png`). They are grouped in folders by discipline:
+100 icons, cut from the reference sheet (except `ifc_import` and `ifc_export`, redrawn as original icons) supplied by the project owner on 15 Oct 2026 (`ribbon/source-sheet.png`). They are grouped in folders by discipline:
 
 | Folder | Icons |
 |---|---|
@@ -35,6 +35,6 @@ They are drawn as 3D SVGs in the same style as the sheet: isometric, brushed met
 
 ## Before shipping
 
-- **IFC logo.** The Import IFC and Export IFC icons on the sheet resemble the buildingSMART IFC logo, which is a trademark. Check the usage terms, or redraw them.
+- **IFC logo.** Resolved 15 Oct 2026: the Import IFC and Export IFC icons on the sheet resembled the buildingSMART logo (a trademark), so they were replaced with original drawings: a document page with a blue model cube and a green arrow out (export) or in (import).
 - **Socket and switch.** These icons are European. The first calculation profile is British practice (BS 1363), so a neutral or profile-specific icon may be needed.
 - **Asset licence.** Choose a licence for these assets before external distribution.
