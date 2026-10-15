@@ -42,3 +42,7 @@ jobs:
         run: |
           cargo run -q --release -p openbim-arch --example spaces_scene > /tmp/spaces.txt
           python spikes/s7_spaces_ifc/spaces_ifc.py /tmp/spaces.txt
+      - name: Family categories and MEP connectors
+        run: |
+          cargo run -q --release -p openbim-family --example fan_scene > /tmp/fan.txt
+          python spikes/s9_connectors_ifc/connectors_ifc.py /tmp/fan.txt

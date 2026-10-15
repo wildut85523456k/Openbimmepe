@@ -14,9 +14,11 @@
 //! rejected when it is compiled. All lengths are metres.
 
 pub mod expr;
+pub mod mep;
 pub mod library;
 
 use expr::{Expr, ExprError};
+pub use mep::{Category, Connector, ConnectorDef, Dir, Domain, FlowDir, Host, MateError, PlanDef, PlanShape, Pose, Resize, ShapeDef, System};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
@@ -198,6 +200,14 @@ pub struct Family {
     pub checks: Vec<CheckDef>,
     pub opening: Option<OpeningDef>,
     pub types: Vec<TypeDef>,
+    /// what the family is (decides the IFC class)
+    pub category: Category,
+    /// what it is placed on; None = the category's usual host
+    pub host: Option<Host>,
+    /// (classification system, code) pairs typed in by the author, for example a Uniclass or OmniClass code
+    pub classification: Vec<(String, String)>,
+    pub connectors: Vec<ConnectorDef>,
+    pub plan: Vec<PlanDef>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -233,6 +243,9 @@ pub enum FamilyError {
     NestTooDeep,
     BadNested { nested: String, why: &'static str },
     Nested { path: String, err: Box<FamilyError> },
+    BadMeta(&'static str),
+    Connector { name: String, why: &'static str },
+    Plan { index: usize, why: &'static str },
 }
 
 impl fmt::Display for FamilyError {
@@ -270,6 +283,9 @@ impl fmt::Display for FamilyError {
             NestTooDeep => write!(f, "families are nested more than {MAX_NEST_DEPTH} levels deep"),
             BadNested { nested, why } => write!(f, "nested family '{nested}': {why}"),
             Nested { path, err } => write!(f, "in {path}: {err}"),
+            BadMeta(why) => write!(f, "family data: {why}"),
+            Connector { name, why } => write!(f, "connector '{name}': {why}"),
+            Plan { index, why } => write!(f, "plan symbol {index}: {why}"),
         }
     }
 }
@@ -335,6 +351,11 @@ pub struct Inner {
     opening: Option<(Expr, Expr, Expr, Option<Expr>)>,
     types: Vec<CompiledType>,
     depth: usize,
+    category: Category,
+    host: Host,
+    classification: Vec<(String, String)>,
+    connectors: Vec<mep::CConnector>,
+    plan: Vec<mep::CPlan>,
 }
 
 /// A family that has passed every structural check. Solving it cannot hit a missing name or a loop.
@@ -343,7 +364,7 @@ pub struct Inner {
 pub struct Compiled(Arc<Inner>);
 impl Deref for Compiled { type Target = Inner; fn deref(&self) -> &Inner { &self.0 } }
 
-fn valid_name(n: &str) -> bool {
+pub(crate) fn valid_name(n: &str) -> bool {
     let mut c = n.chars();
     matches!(c.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_') && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') && n.len() <= 64
 }
@@ -598,8 +619,20 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>) -> Result<Compile
         }
         types.push((t.name.clone(), nums, txts));
     }
+    // category, hosting, classification, connectors and plan symbol
+    let host = fam.host.unwrap_or(if fam.opening.is_some() { Host::Wall } else { fam.category.default_host() });
+    if matches!(fam.category, Category::Door | Category::Window) && host != Host::Wall { return Err(FamilyError::BadMeta("a door or window must be hosted by a wall")); }
+    if fam.opening.is_some() && host != Host::Wall { return Err(FamilyError::BadMeta("a family that cuts an opening must be hosted by a wall")); }
+    if fam.classification.len() > mep::MAX_CLASSIFICATIONS { return Err(FamilyError::TooMany("classification entries")); }
+    for (sys, code) in &fam.classification {
+        if sys.trim().is_empty() || code.trim().is_empty() { return Err(FamilyError::BadMeta("a classification needs a system name and a code")); }
+        clean_text("classification", sys, 64)?;
+        clean_text("classification", code, 64)?;
+    }
+    for (i, (s, _)) in fam.classification.iter().enumerate() { if fam.classification[..i].iter().any(|(o, _)| o == s) { return Err(FamilyError::BadMeta("a classification system is listed twice")); } }
+    let (connectors, plan) = mep::compile(&fam.connectors, &fam.plan, &parse)?;
     let derived: Vec<usize> = (0..nvalues).filter(|&i| formulas[i].is_some() && fam.values[i].axis.is_none()).collect();
-    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth })))
+    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan })))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -627,6 +660,10 @@ pub struct Instance {
     pub opening: Option<[f64; 3]>,
     /// rise of the arched head of the opening (0 = rectangular head)
     pub opening_rise: f64,
+    /// solved MEP connectors in the family's own frame (hidden ones left out)
+    pub connectors: Vec<Connector>,
+    /// solved plan symbol
+    pub plan: Vec<PlanShape>,
 }
 
 impl Instance {
@@ -657,6 +694,9 @@ struct Resolved<'a> {
 
 impl Inner {
     pub fn name(&self) -> &str { &self.name }
+    pub fn category(&self) -> Category { self.category }
+    pub fn host(&self) -> Host { self.host }
+    pub fn classification(&self) -> &[(String, String)] { &self.classification }
     pub fn slot(&self, name: &str) -> Option<usize> { self.index.get(name).copied() }
     pub fn value(&self, inst: &Instance, name: &str) -> Option<f64> { self.slot(name).map(|i| inst.values[i]) }
 
@@ -776,7 +816,7 @@ impl Inner {
                 Err(err) => return Err(FamilyError::CheckError { name: nm.clone(), err }),
             }
         }
-        let mut inst = Instance { values: Vec::new(), solids: Vec::with_capacity(self.solids.len() + 8), materials: Vec::with_capacity(self.solids.len() + 8), xf: Vec::with_capacity(self.solids.len() + 8), strings: Vec::new(), texts: Vec::new(), opening: None, opening_rise: 0.0 };
+        let mut inst = Instance { values: Vec::new(), solids: Vec::with_capacity(self.solids.len() + 8), materials: Vec::with_capacity(self.solids.len() + 8), xf: Vec::with_capacity(self.solids.len() + 8), strings: Vec::new(), texts: Vec::new(), opening: None, opening_rise: 0.0, connectors: Vec::new(), plan: Vec::new() };
         // own solids
         for (si, s) in self.solids.iter().enumerate() {
             if let Some(v) = &s.visible {
@@ -890,6 +930,8 @@ impl Inner {
             }
             None => None,
         };
+        inst.connectors = mep::solve_connectors(&self.connectors, &vals)?;
+        inst.plan = mep::solve_plan(&self.plan, &vals)?;
         vals.truncate(n);
         inst.values = vals;
         inst.texts = texts;
