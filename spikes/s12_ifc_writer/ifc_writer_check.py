@@ -76,11 +76,14 @@ seg_ids = {int(r[0]) for r in rows("SEG")}
 fit_ids = {int(r[0]) for r in rows("FIT")}
 item_rows = {int(r[0]): r for r in rows("ITEM")}
 wall_ids = {int(r[0]) for r in rows("WALL")}
-slab_ids = {int(r[0]) for r in rows("SLAB")}
+slab_ids = {int(r[0]) for r in rows("SLAB") if r[-1] == "Structure"}
+covering_ids = {int(r[0]): r[-1] for r in rows("SLAB") if r[-1] != "Structure"}
 def elems(cls): return {decode(e.GlobalId)[2]: e for e in f.by_type(cls)}
 walls = elems("IfcWall"); slabs = elems("IfcSlab")
 ok(set(walls) == wall_ids and all(decode(e.GlobalId)[1] == 0 for e in walls.values()), "wall ids")
 ok(set(slabs) == slab_ids, "slab ids")
+cov = elems("IfcCovering")
+ok(set(cov) == set(covering_ids) and all(cov[i].PredefinedType == {"FloorFinish": "FLOORING", "Ceiling": "CEILING"}[k] for i, k in covering_ids.items()), "floor finish and false ceiling are coverings")
 segs = {}
 for c in ("IfcPipeSegment", "IfcDuctSegment", "IfcCableCarrierSegment", "IfcCableSegment"):
     segs.update(elems(c))
@@ -168,7 +171,7 @@ for w in rows("WALL"):
     ok(np.allclose(wv.min(axis=0), [*box_lo, base], atol=1e-6) and np.allclose(wv.max(axis=0), [*box_hi, base + h], atol=1e-6), f"wall {wid} box {wv.min(axis=0)} {wv.max(axis=0)}")
 th = float(rows("WALL")[0][-2]); h = float(rows("WALL")[0][-1])
 # slab: area less the shaft and the cut riser opening
-s = rows("SLAB")[0]; sth = float(s[-2])
+s = rows("SLAB")[0]; sth = float(s[-3])
 shaft_area = sum((float(r[2]) - float(r[1])) * (float(r[4]) - float(r[3])) for r in rows("SHAFT"))
 cuts = sum((float(r[3]) - float(r[2])) * (float(r[5]) - float(r[4])) for r in rows("FPEN") if r[1] == "Cut")
 svol = ush.get_volume(ifcopenshell.geom.create_shape(st, list(slabs.values())[0]).geometry)
@@ -176,7 +179,7 @@ ok(abs(svol - (10 * 8 - shaft_area - cuts) * sth) < 1e-6, f"slab volume {svol} v
 
 # where the wall and the slab are, by their solid's bounding box
 sv, _ = verts(list(slabs.values())[0])
-stop = float(s[-3])
+stop = float(s[-4])
 ok(np.allclose(sv.min(axis=0), [0, 0, stop - sth], atol=1e-6) and np.allclose(sv.max(axis=0), [10, 8, stop], atol=1e-6), f"slab box {sv.min(axis=0)} {sv.max(axis=0)}")
 for r in rows("FPEN"):
     if r[1] == "Cut":
@@ -341,6 +344,15 @@ for sp in f.by_type("IfcSpace"):
     if q is None: continue
     ok(abs(q["NetVolume"][1] - mesh_volume(sp, False)) < 1e-6, "space net volume equals the mesh of the room with its hole")
     ok(abs(q["NetFloorArea"][1] * q["Height"][1] - q["NetVolume"][1]) < 1e-6, "space area x height = volume")
+    vp = ue.get_psets(sp)["OpenBIM_SpaceVolumes"]
+    area = q["NetFloorArea"][1]
+    if sp.Name == "Store":
+        # a floor finish 0.04 thick and a false ceiling hung 0.25 under the room top: the volume is between them
+        ok(abs(q["Height"][1] - (5.55 - 3.04)) < 1e-9, f"Store clear height {q['Height'][1]}")
+        ok(abs(vp["CeilingVoidVolume"] - area * 0.25) < 1e-6 and abs(vp["FloorBuildUpVolume"] - area * 0.04) < 1e-6, f"Store void volumes {vp}")
+    else:
+        ok(vp["CeilingVoidVolume"] == 0 and vp["FloorBuildUpVolume"] == 0, f"{sp.Name} has no finishes, so it is slab to slab")
+    ok(abs(q["NetVolume"][1] + vp["CeilingVoidVolume"] + vp["FloorBuildUpVolume"] - vp["SlabToSlabVolume"]) < 1e-6, f"{sp.Name}: room, ceiling void and floor build-up add up to slab to slab")
     if sp.Name == "Office":
         ok(q["GrossFloorArea"][1] > q["NetFloorArea"][1], "the hole is taken off the net floor area")
     else:
@@ -528,11 +540,13 @@ for sid, sp in spaces_by_id.items():
         else:
             # floor or ceiling: one step along the normal is out of the room in height
             below = nrm[2] < 0
-            ok((cen[2] <= z0 + 0.01) if below else (cen[2] >= z1 - 0.3), f"{sp.Name}: boundary {row[1]} is the {'floor' if below else 'ceiling'}")
+            ok((cen[2] <= z0 + 0.1) if below else (cen[2] >= z1 - 0.4), f"{sp.Name}: boundary {row[1]} is the {'floor' if below else 'ceiling'}")
         # area: the outline less the holes
         local = lambda pts: [(np.linalg.inv(m) @ np.append(p, 1))[:2] for p in pts]
         area = polygon_area2(local(outer)) - sum(polygon_area2(local(h)) for h in holes)
         ok(abs(area - float(row[5])) < 1e-9, f"{sp.Name}: boundary {row[1]} area")
+        if el is not None and el.is_a("IfcCovering"):
+            ok(el.PredefinedType == ("FLOORING" if nrm[2] < 0 else "CEILING"), f"{sp.Name}: the covering on the {'floor' if nrm[2] < 0 else 'ceiling'} is a {el.PredefinedType}")
         kinds.append((row[2], area, rel, holes))
     # the floor or ceiling of a room covers its net floor area
     for kind, area, rel, holes in kinds:

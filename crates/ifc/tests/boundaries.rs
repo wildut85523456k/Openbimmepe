@@ -13,7 +13,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None, room_bounding: true }).collect(),
         wall_penetrations: vec![],
-        slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true }).collect(),
+        slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true, role: Default::default() }).collect(),
         shafts: vec![],
         floor_penetrations: vec![],
         networks: vec![],
@@ -385,4 +385,86 @@ fn without_volumes_the_floor_and_ceiling_are_not_boundaries() {
     let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
     assert_eq!(count(&b, |t| matches!(t, Target::Slab(_))), 0);
     assert_eq!(b.len(), 4);
+}
+
+fn finished_scene() -> Scene {
+    // 0: floor slab, 1: slab above (bottom 2.7), 2: floor finish 50 mm, 3: false ceiling at 2.48
+    let mut s = scene(vec![enclosure()], vec![slab(0.0, 0.2, 5.0, 4.0), slab(2.9, 0.2, 5.0, 4.0), slab(0.05, 0.05, 5.0, 4.0), slab(2.5, 0.02, 5.0, 4.0)], room(&INSIDE, 0));
+    s.slabs[2].role = SlabRole::FloorFinish;
+    s.slabs[3].role = SlabRole::Ceiling;
+    s
+}
+fn z_of(b: &Boundary) -> f64 {
+    b.surface.origin[2]
+}
+
+#[test]
+fn a_floor_finish_and_a_false_ceiling_become_the_floor_and_ceiling_of_the_room() {
+    let s = finished_scene();
+    let (b, w) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert!(w.is_empty(), "{w:?}");
+    let floor: Vec<_> = b.iter().filter(|x| x.surface.axis[2] < -0.5).collect();
+    let ceil: Vec<_> = b.iter().filter(|x| x.surface.axis[2] > 0.5).collect();
+    assert_eq!((floor.len(), ceil.len()), (1, 1));
+    assert_eq!(floor[0].target, Target::Slab(2));
+    assert!((z_of(floor[0]) - 0.05).abs() < 1e-9);
+    assert_eq!(ceil[0].target, Target::Slab(3));
+    assert!((z_of(ceil[0]) - 2.48).abs() < 1e-9);
+    // the walls run between them
+    let walls: f64 = b.iter().filter(|x| matches!(x.target, Target::Wall(_))).map(|x| x.surface.area()).sum();
+    assert!((walls - 2.0 * (3.8 + 2.8) * 2.43).abs() < 1e-9, "{walls}");
+}
+
+#[test]
+fn slab_to_slab_is_the_basis_that_ignores_finishes() {
+    let mut s = finished_scene();
+    s.room_settings.volume_basis = VolumeBasis::SlabToSlab;
+    let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Slab(0))), 1);
+    assert_eq!(count(&b, |t| matches!(t, Target::Slab(1))), 1);
+    assert_eq!(count(&b, |t| matches!(t, Target::Slab(2) | Target::Slab(3))), 0);
+    let v = boundaries::room_volumes(&s, &s.rooms[0]);
+    assert!((v.volume - 10.64 * 2.8).abs() < 1e-9 && v.volume == v.slab_to_slab);
+}
+
+#[test]
+fn volumes_split_into_the_room_the_ceiling_void_and_the_floor_build_up() {
+    let s = finished_scene();
+    let v = boundaries::room_volumes(&s, &s.rooms[0]);
+    let a = 3.8 * 2.8;
+    assert!((v.volume - a * (2.48 - 0.05)).abs() < 1e-9, "{v:?}");
+    assert!((v.slab_to_slab - a * 2.8).abs() < 1e-9);
+    assert!((v.ceiling_void - a * (2.8 - 2.48)).abs() < 1e-9);
+    assert!((v.floor_build_up - a * 0.05).abs() < 1e-9);
+    assert!((v.volume + v.ceiling_void + v.floor_build_up - v.slab_to_slab).abs() < 1e-9);
+    // without finishes the room is slab to slab
+    let plain = scene(vec![enclosure()], vec![slab(0.0, 0.2, 5.0, 4.0), slab(2.9, 0.2, 5.0, 4.0)], room(&INSIDE, 0));
+    let v = boundaries::room_volumes(&plain, &plain.rooms[0]);
+    assert!(v.ceiling_void == 0.0 && v.floor_build_up == 0.0 && (v.volume - a * 2.8).abs() < 1e-9);
+}
+
+#[test]
+fn air_changes_use_the_room_or_the_room_with_its_ceiling_void() {
+    let s = finished_scene();
+    let v = boundaries::room_volumes(&s, &s.rooms[0]);
+    let room_only = boundaries::air_changes_per_hour(0.5, &v, false).unwrap();
+    let with_void = boundaries::air_changes_per_hour(0.5, &v, true).unwrap();
+    assert!((room_only - 0.5 * 3600.0 / v.volume).abs() < 1e-9);
+    assert!((with_void - 0.5 * 3600.0 / (v.volume + v.ceiling_void)).abs() < 1e-9);
+    assert!(with_void < room_only);
+    assert!(boundaries::air_changes_per_hour(f64::NAN, &v, false).is_none());
+    let none = RoomVolumes { volume: 0.0, slab_to_slab: 0.0, ceiling_void: 0.0, floor_build_up: 0.0 };
+    assert!(boundaries::air_changes_per_hour(1.0, &none, true).is_none());
+}
+
+#[test]
+fn a_finish_that_does_not_stand_on_the_level_or_hangs_too_low_is_not_a_boundary() {
+    let mut s = finished_scene();
+    // a finish floating 0.3 above the level
+    s.slabs[2].slab.top = 0.35;
+    // a ceiling below the middle of the room
+    s.slabs[3].slab.top = 1.0;
+    let (b, _) = boundaries::room_boundaries(&s, &s.rooms[0]);
+    assert_eq!(count(&b, |t| matches!(t, Target::Slab(2) | Target::Slab(3))), 0);
+    assert_eq!(count(&b, |t| matches!(t, Target::Slab(0) | Target::Slab(1))), 2);
 }

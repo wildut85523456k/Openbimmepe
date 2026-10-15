@@ -47,9 +47,23 @@ pub struct WallItem {
     pub room_bounding: bool,
 }
 
+/// What a slab item is. Rooms are slab to slab by default; a floor finish or a false ceiling takes over as the
+/// room's floor or ceiling where there is one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SlabRole {
+    #[default]
+    Structure,
+    /// a finish laid on a floor slab: written as an IfcCovering (flooring)
+    FloorFinish,
+    /// a false ceiling hung under a slab: written as an IfcCovering (ceiling)
+    Ceiling,
+}
+
 pub struct SlabItem {
     pub id: u64,
     pub slab: Slab,
+    /// a structural slab, or a covering laid on one
+    pub role: SlabRole,
     /// Revit's Room Bounding: whether rooms are bounded by this slab (floor and ceiling)
     pub room_bounding: bool,
 }
@@ -807,6 +821,14 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, bottom], None, None, s.thickness);
         let shape = o.shape(&[solid]);
         let g = o.gid(item.id, 0);
+        if item.role != SlabRole::Structure {
+            let kind = if item.role == SlabRole::FloorFinish { "FLOORING" } else { "CEILING" };
+            let cov = o.s.add(format!("IFCCOVERING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));
+            o.contain(st, cov);
+            o.slab_entities.push(cov);
+            o.report.slabs += 1;
+            continue;
+        }
         let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,.FLOOR.)", string(&s.name)));
         o.contain(st, slab);
         o.slab_entities.push(slab);
@@ -890,7 +912,10 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
             let holes: Vec<String> = room.holes.iter().map(|h| format!("#{}", o.poly_ring(h))).collect();
             o.s.add(format!("IFCARBITRARYPROFILEDEFWITHVOIDS(.AREA.,$,#{outer},({}))", holes.join(",")))
         };
-        let solid = o.extrusion(prof, [0.0; 3], None, None, room.height);
+        // the room's volume lies between its floor and its ceiling, which are finishes where it has them
+        let ext = boundaries::room_extent(scene, r);
+        let elev = scene.levels.all().get(room.level).map_or(0.0, |l| l.elevation);
+        let solid = o.extrusion(prof, [0.0, 0.0, ext.floor_z - elev], None, None, ext.ceiling_z - ext.floor_z);
         let shape = o.shape(&[solid]);
         let g = o.gid(r.id, 0);
         let sp = o.s.add(format!("IFCSPACE({g},$,{},$,$,#{pl},#{shape},$,.ELEMENT.,.INTERNAL.,$)", string(&room.name)));
@@ -899,7 +924,11 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         o.report.spaces += 1;
         let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy))];
         o.pset_mapped(sp, "IfcSpace", "OpenBIM_Space", props, &room.name);
-        o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(room));
+        let vols = boundaries::room_volumes(scene, r);
+        let mut clear = room.clone();
+        clear.height = ext.ceiling_z - ext.floor_z;
+        o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(&clear));
+        o.pset(sp, "OpenBIM_SpaceVolumes", vec![("SlabToSlabVolume", Val::Vol(vols.slab_to_slab)), ("CeilingVoidVolume", Val::Vol(vols.ceiling_void)), ("FloorBuildUpVolume", Val::Vol(vols.floor_build_up))]);
         write_boundaries(o, r, sp);
     }
     Ok(())

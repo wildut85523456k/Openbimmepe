@@ -192,7 +192,12 @@ pub fn build_scene(edit: bool) -> Scene {
         levels,
         walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0), room_bounding: true }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1), room_bounding: true }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1), room_bounding: true }],
         wall_penetrations: built.penetrations.clone(),
-        slabs: vec![SlabItem { id: A | 2, slab, room_bounding: true }],
+        slabs: vec![
+            SlabItem { id: A | 2, slab, room_bounding: true, role: SlabRole::Structure },
+            // the store has a floor finish and a false ceiling: they are its floor and ceiling
+            SlabItem { id: A | 5, slab: Slab { name: "L1 floor finish".into(), top: 3.04, thickness: 0.04, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None }, room_bounding: true, role: SlabRole::FloorFinish },
+            SlabItem { id: A | 6, slab: Slab { name: "L1 false ceiling".into(), top: 5.57, thickness: 0.02, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None }, room_bounding: true, role: SlabRole::Ceiling },
+        ],
         shafts: vec![void],
         floor_penetrations: floor_pens,
         networks: vec![net],
@@ -296,7 +301,7 @@ fn main() {
         println!("SHAFT {} {} {} {} {} {} {}", sh.name, xs.clone().fold(f64::MAX, f64::min), xs.fold(f64::MIN, f64::max), ys.clone().fold(f64::MAX, f64::min), ys.fold(f64::MIN, f64::max), sh.z_bottom, sh.z_top);
     }
     for s in &scene.slabs {
-        println!("SLAB {} {} {} {} {}", s.id, s.slab.name, s.slab.top, s.slab.thickness, s.slab.fire_rating_min.unwrap_or(0));
+        println!("SLAB {} {} {} {} {} {:?}", s.id, s.slab.name, s.slab.top, s.slab.thickness, s.slab.fire_rating_min.unwrap_or(0), s.role);
     }
     if let Some(g) = &scene.georef {
         let (o, (a, b)) = g.map_conversion();

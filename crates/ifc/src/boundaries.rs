@@ -1,7 +1,7 @@
 //! Second-level space boundaries: for every room, the faces of walls, slabs, doors and windows that bound it, each
 //! with its own surface. Worked out from the model, not drawn. Coordinates are in the frame of the storey the room
 //! is on (x, y as in the plan, z from the storey's elevation), which is the frame the room is written in.
-use crate::{RoomItem, Scene};
+use crate::{RoomItem, Scene, SlabRole};
 
 type P = [f64; 2];
 type V = [f64; 3];
@@ -36,11 +36,23 @@ pub struct RoomSettings {
     pub boundary_location: BoundaryLocation,
     /// compute volumes as well as areas: the floor and ceiling are boundaries of the room
     pub volumes: bool,
+    /// what the floor and ceiling of a room are
+    pub volume_basis: VolumeBasis,
+}
+
+/// Where a room's volume stops at the bottom and the top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VolumeBasis {
+    /// a floor finish and a false ceiling, where the room has them, else the slabs (the default)
+    #[default]
+    Finished,
+    /// the slabs only: from the structural floor to the structural slab above, over any finish or false ceiling
+    SlabToSlab,
 }
 
 impl Default for RoomSettings {
     fn default() -> Self {
-        RoomSettings { boundary_location: BoundaryLocation::WallFinish, volumes: true }
+        RoomSettings { boundary_location: BoundaryLocation::WallFinish, volumes: true, volume_basis: VolumeBasis::Finished }
     }
 }
 
@@ -152,6 +164,7 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
     let Some(level) = scene.levels.all().get(r.level) else { return (out, warn) };
     let elev = level.elevation;
     let (z0, z1) = (elev, elev + r.height);
+    let ext = room_extent(scene, room);
     let outline = oriented(&r.outline, true);
     let holes: Vec<Vec<P>> = r.holes.iter().map(|h| oriented(h, false)).collect();
 
@@ -198,7 +211,7 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
                             continue;
                         }
                         covered.push((lo, hi));
-                        let (za, zb) = (z0.max(c.base_z), z1.min(c.base_z + c.height));
+                        let (za, zb) = (ext.floor_z.max(c.base_z), ext.ceiling_z.min(c.base_z + c.height));
                         let origin = [a[0] + d[0] * lo, a[1] + d[1] * lo, za - elev];
                         let axis = [nout[0], nout[1], 0.0];
                         let refdir = [d[0], d[1], 0.0];
@@ -274,37 +287,26 @@ pub fn room_boundaries(scene: &Scene, room: &RoomItem) -> (Vec<Boundary>, Vec<St
 
     // ---- floor and ceiling
     let ring_uv = |ring: &[P], origin: V, refdir: V, vdir: V, z: f64| -> Vec<P> { ring.iter().map(|p| uv(origin, refdir, vdir, [p[0], p[1], z])).collect() };
-    let mut ceiling: Option<(usize, f64)> = None;
-    for (si, item) in scene.slabs.iter().enumerate().filter(|_| scene.room_settings.volumes) {
-        if !item.room_bounding {
-            continue;
-        }
-        let s = &item.slab;
-        let covered = covers(&s.outline, &outline);
-        let bottom = s.top - s.thickness;
-        if !covered {
-            continue;
-        }
-        if (s.top - z0).abs() <= TOL {
-            // the floor: faces down out of the room
-            let (origin, axis, refdir) = ([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
-            let vdir = cross3(axis, refdir);
-            let surface = Surface { origin, axis, refdir, outer: ring_uv(&outline, origin, refdir, vdir, 0.0), inner: holes.iter().map(|h| ring_uv(h, origin, refdir, vdir, 0.0)).collect() };
-            out.push(Boundary { target: Target::Slab(si), surface, parent: None });
-        } else if bottom > z0 + 0.5 * r.height && ceiling.is_none_or(|(_, b)| bottom < b) {
-            ceiling = Some((si, bottom));
-        }
+    if let Some(si) = ext.floor {
+        // the floor faces down out of the room, at the top of its finish
+        let z = ext.floor_z - elev;
+        let (origin, axis, refdir) = ([0.0, 0.0, z], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let vdir = cross3(axis, refdir);
+        let surface = Surface { origin, axis, refdir, outer: ring_uv(&outline, origin, refdir, vdir, z), inner: holes.iter().map(|h| ring_uv(h, origin, refdir, vdir, z)).collect() };
+        out.push(Boundary { target: Target::Slab(si), surface, parent: None });
     }
-    match ceiling {
-        Some((si, bottom)) if (bottom - z1).abs() <= 0.3 => {
-            let (origin, axis, refdir) = ([0.0, 0.0, bottom - elev], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
-            let vdir = cross3(axis, refdir);
+    if let Some(si) = ext.ceiling {
+        let s = &scene.slabs[si].slab;
+        let bottom = s.top - s.thickness;
+        if ext.ceiling_is_false || (bottom - z1).abs() <= 0.3 {
             let z = bottom - elev;
+            let (origin, axis, refdir) = ([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+            let vdir = cross3(axis, refdir);
             let surface = Surface { origin, axis, refdir, outer: ring_uv(&outline, origin, refdir, vdir, z), inner: holes.iter().map(|h| ring_uv(h, origin, refdir, vdir, z)).collect() };
             out.push(Boundary { target: Target::Slab(si), surface, parent: None });
+        } else {
+            warn.push(format!("room {}: the slab {} above is {:.2} m from the top of the room, so no ceiling boundary was made", r.name, s.name, bottom - z1));
         }
-        Some((si, bottom)) => warn.push(format!("room {}: the slab {} above is {:.2} m from the top of the room, so no ceiling boundary was made", r.name, scene.slabs[si].slab.name, bottom - z1)),
-        None => {}
     }
     (out, warn)
 }
@@ -341,4 +343,101 @@ fn wall_lines(scene: &Scene, wi: usize, c: &openbim_geom::WallChain, p: &openbim
             ([c0[0] + u[0] * s0 + n[0] * o, c0[1] + u[1] * s0 + n[1] * o], [c0[0] + u[0] * s1 + n[0] * o, c0[1] + u[1] * s1 + n[1] * o])
         })
         .collect()
+}
+
+/// The heights a room's volume lies between, and the slabs and coverings that make them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extent {
+    /// the floor of the room as its boundary: the top of a floor finish, else the level
+    pub floor_z: f64,
+    /// the ceiling: the underside of a false ceiling, else the room's top
+    pub ceiling_z: f64,
+    /// the level and the room's own top: the slab-to-slab extent
+    pub slab_floor_z: f64,
+    pub slab_ceiling_z: f64,
+    /// index in `Scene::slabs` of what bounds the floor and the ceiling, when something does
+    pub floor: Option<usize>,
+    pub ceiling: Option<usize>,
+    /// the floor or ceiling is a finish or a false ceiling
+    pub floor_is_finish: bool,
+    pub ceiling_is_false: bool,
+}
+
+/// Find the floor and the ceiling of a room. A floor finish standing on the level and a false ceiling under the
+/// room's top are the boundaries when the basis is `Finished`; the structural slabs otherwise.
+pub fn room_extent(scene: &Scene, r: &RoomItem) -> Extent {
+    let room = &r.room;
+    let elev = scene.levels.all().get(room.level).map_or(0.0, |l| l.elevation);
+    let (z0, z1) = (elev, elev + room.height);
+    let outline = oriented(&room.outline, true);
+    let mut e = Extent { floor_z: z0, ceiling_z: z1, slab_floor_z: z0, slab_ceiling_z: z1, floor: None, ceiling: None, floor_is_finish: false, ceiling_is_false: false };
+    if !scene.room_settings.volumes {
+        return e;
+    }
+    let finished = scene.room_settings.volume_basis == VolumeBasis::Finished;
+    let mut ceil_struct: Option<(usize, f64)> = None;
+    for (si, item) in scene.slabs.iter().enumerate() {
+        let s = &item.slab;
+        if !item.room_bounding || !covers(&s.outline, &outline) {
+            continue;
+        }
+        let bottom = s.top - s.thickness;
+        match item.role {
+            SlabRole::Structure => {
+                if (s.top - z0).abs() <= TOL {
+                    if e.floor.is_none() {
+                        e.floor = Some(si);
+                    }
+                } else if bottom > z0 + 0.5 * room.height && ceil_struct.is_none_or(|(_, b)| bottom < b) {
+                    ceil_struct = Some((si, bottom));
+                }
+            }
+            // the highest finish on the level
+            SlabRole::FloorFinish if finished && (bottom - z0).abs() <= TOL && s.top - z0 < 0.5 * room.height && (!e.floor_is_finish || s.top > e.floor_z) => {
+                e.floor = Some(si);
+                e.floor_z = s.top;
+                e.floor_is_finish = true;
+            }
+            // the lowest false ceiling
+            SlabRole::Ceiling if finished && bottom > z0 + 0.5 * room.height && bottom <= z1 + 0.3 && (!e.ceiling_is_false || bottom < e.ceiling_z) => {
+                e.ceiling = Some(si);
+                e.ceiling_z = bottom;
+                e.ceiling_is_false = true;
+            }
+            _ => {}
+        }
+    }
+    if !e.ceiling_is_false {
+        if let Some((si, _)) = ceil_struct {
+            e.ceiling = Some(si);
+        }
+    }
+    e
+}
+
+/// The volumes of a room from its area: what the room holds, and what lies above its false ceiling.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RoomVolumes {
+    /// from the floor to the ceiling as the volume basis says (the volume of the room)
+    pub volume: f64,
+    /// from the structural floor to the slab: the room and any floor build-up and ceiling void
+    pub slab_to_slab: f64,
+    /// the part of slab-to-slab above a false ceiling (zero without one)
+    pub ceiling_void: f64,
+    /// the part below the floor finish (zero without one)
+    pub floor_build_up: f64,
+}
+
+pub fn room_volumes(scene: &Scene, r: &RoomItem) -> RoomVolumes {
+    let e = room_extent(scene, r);
+    let a = r.room.area();
+    let (vol, s2s) = (a * (e.ceiling_z - e.floor_z), a * (e.slab_ceiling_z - e.slab_floor_z));
+    RoomVolumes { volume: vol, slab_to_slab: s2s, ceiling_void: a * (e.slab_ceiling_z - e.ceiling_z), floor_build_up: a * (e.floor_z - e.slab_floor_z) }
+}
+
+/// Air changes per hour of a room: an air flow in m³/s over a volume in m³. `with_ceiling_void` counts the space
+/// above a false ceiling as part of the room, as it is for a plenum that the room's air passes through.
+pub fn air_changes_per_hour(flow_m3_per_s: f64, v: &RoomVolumes, with_ceiling_void: bool) -> Option<f64> {
+    let vol = if with_ceiling_void { v.volume + v.ceiling_void } else { v.volume };
+    (flow_m3_per_s.is_finite() && vol > 1e-9).then(|| flow_m3_per_s * 3600.0 / vol)
 }
