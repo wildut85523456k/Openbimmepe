@@ -286,6 +286,7 @@ proptest! {
                 prop_assert_eq!(n.components().len(), 1);
                 prop_assert_eq!(n.open_ports().len(), before.open_ports().len());
                 prop_assert_eq!(n.equipment[0].pos, moved.pos);
+                prop_assert_eq!(n.equipment[0].dir, moved.dir);
                 prop_assert!(r.kept >= 1);
                 // the pieces off the chain are untouched
                 for s in before.segments.iter().filter(|s| s.run.a[0] == 6.0 && s.run.b[0] == 6.0) {
@@ -365,4 +366,54 @@ fn the_pipe_keeps_its_size_and_a_shorter_way_retires_the_pieces_it_no_longer_nee
         assert!(ids(&before).contains(id));
     }
     assert_eq!(now.len(), old_count - r.retired.len());
+}
+
+#[test]
+fn a_connector_of_another_size_is_taken_over_with_the_unit() {
+    let mut n = tee_network();
+    let p = prefs(Junction::Tee);
+    let o = AutoOptions::default();
+    let mut moved = conn("c", [1.0, 3.0, 1.0], [0.0, 1.0, 0.0]);
+    moved.size = Size::Round { diameter: 0.04 };
+    reroute_equipment(&mut n, &request(0, &moved, &p, &[], &o)).unwrap();
+    n.validate().unwrap();
+    assert_eq!(n.equipment[0].size, round(0.04));
+    assert_eq!(n.equipment[0].dir, [0.0, 1.0, 0.0]);
+    assert_eq!(n.open_ports().len(), 2);
+}
+
+#[test]
+fn a_junction_numbered_after_the_pieces_that_go_is_found_again() {
+    // unit 1's pipe is drawn first, with an elbow; a branch is then tee'd into it, so the tee has a higher number than the pieces that will be replaced
+    let p = prefs(Junction::Tee);
+    let c1 = conn("c1", [0.0, 0.0, 1.0], PX);
+    let r1 = route_from_connector(&c1, &[[6.0, 0.0, 1.0], [6.0, 4.0, 1.0]], round(0.05), &p, &off()).unwrap();
+    let mut n = Network::new(1);
+    let a = n.add_route(&r1).unwrap();
+    n.attach_equipment(1, &c1, 0, End::Start).unwrap();
+    let last = *a.segments.last().unwrap();
+    let br = branch_from_run(&n.segments[last].run, &[[6.0, 2.0, 1.0], [9.0, 2.0, 1.0]], &[round(0.05)], &p, &off()).unwrap();
+    let added = n.add_branch(last, &br).unwrap();
+    n.attach_equipment(2, &conn("c2", [9.0, 2.0, 1.0], NX), *added.segments.last().unwrap(), End::End).unwrap();
+    // and, numbered after all of that, an unrelated run with a tap on it
+    let other = route_path(&[[0.0, 8.0, 1.0], [8.0, 8.0, 1.0]], &[round(0.05)], &p, &off()).unwrap();
+    let o_added = n.add_route(&other).unwrap();
+    let tap = branch_from_run(&n.segments[o_added.segments[0]].run, &[[4.0, 8.0, 1.0], [4.0, 10.0, 1.0]], &[round(0.05)], &prefs(Junction::Tap), &off()).unwrap();
+    n.add_branch(o_added.segments[0], &tap).unwrap();
+    assert_eq!(n.taps.len(), 1);
+    n.validate().unwrap();
+    let chain = n.chain_from_equipment(0).unwrap();
+    let tee = match chain.end {
+        ChainEnd::Port(PortRef { node: NodeRef::Fitting(i), .. }) => i,
+        e => panic!("{e:?}"),
+    };
+    assert!(chain.nodes.iter().any(|x| matches!(x, NodeRef::Fitting(i) if *i < tee)), "a fitting on the way has a lower number than the tee");
+    let o = AutoOptions::default();
+    let moved = conn("c1", [0.0, -3.0, 1.0], PX);
+    reroute_equipment(&mut n, &request(0, &moved, &p, &[], &o)).unwrap();
+    n.validate().unwrap();
+    assert_eq!(n.components().len(), 2);
+    assert_eq!(n.taps.len(), 1, "the tap on the other run is still there, on the right run");
+    let t = n.taps[0];
+    assert_eq!(n.segments[t.segment].run.a[1], 8.0);
 }

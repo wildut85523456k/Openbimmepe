@@ -16,7 +16,8 @@
 //! valid route; the result is built with the same drawing code as a route drawn by hand and refused if that
 //! code refuses it. The search is exact on the grid (A* with an admissible heuristic) and does the same thing
 //! every time. Nothing here is a standard value: every number is the author's.
-use super::{conn_run_size, ref_dim, route_inner, Opts, Route, RouteError, RoutingPrefs};
+use super::catalogue::FittingClass;
+use super::{conn_run_size, ref_dim, route_inner, same_size, transition_len, Opts, Route, RouteError, RoutingPrefs};
 use crate::snaps::{SnapSettings, Snaps};
 use openbim_family::mep::Connector;
 use openbim_geom::WallChain;
@@ -363,7 +364,14 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
     let stub = prefs.connector_stub.max(1e-3);
     let r = dim / 2.0 + prefs.margin + o.clearance;
     let bend_r = prefs.bend_radius_factor * dim;
-    let min_leg = o.min_leg.unwrap_or_else(|| (2.0 * bend_r + prefs.min_straight).max(stub + bend_r + prefs.min_straight));
+    // a connector of another size than the pipe gets a transition just after its stub, which the first leg must hold
+    let lead_transition = if same_size(csz1, rq.size) {
+        0.0
+    } else {
+        let ty = prefs.effective_catalogue().pick_transition(prefs.domain, prefs.system, csz1, rq.size).map_err(|_| AutoError::Route(RouteError::NoFitting { class: FittingClass::Transition, vertex: 1 }))?.clone();
+        transition_len(&ty, csz1, rq.size).ok_or(AutoError::Route(RouteError::MixedTransition { vertex: 1 }))?
+    };
+    let min_leg = o.min_leg.unwrap_or_else(|| (2.0 * bend_r + prefs.min_straight).max(stub + bend_r + prefs.min_straight + lead_transition));
     let kf = (min_leg / o.pitch - 1e-9).ceil().max(1.0);
     if kf > 1000.0 {
         return Err(AutoError::BadInput("the shortest leg is more than 1000 pitches"));
