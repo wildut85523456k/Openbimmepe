@@ -28,12 +28,53 @@ pub const MAX_TURN: f64 = 150.0;
 pub enum ProfileDef {
     Polygon(Vec<(String, String)>),
     Circle { c: (String, String), r: String },
+    /// a polygon held by locks and dimensions; every number is a formula, so family parameters drive it
+    Sketch(SketchDef),
+}
+
+/// A constraint whose numbers are formulas.
+#[derive(Debug, Clone)]
+pub enum SketchCon {
+    /// relations that carry no number (parallel, horizontal, ...)
+    Rel(openbim_sketch::Constraint),
+    Fixed { p: usize, x: String, y: String },
+    Distance { a: usize, b: usize, d: String },
+    DistanceX { a: usize, b: usize, d: String },
+    DistanceY { a: usize, b: usize, d: String },
+    Angle { l1: usize, l2: usize, degrees: String },
+}
+
+/// Points as first drawn (formulas), the first `loop_len` of which form the outline in order, then constraints.
+/// Lines 0..loop_len are the outline edges (edge k runs from point k to point k+1); extra construction lines follow.
+#[derive(Debug, Clone)]
+pub struct SketchDef {
+    pub points: Vec<(String, String)>,
+    pub loop_len: usize,
+    pub lines: Vec<(usize, usize)>,
+    pub constraints: Vec<SketchCon>,
+}
+
+impl SketchDef {
+    /// All the points are the outline.
+    pub fn new(points: &[(&str, &str)]) -> Self {
+        SketchDef { points: points.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(), loop_len: points.len(), lines: vec![], constraints: vec![] }
+    }
+    /// Add a construction point that is not part of the outline.
+    pub fn extra_point(mut self, x: &str, y: &str) -> Self { self.points.push((x.into(), y.into())); self }
+    pub fn line(mut self, a: usize, b: usize) -> Self { self.lines.push((a, b)); self }
+    pub fn rel(mut self, c: openbim_sketch::Constraint) -> Self { self.constraints.push(SketchCon::Rel(c)); self }
+    pub fn fixed(mut self, p: usize, x: &str, y: &str) -> Self { self.constraints.push(SketchCon::Fixed { p, x: x.into(), y: y.into() }); self }
+    pub fn distance(mut self, a: usize, b: usize, d: &str) -> Self { self.constraints.push(SketchCon::Distance { a, b, d: d.into() }); self }
+    pub fn distance_x(mut self, a: usize, b: usize, d: &str) -> Self { self.constraints.push(SketchCon::DistanceX { a, b, d: d.into() }); self }
+    pub fn distance_y(mut self, a: usize, b: usize, d: &str) -> Self { self.constraints.push(SketchCon::DistanceY { a, b, d: d.into() }); self }
+    pub fn angle(mut self, l1: usize, l2: usize, degrees: &str) -> Self { self.constraints.push(SketchCon::Angle { l1, l2, degrees: degrees.into() }); self }
 }
 
 impl ProfileDef {
     pub fn polygon(pts: &[(&str, &str)]) -> Self { ProfileDef::Polygon(pts.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()) }
     pub fn rect(u0: &str, v0: &str, u1: &str, v1: &str) -> Self { Self::polygon(&[(u0, v0), (u1, v0), (u1, v1), (u0, v1)]) }
     pub fn circle(cu: &str, cv: &str, r: &str) -> Self { ProfileDef::Circle { c: (cu.into(), cv.into()), r: r.into() } }
+    pub fn sketch(s: SketchDef) -> Self { ProfileDef::Sketch(s) }
 }
 
 #[derive(Debug, Clone)]
@@ -76,9 +117,24 @@ impl FormDef {
 
 pub(crate) type Parse<'a> = &'a dyn Fn(&str, &str, bool) -> Result<Expr, FamilyError>;
 
+pub(crate) enum CCon {
+    Rel(openbim_sketch::Constraint),
+    Fixed(usize, Expr, Expr),
+    Distance(usize, usize, Expr),
+    DistanceX(usize, usize, Expr),
+    DistanceY(usize, usize, Expr),
+    Angle(usize, usize, Expr),
+}
+pub(crate) struct CSketch {
+    points: Vec<[Expr; 2]>,
+    loop_len: usize,
+    lines: Vec<(usize, usize)>,
+    cons: Vec<CCon>,
+}
 pub(crate) enum CLoop {
     Poly(Vec<[Expr; 2]>),
     Circle([Expr; 2], Expr),
+    Sketch(CSketch),
 }
 pub(crate) enum CKind {
     Extrusion { plane: Axis, from: Expr, to: Expr },
@@ -105,6 +161,27 @@ fn compile_loop(name: &str, what: &str, p: &ProfileDef, parse: Parse) -> Result<
             let mut out = Vec::with_capacity(pts.len());
             for (i, (u, v)) in pts.iter().enumerate() { out.push([pe(format!("u{i}"), u)?, pe(format!("v{i}"), v)?]); }
             Ok(CLoop::Poly(out))
+        }
+        ProfileDef::Sketch(sk) => {
+            if sk.loop_len < 3 || sk.loop_len > sk.points.len() { return Err(bad(name, "a sketch outline needs at least 3 of its points")); }
+            if sk.points.len() > openbim_sketch::MAX_POINTS { return Err(FamilyError::TooMany("points in a profile")); }
+            if sk.constraints.len() > openbim_sketch::MAX_CONSTRAINTS { return Err(FamilyError::TooMany("sketch constraints")); }
+            if sk.loop_len + sk.lines.len() > openbim_sketch::MAX_LINES { return Err(FamilyError::TooMany("lines in a sketch")); }
+            let mut points = Vec::with_capacity(sk.points.len());
+            for (i, (u, v)) in sk.points.iter().enumerate() { points.push([pe(format!("u{i}"), u)?, pe(format!("v{i}"), v)?]); }
+            let mut cons = Vec::with_capacity(sk.constraints.len());
+            for (k, c) in sk.constraints.iter().enumerate() {
+                let e = |part: &str, s: &str| pe(format!("c{k}.{part}"), s);
+                cons.push(match c {
+                    SketchCon::Rel(r) => CCon::Rel(*r),
+                    SketchCon::Fixed { p, x, y } => CCon::Fixed(*p, e("x", x)?, e("y", y)?),
+                    SketchCon::Distance { a, b, d } => CCon::Distance(*a, *b, e("d", d)?),
+                    SketchCon::DistanceX { a, b, d } => CCon::DistanceX(*a, *b, e("d", d)?),
+                    SketchCon::DistanceY { a, b, d } => CCon::DistanceY(*a, *b, e("d", d)?),
+                    SketchCon::Angle { l1, l2, degrees } => CCon::Angle(*l1, *l2, e("degrees", degrees)?),
+                });
+            }
+            Ok(CLoop::Sketch(CSketch { points, loop_len: sk.loop_len, lines: sk.lines.clone(), cons }))
         }
         ProfileDef::Circle { c, r } => Ok(CLoop::Circle([pe("cu".into(), &c.0)?, pe("cv".into(), &c.1)?], pe("r".into(), r)?)),
     }
@@ -281,15 +358,20 @@ fn solve_loop(name: &str, c: &CLoop, vals: &[f64]) -> Result<Loop, FamilyError> 
         if v.abs() > MAX_COORD { return Err(bad(name, "a coordinate is not a finite number within 100 m")); }
         Ok(v)
     };
+    let raw = |e: &Expr, part: &str| -> Result<f64, FamilyError> { e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.{part}"), err }) };
     match c {
         CLoop::Circle(ce, r) => {
             let (cu, cv, rr) = (ev(&ce[0], "cu")?, ev(&ce[1], "cv")?, ev(r, "r")?);
             if rr < 0.0 || std::f64::consts::PI * rr * rr < MIN_AREA { return Err(bad(name, "the circle is too small")); }
             Ok(Loop::Circle { c: [cu, cv], r: rr })
         }
-        CLoop::Poly(pts) => {
-            let mut p = Vec::with_capacity(pts.len());
-            for q in pts { p.push([ev(&q[0], "u")?, ev(&q[1], "v")?]); }
+        CLoop::Poly(_) | CLoop::Sketch(_) => {
+            let mut p: Vec<P2> = Vec::new();
+            match c {
+                CLoop::Poly(pts) => { for q in pts { p.push([ev(&q[0], "u")?, ev(&q[1], "v")?]); } }
+                CLoop::Sketch(cs) => p = solve_sketch(name, cs, &ev, &raw)?,
+                CLoop::Circle(..) => {}
+            }
             if !poly_simple(&p) { return Err(bad(name, "the profile crosses or touches itself")); }
             let a = signed_area(&p);
             if a.abs() < MIN_AREA { return Err(bad(name, "the profile has no area")); }
@@ -297,6 +379,34 @@ fn solve_loop(name: &str, c: &CLoop, vals: &[f64]) -> Result<Loop, FamilyError> 
             Ok(Loop::Poly(p))
         }
     }
+}
+
+/// Evaluate the sketch's formulas, let the solver settle it, and return its outline.
+fn solve_sketch(name: &str, cs: &CSketch, ev: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>, raw: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>) -> Result<Vec<P2>, FamilyError> {
+    use openbim_sketch::{Constraint, Sketch, SketchError, Status};
+    let mut sk = Sketch::default();
+    for q in &cs.points { sk.point(ev(&q[0], "u")?, ev(&q[1], "v")?); }
+    for k in 0..cs.loop_len { sk.line(k, (k + 1) % cs.loop_len); }
+    for &(a, b) in &cs.lines { sk.line(a, b); }
+    for c in &cs.cons {
+        sk.constrain(match c {
+            CCon::Rel(r) => *r,
+            CCon::Fixed(p, x, y) => Constraint::Fixed { p: *p, x: ev(x, "x")?, y: ev(y, "y")? },
+            CCon::Distance(a, b, d) => Constraint::Distance { a: *a, b: *b, d: ev(d, "d")? },
+            CCon::DistanceX(a, b, d) => Constraint::DistanceX { a: *a, b: *b, d: ev(d, "d")? },
+            CCon::DistanceY(a, b, d) => Constraint::DistanceY { a: *a, b: *b, d: ev(d, "d")? },
+            CCon::Angle(l1, l2, d) => Constraint::Angle { l1: *l1, l2: *l2, degrees: raw(d, "degrees")? },
+        });
+    }
+    let sol = sk.solve().map_err(|e| bad(name, match e {
+        SketchError::TooMany(_) => "the sketch has too many parts",
+        SketchError::BadIndex { .. } | SketchError::DegenerateLine(_) => "a sketch constraint or line refers to a point, line or circle that is not there",
+        SketchError::BadValue { .. } | SketchError::NotFinite(_) => "a sketch dimension is not a usable number",
+    }))?;
+    if !matches!(sol.status, Status::Solved) { return Err(bad(name, "the sketch constraints conflict with each other")); }
+    let out: Vec<P2> = sol.points[..cs.loop_len].to_vec();
+    if out.iter().any(|q| q[0].abs() > MAX_COORD || q[1].abs() > MAX_COORD) { return Err(bad(name, "the sketch ends outside 100 m")); }
+    Ok(out)
 }
 
 fn solve_profile(name: &str, outer: &CLoop, holes: &[CLoop], vals: &[f64]) -> Result<(Loop, Vec<Loop>), FamilyError> {

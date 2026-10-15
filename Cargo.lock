@@ -253,6 +253,7 @@ name = "openbim-family"
 version = "0.0.1"
 dependencies = [
  "openbim-arch",
+ "openbim-sketch",
  "proptest",
  "rayon",
 ]
