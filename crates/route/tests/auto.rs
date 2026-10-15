@@ -450,3 +450,14 @@ fn a_later_pipe_goes_round_an_earlier_one_in_a_sequence() {
         }
     }
 }
+
+#[test]
+fn the_exemption_only_covers_the_way_out_of_the_connector_not_the_line_behind_it() {
+    // a unit as big as the search volume: the only gap in it is the connector's own axis, and only outwards
+    let a = conn([0.0, 0.0, 1.0], PX, 0.05);
+    let b = conn([-3.0, 0.0, 1.0], PX, 0.05);
+    let body = [Zone::hard("unit", [-0.6, -5.0, -5.0], [0.0, 5.0, 5.0]).unwrap()];
+    let o = AutoOptions { search_margin: 1.5, ..Default::default() };
+    let p = prefs();
+    assert_eq!(auto_route(&run_req(&a, &b, round(0.05), &p, &body, &[0], &[], &o)), Err(AutoError::NoPath));
+}
