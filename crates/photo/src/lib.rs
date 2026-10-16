@@ -286,9 +286,9 @@ fn parse_ldt(text: &str) -> Result<Photometry, PhotoError> {
         _ => (mc / 4 + 1, Symmetry::Quadrant),
     };
     let stored = stored.max(1);
-    // files differ on whether the list of C angles has all planes or only the stored ones: take the one that fits
-    let fits = |nc: usize| nc + ng + stored * ng == remaining.len();
-    let nc = [mc.max(1), stored].into_iter().find(|&nc| fits(nc)).or_else(|| (remaining.len() >= stored * ng + ng).then_some(remaining.len() - stored * ng - ng).filter(|&k| k <= MAX_ANGLES));
+    // files differ on whether the list of C angles has all planes or only the stored ones: whatever is left after
+    // the gamma angles and the table is the list of C angles
+    let nc = remaining.len().checked_sub(stored * ng + ng).filter(|&k| k <= MAX_ANGLES);
     let Some(nc) = nc else { return bad(format!("the intensity table has {} numbers; {} planes of {} intensities were expected", remaining.len(), stored, ng)) };
     if stored.saturating_mul(ng) > MAX_VALUES { return bad("the table is too large"); }
     let mut it = Nums { it: remaining.into_iter() };

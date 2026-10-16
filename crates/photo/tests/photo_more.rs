@@ -455,3 +455,23 @@ fn archive_limits_are_exact() {
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].name, "A.LDT");
 }
+
+#[test]
+fn eulumdat_table_size_axial_c_and_zero_intensity() {
+    // exactly a million values are read, one plane more is refused
+    let big = |mc: usize| { let mut m = base(vec![vec![1.0; 1000]; mc]); m.isym = 0; m.mc = mc as f64; m.dc = 0.36; m.ng = 1000; m.dg = 0.18; m.cs = (0..mc).map(|k| k as f64 * 0.36).collect(); m.gs = (0..1000).map(|k| k as f64 * 0.18).collect(); read(&m) };
+    assert!(big(1000).is_ok());
+    assert!(big(1001).is_err());
+    // axial: C is 0 whatever the file lists
+    let mut m = base(vec![vec![1.0, 1.0]]);
+    m.isym = 1;
+    m.mc = 0.0;
+    m.dc = 0.0;
+    m.cs = vec![7.0];
+    assert_eq!(read(&m).unwrap().c, vec![0.0]);
+    // an intensity of zero is allowed
+    let mut m = base(vec![vec![0.0, 0.0]]);
+    m.isym = 1;
+    m.mc = 0.0;
+    assert!(read(&m).is_ok());
+}
