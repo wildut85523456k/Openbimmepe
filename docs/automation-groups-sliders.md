@@ -9,7 +9,8 @@ wire endpoints follow. Right-click the title to rename, change color, add/remove
 selected blocks, or ungroup while retaining blocks and connections.
 
 Groups fit their members automatically. This first increment supports flat groups;
-nested groups, collapse/expand and marquee selection are not implemented.
+nested groups and collapse/expand are not implemented. See automation-selection.md
+for marquee selection and movement of selected blocks.
 Deleting a block removes its group membership and deletes an empty group.
 
 ## Sliders

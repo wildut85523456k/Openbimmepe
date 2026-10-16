@@ -13,6 +13,16 @@ fn node_rect(origin: Pos2, node: &Node) -> Rect {
 }
 fn footer_height(kind:&NodeKind)->f32 {if matches!(kind,NodeKind::Slider {..}) {180.0} else {56.0}}
 
+#[derive(Clone)]
+struct Marquee { start:Pos2, base:std::collections::BTreeSet<u64>, additive:bool }
+
+fn move_selection(graph:&mut Graph,selected:&std::collections::BTreeSet<u64>,mut delta:Vec2) {
+    let left=graph.nodes.iter().filter(|n|selected.contains(&n.id)).map(|n|n.position[0]).fold(f32::INFINITY,f32::min);
+    let top=graph.nodes.iter().filter(|n|selected.contains(&n.id)).map(|n|n.position[1]).fold(f32::INFINITY,f32::min);
+    delta.x=delta.x.max(-left);delta.y=delta.y.max(-top);
+    for n in graph.nodes.iter_mut().filter(|n|selected.contains(&n.id)) {n.position[0]+=delta.x;n.position[1]+=delta.y;}
+}
+
 fn port_position(rect: Rect, input: Option<usize>, output:u16) -> Pos2 {
     egui::pos2(
         if input.is_some() { rect.left() } else { rect.right() },
@@ -108,12 +118,12 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     selected.retain(|id|graph.nodes.iter().any(|n|n.id==*id));
     let group_requested=ui.button("Group selected (Ctrl+G)").clicked() || ui.input_mut(|i|i.consume_key(egui::Modifiers::COMMAND,egui::Key::G));
     if group_requested {crate::automation_groups::create(graph,&selected);}
-    ui.weak("Click a block header to select; Ctrl-click adds blocks. Right-click a group title to edit or ungroup.");
+    ui.weak("Click a header to select; Ctrl-click toggles. Drag empty canvas to select blocks; drag a selected header to move the selection.");
     ui.label("Drag an output to an input and release. Drag a blue wire to reshape it. Double-click a wire to reset. Esc cancels.");
     ui.weak("Manual execution: Preview passes data through the links. Apply changes updates the model.");
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) { *pending = None; }
     let height=graph.nodes.iter().map(|n|node_rect(Pos2::ZERO,n).bottom()+32.0).fold(350.0,f32::max).min(4000.0);
-    let (canvas, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let (canvas, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click_and_drag());
     let painter = ui.painter().with_clip_rect(canvas);
     let dark = ui.visuals().dark_mode;
     let blue = if dark { Color32::from_rgb(90, 180, 255) } else { Color32::from_rgb(35, 130, 220) };
@@ -122,30 +132,82 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     let unconnected = if dark { Color32::from_gray(180) } else { Color32::from_gray(115) };
     painter.rect_filled(canvas, 4.0, ui.visuals().extreme_bg_color);
     let mut changed = group_requested;
-    changed |= crate::automation_groups::show(ui,graph,canvas,&selected,|node|node_rect(canvas.min,node));
+    let marquee_key=ui.id().with("selection-marquee");
+    let mut marquee=ui.ctx().data(|d|d.get_temp::<Marquee>(marquee_key));
+    let escaped=ui.input(|i|i.key_pressed(egui::Key::Escape));
+    if escaped {
+        if let Some(m)=marquee.take() {selected=m.base;}
+    } else if ui.input(|i|i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        if let Some(pointer)=ui.ctx().pointer_interact_pos().filter(|p|canvas.contains(*p)) {
+            let on_block=graph.nodes.iter().any(|n|node_rect(canvas.min,n).expand(10.0).contains(pointer));
+            let on_wire=graph.wires.iter().any(|w| {
+                let source=graph.nodes.iter().find(|n|n.id==w.from);
+                let target=graph.nodes.iter().find(|n|n.id==w.to);
+                source.zip(target).is_some_and(|(s,t)| {
+                    let start=port_position(node_rect(canvas.min,s),None,w.output);
+                    let end=port_position(node_rect(canvas.min,t),Some(w.input),0);
+                    let handle=route_point(start,end,w.route);
+                    if w.route.is_some() {near_curve(start,handle,pointer).or_else(||near_curve(handle,end,pointer)).is_some()} else {near_curve(start,end,pointer).is_some()}
+                })
+            });
+            // Group headers own their gestures; empty group backgrounds remain selectable.
+            let on_group=graph.groups.iter().any(|g| {
+                let bounds=graph.nodes.iter().filter(|n|g.nodes.contains(&n.id)).fold(Rect::NOTHING,|r,n|r.union(node_rect(canvas.min,n))).expand(12.0);
+                Rect::from_min_size(bounds.min-Vec2::new(0.0,28.0),Vec2::new(bounds.width(),28.0)).contains(pointer)
+            });
+            if !on_block && !on_wire && !on_group && pending.is_none() {
+                marquee=Some(Marquee {start:pointer,base:selected.clone(),additive:ui.input(|i|i.modifiers.command || i.modifiers.ctrl)});
+            }
+        }
+    }
+    if let Some(m)=&marquee {
+        if let Some(pointer)=ui.ctx().pointer_interact_pos() {
+            let area=Rect::from_two_pos(m.start,pointer);
+            selected=if m.additive {m.base.clone()} else {Default::default()};
+            if area.width()>3.0 || area.height()>3.0 {
+                for node in &graph.nodes {
+                    let rect=node_rect(canvas.min,node);
+                    if if pointer.x>=m.start.x {area.contains_rect(rect)} else {area.intersects(rect)} {selected.insert(node.id);}
+                }
+                painter.rect_filled(area,0.0,blue.gamma_multiply(0.12));
+                painter.rect_stroke(area,0.0,Stroke::new(1.0,blue),StrokeKind::Inside);
+            }
+        }
+    }
+    if ui.input(|i|i.pointer.button_released(egui::PointerButton::Primary)) {marquee=None;}
+    ui.ctx().data_mut(|d| {if let Some(m)=marquee {d.insert_temp(marquee_key,m);} else {d.remove::<Marquee>(marquee_key);}});
+    changed |= crate::automation_groups::show(ui,graph,canvas,&mut selected,|node|node_rect(canvas.min,node));
     let mut delete = None;
     let mut disconnect = None;
     let mut connect = None;
 
     // Resolve motion first so sockets and both ends of every wire move in the
     // same frame. Context menus stay confined to headers and their own port rows.
-    for node in &mut graph.nodes {
+    let mut selection_motion=None;
+    for node in &graph.nodes {
         let rect = node_rect(canvas.min, node);
         let header = Rect::from_min_size(rect.min, Vec2::new(WIDTH, HEADER));
         let response = ui.interact(header.intersect(canvas), ui.id().with(("node-header", node.id)), Sense::click_and_drag());
+        if response.double_clicked() && matches!(node.kind,NodeKind::Python {..}) {
+            ui.ctx().data_mut(|d|d.insert_temp(ui.id().with("python-editor"),node.id));
+        }
         if response.clicked() {
             if ui.input(|i|i.modifiers.command || i.modifiers.ctrl) {
                 if !selected.insert(node.id) {selected.remove(&node.id);}
             } else {selected.clear();selected.insert(node.id);}
         }
         if response.dragged() {
-            node.position[0] = (node.position[0] + response.drag_delta().x).max(0.0);
-            node.position[1] = (node.position[1] + response.drag_delta().y).max(0.0);
+            if !selected.contains(&node.id) {selected.clear();selected.insert(node.id);}
+            selection_motion=Some(response.drag_delta());
         }
         response.context_menu(|ui| {
-            if ui.button("Delete node").clicked() { delete = Some(node.id); ui.close(); }
+            if matches!(node.kind,NodeKind::Python {..}) && ui.button("Edit Python expression").clicked() {
+                ui.ctx().data_mut(|d|d.insert_temp(selection_key.with("python-editor-request"),node.id));ui.close();
+            }
+            if ui.button(if selected.contains(&node.id) && selected.len()>1 {"Delete selected blocks"} else {"Delete block"}).clicked() { delete = Some(node.id); ui.close(); }
         });
     }
+    if let Some(delta)=selection_motion {move_selection(graph,&selected,delta);}
     let drag_key = ui.id().with("connector-drag");
     let cancel_key = ui.id().with("connector-drag-cancelled");
     if ui.input(|i|i.key_pressed(egui::Key::Escape)) {
@@ -225,10 +287,10 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         let header = Rect::from_min_size(rect.min, Vec2::new(WIDTH, HEADER));
         let middle = rect.left() + WIDTH * 0.5;
         painter.rect_filled(rect, 3.0, body);
-        painter.rect_filled(header, 3.0, Color32::from_rgb(35, 90, 135));
+        painter.rect_filled(header, 3.0, if dark {Color32::from_gray(74)} else {Color32::from_gray(214)});
         painter.rect_stroke(rect, 3.0, Stroke::new(if selected.contains(&node.id) {2.5} else {1.0},if selected.contains(&node.id) {blue} else {separator}), StrokeKind::Inside);
         painter.text(header.center(), egui::Align2::CENTER_CENTER,
-            format!("{} | {}", node.id, title(&node.kind)), FontId::proportional(13.0), Color32::WHITE);
+            title(&node.kind), FontId::proportional(13.0), ui.visuals().text_color());
 
         let inputs = node.kind.inputs();
         let rows = inputs.len().max(node.kind.outputs().len()).max(1);
@@ -338,6 +400,27 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
             }
         });
     }
+    let editor_key=ui.id().with("python-editor");
+    if let Some(id)=ui.ctx().data(|d|d.get_temp::<u64>(selection_key.with("python-editor-request"))) {
+        ui.ctx().data_mut(|d| {d.remove::<u64>(selection_key.with("python-editor-request"));d.insert_temp(editor_key,id);});
+    }
+    if let Some(id)=ui.ctx().data(|d|d.get_temp::<u64>(editor_key)) {
+        let mut open=true;
+        if let Some(node)=graph.nodes.iter_mut().find(|n|n.id==id) {
+            if let NodeKind::Python {expression,quantity}=&mut node.kind {
+                egui::Window::new(format!("Python expression | Node {id}")).id(editor_key).open(&mut open).default_width(480.0).show(ui.ctx(),|ui| {
+                    ui.label("Numeric expression using x. The worker currently supports expressions, not general Python scripts.");
+                    changed|=ui.add(egui::TextEdit::multiline(expression).code_editor().desired_rows(8)).changed();
+                    egui::ComboBox::from_id_salt("expression-quantity").selected_text(format!("{quantity:?}")).show_ui(ui,|ui| {
+                        changed|=ui.selectable_value(quantity,openbim_automation::Type::Length,"Length (m)").changed();
+                        changed|=ui.selectable_value(quantity,openbim_automation::Type::Ratio,"Number / ratio").changed();
+                    });
+                    ui.weak("Changes invalidate the preview. Close this editor, then Preview before Apply.");
+                });
+            } else {open=false;}
+        } else {open=false;}
+        if !open {ui.ctx().data_mut(|d|d.remove::<u64>(editor_key));}
+    }
     if rerouted { *status="Wire path adjusted; its data connection is unchanged.".into(); }
     if let Some(connection) = connect {
         graph.wires.retain(|w| w.to != connection.to || w.input != connection.input);
@@ -350,11 +433,12 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         changed = true;
     }
     if let Some(id) = delete {
-        graph.nodes.retain(|n| n.id != id);
-        graph.wires.retain(|w| w.from != id && w.to != id);
-        for group in &mut graph.groups {group.nodes.retain(|member|*member!=id);}
+        let removed=if selected.contains(&id) {selected.clone()} else {std::collections::BTreeSet::from([id])};
+        graph.nodes.retain(|n| !removed.contains(&n.id));
+        graph.wires.retain(|w| !removed.contains(&w.from) && !removed.contains(&w.to));
+        for group in &mut graph.groups {group.nodes.retain(|member|!removed.contains(member));}
         graph.groups.retain(|group|!group.nodes.is_empty());
-        if pending.is_some_and(|p|p.0==id) { *pending = None; }
+        if pending.is_some_and(|p|removed.contains(&p.0)) { *pending = None; }
         changed = true;
     }
     ui.ctx().data_mut(|d|d.insert_temp(selection_key,selected));
@@ -366,9 +450,15 @@ mod tests {
     use super::*;
     use egui::{Event,Modifiers,PointerButton,RawInput};
 
-    fn frame(ctx:&egui::Context,graph:&mut Graph,pending:&mut Option<(u64,u16)>,events:Vec<Event>)->egui::FullOutput {
+    fn frame(ctx:&egui::Context,graph:&mut Graph,pending:&mut Option<(u64,u16)>,mut events:Vec<Event>)->egui::FullOutput {
+        if let Some(modifiers)=events.iter().rev().find_map(|e|match e {Event::PointerButton {modifiers,..}|Event::Key {modifiers,..}=>Some(*modifiers),_=>None}) {
+            events.insert(0,Event::ModifiersChanged(modifiers));
+        }
         let mut output=ctx.run_ui(RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1000.0,600.0))),events,..Default::default() },|ui| {
-            egui::ScrollArea::vertical().show(ui,|ui| { show(ui,graph,pending,&mut String::new()); });
+            egui::ScrollArea::vertical().show(ui,|ui| {
+                ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("test-canvas-id"),ui.id()));
+                show(ui,graph,pending,&mut String::new());
+            });
         });
         output.textures_delta.clear();
         output
@@ -378,6 +468,69 @@ mod tests {
     }
     fn first_curve(output:&egui::FullOutput)->egui::epaint::CubicBezierShape {
         output.shapes.iter().find_map(|s|if let egui::Shape::CubicBezier(curve)=&s.shape {Some(curve.clone())}else{None}).expect("Visible wire")
+    }
+    #[test]
+    fn ctrl_click_toggles_selection_and_double_click_opens_python_editor() {
+        let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
+        graph.nodes[1].kind=NodeKind::Python {expression:"x + 0.3".into(),quantity:openbim_automation::Type::Length};
+        graph.wires[0].from=3;graph.validate().unwrap();
+        let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[3]-Vec2::new(290.0,74.0);
+        let first=origin+Vec2::new(140.0,45.0);let second=origin+Vec2::new(410.0,45.0);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(first),button(first,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![button(first,false)]);
+        let ctrl=Modifiers {ctrl:true,command:true,..Default::default()};
+        for pressed in [true,false] {frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(second),Event::PointerButton {pos:second,pressed,button:PointerButton::Primary,modifiers:ctrl}]);}
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        assert_eq!(ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap(),std::collections::BTreeSet::from([1,2]));
+        for pressed in [true,false] {frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(first),Event::PointerButton {pos:first,pressed,button:PointerButton::Primary,modifiers:ctrl}]);}
+        assert_eq!(ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap(),std::collections::BTreeSet::from([2]));
+        // A plain double-click opens the numeric Python editor.
+        let ctx=egui::Context::default();
+        let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[3]-Vec2::new(290.0,74.0);
+        let second=origin+Vec2::new(410.0,45.0);
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        for _ in 0..2 {
+            frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(second),button(second,true)]);
+            frame(&ctx,&mut graph,&mut pending,vec![button(second,false)]);
+        }
+        assert_eq!(ctx.data(|d|d.get_temp::<u64>(id.with("python-editor"))),Some(2));
+    }
+    #[test]
+    fn escape_restores_selection_and_empty_click_clears_it() {
+        let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
+        let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[0]-Vec2::new(260.0,74.0);
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        ctx.data_mut(|d|d.insert_temp(id.with("selected-blocks"),std::collections::BTreeSet::from([4_u64])));
+        let start=origin+Vec2::new(10.0,15.0);let end=origin+Vec2::new(550.0,170.0);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(end)]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::Key {key:egui::Key::Escape,physical_key:None,pressed:true,repeat:false,modifiers:Modifiers::default()}]);
+        assert_eq!(ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap(),std::collections::BTreeSet::from([4]));
+        frame(&ctx,&mut graph,&mut pending,vec![button(end,false)]);
+        let empty=origin+Vec2::new(900.0,300.0);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(empty),button(empty,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![button(empty,false)]);
+        assert!(ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap().is_empty());
+    }
+    #[test]
+    fn marquee_selects_two_blocks_and_header_drag_moves_both() {
+        let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
+        let output=frame(&ctx,&mut graph,&mut pending,vec![]);
+        let origin=first_curve(&output).points[0]-Vec2::new(260.0,74.0);
+        let start=origin+Vec2::new(10.0,15.0);let end=origin+Vec2::new(550.0,170.0);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(end)]);
+        frame(&ctx,&mut graph,&mut pending,vec![button(end,false)]);
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        let selected=ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap();
+        assert_eq!(selected,std::collections::BTreeSet::from([1,2]));
+        let before=graph.nodes.clone();let wires=graph.wires.clone();
+        let header=origin+Vec2::new(140.0,45.0);let finish=header+Vec2::new(25.0,30.0);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(header),button(header,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(finish)]);
+        frame(&ctx,&mut graph,&mut pending,vec![button(finish,false)]);
+        for index in [0,1] {assert_eq!(graph.nodes[index].position,[before[index].position[0]+25.0,before[index].position[1]+30.0]);}
+        assert_eq!(graph.nodes[2],before[2]);assert_eq!(graph.wires,wires);
     }
     #[test]
     fn second_output_socket_connects_and_preserves_other_outputs() {

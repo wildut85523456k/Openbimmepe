@@ -9,7 +9,7 @@ pub fn create(graph:&mut Graph,selected:&BTreeSet<u64>)->bool {
     graph.groups.push(Group {id,title:"New group".into(),nodes,color:[70,120,160]});true
 }
 
-pub fn show(ui:&mut egui::Ui,graph:&mut Graph,canvas:Rect,selected:&BTreeSet<u64>,rect:impl Fn(&openbim_automation::Node)->Rect)->bool {
+pub fn show(ui:&mut egui::Ui,graph:&mut Graph,canvas:Rect,selected:&mut BTreeSet<u64>,rect:impl Fn(&openbim_automation::Node)->Rect)->bool {
     let mut changed=false;let mut remove=None;let mut transfer=None;
     for group in &mut graph.groups {
         let mut bounds=Rect::NOTHING;
@@ -18,6 +18,15 @@ pub fn show(ui:&mut egui::Ui,graph:&mut Graph,canvas:Rect,selected:&BTreeSet<u64
         bounds=bounds.expand(12.0);bounds.min.y-=28.0;
         let header=Rect::from_min_size(bounds.min,Vec2::new(bounds.width(),28.0));
         let response=ui.interact(header.intersect(canvas),ui.id().with(("group-header",group.id)),Sense::click_and_drag());
+        if response.clicked() {
+            let additive=ui.input(|i|i.modifiers.command || i.modifiers.ctrl);
+            if additive && group.nodes.iter().all(|id|selected.contains(id)) {
+                selected.retain(|id|!group.nodes.contains(id));
+            } else {
+                if !additive {selected.clear();}
+                selected.extend(group.nodes.iter().copied());
+            }
+        }
         if response.dragged() {
             let mut delta=response.drag_delta();
             let left=graph.nodes.iter().filter(|n|group.nodes.contains(&n.id)).map(|n|n.position[0]).fold(f32::INFINITY,f32::min);
@@ -37,7 +46,7 @@ pub fn show(ui:&mut egui::Ui,graph:&mut Graph,canvas:Rect,selected:&BTreeSet<u64
             ui.label("Group title"); changed|=ui.add(egui::TextEdit::singleline(&mut group.title).char_limit(128)).changed();
             changed|=ui.color_edit_button_srgb(&mut group.color).changed();
             if ui.button("Add selected blocks").clicked() {
-                for id in selected {if !group.nodes.contains(id) {group.nodes.push(*id);}}
+                for id in selected.iter() {if !group.nodes.contains(id) {group.nodes.push(*id);}}
                 transfer=Some(group.id);
                 changed=true;ui.close();
             }
@@ -66,7 +75,7 @@ mod tests {
         let wires=graph.wires.clone();let before=graph.nodes.clone();
         let mut frame=|events| {
             let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(egui::Pos2::ZERO,Vec2::new(1000.0,600.0))),events,..Default::default()},|ui| {
-                show(ui,&mut graph,Rect::from_min_size(egui::Pos2::ZERO,Vec2::new(1000.0,600.0)),&BTreeSet::new(),|n|Rect::from_min_size(egui::pos2(n.position[0],n.position[1]),Vec2::new(240.0,100.0)));
+                show(ui,&mut graph,Rect::from_min_size(egui::Pos2::ZERO,Vec2::new(1000.0,600.0)),&mut BTreeSet::new(),|n|Rect::from_min_size(egui::pos2(n.position[0],n.position[1]),Vec2::new(240.0,100.0)));
             });
             output.textures_delta.clear();
         };

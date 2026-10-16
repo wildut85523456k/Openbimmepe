@@ -142,7 +142,8 @@ impl Automation {
                 }
             });
         }
-        // Always visible in Player, because these are the exposed graph inputs.
+        // Graph mode edits values inside blocks; Player exposes the same inputs.
+        if self.player {
         for node in &mut self.graph.nodes {
             ui.horizontal(|ui| {
                 ui.label(format!("Node {}", node.id));
@@ -175,6 +176,7 @@ impl Automation {
                     }
                 }
             });
+        }
         }
         if !self.player {
             ui.horizontal_wrapped(|ui| {
