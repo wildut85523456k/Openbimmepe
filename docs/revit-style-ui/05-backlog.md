@@ -22,9 +22,13 @@ Statuses below are **not started as UI integration** unless indicated. Existing 
 | MEP-001 | P1 | Connector/system browser and route editing UI | route, GUI | Connectivity reflected in model and UI |
 | MEP-002 | P1 | Hydraulic/airflow/electrical calculation modules | MEP-001 | Verified reference calculations with units |
 | DOC-001 | P1 | Annotations, sheets, schedules, print/export | BIM, render, GUI | Repeatable view/sheet output |
-| AUTO-001 | P1 | Typed Rust scripting API and Python binding | BIM-002 | Python transaction and query acceptance suite |
-| AUTO-002 | P1 | Headless typed node graph runtime | AUTO-001 | Deterministic DAG execution and diff preview |
-| AUTO-003 | P1 | Visual node canvas / debugger | AUTO-002, GUI-001 | Save/load graph, errors, preview, commit/undo |
+| AUTO-001 | P0 | Typed command and query API: quantities with units, stable parameter IDs (EN/FR labels) | BIM-002 | Ribbon uses it; unit-mismatch and label-lookup tests |
+| AUTO-002 | P1 | Per-element commit rules: element revisions, last writer wins with flag, locks give change requests, all-or-nothing marks | oplog, COLLAB-002 | Bulk edit of 500 elements with 1 clash applies 499 and reports 1 |
+| AUTO-003 | P1 | MCP server in the app (stdio and local HTTP with token), read-only then accepted proposals | AUTO-001, AUTO-002 | Firestop CSV via an MCP client: preview, accept, undo; changes logged under the client |
+| AUTO-004 | P1 | Headless graph engine `openbim-graph`: Dynamo lacing, parallel, cache, versioned graph file | AUTO-001 | Same graph run twice gives identical change sets; lacing tests |
+| AUTO-005 | P1 | OpenBIM Graph app (egui, Dynamo-like): library, canvas, Run bar, Watch, 3D preview, Player | AUTO-004, GUI-002 | Firestop graph end to end; Player runs it from the app |
+| AUTO-006 | P1 | Python Script node in OpenBIM Graph: worker processes, declared permissions, code warning | AUTO-005 | Denied permission refused by the app; shared graph with code warns |
+| AUTO-007 | P2 | Discipline node libraries calling the calculation modules | AUTO-005, MEP-002 | No calculation reimplemented in nodes; standard and edition recorded |
 | PERF-001 | P0 | Incremental edit benchmark, issue #14 | BIM-003 | Demonstrate local rather than global rebuild |
 | PERF-002 | P1 | Spatial index for auto-router, issue #21 | route | Query performance scaling benchmark |
 
@@ -33,7 +37,7 @@ Statuses below are **not started as UI integration** unless indicated. Existing 
 2. **Usable desktop** — GUI-001–005 with reference Place Duct and wall workflows.
 3. **Central collaboration** — COLLAB-001/002.
 4. **Discipline completeness** — FAMILY, ARCH, STR, MEP, DOC.
-5. **Automation** — AUTO-001, AUTO-002, AUTO-003 (API design starts during Foundation).
+5. **Automation** — AUTO-001 to AUTO-007, see `04-visual-automation.md` (AUTO-001 starts during Foundation, with BIM-002).
 
 ## Review checklist for every PR
 - Public API/schema and migrations described.
