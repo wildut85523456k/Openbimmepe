@@ -2,13 +2,13 @@
 
 ## Existing Rust workspace reviewed (October 2026)
 `crates/geom`, `family`, `place`, `keymap`, `arch`, `oplog`, `sketch`, `route`, `ifc`.
-No integrated desktop GUI is established by these crates. Existing `keymap`, `oplog`, `family`, `route`, `ifc` should be reused, not duplicated.
+Existing `keymap`, `oplog`, `family`, `route`, `ifc` should be reused, not duplicated. The egui desktop app (`apps/desktop`) and a provisional `crates/document` are on branch `feature/rust-gui`; `crates/document` is to be merged into the oplog model (#24).
 
 ## Layering
 ```text
-Desktop GUI: ribbon | palettes | project browser | viewport | node editor
-                      |
-                Command registry
+Desktop GUI (egui): ribbon | palettes | project browser | viewport     OpenBIM Graph | MCP clients
+                      |                                                    |
+                Command registry (openbim-commands) <----------------------+
                       |
        Document / transaction / dependency graph
           |           |            |
@@ -16,31 +16,28 @@ Desktop GUI: ribbon | palettes | project browser | viewport | node editor
                       |
            IFC importer/exporter
                       |
-        standalone persistence OR central sync
+   project files on a local disk OR a shared folder (server share / cloud-synced)
 ```
 
 ## Proposed crate/app boundaries (names provisional)
 - `openbim-document`: stable element identifiers, typed properties, type/instance references, host links, spatial containment, dependency tracking.
 - `openbim-commands`: command schemas, applicability, previews, validation, transaction execution.
 - `openbim-storage`: snapshots, operation log integration, transactional local project persistence.
-- `openbim-sync`: revisioned server-authoritative transaction protocol, ownership/leases, conflict handling.
+- `openbim-sync`: shared-folder synchronisation without a server: one writer per segment file, heartbeats, an elected snapshot writer, element borrowing, locks giving change requests, per-element commit rules (#33, #34).
 - `openbim-render`: 2D/3D scene adapter, incremental tessellation cache, picking, graphic styles.
 - `apps/desktop`: GUI composition only; no direct IFC mutation.
-- `openbim-api`: script-facing safe client interface shared by Python and visual graphs.
+- `openbim-commands` also serves OpenBIM Graph (local link, scoped token) and the MCP server in the app; `openbim-graph`: headless graph engine shared with OpenBIM Graph (see 04).
 
-## GUI toolkit evaluation (no choice made yet)
-Spike each option with identical scenario: docked Properties and Project Browser, ribbon and contextual Place Duct, 2D/3D view, keyboard/mouse, selection and 100k-element picking.
-- **Qt 6**: mature desktop docking/widgets; bridges and mixed-language build/deploy increase complexity.
-- **Slint**: declarative Rust-friendly interface; assess advanced CAD docking and interaction needs.
-- **egui + wgpu**: predominantly Rust, flexible tooling and embedded node canvas; more custom UI behavior/polish required.
-Record objective latency, install size, accessibility, testability and platform compatibility.
+## GUI toolkit: egui (decided 15 Oct 2026)
+egui with wgpu, all in Rust: the UI and the 3D viewport draw in the same frame with no language bridge, and the same toolkit serves OpenBIM Graph. Qt 6 (C++), Slint and the web shell are dropped (#22). Still to build ourselves: the ribbon, docking polish and the visual theme.
+Measure on the reference scenario (docked Properties and Project Browser, ribbon and contextual Place Duct, 2D/3D view, keyboard/mouse, 100k-element picking): latency, install size, accessibility and platform compatibility.
 
 ## Multi-user rule
-Never share one writable IFC file as the central collaboration protocol. Local and central modes use the same validated transactions; central server decides commit order and broadcasts revisions.
+Never share one writable IFC file as the central collaboration protocol. Standalone and shared-folder modes use the same validated transactions. Each user writes only their own segment files; everyone merges what the others wrote with the per-element rules (last writer wins and flags the loser; locked elements give change requests). Discipline models are linked into the central file, not merged.
 Conflict checks must include *semantic dependencies* (hosted door vs wall; duct vs fitting), not only same element/property collisions.
 
 ## IFC rule
-IFC is the interchange/semantic standard; native parameter dependencies are separately persisted. Preserve GlobalIds and unsupported imported data where feasible; enforce schema and round-trip tests.
+IFC (IFC4, plus IFC2X3 for DIALux) is the interchange/semantic standard, read and written in Rust inside the app; native parameter dependencies are separately persisted. Preserve GlobalIds and unsupported imported data where feasible; enforce schema and round-trip tests.
 
 ## Performance
 - Incremental recalculation per dependent elements, not entire project rebuilds (see existing issue #14).
@@ -49,6 +46,6 @@ IFC is the interchange/semantic standard; native parameter dependencies are sepa
 - Versioned graphics caches and background computation with cancellation.
 
 ## Security and reliability
-Authentication can use OIDC; authorization remains project/discipline/action aware.
-Python runs isolated or with explicit local trust: never permit arbitrary code inside central authoritative process.
+Access to a shared project follows the shared folder's permissions plus element borrowing per discipline; authorization remains project/discipline/action aware.
+No Python in the app: Python runs only in OpenBIM Graph, in worker processes, with permissions declared in each graph. OpenBIM Graph and MCP clients get tokens scoped to those permissions (#39).
 Transactional recovery, periodic durable snapshots, audit trail and schema migration are mandatory.
