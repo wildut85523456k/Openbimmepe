@@ -371,7 +371,7 @@ pub fn find(chains: &[WallChain], runs: &[Run], merge_gap: f64) -> (Vec<Penetrat
 }
 
 /// A label as one cell of a comma separated file: no separators or quotes, and never read as a formula by a spreadsheet.
-pub(crate) fn csv_safe(label: &str) -> String {
+pub fn csv_safe(label: &str) -> String {
     let t = label.replace([',', '\n', '\r', '"'], " ");
     if t.starts_with(['=', '+', '-', '@']) { format!(" {t}") } else { t }
 }

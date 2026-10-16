@@ -6,6 +6,7 @@ use openbim_family::forms::{Align, FormDef, ProfileDef};
 use openbim_family::{compile_library, library, Axis, Category, Family, NestedDef, SolidDef, ValueDef};
 use openbim_family::mep::{Domain, System};
 use openbim_family::Request;
+use openbim_family::light::{LightingDef, Mounting};
 use openbim_geom::WallChain;
 use openbim_ifc::pset_map::PsetMap;
 use openbim_ifc::*;
@@ -81,7 +82,21 @@ pub fn build_scene(edit: bool) -> Scene {
         category: Category::Furniture,
         ..Default::default()
     };
-    let extra = compile_library(&[part, stand]).unwrap();
+    // a luminaire with the data a lighting program needs (the numbers are made up for the test)
+    let lum = Family {
+        name: "Test luminaire".into(),
+        values: vec![
+            ValueDef::plane("x0", Axis::X, "-0.15"), ValueDef::plane("x1", Axis::X, "0.15"),
+            ValueDef::plane("y0", Axis::Y, "-0.15"), ValueDef::plane("y1", Axis::Y, "0.15"),
+            ValueDef::plane("z0", Axis::Z, "-0.05"), ValueDef::plane("z1", Axis::Z, "0"),
+        ],
+        solids: vec![SolidDef::new("body", ("x0", "x1"), ("y0", "y1"), ("z0", "z1"))],
+        category: Category::LightFixture,
+        lighting: Some(LightingDef { photometry: Some("test.ldt".into()), manufacturer: Some("Maker".into()), article: Some("A-1".into()), flux_lm: Some(3000.0), power_w: Some(28.0), cct_k: Some(4000.0), cri: Some(80.0), ip: Some("IP20".into()), dimming: Some(0.8), mounting: Mounting::Recessed }),
+        ..Default::default()
+    };
+    let lum_family = fams.len() + 2;
+    let extra = compile_library(&[part, stand, lum]).unwrap();
     let stand_family = fams.len() + 1;
     fams.extend(extra);
     let fc_family = 4usize;
@@ -143,6 +158,7 @@ pub fn build_scene(edit: bool) -> Scene {
     }
     let stand_frame = Frame { origin: [1.0, 5.0, 0.0], x: [0.0, 1.0] };
     items.push(FamilyItem { id: A | 950, name: "STAND-01".into(), family: stand_family, type_name: None, frame: stand_frame, instance: fams[stand_family].solve(&Request::default()).unwrap(), host: None });
+    items.push(FamilyItem { id: A | 951, name: "L-01".into(), family: lum_family, type_name: None, frame: Frame { origin: [6.0, 3.0, 2.8], x: [0.0, 1.0] }, instance: fams[lum_family].solve(&Request::default()).unwrap(), host: None });
     items.push(FamilyItem { id: A | 900, name: "FCU-01".into(), family: fc_family, type_name: None, frame: fc_frame, instance: fc_inst.clone(), host: None });
 
     let levels = Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }, Level { name: "L2".into(), elevation: 6.0 }]).unwrap();
@@ -352,6 +368,11 @@ fn main() {
     for c in &scene.columns {
         println!("COLUMN {} {} {} {}", c.id, c.base_z, c.height, c.footprint.iter().map(|p| format!("{} {}", p[0], p[1])).collect::<Vec<_>>().join(" "));
     }
+    let (sched, warns) = openbim_ifc::lighting::luminaire_schedule(&scene);
+    for l in sched.lines().skip(1) {
+        println!("LUM {l}");
+    }
+    println!("LUMWARN {}", warns.len());
     for p in &scene.wall_penetrations {
         println!("WPEN {} {} {} {} {} {} {}", p.id, p.cut as u8, v(p.centre), p.width, p.height, p.fire_rating_min.unwrap_or(0), if p.shape == openbim_place::penetrations::OpeningShape::Round { "round" } else { "rect" });
     }

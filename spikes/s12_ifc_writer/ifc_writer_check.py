@@ -92,7 +92,7 @@ fits = {}
 for c in ("IfcPipeFitting", "IfcDuctFitting", "IfcCableCarrierFitting", "IfcCableFitting"):
     fits.update(elems(c))
 occs = {}
-for c in ("IfcDoor", "IfcWindow", "IfcUnitaryEquipment", "IfcFurniture"):
+for c in ("IfcDoor", "IfcWindow", "IfcUnitaryEquipment", "IfcFurniture", "IfcLightFixture"):
     occs.update(elems(c))
 ok(set(segs) == seg_ids, f"segment ids {set(segs) ^ seg_ids}")
 ok(set(fits) == fit_ids, "fitting ids")
@@ -223,6 +223,22 @@ for iid, r in item_rows.items():
     if is_mapped(e):
         inner = {i.is_a() for m in reps for i in m.MappingSource.MappedRepresentation.Items}
         ok(inner <= {"IfcExtrudedAreaSolid", "IfcRevolvedAreaSolid", "IfcFixedReferenceSweptAreaSolid"}, f"{name_of(r)} shared shape kinds {inner}")
+# luminaires: the schedule row says where it is, the type carries the lighting data a lighting program needs
+for r in rows("LUM"):
+    c = r[0].split(",")
+    iid = int(c[0])
+    e = occs[iid]
+    ok(e.is_a("IfcLightFixture"), "luminaire is an IfcLightFixture")
+    ps = ue.get_psets(ue.get_type(e))
+    ok(ps["Pset_LightFixtureTypeCommon"]["TotalWattage"] == float(c[15]) and ps["Pset_LightFixtureTypeCommon"]["LightFixtureMountingType"] == "RECESSED", "luminaire standard property set")
+    ok(ps["Pset_ManufacturerTypeInformation"]["Manufacturer"] == c[12] and ps["Pset_ManufacturerTypeInformation"]["ArticleNumber"] == c[13], "luminaire manufacturer and article")
+    own = ps["OpenBIM_Lighting"]
+    ok(own["PhotometryFile"] == c[11] and own["LuminousFlux"] == float(c[14]) and own["ColourTemperature"] == float(c[16]) and own["ColourRenderingIndex"] == float(c[17]) and own["DimmingLevel"] == float(c[18]) and own["IngressProtection"] == c[19], "luminaire lighting property set")
+    # the row's position is the placed object's position, and its room is the one it is inside
+    m = up.get_local_placement(e.ObjectPlacement)
+    ok(np.allclose(m[:3, 3], [float(c[5]), float(c[6]), float(c[7])], atol=1e-6), "schedule position is the placement")
+    ok(c[3] == "Office" and abs(float(c[9]) - 2.8) < 1e-9, "schedule room and mounting height")
+ok(len(rows("LUM")) == 1 and rows("LUMWARN")[0][0] == "0", "one luminaire in the schedule, nothing missing")
 # swept forms: each one, built alone, has the volume and the box the Rust code solved (mitred corners, profile the right way up)
 file_sweeps = []
 for sw in f.by_type("IfcFixedReferenceSweptAreaSolid"):
@@ -248,7 +264,7 @@ for tid, ids in types_seen.items():
 by_name = {name_of(r): iid for iid, r in item_rows.items()}
 ok(is_mapped(occs[by_name["D-01"]]) and is_mapped(occs[by_name["D-03"]]) and not is_mapped(occs[by_name["D-02"]]), "D-01 and D-03 are mapped, D-02 (swing left) has its own shape")
 ok(len({occs[by_name[n]].Representation.Representations[0].Items[0].MappingSource.id() for n in ("D-01", "D-03")}) == 1, "D-01 and D-03 use one representation map")
-ok(len(types_seen) == 4 and sorted(len(v) for v in types_seen.values()) == [1, 1, 1, 3], f"four types, with 3, 1, 1 and 1 occurrences: {sorted(len(v) for v in types_seen.values())}")
+ok(len(types_seen) == 5 and sorted(len(v) for v in types_seen.values()) == [1, 1, 1, 1, 3], f"five types, with 3, 1, 1, 1 and 1 occurrences: {sorted(len(v) for v in types_seen.values())}")
 # the placed shape lies where the family frame puts the solved bounds (the frames here are quarter turns, so the box stays square)
 for r in rows("IBOX"):
     iid = int(r[0]); ir = item_rows[iid]

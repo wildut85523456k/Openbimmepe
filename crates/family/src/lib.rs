@@ -16,6 +16,7 @@
 pub mod expr;
 pub mod display;
 pub mod mep;
+pub mod light;
 pub mod forms;
 pub mod shared;
 pub mod catalogue;
@@ -232,6 +233,8 @@ pub struct Family {
     pub shared: Vec<String>,
     /// extrusions, revolves and sweeps
     pub forms: Vec<FormDef>,
+    /// lighting data, for a luminaire (category `LightFixture`)
+    pub lighting: Option<light::LightingDef>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -387,6 +390,7 @@ pub struct Inner {
     category: Category,
     host: Host,
     classification: Vec<(String, String)>,
+    lighting: Option<light::LightingDef>,
     connectors: Vec<mep::CConnector>,
     plan: Vec<mep::CPlan>,
     shared_ids: Vec<(String, u128)>,
@@ -725,10 +729,14 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
         clean_text("classification", code, 64)?;
     }
     for (i, (s, _)) in fam.classification.iter().enumerate() { if fam.classification[..i].iter().any(|(o, _)| o == s) { return Err(FamilyError::BadMeta("a classification system is listed twice")); } }
+    if let Some(l) = &fam.lighting {
+        if fam.category != Category::LightFixture { return Err(FamilyError::BadMeta("lighting data belongs to a family of category light fixture")); }
+        l.check()?;
+    }
     let (connectors, plan) = mep::compile(&fam.connectors, &fam.plan, &parse)?;
     let forms = forms::compile(&fam.forms, &parse, &material_slot)?;
     let derived: Vec<usize> = (0..nvalues).filter(|&i| formulas[i].is_some() && fam.values[i].axis.is_none()).collect();
-    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, dims: dims_v, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids, forms, form_names })))
+    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, dims: dims_v, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), lighting: fam.lighting.clone(), connectors, plan, shared_ids, forms, form_names })))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -801,6 +809,8 @@ impl Inner {
     /// Names of the family's types, in the order the author gave them.
     pub fn type_names(&self) -> Vec<&str> { self.types.iter().map(|t| t.0.as_str()).collect() }
     pub fn classification(&self) -> &[(String, String)] { &self.classification }
+    /// lighting data of a luminaire family
+    pub fn lighting(&self) -> Option<&light::LightingDef> { self.lighting.as_ref() }
     pub fn slot(&self, name: &str) -> Option<usize> { self.index.get(name).copied() }
     /// What a value measures: a length, an area, an angle, a plain number. Calculated values take it from their formula.
     pub fn value_dim(&self, name: &str) -> Option<Dim> { self.slot(name).map(|i| self.dims[i]) }

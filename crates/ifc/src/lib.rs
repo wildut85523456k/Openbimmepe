@@ -18,6 +18,7 @@ mod families;
 pub mod guid;
 pub mod boundaries;
 pub mod georef;
+pub mod lighting;
 pub mod pset_map;
 pub mod walls;
 pub mod quantities;

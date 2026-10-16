@@ -213,6 +213,37 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 for (name, list) in split.sets {
                     psets.push(format!("#{}", o.pset_entity(name, list)));
                 }
+                if let Some(l) = fam.lighting() {
+                    // what a lighting program needs; standard sets where IFC has the field, the rest in our own
+                    let mut common = vec![("LightFixtureMountingType", Val::Label(l.mounting.ifc().to_string()))];
+                    if let Some(w) = l.power_w {
+                        common.push(("TotalWattage", Val::Real(w)));
+                    }
+                    psets.push(format!("#{}", o.pset_entity("Pset_LightFixtureTypeCommon", common)));
+                    let mut maker = Vec::new();
+                    if let Some(m) = &l.manufacturer {
+                        maker.push(("Manufacturer", Val::Label(m.clone())));
+                    }
+                    if let Some(a) = &l.article {
+                        maker.push(("ArticleNumber", Val::Label(a.clone())));
+                    }
+                    if !maker.is_empty() {
+                        psets.push(format!("#{}", o.pset_entity("Pset_ManufacturerTypeInformation", maker)));
+                    }
+                    let mut own = Vec::new();
+                    if let Some(f) = &l.photometry {
+                        own.push(("PhotometryFile", Val::Label(f.clone())));
+                    }
+                    for (n, v) in [("LuminousFlux", l.flux_lm), ("ColourTemperature", l.cct_k), ("ColourRenderingIndex", l.cri), ("DimmingLevel", l.dimming)] {
+                        if let Some(v) = v {
+                            own.push((n, Val::Real(v)));
+                        }
+                    }
+                    if let Some(ip) = &l.ip {
+                        own.push(("IngressProtection", Val::Label(ip.clone())));
+                    }
+                    psets.push(format!("#{}", o.pset_entity("OpenBIM_Lighting", own)));
+                }
                 let tid = (0xFFFF_FFFEu64 << 32) | (u64::from(fr.id) << 16) | slot as u64;
                 let g = o.gid(tid, 0);
                 let cls = upper(&format!("{}Type", fam.category().ifc_class()));
