@@ -194,13 +194,66 @@ pub fn groups(tab: &str, systems_sub: &str) -> Vec<&'static Group> {
 }
 
 /// The icon for a command ID; unknown IDs fall back to the generic component icon.
-pub fn icon_image(id: &str, dark: bool) -> egui::Image<'static> {
+pub fn icon_image(ui: &egui::Ui, id: &str, dark: bool, size: Vec2) -> egui::Image<'static> {
     let icon = icons::find(id).or_else(|| icons::find("component")).expect("component icon is embedded");
     let (bytes, theme) = match (dark, icon.dark) {
         (true, Some(d)) => (d, "dark"),
         _ => (icon.light, "light"),
     };
-    egui::Image::from_bytes(format!("bytes://icons/{theme}/{}.png", icon.id), bytes)
+    // Prepare at physical display resolution instead of asking the GPU to
+    // shrink a detailed 128 px illustration to a tiny toolbar in one step.
+    let pixels = (size * ui.ctx().pixels_per_point()).round();
+    let width = (pixels.x as u32).clamp(1, 512);
+    let height = (pixels.y as u32).clamp(1, 512);
+    let key = egui::Id::new(("filtered-icon-v1", icon.id, theme, width, height));
+    let cached = ui.ctx().data_mut(|data| data.get_temp::<egui::TextureHandle>(key));
+    let texture = cached.unwrap_or_else(|| {
+        let rgba = prepare_icon(bytes, width, height);
+        let color = egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize], rgba.as_raw());
+        let texture = ui.ctx().load_texture(
+            format!("icon/{theme}/{}/{width}x{height}", icon.id), color,
+            egui::TextureOptions::LINEAR);
+        ui.ctx().data_mut(|data| data.insert_temp(key, texture.clone()));
+        texture
+    });
+    egui::Image::new((texture.id(), size)).fit_to_exact_size(size)
+}
+
+/// Filter premultiplied pixels, so transparent borders cannot bleed into the
+/// illustration. Source artwork and its proportions remain unchanged.
+fn prepare_icon(bytes: &[u8], width: u32, height: u32) -> image::RgbaImage {
+    let source = image::load_from_memory(bytes).expect("embedded PNG icon").to_rgba8();
+    let mut premultiplied = image::Rgba32FImage::new(source.width(), source.height());
+    for (dst, src) in premultiplied.pixels_mut().zip(source.pixels()) {
+        let alpha = f32::from(src[3]) / 255.0;
+        *dst = image::Rgba([
+            f32::from(src[0]) / 255.0 * alpha,
+            f32::from(src[1]) / 255.0 * alpha,
+            f32::from(src[2]) / 255.0 * alpha, alpha,
+        ]);
+    }
+    let scale = (width as f32 / source.width() as f32)
+        .min(height as f32 / source.height() as f32);
+    let w = ((source.width() as f32 * scale).round() as u32).clamp(1, width);
+    let h = ((source.height() as f32 * scale).round() as u32).clamp(1, height);
+    let filtered = image::imageops::resize(&premultiplied, w, h,
+        image::imageops::FilterType::Lanczos3);
+    let mut output = image::RgbaImage::new(width, height);
+    let left = (width - w) / 2;
+    let top = (height - h) / 2;
+    for (x, y, pixel) in filtered.enumerate_pixels() {
+        let alpha = pixel[3].clamp(0.0, 1.0);
+        let mut rgba = [0; 4];
+        if alpha > 1.0 / 255.0 {
+            for channel in 0..3 {
+                rgba[channel] = ((pixel[channel] / alpha).clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+            rgba[3] = (alpha * 255.0).round() as u8;
+        }
+        output.put_pixel(left + x, top + y, image::Rgba(rgba));
+    }
+    output
 }
 
 /// A ribbon panel: the commands in a row with the title centred underneath, then a divider.
@@ -233,7 +286,7 @@ pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: 
             ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0_f32, stroke.color), StrokeKind::Inside);
         }
         let icon_rect = Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 20.0), Vec2::splat(32.0));
-        icon_image(id, dark).paint_at(ui, icon_rect);
+        icon_image(ui, id, dark, icon_rect.size()).paint_at(ui, icon_rect);
         let color: Color32 = visuals.text_color();
         let mut job = egui::text::LayoutJob::simple(label.to_owned(), FontId::proportional(11.0), color, size.x - 4.0);
         job.halign = Align::Center;
@@ -247,6 +300,26 @@ pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transparent_pixels_do_not_tint_filtered_edges() {
+        // Invisible magenta must not bleed into the white foreground.
+        let mut source = image::RgbaImage::from_pixel(16, 16, image::Rgba([255, 0, 255, 0]));
+        for y in 4..12 {
+            for x in 4..12 {
+                source.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(source)
+            .write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let filtered = prepare_icon(bytes.get_ref(), 7, 7);
+        assert!(filtered.pixels().any(|p| p[3] > 0 && p[3] < 255));
+        for pixel in filtered.pixels().filter(|p| p[3] > 0) {
+            assert_eq!(pixel[0], pixel[1]);
+            assert_eq!(pixel[1], pixel[2]);
+        }
+    }
 
     fn png_size(b: &[u8]) -> Option<(u32, u32)> {
         if b.len() < 24 || b[..8] != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] || &b[12..16] != b"IHDR" {

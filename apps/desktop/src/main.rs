@@ -88,7 +88,7 @@ impl Desktop {
             ui.separator();
             // Quick access toolbar: common commands with the 3D icons.
             for (id, label) in ribbon::QUICK_ACCESS {
-                let img = ribbon::icon_image(id, self.dark).fit_to_exact_size(Vec2::splat(20.0));
+                let img = ribbon::icon_image(ui, id, self.dark, Vec2::splat(24.0));
                 if ui.add(egui::Button::image(img).frame(false)).on_hover_text(*label).clicked() {
                     self.run_command(id, label);
                 }
@@ -132,7 +132,7 @@ impl Desktop {
         // Ribbon tabs, each with a small icon.
         ui.horizontal(|ui| {
             for (tab, icon) in ribbon::TABS {
-                let img = ribbon::icon_image(icon, self.dark).fit_to_exact_size(Vec2::splat(16.0));
+                let img = ribbon::icon_image(ui, icon, self.dark, Vec2::splat(16.0));
                 if ui.add(egui::Button::image_and_text(img, *tab).selected(self.ribbon == *tab).frame(false)).clicked() {
                     self.ribbon = tab;
                 }
@@ -141,7 +141,7 @@ impl Desktop {
         if self.ribbon == "Systems" {
             ui.horizontal(|ui| {
                 for (sub, icon) in ribbon::SYSTEMS_SUBTABS {
-                    let img = ribbon::icon_image(icon, self.dark).fit_to_exact_size(Vec2::splat(14.0));
+                    let img = ribbon::icon_image(ui, icon, self.dark, Vec2::splat(14.0));
                     if ui.add(egui::Button::image_and_text(img, *sub).selected(self.systems_sub == *sub).small()).clicked() {
                         self.systems_sub = sub;
                     }

@@ -4,7 +4,7 @@ The ribbon and toolbars use the **approved 3D icon package** (`approved-3d/`, 15
 
 ## What the Rust app embeds
 
-`apps/desktop/src/icons.rs` embeds `rust/*.png`, a derived set that this repository can rebuild at any time:
+`apps/desktop/src/icons.rs` embeds `rust/*.png`. The desktop downsamples this existing artwork with an alpha-aware Lanczos filter at the current physical display resolution and caches textures by theme and size. Quick-access icons use 24 logical pixels; ribbon icons use 32. See `docs/icon-display-update.md` for review steps. The derived PNGs can be rebuilt at any time:
 
 ```sh
 python3 assets/icons/make_rust_icons.py   # approved-3d/*.png -> rust/*.png (transparent background)
