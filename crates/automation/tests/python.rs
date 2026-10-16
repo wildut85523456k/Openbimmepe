@@ -3,7 +3,7 @@ use openbim_document::Document;
 use std::{sync::atomic::AtomicBool,time::Duration};
 #[test]
 fn python_requires_host_enable_and_cannot_claim_element_types() {
-    let mut g=Graph { version:1,nodes:vec![
+    let mut g=Graph { groups:vec![], version:1,nodes:vec![
         Node { id:1,kind:NodeKind::Length { metres:2. },position:[0.,0.] },
         Node { id:2,kind:NodeKind::Python { expression:"x+1".into(),quantity:Type::Length },position:[0.,0.] },
     ],wires:vec![Wire { output:0, from:1,to:2,input:0, route: None }] };

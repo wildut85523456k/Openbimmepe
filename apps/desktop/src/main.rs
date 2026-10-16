@@ -9,6 +9,8 @@ mod model_view;
 mod model_edit;
 mod automation;
 mod automation_canvas;
+mod automation_groups;
+mod automation_slider;
 mod automation_icons;
 
 use openbim_document::{Document, ElementId};

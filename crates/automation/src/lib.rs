@@ -27,6 +27,7 @@ pub enum NodeKind {
     Dimensions,
     Length { metres: f64 },
     Ratio { value: f64 },
+    Slider { value:f64, min:f64, max:f64, step:f64, quantity:Type },
     /// Numeric expression applied to each input quantity in a separate Python process.
     Python { expression: String, quantity: Type },
     Set { property: Property },
@@ -45,7 +46,7 @@ impl NodeKind {
             Self::Read { property } => property.value_type(),
             Self::Length { .. } | Self::Dimensions => Type::Length,
             Self::Ratio { .. } => Type::Ratio,
-            Self::Python { quantity, .. } => *quantity,
+            Self::Python { quantity, .. } | Self::Slider { quantity,.. } => *quantity,
             _ => Type::Elements,
         }
     }
@@ -76,12 +77,19 @@ pub struct Wire {
 fn is_default_output(id:&u16)->bool { *id==0 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Graph { pub version: u32, pub nodes: Vec<Node>, pub wires: Vec<Wire> }
+pub struct Graph {
+    pub version: u32, pub nodes: Vec<Node>, pub wires: Vec<Wire>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub groups:Vec<Group>,
+}
+#[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Group { pub id:u64, pub title:String, pub nodes:Vec<u64>, pub color:[u8;3] }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     Version, DuplicateNode(u64), MissingNode(u64), InvalidInput(u64, usize),
     DuplicateInput(u64, usize), MissingInput(u64, usize), TypeMismatch(u64, usize),
-    Cycle, InvalidOutput(u64,u16), InvalidNumber(u64), MissingElement(u64), UnsupportedProperty(u64),
+    Cycle, InvalidGroup(u64), InvalidOutput(u64,u16), InvalidNumber(u64), MissingElement(u64), UnsupportedProperty(u64),
     InvalidPythonType(u64), PythonDisabled(u64), Worker(u64, String), Cancelled, GraphLimit, InvalidRoute(u64,usize),
     Cardinality(u64), ConflictingWrite(u64, Property), Document(EditError), Json(String),
 }
@@ -115,7 +123,7 @@ impl Plan {
 }
 impl Graph {
     pub fn example(ids: Vec<u64>) -> Self {
-        Self { version: 1, nodes: vec![
+        Self { version: 1, groups:vec![], nodes: vec![
             Node { id: 1, kind: NodeKind::Selection { ids }, position: [20., 30.] },
             Node { id: 2, kind: NodeKind::Read { property: Property::Elevation }, position: [290., 30.] },
             Node { id: 3, kind: NodeKind::Length { metres: 3. }, position: [20., 210.] },
@@ -137,6 +145,7 @@ impl Graph {
     pub fn validate(&self) -> Result<Vec<u64>, Error> {
         if self.version != 1 { return Err(Error::Version); }
         if self.nodes.len()>10_000 || self.wires.len()>30_000 { return Err(Error::GraphLimit); }
+        if self.groups.len()>1000 { return Err(Error::GraphLimit); }
         let mut nodes = BTreeMap::new();
         for n in &self.nodes {
             if nodes.insert(n.id, n).is_some() { return Err(Error::DuplicateNode(n.id)); }
@@ -144,8 +153,18 @@ impl Graph {
             match n.kind {
                 NodeKind::Length { metres } if !metres.is_finite() => return Err(Error::InvalidNumber(n.id)),
                 NodeKind::Ratio { value } if !value.is_finite() => return Err(Error::InvalidNumber(n.id)),
+                NodeKind::Slider { value,min,max,step,quantity } if
+                    [value,min,max,step].iter().any(|v|!v.is_finite()) || min>=max || step<=0.0 ||
+                    !(max-min).is_finite() || value<min || value>max || quantity==Type::Elements => return Err(Error::InvalidNumber(n.id)),
                 NodeKind::Python { quantity: Type::Elements, .. } => return Err(Error::InvalidPythonType(n.id)),
                 _ => {}
+            }
+        }
+        let mut group_ids=BTreeSet::new();let mut members=BTreeSet::new();
+        for g in &self.groups {
+            if !group_ids.insert(g.id) || g.title.len()>256 || g.nodes.is_empty() ||
+                g.nodes.iter().any(|id|!nodes.contains_key(id) || !members.insert(*id)) {
+                return Err(Error::InvalidGroup(g.id));
             }
         }
         let mut inputs = BTreeSet::new();
@@ -213,7 +232,7 @@ impl Graph {
                     Value::Elements(ids.iter().copied().filter(|id| seen.insert(*id)).collect())
                 }
                 NodeKind::Length { metres } => Value::Quantities(vec![*metres]),
-                NodeKind::Ratio { value } => Value::Quantities(vec![*value]),
+                NodeKind::Ratio { value } | NodeKind::Slider { value,.. } => Value::Quantities(vec![*value]),
                 NodeKind::Python { expression, .. } => {
                     let Value::Quantities(numbers) = input(0) else { unreachable!() };
                     let python = python.ok_or(Error::PythonDisabled(id))?;

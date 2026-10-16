@@ -86,3 +86,10 @@ types, cycles, invalid dimensions, unsupported properties, JSON/versioning and
 composition of independent dimension writes. Run the Cargo tests above with
 registry dependencies available. Visual acceptance requires opening the desktop
 and checking both themes and display scales.
+
+## Visual groups and sliders
+
+Ctrl-click block headers and press Ctrl+G to create a named colored group.
+Drag its title to move its blocks together. Length and Number sliders expose
+Min / Max / Step controls and typed outputs, including in Player. See
+[groups and sliders](automation-groups-sliders.md) for scope and persistence.

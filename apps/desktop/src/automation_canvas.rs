@@ -9,8 +9,9 @@ const ROW: f32 = 28.0;
 
 fn node_rect(origin: Pos2, node: &Node) -> Rect {
     let rows = node.kind.inputs().len().max(node.kind.outputs().len()).max(1);
-    Rect::from_min_size(origin + Vec2::from(node.position), Vec2::new(WIDTH, HEADER + ROW * rows as f32 + 56.0))
+    Rect::from_min_size(origin + Vec2::from(node.position), Vec2::new(WIDTH, HEADER + ROW * rows as f32 + footer_height(&node.kind)))
 }
+fn footer_height(kind:&NodeKind)->f32 {if matches!(kind,NodeKind::Slider {..}) {180.0} else {56.0}}
 
 fn port_position(rect: Rect, input: Option<usize>, output:u16) -> Pos2 {
     egui::pos2(
@@ -64,6 +65,7 @@ fn title(kind: &NodeKind) -> String {
         NodeKind::Set { property } => format!("Set {property:?}"),
         NodeKind::Length { .. } => "Length".into(),
         NodeKind::Ratio { .. } => "Ratio".into(),
+        NodeKind::Slider { .. } => "Number slider".into(),
         NodeKind::Python { .. } => "Python expression".into(),
     }
 }
@@ -84,6 +86,7 @@ fn output_name(kind: &NodeKind) -> String {
         NodeKind::Read { property } => format!("{property:?}").to_lowercase(),
         NodeKind::Length { .. } => "length (m)".into(),
         NodeKind::Ratio { .. } => "ratio".into(),
+        NodeKind::Slider { .. } => "value".into(),
         NodeKind::Python { .. } => "result".into(),
     }
 }
@@ -100,10 +103,17 @@ fn socket(painter: &egui::Painter, cell: Rect, input: bool, connected: bool, col
 }
 
 pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)>, status: &mut String) -> bool {
+    let selection_key=ui.id().with("selected-blocks");
+    let mut selected=ui.ctx().data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(selection_key)).unwrap_or_default();
+    selected.retain(|id|graph.nodes.iter().any(|n|n.id==*id));
+    let group_requested=ui.button("Group selected (Ctrl+G)").clicked() || ui.input_mut(|i|i.consume_key(egui::Modifiers::COMMAND,egui::Key::G));
+    if group_requested {crate::automation_groups::create(graph,&selected);}
+    ui.weak("Click a block header to select; Ctrl-click adds blocks. Right-click a group title to edit or ungroup.");
     ui.label("Drag an output to an input and release. Drag a blue wire to reshape it. Double-click a wire to reset. Esc cancels.");
     ui.weak("Manual execution: Preview passes data through the links. Apply changes updates the model.");
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) { *pending = None; }
-    let (canvas, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 350.0), Sense::hover());
+    let height=graph.nodes.iter().map(|n|node_rect(Pos2::ZERO,n).bottom()+32.0).fold(350.0,f32::max).min(4000.0);
+    let (canvas, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
     let painter = ui.painter().with_clip_rect(canvas);
     let dark = ui.visuals().dark_mode;
     let blue = if dark { Color32::from_rgb(90, 180, 255) } else { Color32::from_rgb(35, 130, 220) };
@@ -111,7 +121,8 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     let body = if dark { Color32::from_gray(61) } else { Color32::from_gray(235) };
     let unconnected = if dark { Color32::from_gray(180) } else { Color32::from_gray(115) };
     painter.rect_filled(canvas, 4.0, ui.visuals().extreme_bg_color);
-    let mut changed = false;
+    let mut changed = group_requested;
+    changed |= crate::automation_groups::show(ui,graph,canvas,&selected,|node|node_rect(canvas.min,node));
     let mut delete = None;
     let mut disconnect = None;
     let mut connect = None;
@@ -121,7 +132,12 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     for node in &mut graph.nodes {
         let rect = node_rect(canvas.min, node);
         let header = Rect::from_min_size(rect.min, Vec2::new(WIDTH, HEADER));
-        let response = ui.interact(header.intersect(canvas), ui.id().with(("node-header", node.id)), Sense::drag());
+        let response = ui.interact(header.intersect(canvas), ui.id().with(("node-header", node.id)), Sense::click_and_drag());
+        if response.clicked() {
+            if ui.input(|i|i.modifiers.command || i.modifiers.ctrl) {
+                if !selected.insert(node.id) {selected.remove(&node.id);}
+            } else {selected.clear();selected.insert(node.id);}
+        }
         if response.dragged() {
             node.position[0] = (node.position[0] + response.drag_delta().x).max(0.0);
             node.position[1] = (node.position[1] + response.drag_delta().y).max(0.0);
@@ -210,7 +226,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         let middle = rect.left() + WIDTH * 0.5;
         painter.rect_filled(rect, 3.0, body);
         painter.rect_filled(header, 3.0, Color32::from_rgb(35, 90, 135));
-        painter.rect_stroke(rect, 3.0, Stroke::new(1.0, separator), StrokeKind::Inside);
+        painter.rect_stroke(rect, 3.0, Stroke::new(if selected.contains(&node.id) {2.5} else {1.0},if selected.contains(&node.id) {blue} else {separator}), StrokeKind::Inside);
         painter.text(header.center(), egui::Align2::CENTER_CENTER,
             format!("{} | {}", node.id, title(&node.kind)), FontId::proportional(13.0), Color32::WHITE);
 
@@ -291,10 +307,11 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     // Edit values directly inside each block, outside the port hit regions.
     for node in &mut graph.nodes {
         let rect=node_rect(canvas.min,node);
-        let editor=Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.bottom()-52.0),rect.right_bottom()-Vec2::splat(8.0));
+        let editor=Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.bottom()-footer_height(&node.kind)+4.0),rect.right_bottom()-Vec2::splat(8.0));
         ui.scope_builder(egui::UiBuilder::new().id_salt(("block-editor",node.id)).max_rect(editor),|ui| {
             ui.set_clip_rect(editor.intersect(canvas));
             match &mut node.kind {
+                kind @ NodeKind::Slider {..} => {changed|=crate::automation_slider::show(ui,kind);}
                 NodeKind::Length { metres } => { changed |= ui.add(egui::DragValue::new(metres).speed(0.01).suffix(" m")).changed(); }
                 NodeKind::Ratio { value } => { changed |= ui.add(egui::DragValue::new(value).speed(0.001)).changed(); }
                 NodeKind::Python { expression,.. } => { changed |= ui.text_edit_singleline(expression).changed(); }
@@ -335,9 +352,12 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     if let Some(id) = delete {
         graph.nodes.retain(|n| n.id != id);
         graph.wires.retain(|w| w.from != id && w.to != id);
+        for group in &mut graph.groups {group.nodes.retain(|member|*member!=id);}
+        graph.groups.retain(|group|!group.nodes.is_empty());
         if pending.is_some_and(|p|p.0==id) { *pending = None; }
         changed = true;
     }
+    ui.ctx().data_mut(|d|d.insert_temp(selection_key,selected));
     changed
 }
 

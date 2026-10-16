@@ -41,7 +41,7 @@ fn slope_graph_uses_ratio_type_and_python_is_unavailable() {
     let s=service();let graph=s.build_property_graph("test",vec![2],Property::Slope,0.02).unwrap();
     assert!(matches!(graph.nodes[2].kind,NodeKind::Ratio { value:0.02 }));
     assert_eq!(s.preview("test",42,&graph,0,10).unwrap().changes[0].after,0.02);
-    let g=Graph { version:1,nodes:vec![
+    let g=Graph { groups:vec![], version:1,nodes:vec![
         Node { id:1,kind:NodeKind::Length { metres:1. },position:[0.,0.] },
         Node { id:2,kind:NodeKind::Python { expression:"x".into(),quantity:Type::Length },position:[0.,0.] },
     ],wires:vec![Wire { output:0, from:1,to:2,input:0, route: None }] };

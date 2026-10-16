@@ -135,6 +135,7 @@ impl McpServer {
                     {"kind":"Dimensions","inputs":["Elements"],"outputs":[{"id":0,"name":"width","type":"Length"},{"id":1,"name":"height","type":"Length"},{"id":2,"name":"elevation","type":"Length"}]},
                     {"kind":"Length","inputs":[],"output":"Length","unit":"metre"},
                     {"kind":"Ratio","inputs":[],"output":"Ratio"},
+                    {"kind":"Slider","inputs":[],"output":"Length or Ratio","fields":["value","min","max","step","quantity"]},
                     {"kind":"Set","inputs":["Elements","Property quantity"],"output":"Elements","effect":"preview only"}],
                     "python_supported":false,"properties":["Width","Height","Elevation","Slope"]}))
             }
@@ -169,12 +170,13 @@ pub fn graph_schema()->Value {
         ("Set",json!({"property":property_schema()}),vec!["property"]),
         ("Length",json!({"metres":{"type":"number"}}),vec!["metres"]),
         ("Ratio",json!({"value":{"type":"number"}}),vec!["value"]),
+        ("Slider",json!({"value":{"type":"number"},"min":{"type":"number"},"max":{"type":"number"},"step":{"type":"number","exclusiveMinimum":0},"quantity":{"enum":["Length","Ratio"]}}),vec!["value","min","max","step","quantity"]),
     ] {
         let mut props=serde_json::Map::new();props.insert(name.into(),object(fields,required));
         kinds.push(object(Value::Object(props),vec![name]));
     }
     kinds.push(json!({"const":"Dimensions"}));
-    object(json!({"version":{"const":1},"nodes":{"type":"array","maxItems":1000,"items":object(json!({
+    object(json!({"version":{"const":1},"groups":{"type":"array","maxItems":1000,"items":object(json!({"id":{"type":"integer","minimum":0},"title":{"type":"string","maxLength":256},"nodes":{"type":"array","minItems":1,"items":{"type":"integer","minimum":0}},"color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"integer","minimum":0,"maximum":255}}}),vec!["id","title","nodes","color"])},"nodes":{"type":"array","maxItems":1000,"items":object(json!({
         "id":{"type":"integer","minimum":0},"kind":{"oneOf":kinds},
         "position":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2}}),vec!["id","kind","position"])},
         "wires":{"type":"array","maxItems":3000,"items":object(json!({"from":{"type":"integer","minimum":0},

@@ -6,6 +6,30 @@ fn document() -> Document {
         name: "Supply".into(), width_m: 0.2, height_m: 0.3, elevation_m: 2.7 }]).unwrap(); d
 }
 #[test]
+fn groups_are_visual_only_and_slider_drives_a_real_input() {
+    let d=document();let mut g=Graph::example(vec![1]);
+    g.nodes[2].kind=NodeKind::Slider {value:4.0,min:0.0,max:10.0,step:0.1,quantity:Type::Length};
+    let baseline=g.preview(&d).unwrap().changes().to_vec();
+    g.groups.push(Group {id:1,title:"Inputs".into(),nodes:vec![1,3],color:[70,120,160]});
+    assert_eq!(g.preview(&d).unwrap().changes(),baseline);
+    let roundtrip=Graph::from_json(&g.to_json().unwrap()).unwrap();assert_eq!(g,roundtrip);
+    assert_eq!(baseline[0].after,4.0);
+    g.groups[0].nodes.push(999);assert_eq!(g.validate(),Err(Error::InvalidGroup(1)));
+}
+#[test]
+fn invalid_slider_settings_and_duplicate_group_members_are_rejected() {
+    let mut g=Graph::example(vec![1]);
+    for kind in [
+        NodeKind::Slider {value:1.0,min:2.0,max:0.0,step:0.1,quantity:Type::Length},
+        NodeKind::Slider {value:11.0,min:0.0,max:10.0,step:0.1,quantity:Type::Length},
+        NodeKind::Slider {value:1.0,min:0.0,max:10.0,step:0.0,quantity:Type::Length},
+        NodeKind::Slider {value:1.0,min:0.0,max:10.0,step:0.1,quantity:Type::Elements},
+    ] {g.nodes[2].kind=kind;assert_eq!(g.validate(),Err(Error::InvalidNumber(3)));}
+    g=Graph::example(vec![1]);
+    g.groups.push(Group {id:1,title:"Inputs".into(),nodes:vec![1,1],color:[0,0,0]});
+    assert_eq!(g.validate(),Err(Error::InvalidGroup(1)));
+}
+#[test]
 fn named_outputs_deliver_distinct_values_and_apply_atomically() {
     let mut d=document(); let mut g=Graph::example(vec![1]);
     g.nodes[1].kind=NodeKind::Dimensions;
@@ -112,7 +136,7 @@ fn scheduler_handles_reverse_order_dependencies() {
         wires.push(Wire { output:0, from:id+1,to:id,input:0, route: None });
         wires.push(Wire { output:0, from:5002,to:id,input:1, route: None });
     }
-    let order=Graph { version:1,nodes,wires }.validate().unwrap();
+    let order=Graph { groups:vec![], version:1,nodes,wires }.validate().unwrap();
     assert_eq!(order.len(),5002);
     assert_eq!(*order.last().unwrap(),1);
 }

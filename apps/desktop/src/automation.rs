@@ -147,6 +147,7 @@ impl Automation {
             ui.horizontal(|ui| {
                 ui.label(format!("Node {}", node.id));
                 match &mut node.kind {
+                    kind @ NodeKind::Slider {..} => {ui.push_id(node.id,|ui| {dirty|=crate::automation_slider::show(ui,kind);});}
                     NodeKind::Dimensions => { ui.label("Width / height / elevation"); },
                 NodeKind::Selection { ids } => {
                         ui.label(format!("Element IDs: {ids:?}"));
@@ -184,6 +185,8 @@ impl Automation {
                     ("Read", NodeKind::Read { property: Property::Elevation }),
                     ("Length", NodeKind::Length { metres: 1. }),
                     ("Ratio", NodeKind::Ratio { value: 0.01 }),
+                    ("Length slider",NodeKind::Slider {value:1.0,min:0.0,max:10.0,step:0.01,quantity:Type::Length}),
+                    ("Number slider",NodeKind::Slider {value:0.5,min:0.0,max:1.0,step:0.01,quantity:Type::Ratio}),
                     ("Python", NodeKind::Python { expression:"x + 0.3".into(),quantity:Type::Length }),
                     ("Set", NodeKind::Set { property: Property::Elevation }),
                 ] {
