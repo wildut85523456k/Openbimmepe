@@ -239,11 +239,11 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
             socket(&painter, cell, true, connected, if connected { blue } else { unconnected });
             painter.text(cell.left_center() + Vec2::new(12.0, 0.0), egui::Align2::LEFT_CENTER,
                 input_name(&node.kind, index), FontId::proportional(12.0), ui.visuals().text_color());
-            if response.clicked() {
-                if !was_connector_drag { if let Some(from) = *pending {
+            if response.clicked() && !was_connector_drag {
+                if let Some(from) = *pending {
                     if compatible { connect = Some(Wire { output:from.1, from:from.0, to: node.id, input: index, route: None }); *pending = None; }
                     else { *status = "Connection rejected: incompatible types or self connection".into(); }
-                } }
+                }
             }
             response.on_hover_text(format!("{} � {ty:?}\nClick to connect; right-click to disconnect", input_name(&node.kind, index))).context_menu(|ui| {
                 if ui.add_enabled(connected, egui::Button::new("Disconnect input")).clicked() {
