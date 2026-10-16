@@ -22,9 +22,10 @@ native file dialogs and automatic saving are not implemented.
 Blocks use input ports on the left and output ports on the right, separated by
 dark lines. Drag an output to a compatible input and release. Each input takes
 one source; a valid replacement affects only that input. One output may feed
-many inputs. Current node kinds each expose one output port: distinct multiple
-output ports remain future work and must be addressed explicitly in graph schema,
-validation, execution and MCP before adding such node kinds.
+many inputs. The Read dimensions block exposes width, height and elevation as separate named
+outputs with fixed numeric IDs. Wires carry an optional output ID (default 0 for
+older graphs). Other current node kinds retain their single output. See
+[multiple ports](automation-multiple-ports.md).
 
 Edit numeric values, properties, Python expressions and element IDs inside the
 block. The existing top-level controls remain available, including in Player.

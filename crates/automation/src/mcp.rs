@@ -132,6 +132,7 @@ impl McpServer {
                 Ok(json!({"graph_schema":graph_schema(),"nodes":[
                     {"kind":"Selection","inputs":[],"output":"Elements"},
                     {"kind":"Read","inputs":["Elements"],"output":"Property quantity"},
+                    {"kind":"Dimensions","inputs":["Elements"],"outputs":[{"id":0,"name":"width","type":"Length"},{"id":1,"name":"height","type":"Length"},{"id":2,"name":"elevation","type":"Length"}]},
                     {"kind":"Length","inputs":[],"output":"Length","unit":"metre"},
                     {"kind":"Ratio","inputs":[],"output":"Ratio"},
                     {"kind":"Set","inputs":["Elements","Property quantity"],"output":"Elements","effect":"preview only"}],
@@ -172,11 +173,13 @@ pub fn graph_schema()->Value {
         let mut props=serde_json::Map::new();props.insert(name.into(),object(fields,required));
         kinds.push(object(Value::Object(props),vec![name]));
     }
+    kinds.push(json!({"const":"Dimensions"}));
     object(json!({"version":{"const":1},"nodes":{"type":"array","maxItems":1000,"items":object(json!({
         "id":{"type":"integer","minimum":0},"kind":{"oneOf":kinds},
         "position":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2}}),vec!["id","kind","position"])},
         "wires":{"type":"array","maxItems":3000,"items":object(json!({"from":{"type":"integer","minimum":0},
             "to":{"type":"integer","minimum":0},"input":{"type":"integer","minimum":0},
+            "output":{"type":"integer","minimum":0,"maximum":65535,"default":0},
             "route":{"type":"array","items":{"type":"integer","minimum":-100000,"maximum":100000},"minItems":2,"maxItems":2}}),vec!["from","to","input"])}}),vec!["version","nodes","wires"])
 }
 pub fn tools()->Vec<Value> {

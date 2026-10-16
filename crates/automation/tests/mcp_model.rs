@@ -44,6 +44,6 @@ fn slope_graph_uses_ratio_type_and_python_is_unavailable() {
     let g=Graph { version:1,nodes:vec![
         Node { id:1,kind:NodeKind::Length { metres:1. },position:[0.,0.] },
         Node { id:2,kind:NodeKind::Python { expression:"x".into(),quantity:Type::Length },position:[0.,0.] },
-    ],wires:vec![Wire { from:1,to:2,input:0, route: None }] };
+    ],wires:vec![Wire { output:0, from:1,to:2,input:0, route: None }] };
     assert!(s.validate(&g).unwrap_err().contains("Python nodes are disabled"));
 }

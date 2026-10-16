@@ -8,6 +8,17 @@ fn request() -> PreviewRequest {
     },graph:Graph::example(vec![1]) }
 }
 #[test]
+fn report_exports_all_named_port_values() {
+    let mut r=request();r.graph.nodes[1].kind=openbim_automation::NodeKind::Dimensions;
+    let report=r.evaluate(None,&AtomicBool::new(false)).unwrap();
+    let json=serde_json::to_string(&report).unwrap();
+    let restored:PreviewResponse=serde_json::from_str(&json).unwrap();
+    let outputs:Vec<_>=restored.outputs.iter().filter(|o|o.node==2).collect();
+    assert_eq!(outputs.len(),3);
+    assert_eq!(outputs[1].port,1);
+    assert_eq!(outputs[1].value,openbim_automation::Value::Quantities(vec![0.3]));
+}
+#[test]
 fn snapshot_report_preserves_source_identity_and_revision() {
     let request=request();
     let response=request.evaluate(None,&AtomicBool::new(false)).unwrap();

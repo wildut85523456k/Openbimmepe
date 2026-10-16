@@ -8,14 +8,14 @@ const HEADER: f32 = 30.0;
 const ROW: f32 = 28.0;
 
 fn node_rect(origin: Pos2, node: &Node) -> Rect {
-    let rows = node.kind.inputs().len().max(1);
+    let rows = node.kind.inputs().len().max(node.kind.outputs().len()).max(1);
     Rect::from_min_size(origin + Vec2::from(node.position), Vec2::new(WIDTH, HEADER + ROW * rows as f32 + 56.0))
 }
 
-fn port_position(rect: Rect, input: Option<usize>) -> Pos2 {
+fn port_position(rect: Rect, input: Option<usize>, output:u16) -> Pos2 {
     egui::pos2(
         if input.is_some() { rect.left() } else { rect.right() },
-        rect.top() + HEADER + ROW * (input.unwrap_or(0) as f32 + 0.5),
+        rect.top() + HEADER + ROW * (input.unwrap_or(output as usize) as f32 + 0.5),
     )
 }
 
@@ -59,6 +59,7 @@ fn near_curve(start: Pos2, end: Pos2, pointer: Pos2) -> Option<Pos2> {
 fn title(kind: &NodeKind) -> String {
     match kind {
         NodeKind::Selection { .. } => "Select elements".into(),
+        NodeKind::Dimensions => "Read dimensions".into(),
         NodeKind::Read { property } => format!("Read {property:?}"),
         NodeKind::Set { property } => format!("Set {property:?}"),
         NodeKind::Length { .. } => "Length".into(),
@@ -69,7 +70,7 @@ fn title(kind: &NodeKind) -> String {
 
 fn input_name(kind: &NodeKind, index: usize) -> String {
     match (kind, index) {
-        (NodeKind::Read { .. } | NodeKind::Set { .. }, 0) => "elements".into(),
+        (NodeKind::Read { .. } | NodeKind::Set { .. } | NodeKind::Dimensions, 0) => "elements".into(),
         (NodeKind::Set { property }, 1) => format!("{property:?}").to_lowercase(),
         (NodeKind::Python { .. }, 0) => "x".into(),
         _ => "input".into(),
@@ -79,6 +80,7 @@ fn input_name(kind: &NodeKind, index: usize) -> String {
 fn output_name(kind: &NodeKind) -> String {
     match kind {
         NodeKind::Selection { .. } | NodeKind::Set { .. } => "elements".into(),
+        NodeKind::Dimensions => "Read dimensions".into(),
         NodeKind::Read { property } => format!("{property:?}").to_lowercase(),
         NodeKind::Length { .. } => "length (m)".into(),
         NodeKind::Ratio { .. } => "ratio".into(),
@@ -97,7 +99,7 @@ fn socket(painter: &egui::Painter, cell: Rect, input: bool, connected: bool, col
     painter.rect_stroke(tab, 0.0, Stroke::new(1.2, color), StrokeKind::Inside);
 }
 
-pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, status: &mut String) -> bool {
+pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)>, status: &mut String) -> bool {
     ui.label("Drag an output to an input and release. Drag a blue wire to reshape it. Double-click a wire to reset. Esc cancels.");
     ui.weak("Manual execution: Preview passes data through the links. Apply changes updates the model.");
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) { *pending = None; }
@@ -138,11 +140,13 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
     // the gesture. Include the visible edge and a small outside hit margin.
     if !cancelled && ui.input(|i|i.pointer.button_pressed(egui::PointerButton::Primary)) {
         if let Some(pointer)=ui.ctx().pointer_interact_pos().filter(|p|canvas.contains(*p)) {
-            if let Some(node)=graph.nodes.iter().rev().find(|n| {
+            if let Some((node,output))=graph.nodes.iter().rev().find_map(|n| {
                 let rect=node_rect(canvas.min,n);
-                Rect::from_min_max(egui::pos2(rect.center().x,rect.top()+HEADER),egui::pos2(rect.right()+10.0,rect.top()+HEADER+ROW)).contains(pointer)
+                n.kind.outputs().into_iter().enumerate().find_map(|(row,(id,_,_))| {
+                    Rect::from_min_max(egui::pos2(rect.center().x,rect.top()+HEADER+row as f32*ROW),egui::pos2(rect.right()+10.0,rect.top()+HEADER+(row+1) as f32*ROW)).contains(pointer).then_some((n,id))
+                })
             }) {
-                *pending=Some(node.id);
+                *pending=Some((node.id,output));
                 ui.ctx().data_mut(|data|data.insert_temp(drag_key,true));
             }
         }
@@ -155,8 +159,8 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
             graph.nodes.iter().find(|n| n.id == connection.from),
             graph.nodes.iter().find(|n| n.id == connection.to),
         ) {
-            let start = port_position(node_rect(canvas.min, source),None);
-            let end = port_position(node_rect(canvas.min, target),Some(connection.input));
+            let start = port_position(node_rect(canvas.min, source),None,connection.output);
+            let end = port_position(node_rect(canvas.min, target),Some(connection.input),0);
             let mut handle = route_point(start,end,connection.route);
             let pointer = ui.ctx().pointer_hover_pos().filter(|p|canvas.contains(*p));
             let blocked = pointer.is_some_and(|p|graph.nodes.iter().any(|n|node_rect(canvas.min,n).contains(p)));
@@ -171,7 +175,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
             } else if !blocked && pending.is_none() {
                 Rect::from_center_size(handle,Vec2::splat(14.0)).intersect(canvas)
             } else { Rect::from_min_size(canvas.min,Vec2::ZERO) };
-            let response = ui.interact(hit,ui.id().with(("wire-route",connection.from,connection.to,connection.input)),Sense::click_and_drag());
+            let response = ui.interact(hit,ui.id().with(("wire-route",connection.from,connection.output,connection.to,connection.input)),Sense::click_and_drag());
             if response.double_clicked() {
                 connection.route=None;
                 handle=route_point(start,end,None);
@@ -195,9 +199,9 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
             response.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text("Drag to change the wire path; release to keep it. Double-click to restore the automatic curve.");
         }
     }
-    if let Some(source) = pending.and_then(|id| graph.nodes.iter().find(|n| n.id == id)) {
+    if let Some(source) = pending.and_then(|(id,_)| graph.nodes.iter().find(|n| n.id == id)) {
         if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| canvas.contains(*p)) {
-            wire(&painter, port_position(node_rect(canvas.min, source), None), pointer, blue.gamma_multiply(0.75), 2.0);
+            wire(&painter, port_position(node_rect(canvas.min, source), None,pending.unwrap().1), pointer, blue.gamma_multiply(0.75), 2.0);
         }
     }
     for node in &graph.nodes {
@@ -211,7 +215,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
             format!("{} | {}", node.id, title(&node.kind)), FontId::proportional(13.0), Color32::WHITE);
 
         let inputs = node.kind.inputs();
-        let rows = inputs.len().max(1);
+        let rows = inputs.len().max(node.kind.outputs().len()).max(1);
         painter.line_segment([egui::pos2(middle, header.bottom()), egui::pos2(middle, rect.bottom())], Stroke::new(1.0, separator));
         for row in 0..rows {
             let top = header.bottom() + row as f32 * ROW;
@@ -225,8 +229,8 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
             if ui.ctx().pointer_interact_pos().is_some_and(|p|canvas.contains(p) && cell.expand2(Vec2::new(10.0,0.0)).contains(p)) {
                 connection_target=Some((node.id,index));
             }
-            let compatible = pending.and_then(|id| graph.nodes.iter().find(|n| n.id == id))
-                .is_some_and(|source| source.id != node.id && source.kind.output() == *ty);
+            let compatible = pending.and_then(|(id,_)| graph.nodes.iter().find(|n| n.id == id))
+                .is_some_and(|source| source.id != node.id && source.kind.output_type(pending.unwrap().1) == Some(*ty));
             if response.hovered() {
                 let color = if pending.is_none() || compatible { blue } else { Color32::from_rgb(210, 70, 65) };
                 painter.rect_filled(cell.shrink(1.0), 0.0, color.gamma_multiply(0.16));
@@ -237,7 +241,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
                 input_name(&node.kind, index), FontId::proportional(12.0), ui.visuals().text_color());
             if response.clicked() {
                 if !was_connector_drag { if let Some(from) = *pending {
-                    if compatible { connect = Some(Wire { from, to: node.id, input: index, route: None }); *pending = None; }
+                    if compatible { connect = Some(Wire { output:from.1, from:from.0, to: node.id, input: index, route: None }); *pending = None; }
                     else { *status = "Connection rejected: incompatible types or self connection".into(); }
                 } }
             }
@@ -247,26 +251,28 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
                 }
             });
         }
-        let cell = Rect::from_min_size(egui::pos2(middle, header.bottom()), Vec2::new(WIDTH * 0.5, ROW));
-        let selected = *pending == Some(node.id);
-        let response = ui.interact(cell.intersect(canvas), ui.id().with(("output-row", node.id)), Sense::click_and_drag());
+        for (row,(output,name,ty)) in node.kind.outputs().into_iter().enumerate() {
+        let cell = Rect::from_min_size(egui::pos2(middle, header.bottom()+row as f32*ROW), Vec2::new(WIDTH * 0.5, ROW));
+        let selected = *pending == Some((node.id,output));
+        let response = ui.interact(cell.intersect(canvas), ui.id().with(("output-row", node.id,output)), Sense::click_and_drag());
         if selected || response.hovered() { painter.rect_filled(cell.shrink(1.0), 0.0, blue.gamma_multiply(0.16)); }
-        let connected = graph.wires.iter().any(|w| w.from == node.id);
+        let connected = graph.wires.iter().any(|w| w.from == node.id && w.output==output);
         socket(&painter, cell, false, connected || selected, if connected || selected { blue } else { unconnected });
         painter.text(cell.right_center() - Vec2::new(12.0, 0.0), egui::Align2::RIGHT_CENTER,
-            output_name(&node.kind), FontId::proportional(12.0), ui.visuals().text_color());
+            if matches!(node.kind,NodeKind::Dimensions) {name.to_owned()} else {output_name(&node.kind)}, FontId::proportional(12.0), ui.visuals().text_color());
         if !cancelled && (response.drag_started() || response.dragged()) {
-            *pending=Some(node.id);
+            *pending=Some((node.id,output));
             ui.ctx().data_mut(|data|data.insert_temp(drag_key,true));
-        } else if response.clicked() && !was_connector_drag { *pending = if selected { None } else { Some(node.id) }; }
-        response.on_hover_text(format!("{} | {:?}\nDrag to a compatible input and release; click-click also works", output_name(&node.kind), node.kind.output()));
+        } else if response.clicked() && !was_connector_drag { *pending = if selected { None } else { Some((node.id,output)) }; }
+        response.on_hover_text(format!("{name} | {ty:?}\nDrag to a compatible input and release; click-click also works"));
+        }
     }
     if was_connector_drag && !cancelled && ui.input(|i|i.pointer.button_released(egui::PointerButton::Primary)) {
-        if let (Some(from),Some((to,input)))=(*pending,connection_target) {
+        if let (Some((from,output)),Some((to,input)))=(*pending,connection_target) {
             let source=graph.nodes.iter().find(|n|n.id==from);
             let target=graph.nodes.iter().find(|n|n.id==to);
-            if source.zip(target).is_some_and(|(s,t)|s.id!=t.id && t.kind.inputs().get(input)==Some(&s.kind.output())) {
-                connect=Some(Wire { from,to,input,route:None });
+            if source.zip(target).is_some_and(|(s,t)|s.id!=t.id && t.kind.inputs().get(input)==s.kind.output_type(output).as_ref()) {
+                connect=Some(Wire { output, from,to,input,route:None });
                 *status="Connected. Click Preview to evaluate the graph.".into();
             } else { *status="Connection rejected: incompatible connector types".into(); }
             *pending=None;
@@ -299,6 +305,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
                         }
                     });
                 }
+                NodeKind::Dimensions => { ui.label("Width / height / elevation"); },
                 NodeKind::Selection { ids } => {
                     let key=ui.id().with("selection-text");
                     let mut text=ui.ctx().data(|d|d.get_temp::<String>(key)).unwrap_or_else(||ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", "));
@@ -328,7 +335,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
     if let Some(id) = delete {
         graph.nodes.retain(|n| n.id != id);
         graph.wires.retain(|w| w.from != id && w.to != id);
-        if *pending == Some(id) { *pending = None; }
+        if pending.is_some_and(|p|p.0==id) { *pending = None; }
         changed = true;
     }
     changed
@@ -339,7 +346,7 @@ mod tests {
     use super::*;
     use egui::{Event,Modifiers,PointerButton,RawInput};
 
-    fn frame(ctx:&egui::Context,graph:&mut Graph,pending:&mut Option<u64>,events:Vec<Event>)->egui::FullOutput {
+    fn frame(ctx:&egui::Context,graph:&mut Graph,pending:&mut Option<(u64,u16)>,events:Vec<Event>)->egui::FullOutput {
         let mut output=ctx.run_ui(RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1000.0,600.0))),events,..Default::default() },|ui| {
             egui::ScrollArea::vertical().show(ui,|ui| { show(ui,graph,pending,&mut String::new()); });
         });
@@ -351,6 +358,22 @@ mod tests {
     }
     fn first_curve(output:&egui::FullOutput)->egui::epaint::CubicBezierShape {
         output.shapes.iter().find_map(|s|if let egui::Shape::CubicBezier(curve)=&s.shape {Some(curve.clone())}else{None}).expect("Visible wire")
+    }
+    #[test]
+    fn second_output_socket_connects_and_preserves_other_outputs() {
+        let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
+        graph.nodes[1].kind=NodeKind::Dimensions;
+        let shape=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![]));
+        // First curve ends at the Dimensions input; its output is WIDTH to the right.
+        let start=shape.points[3]+Vec2::new(WIDTH-3.0,ROW);
+        let output=frame(&ctx,&mut graph,&mut pending,vec![]);
+        let curves:Vec<_>=output.shapes.iter().filter_map(|s|if let egui::Shape::CubicBezier(c)=&s.shape {Some(c)}else{None}).collect();
+        let finish=curves.last().unwrap().points[3]+Vec2::new(3.0,0.0);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(finish),button(finish,false)]);
+        assert!(graph.wires.iter().any(|w|w.from==2 && w.output==1 && w.to==4 && w.input==1));
+        assert!(graph.wires.iter().any(|w|w.from==1 && w.to==4 && w.input==0));
+        graph.validate().unwrap();
     }
     #[test]
     fn socket_edge_drag_in_one_motion_keeps_output_fanout() {
@@ -412,4 +435,3 @@ mod tests {
         assert!(pending.is_none());
     }
 }
-

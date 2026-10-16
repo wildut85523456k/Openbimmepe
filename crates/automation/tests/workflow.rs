@@ -6,6 +6,31 @@ fn document() -> Document {
         name: "Supply".into(), width_m: 0.2, height_m: 0.3, elevation_m: 2.7 }]).unwrap(); d
 }
 #[test]
+fn named_outputs_deliver_distinct_values_and_apply_atomically() {
+    let mut d=document(); let mut g=Graph::example(vec![1]);
+    g.nodes[1].kind=NodeKind::Dimensions;
+    g.nodes[3].kind=NodeKind::Set { property:Property::Width };
+    g.wires[2].from=2; g.wires[2].output=1;
+    let plan=g.preview(&d).unwrap();
+    assert_eq!(plan.port_values()[&(2,0)],Value::Quantities(vec![0.2]));
+    assert_eq!(plan.port_values()[&(2,1)],Value::Quantities(vec![0.3]));
+    assert_eq!(plan.port_values()[&(2,2)],Value::Quantities(vec![2.7]));
+    let json=g.to_json().unwrap(); assert!(json.contains("\"output\": 1"));
+    assert_eq!(Graph::from_json(&json).unwrap(),g);
+    plan.apply(&mut d).unwrap(); assert_eq!(d.get(ElementId(1)).unwrap().width_m,0.3);
+    d.undo().unwrap(); assert_eq!(d.get(ElementId(1)).unwrap().width_m,0.2);
+    g.wires[2].output=17;
+    assert_eq!(g.validate(),Err(Error::InvalidOutput(2,17)));
+}
+#[test]
+fn legacy_wires_default_to_first_output() {
+    let json=Graph::example(vec![1]).to_json().unwrap();
+    assert!(!json.contains("\"output\""));
+    let graph=Graph::from_json(&json).unwrap();
+    assert!(graph.wires.iter().all(|w|w.output==0));
+    assert!(graph.preview(&document()).is_ok());
+}
+#[test]
 fn preview_apply_undo_and_idempotent_rerun() {
     let mut d = document(); let before = d.clone(); let g = Graph::example(vec![1]);
     let plan = g.preview(&d).unwrap();
@@ -62,7 +87,7 @@ fn independent_width_and_height_writes_compose() {
     g.nodes[3].kind = NodeKind::Set { property: Property::Width };
     g.nodes.push(Node { id:5,kind:NodeKind::Length { metres:2. },position:[0.,0.] });
     g.nodes.push(Node { id:6,kind:NodeKind::Set { property:Property::Height },position:[0.,0.] });
-    g.wires.extend([Wire { from:1,to:6,input:0, route: None },Wire { from:5,to:6,input:1, route: None }]);
+    g.wires.extend([Wire { output:0, from:1,to:6,input:0, route: None },Wire { output:0, from:5,to:6,input:1, route: None }]);
     g.preview(&d).unwrap().apply(&mut d).unwrap();
     let e = d.get(ElementId(1)).unwrap(); assert_eq!((e.width_m,e.height_m),(3.,2.));
 }
@@ -71,7 +96,7 @@ fn independent_width_and_height_writes_compose() {
 fn duplicate_writers_and_invalid_layout_are_rejected() {
     let mut g=Graph::example(vec![1]);
     g.nodes.push(Node { id:5,kind:NodeKind::Set { property:Property::Elevation },position:[0.,0.] });
-    g.wires.extend([Wire { from:1,to:5,input:0, route: None },Wire { from:3,to:5,input:1, route: None }]);
+    g.wires.extend([Wire { output:0, from:1,to:5,input:0, route: None },Wire { output:0, from:3,to:5,input:1, route: None }]);
     assert!(matches!(g.preview(&document()),Err(Error::ConflictingWrite(1,Property::Elevation))));
     let mut g=Graph::example(vec![1]);g.nodes[0].position[0]=f32::NAN;
     assert_eq!(g.validate(),Err(Error::InvalidNumber(1)));
@@ -84,8 +109,8 @@ fn scheduler_handles_reverse_order_dependencies() {
     let mut wires=Vec::new();
     for id in 1..=5000 {
         nodes.push(Node { id,kind:NodeKind::Set { property:Property::Elevation },position:[0.,0.] });
-        wires.push(Wire { from:id+1,to:id,input:0, route: None });
-        wires.push(Wire { from:5002,to:id,input:1, route: None });
+        wires.push(Wire { output:0, from:id+1,to:id,input:0, route: None });
+        wires.push(Wire { output:0, from:5002,to:id,input:1, route: None });
     }
     let order=Graph { version:1,nodes,wires }.validate().unwrap();
     assert_eq!(order.len(),5002);

@@ -10,8 +10,9 @@ an existing connection. Escape cancels. The earlier click-output/click-input
 gesture remains supported.
 
 An output may feed several inputs. Each input accepts one source; replacing it
-preserves other outgoing links. Current node kinds expose one output port each;
-multiple distinct outputs are not yet supported. Edge-drop regression tests run
+preserves other outgoing links. Read dimensions exposes three distinct outputs (width, height, elevation);
+other current node kinds retain one output. Each outgoing wire records its
+source output ID. See [multiple ports](automation-multiple-ports.md). Edge-drop regression tests run
 inside the scrolling canvas and cover a press/move/release in one motion.
 
 ## Edit a block

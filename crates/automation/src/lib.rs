@@ -24,6 +24,7 @@ impl Property {
 pub enum NodeKind {
     Selection { ids: Vec<u64> },
     Read { property: Property },
+    Dimensions,
     Length { metres: f64 },
     Ratio { value: f64 },
     /// Numeric expression applied to each input quantity in a separate Python process.
@@ -33,7 +34,7 @@ pub enum NodeKind {
 impl NodeKind {
     pub fn inputs(&self) -> Vec<Type> {
         match self {
-            Self::Read { .. } => vec![Type::Elements],
+            Self::Read { .. } | Self::Dimensions => vec![Type::Elements],
             Self::Python { quantity, .. } => vec![*quantity],
             Self::Set { property } => vec![Type::Elements, property.value_type()],
             _ => vec![],
@@ -42,11 +43,20 @@ impl NodeKind {
     pub fn output(&self) -> Type {
         match self {
             Self::Read { property } => property.value_type(),
-            Self::Length { .. } => Type::Length,
+            Self::Length { .. } | Self::Dimensions => Type::Length,
             Self::Ratio { .. } => Type::Ratio,
             Self::Python { quantity, .. } => *quantity,
             _ => Type::Elements,
         }
+    }
+    /// IDs are persistent identifiers, independent of displayed names/order.
+    pub fn outputs(&self) -> Vec<(u16, &'static str, Type)> {
+        if matches!(self,Self::Dimensions) {
+            vec![(0,"width",Type::Length),(1,"height",Type::Length),(2,"elevation",Type::Length)]
+        } else { vec![(0,"result",self.output())] }
+    }
+    pub fn output_type(&self,id:u16)->Option<Type> {
+        self.outputs().into_iter().find(|p|p.0==id).map(|p|p.2)
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,12 +65,15 @@ pub struct Node { pub id: u64, pub kind: NodeKind, pub position: [f32; 2] }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Wire {
+    #[serde(default, skip_serializing_if="is_default_output")]
+    pub output: u16,
     pub from: u64, pub to: u64, pub input: usize,
     /// Optional visual waypoint offset from the midpoint of the two ports.
     /// This changes the displayed route only, never graph execution.
     #[serde(default, skip_serializing_if="Option::is_none")]
     pub route: Option<[i32; 2]>,
 }
+fn is_default_output(id:&u16)->bool { *id==0 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Graph { pub version: u32, pub nodes: Vec<Node>, pub wires: Vec<Wire> }
@@ -68,7 +81,7 @@ pub struct Graph { pub version: u32, pub nodes: Vec<Node>, pub wires: Vec<Wire> 
 pub enum Error {
     Version, DuplicateNode(u64), MissingNode(u64), InvalidInput(u64, usize),
     DuplicateInput(u64, usize), MissingInput(u64, usize), TypeMismatch(u64, usize),
-    Cycle, InvalidNumber(u64), MissingElement(u64), UnsupportedProperty(u64),
+    Cycle, InvalidOutput(u64,u16), InvalidNumber(u64), MissingElement(u64), UnsupportedProperty(u64),
     InvalidPythonType(u64), PythonDisabled(u64), Worker(u64, String), Cancelled, GraphLimit, InvalidRoute(u64,usize),
     Cardinality(u64), ConflictingWrite(u64, Property), Document(EditError), Json(String),
 }
@@ -84,10 +97,12 @@ pub struct Plan {
     commands: Vec<Command>,
     changes: Vec<Change>,
     values: BTreeMap<u64, Value>,
+    port_values: BTreeMap<(u64,u16),Value>,
 }
 impl Plan {
     pub fn changes(&self) -> &[Change] { &self.changes }
     pub fn values(&self) -> &BTreeMap<u64, Value> { &self.values }
+    pub fn port_values(&self) -> &BTreeMap<(u64,u16),Value> { &self.port_values }
     pub fn apply(self, document: &mut Document) -> Result<u64, Error> {
         if *document != self.snapshot {
             return Err(Error::Document(EditError::RevisionConflict {
@@ -106,8 +121,8 @@ impl Graph {
             Node { id: 3, kind: NodeKind::Length { metres: 3. }, position: [20., 210.] },
             Node { id: 4, kind: NodeKind::Set { property: Property::Elevation }, position: [560., 130.] },
         ], wires: vec![
-            Wire { from: 1, to: 2, input: 0, route: None }, Wire { from: 1, to: 4, input: 0, route: None },
-            Wire { from: 3, to: 4, input: 1, route: None },
+            Wire { output:0, from: 1, to: 2, input: 0, route: None }, Wire { output:0, from: 1, to: 4, input: 0, route: None },
+            Wire { output:0, from: 3, to: 4, input: 1, route: None },
         ] }
     }
     pub fn to_json(&self) -> Result<String, Error> {
@@ -143,7 +158,8 @@ impl Graph {
             let ports = to.kind.inputs();
             let expected = ports.get(w.input).ok_or(Error::InvalidInput(w.to, w.input))?;
             if !inputs.insert((w.to, w.input)) { return Err(Error::DuplicateInput(w.to, w.input)); }
-            if *expected != from.kind.output() { return Err(Error::TypeMismatch(w.to, w.input)); }
+            let actual=from.kind.output_type(w.output).ok_or(Error::InvalidOutput(w.from,w.output))?;
+            if *expected != actual { return Err(Error::TypeMismatch(w.to, w.input)); }
         }
         for n in &self.nodes {
             for i in 0..n.kind.inputs().len() {
@@ -177,6 +193,7 @@ impl Graph {
     pub fn preview_with(&self, document: &Document, python: Option<&worker::PythonWorker>, cancel: &AtomicBool) -> Result<Plan, Error> {
         let order = self.validate()?;
         let mut values = BTreeMap::new();
+        let mut port_values = BTreeMap::new();
         let mut commands = Vec::new();
         let mut changes = Vec::new();
         let mut writes = BTreeSet::new();
@@ -185,7 +202,7 @@ impl Graph {
             let node = self.nodes.iter().find(|n| n.id == id).expect("validated node");
             let input = |i| {
                 let wire = self.wires.iter().find(|w| w.to == id && w.input == i).expect("validated input");
-                values.get(&wire.from).expect("topological input")
+                port_values.get(&(wire.from,wire.output)).expect("topological input")
             };
             let value = match &node.kind {
                 NodeKind::Selection { ids } => {
@@ -203,6 +220,14 @@ impl Graph {
                     Value::Quantities(python.evaluate(expression, numbers, cancel).map_err(|e| {
                         if cancel.load(Ordering::Relaxed) { Error::Cancelled } else { Error::Worker(id, e) }
                     })?)
+                }
+                NodeKind::Dimensions => {
+                    let Value::Elements(ids) = input(0) else { unreachable!() };
+                    let ids=ids.clone();
+                    for (port,property) in [(0,Property::Width),(1,Property::Height),(2,Property::Elevation)] {
+                        port_values.insert((id,port),Value::Quantities(ids.iter().map(|eid|read(document,*eid,property)).collect::<Result<_,_>>()?));
+                    }
+                    port_values.get(&(id,0)).unwrap().clone()
                 }
                 NodeKind::Read { property } => {
                     let Value::Elements(ids) = input(0) else { unreachable!() };
@@ -233,6 +258,7 @@ impl Graph {
                     Value::Elements(ids.clone())
                 }
             };
+            port_values.insert((id,0),value.clone());
             values.insert(id, value);
         }
         // Compose independent dimension edits using all proposed changes.
@@ -249,7 +275,7 @@ impl Graph {
             let mut trial = document.clone();
             trial.transact(document.revision(), &commands).map_err(Error::Document)?;
         }
-        Ok(Plan { snapshot: document.clone(), commands, changes, values })
+        Ok(Plan { snapshot: document.clone(), commands, changes, values, port_values })
     }
 }
 fn read(document: &Document, id: u64, property: Property) -> Result<f64, Error> {

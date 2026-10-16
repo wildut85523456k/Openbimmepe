@@ -67,7 +67,11 @@ pub struct PreviewResponse {
     pub source_revision: u64,
     pub changes: Vec<Change>,
     pub values: BTreeMap<u64, Value>,
+    #[serde(default)]
+    pub outputs: Vec<OutputValue>,
 }
+#[derive(Clone,Debug,Serialize,Deserialize)]
+pub struct OutputValue { pub node:u64, pub port:u16, pub value:Value }
 impl Snapshot {
     pub fn to_json(&self)->Result<String,String> {
         serde_json::to_string_pretty(self).map_err(|e|e.to_string())
@@ -121,6 +125,7 @@ impl PreviewRequest {
         let document = self.snapshot.materialize()?;
         let plan = self.graph.preview_with(&document,python,cancel).map_err(|e|format!("{e:?}"))?;
         Ok(PreviewResponse { version:1, request_id:self.request_id.clone(), document_id:self.snapshot.document_id.clone(),
-            source_revision:self.snapshot.revision, changes:plan.changes().to_vec(), values:plan.values().clone() })
+            source_revision:self.snapshot.revision, changes:plan.changes().to_vec(), values:plan.values().clone(),
+            outputs:plan.port_values().iter().map(|(&(node,port),value)|OutputValue {node,port,value:value.clone()}).collect() })
     }
 }

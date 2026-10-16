@@ -6,7 +6,7 @@ fn python_requires_host_enable_and_cannot_claim_element_types() {
     let mut g=Graph { version:1,nodes:vec![
         Node { id:1,kind:NodeKind::Length { metres:2. },position:[0.,0.] },
         Node { id:2,kind:NodeKind::Python { expression:"x+1".into(),quantity:Type::Length },position:[0.,0.] },
-    ],wires:vec![Wire { from:1,to:2,input:0, route: None }] };
+    ],wires:vec![Wire { output:0, from:1,to:2,input:0, route: None }] };
     assert!(matches!(g.preview(&Document::new()),Err(Error::PythonDisabled(2))));
     assert!(matches!(g.preview_with(&Document::new(),None,&AtomicBool::new(true)),Err(Error::Cancelled)));
     g.nodes[1].kind=NodeKind::Python { expression:"x".into(),quantity:Type::Elements };

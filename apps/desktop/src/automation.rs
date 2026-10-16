@@ -10,7 +10,7 @@ impl Drop for Job {
 }
 
 pub struct Automation {
-    graph: Graph, plan: Option<Plan>, pending: Option<u64>,
+    graph: Graph, plan: Option<Plan>, pending: Option<(u64,u16)>,
     pub player: bool, json: String, show_json: bool, status: String, history: Vec<String>,
     job: Option<Job>, python_enabled: bool, python_executable: String,
     runner_json: Option<String>,
@@ -147,7 +147,8 @@ impl Automation {
             ui.horizontal(|ui| {
                 ui.label(format!("Node {}", node.id));
                 match &mut node.kind {
-                    NodeKind::Selection { ids } => {
+                    NodeKind::Dimensions => { ui.label("Width / height / elevation"); },
+                NodeKind::Selection { ids } => {
                         ui.label(format!("Element IDs: {ids:?}"));
                         if ui.button("Use all document elements").clicked() { *ids = document.elements().map(|e| e.id.0).collect(); dirty = true; }
                     }
@@ -179,6 +180,7 @@ impl Automation {
                 ui.label("Add:");
                 for (label, kind) in [
                     ("Selection", NodeKind::Selection { ids: vec![] }),
+                    ("Dimensions", NodeKind::Dimensions),
                     ("Read", NodeKind::Read { property: Property::Elevation }),
                     ("Length", NodeKind::Length { metres: 1. }),
                     ("Ratio", NodeKind::Ratio { value: 0.01 }),
@@ -197,7 +199,7 @@ impl Automation {
         if dirty { self.job=None; self.plan = None; }
         if let Some(plan) = &self.plan {
             ui.collapsing("Proposed changes",|ui| { for c in plan.changes() { ui.label(format!("Element {} | {:?}: {} -> {}",c.element,c.property,c.before,c.after)); } });
-            ui.collapsing("Watch outputs",|ui| { for (id,value) in plan.values() { ui.label(format!("Node {id}: {value:?}")); } });
+            ui.collapsing("Watch outputs",|ui| { for ((id,port),value) in plan.port_values() { ui.label(format!("Node {id}, output {port}: {value:?}")); } });
         }
         ui.collapsing("Run history (session)",|ui| { for entry in &self.history { ui.label(entry); } });
         applied

@@ -19,9 +19,9 @@ Right-click an input row to disconnect only that input. Replacing a connection
 preserves the existing one-input/one-source rule. The whole port row is a hit
 target and its tooltip reports the port's quantity/element type.
 
-An output supports multiple outgoing wires; each input has one source. Current
-node kinds have one output port each. Distinct multiple output ports remain a
-future schema/runtime increment. Block footers provide inline numeric, property,
+An output supports multiple outgoing wires; each input has one source. Read dimensions exposes three separate outputs: width (0), height (1), elevation
+(2). Other current node kinds have one output. Connections retain these fixed IDs
+independently of display names. See [multiple ports](automation-multiple-ports.md). Block footers provide inline numeric, property,
 expression and element-ID editors. Socket hit targets include the outside edge;
 drop detection uses pointer geometry rather than widget hover ownership.
 
