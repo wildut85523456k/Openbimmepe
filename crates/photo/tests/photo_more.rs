@@ -48,6 +48,8 @@ fn c_planes_fold_by_each_symmetry() {
     for c in [0.0, 100.0, -50.0, 359.0] {
         assert!(close(a.intensity(c, 45.0), 77.0, 1e-12));
     }
+    // the full circle is an ordinary table, no note
+    assert!(n.notes.is_empty(), "{:?}", n.notes);
     // angles that fit no pattern are taken as given, with a note
     let u = plane_values(&[10.0, 50.0], &[10.0, 20.0]);
     assert_eq!(u.symmetry, Symmetry::None);
@@ -186,8 +188,13 @@ fn eulumdat_stores_the_planes_each_symmetry_asks_for() {
     // the same with the list of C angles holding every plane, or a count that fits neither
     l.cs = (0..8).map(|k| k as f64 * 45.0).collect();
     assert_eq!(read(&l).unwrap().c, vec![0.0, 45.0, 90.0]);
-    l.cs = vec![0.0, 45.0, 90.0, 135.0, 180.0];
-    assert_eq!(read(&l).unwrap().c, vec![0.0, 45.0, 90.0]);
+    // (the intensities must still be the ones that were written, whatever the length of the C list)
+    for cs in [vec![0.0, 45.0, 90.0, 135.0, 180.0], vec![0.0; 11]] {
+        l.cs = cs;
+        let q = read(&l).unwrap();
+        assert_eq!(q.c, vec![0.0, 45.0, 90.0]);
+        assert!(close(q.intensity(0.0, 45.0), 10.0, 1e-9) && close(q.intensity(45.0, 45.0), 20.0, 1e-9) && close(q.intensity(90.0, 45.0), 30.0, 1e-9));
+    }
     // without a C step the angles of the file are used
     l.dc = 0.0;
     l.cs = vec![0.0, 20.0, 70.0];
