@@ -469,6 +469,8 @@ pub fn parse(bytes: &[u8], name: &str) -> Result<Photometry, PhotoError> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Imported {
     pub name: String,
+    /// the file's own bytes, to keep in the project exactly as the manufacturer wrote them
+    pub data: Vec<u8>,
     pub result: Result<Photometry, PhotoError>,
 }
 
@@ -482,15 +484,15 @@ const MAX_TOTAL: u64 = 64 * 1024 * 1024;
 pub fn import(bytes: &[u8], name: &str) -> Vec<Imported> {
     use std::io::Read;
     if !bytes.starts_with(b"PK\x03\x04") {
-        return vec![Imported { name: name.to_string(), result: parse(bytes, name) }];
+        return vec![Imported { name: name.to_string(), data: bytes.to_vec(), result: parse(bytes, name) }];
     }
     let mut out = Vec::new();
     let mut zip = match zip::ZipArchive::new(std::io::Cursor::new(bytes)) {
         Ok(z) => z,
-        Err(e) => return vec![Imported { name: name.to_string(), result: Err(PhotoError::Bad(format!("the archive cannot be read: {e}"))) }],
+        Err(e) => return vec![Imported { name: name.to_string(), data: Vec::new(), result: Err(PhotoError::Bad(format!("the archive cannot be read: {e}"))) }],
     };
     if zip.len() > MAX_ENTRIES {
-        return vec![Imported { name: name.to_string(), result: Err(PhotoError::Bad(format!("the archive holds more than {MAX_ENTRIES} files"))) }];
+        return vec![Imported { name: name.to_string(), data: Vec::new(), result: Err(PhotoError::Bad(format!("the archive holds more than {MAX_ENTRIES} files"))) }];
     }
     let mut total = 0u64;
     for i in 0..zip.len() {
@@ -500,18 +502,18 @@ pub fn import(bytes: &[u8], name: &str) -> Vec<Imported> {
         if f.is_dir() || !(lower.ends_with(".ies") || lower.ends_with(".ldt")) { continue; }
         total = total.saturating_add(f.size());
         if f.size() > MAX_BYTES as u64 || total > MAX_TOTAL {
-            out.push(Imported { name: inner, result: Err(PhotoError::TooLarge) });
+            out.push(Imported { name: inner, data: Vec::new(), result: Err(PhotoError::TooLarge) });
             continue;
         }
         let mut buf = Vec::new();
         // the declared size can lie: read no more than the limit
         match (&mut f).take(MAX_BYTES as u64 + 1).read_to_end(&mut buf) {
-            Ok(_) => out.push(Imported { result: parse(&buf, &inner), name: inner }),
-            Err(e) => out.push(Imported { name: inner, result: Err(PhotoError::Bad(format!("cannot be unpacked: {e}"))) }),
+            Ok(_) => out.push(Imported { result: parse(&buf, &inner), data: buf, name: inner }),
+            Err(e) => out.push(Imported { name: inner, data: Vec::new(), result: Err(PhotoError::Bad(format!("cannot be unpacked: {e}"))) }),
         }
     }
     if out.is_empty() {
-        out.push(Imported { name: name.to_string(), result: Err(PhotoError::Bad("the archive holds no .ies or .ldt file".into())) });
+        out.push(Imported { name: name.to_string(), data: Vec::new(), result: Err(PhotoError::Bad("the archive holds no .ies or .ldt file".into())) });
     }
     out
 }
