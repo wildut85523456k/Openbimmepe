@@ -31,6 +31,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
         georef: None,
         room_settings: Default::default(),
         separation_lines: vec![],
+        room_lighting: Default::default(),
         pset_map: Default::default(),
     }
 }

@@ -27,6 +27,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         georef: None,
         room_settings: Default::default(),
         separation_lines: vec![],
+        room_lighting: Default::default(),
         pset_map: Default::default(),
     }
 }

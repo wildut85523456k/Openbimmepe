@@ -239,6 +239,29 @@ for r in rows("LUM"):
     ok(np.allclose(m[:3, 3], [float(c[5]), float(c[6]), float(c[7])], atol=1e-6), "schedule position is the placement")
     ok(c[3] == "Office" and abs(float(c[9]) - 2.8) < 1e-9, "schedule room and mounting height")
 ok(len(rows("LUM")) == 1 and rows("LUMWARN")[0][0] == "0", "one luminaire in the schedule, nothing missing")
+# rooms: lighting inputs on the space, and the room schedule's own sums
+def shoelace(pts):
+    return abs(sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts)))) / 2
+room_rows = {int(r[0]): r for r in rows("ROOM")}
+for r in rows("ROOMLIGHT"):
+    c = " ".join(r).split(",")
+    rid = int(c[0])
+    rr = room_rows[rid]
+    n = int(rr[4]); xy = [float(v) for v in rr[5:5 + 2 * n]]
+    outline = list(zip(xy[0::2], xy[1::2]))
+    sp = [x for x in f.by_type("IfcSpace") if decode(x.GlobalId)[2] == rid][0]
+    psets = ue.get_psets(sp)
+    if c[1] == "Office":
+        ok(abs(float(c[4]) - (shoelace(outline) - 1.0)) < 1e-3, f"office area {c[4]} is its outline minus the 1 m2 hole")
+        ok(abs(float(c[7]) - 3000.0 * 0.8) < 1e-6 and abs(float(c[8]) - 28.0 * 0.8) < 1e-6 and c[6] == "1", "installed flux and power are the luminaire's at its dimming level")
+        rl = psets["OpenBIM_RoomLighting"]
+        ok(rl["WorkPlaneHeight"] == 0.8 and rl["MaintenanceFactor"] == 0.8 and rl["MaximumUGR"] == 19.0 and rl["ReflectanceFloor"] == 0.2 and rl["BoundaryZone"] == 0.5, "room lighting inputs on the space")
+        sl = psets["Pset_SpaceLightingRequirements"]
+        ok(sl["ArtificialLighting"] is True and sl["Illuminance"] == 500.0, "standard lighting requirements on the space")
+        ok(c[-1] == "", "office has every input")
+    else:
+        ok("OpenBIM_RoomLighting" not in psets and c[6] == "0" and "work plane height" in c[-1], "a room without inputs lists what is missing")
+ok(len(rows("ROOMLIGHT")) == len(room_rows), "one schedule row per room")
 # swept forms: each one, built alone, has the volume and the box the Rust code solved (mitred corners, profile the right way up)
 file_sweeps = []
 for sw in f.by_type("IfcFixedReferenceSweptAreaSolid"):

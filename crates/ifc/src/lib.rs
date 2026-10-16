@@ -162,6 +162,8 @@ pub struct Scene {
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
     pub rooms: Vec<RoomItem>,
+    /// lighting inputs of rooms, by the room's element number
+    pub room_lighting: std::collections::BTreeMap<u64, lighting::RoomLighting>,
     pub wall_types: Vec<walls::WallType>,
     /// where one wall element meets another (see `walls::find_joins`)
     pub wall_joins: Vec<walls::WallJoin>,
@@ -945,7 +947,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
 
 fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
-    for r in &scene.rooms {
+    for (ri, r) in scene.rooms.iter().enumerate() {
         let room = &r.room;
         if room.level >= scene.levels.all().len() {
             return Err(ExportError::Unsupported(format!("room {}: no level {}", room.name, room.level)));
@@ -979,6 +981,26 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         clear.height = ext.ceiling_z - ext.floor_z;
         o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(&clear));
         o.pset(sp, "OpenBIM_SpaceVolumes", vec![("SlabToSlabVolume", Val::Vol(vols.slab_to_slab)), ("CeilingVoidVolume", Val::Vol(vols.ceiling_void)), ("FloorBuildUpVolume", Val::Vol(vols.floor_build_up))]);
+        if let Some(rl) = scene.room_lighting.get(&r.id) {
+            let n = scene.items.iter().filter(|it| scene.families.get(it.family).is_some_and(|f| f.family.lighting().is_some()) && lighting::room_at(scene, [it.frame.origin[0], it.frame.origin[1]], it.frame.origin[2]) == Some(ri)).count();
+            let mut common = vec![("ArtificialLighting", Val::Bool(n > 0))];
+            if let Some(v) = rl.required_lux {
+                common.push(("Illuminance", Val::Real(v)));
+            }
+            o.pset(sp, "Pset_SpaceLightingRequirements", common);
+            let mut own = Vec::new();
+            for (n, v) in [("WorkPlaneHeight", rl.work_plane_height_m), ("BoundaryZone", rl.boundary_zone_m)] {
+                if let Some(v) = v {
+                    own.push((n, Val::LenAny(v)));
+                }
+            }
+            for (n, v) in [("MaintenanceFactor", rl.maintenance_factor), ("MinimumUniformity", rl.min_uniformity), ("MaximumUGR", rl.max_ugr), ("MinimumCRI", rl.min_cri), ("ReflectanceCeiling", rl.reflectance_ceiling), ("ReflectanceWalls", rl.reflectance_walls), ("ReflectanceFloor", rl.reflectance_floor)] {
+                if let Some(v) = v {
+                    own.push((n, Val::Real(v)));
+                }
+            }
+            o.pset(sp, "OpenBIM_RoomLighting", own);
+        }
         write_boundaries(o, r, sp);
     }
     Ok(())

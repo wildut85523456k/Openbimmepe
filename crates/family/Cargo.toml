@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 rayon = "1.10"
 openbim-sketch = { path = "../sketch" }
+openbim-photo = { path = "../photo" }
 
 [dev-dependencies]
 proptest = "1"

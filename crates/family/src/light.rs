@@ -67,6 +67,24 @@ pub const MAX_LIGHT_FLUX: f64 = 1.0e7;
 pub const MAX_LIGHT_POWER: f64 = 1.0e6;
 
 impl LightingDef {
+    /// Lighting data from a manufacturer's photometric file read by `openbim_photo`. `file_name` is the name the
+    /// file is kept under in the project. What the file states fills the fields (manufacturer, catalogue number as
+    /// the article, the luminous flux the table adds up to, input power, and colour temperature and rendering when the
+    /// file has them); the mounting, IP code and dimming level are not in such files and stay as they were in `base`.
+    pub fn from_photometry(p: &openbim_photo::Photometry, file_name: &str, base: LightingDef) -> LightingDef {
+        LightingDef {
+            photometry: Some(file_name.to_string()),
+            manufacturer: p.manufacturer.clone().or(base.manufacturer),
+            article: p.catalogue.clone().or(base.article),
+            flux_lm: p.flux_lm().filter(|f| *f > 0.0).or(base.flux_lm),
+            power_w: p.watts.or(base.power_w),
+            cct_k: p.cct_k.or(base.cct_k),
+            cri: p.cri.or(base.cri),
+            ip: base.ip,
+            dimming: base.dimming,
+            mounting: base.mounting,
+        }
+    }
     pub(crate) fn check(&self) -> Result<(), FamilyError> {
         let bad = |why: &'static str| Err(FamilyError::BadMeta(why));
         for (what, v) in [("photometry file", &self.photometry), ("manufacturer", &self.manufacturer), ("article number", &self.article), ("IP code", &self.ip)] {

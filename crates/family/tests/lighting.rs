@@ -46,3 +46,18 @@ fn lighting_data_is_checked() {
     let not = Family { name: "D".into(), category: Category::Door, lighting: Some(full()), ..Default::default() };
     assert!(matches!(not.compile(), Err(FamilyError::BadMeta(_))));
 }
+
+#[test]
+fn a_photometric_file_fills_the_lighting_data() {
+    use std::f64::consts::PI;
+    let v: Vec<String> = (0..=6).map(|k| (k * 30).to_string()).collect();
+    let file = format!("IESNA:LM-63-2002\n[MANUFAC] Maker\n[LUMCAT] ART-9\n[LUMINAIRE] Light\nTILT=NONE\n1 -1 1 7 1 1 2 0.6 0.6 0\n1 1 40\n{}\n0\n{}\n", v.join(" "), ["100"; 7].join(" "));
+    let p = openbim_photo::parse(file.as_bytes(), "a.ies").unwrap();
+    let base = LightingDef { ip: Some("IP44".into()), dimming: Some(0.5), mounting: Mounting::Suspended, cct_k: Some(3000.0), ..Default::default() };
+    let l = LightingDef::from_photometry(&p, "a.ies", base);
+    assert_eq!((l.photometry.as_deref(), l.manufacturer.as_deref(), l.article.as_deref()), (Some("a.ies"), Some("Maker"), Some("ART-9")));
+    assert!((l.flux_lm.unwrap() - 400.0 * PI).abs() < 1e-6 && l.power_w == Some(40.0));
+    // what the file does not hold stays as the author typed it
+    assert_eq!((l.ip.as_deref(), l.dimming, l.mounting, l.cct_k), (Some("IP44"), Some(0.5), Mounting::Suspended, Some(3000.0)));
+    assert!(lum(l).compile().is_ok());
+}
