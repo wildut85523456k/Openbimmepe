@@ -382,9 +382,15 @@ struct Out<'a> {
     /// the virtual element of each separation line that a boundary used
     virtual_entities: BTreeMap<usize, u32>,
     item_entities: Vec<u32>,
+    /// writing IFC2X3 (for DIALux and other readers that stop at 2x3) instead of IFC4
+    v2: bool,
 }
 
 impl<'a> Out<'a> {
+    /// The attribute list tail of an element that has a predefined type in IFC4 only: `$` then the type.
+    fn tail4(&self, t: &str) -> String {
+        if self.v2 { "$".into() } else { format!("$,{t}") }
+    }
     fn r(&mut self, x: f64, what: &str) -> String {
         if !x.is_finite() {
             self.bad.get_or_insert_with(|| what.to_string());
@@ -510,7 +516,8 @@ impl<'a> Out<'a> {
                 quantities::Kind::Area => ("IFCQUANTITYAREA", 0),
                 quantities::Kind::Volume => ("IFCQUANTITYVOLUME", 0),
             };
-            ids.push(format!("#{}", self.s.add(format!("{class}({},$,$,{v},$)", string(q.name)))));
+            let ent = if self.v2 { format!("{class}({},$,$,{v})", string(q.name)) } else { format!("{class}({},$,$,{v},$)", string(q.name)) };
+            ids.push(format!("#{}", self.s.add(ent)));
         }
         let g = self.gen_gid();
         let eq = self.s.add(format!("IFCELEMENTQUANTITY({g},$,{},$,$,({}))", string(name), ids.join(",")));
@@ -580,13 +587,24 @@ fn size_props(size: RunSize) -> Vec<(&'static str, Val)> {
 
 /// Write the scene as IFC4.
 pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
+    export_as(scene, false)
+}
+
+/// Write the scene as IFC2X3, the schema DIALux evo reads best: the building shell, rooms, doors and windows.
+/// What 2x3 cannot carry (service networks, wall types, joins, space boundaries, map conversion, luminaires)
+/// is left out and named in the report's warnings.
+pub fn export_ifc2x3(scene: &Scene) -> Result<Exported, ExportError> {
+    export_as(scene, true)
+}
+
+fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     if scene.project_key > guid::MAX_PROJECT_KEY {
         return Err(ExportError::BadKey);
     }
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new() };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {
@@ -607,7 +625,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     let u_vol = o.s.add("IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)".into());
     let u_ang = o.s.add("IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)".into());
     let units = o.s.add(format!("IFCUNITASSIGNMENT((#{u_len},#{u_area},#{u_vol},#{u_ang}))"));
-    if let Some(gr) = &scene.georef {
+    if let (false, Some(gr)) = (v2, &scene.georef) {
         let opt = |v: &Option<String>| v.as_ref().map_or("$".to_string(), |t| string(t));
         let crs = o.s.add(format!("IFCPROJECTEDCRS({},$,{},{},{},{},#{u_len})", string(&gr.crs.name), opt(&gr.crs.geodetic_datum), opt(&gr.crs.vertical_datum), opt(&gr.crs.map_projection), opt(&gr.crs.map_zone)));
         let (origin, (a, b)) = gr.map_conversion();
@@ -615,11 +633,22 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
         o.s.add(format!("IFCMAPCONVERSION(#{ctx},#{crs},{})", vals.join(",")));
         o.report.map_conversions = 1;
     }
+    // IFC2X3 insists on an owner history for every rooted entity; `Step::finish_2x3` points them all at this one
+    let oh = if v2 {
+        let org = o.s.add("IFCORGANIZATION($,'openbim',$,$,$)".into());
+        let per = o.s.add("IFCPERSON($,'openbim',$,$,$,$,$,$)".into());
+        let pao = o.s.add(format!("IFCPERSONANDORGANIZATION(#{per},#{org},$)"));
+        let app = o.s.add(format!("IFCAPPLICATION(#{org},'0.1','openbim','openbim')"));
+        o.s.add(format!("IFCOWNERHISTORY(#{pao},#{app},$,.ADDED.,$,$,$,0)"))
+    } else {
+        0
+    };
     let g = o.gen_gid();
     let project = o.s.add(format!("IFCPROJECT({g},$,{},$,$,$,$,(#{ctx}),#{units})", string(&scene.project_name)));
     // spatial structure
     // the site carries the whole model, so it is where the file's origin is moved to
     let site_pl = match &scene.georef {
+        _ if v2 => o.place(None, [0.0; 3], None, None),
         Some(gr) if gr.coordinate_base == georef::CoordinateBase::SharedCoordinates => {
             let (a, b) = gr.x_axis();
             o.place(None, gr.origin_shared(), Some([0.0, 0.0, 1.0]), Some([a, b, 0.0]))
@@ -659,11 +688,21 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{bld},({}))", storey_ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
 
     write_walls(&mut o)?;
-    families::write_families(&mut o)?;
+    if v2 {
+        families::write_openings_2x3(&mut o)?;
+    } else {
+        families::write_families(&mut o)?;
+    }
     write_slabs(&mut o)?;
     write_columns(&mut o)?;
     write_spaces(&mut o)?;
-    write_networks(&mut o)?;
+    if v2 {
+        if !scene.networks.is_empty() {
+            o.report.warnings.push("IFC2X3: service networks are not written".into());
+        }
+    } else {
+        write_networks(&mut o)?;
+    }
 
     // containment, per storey
     let contained = std::mem::take(&mut o.contained);
@@ -678,16 +717,20 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if let Some(id) = o.dup {
         return Err(ExportError::DuplicateId(id));
     }
-    let text = o.s.finish(&scene.project_name, &scene.timestamp);
+    let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp) };
     Ok(Exported { text, report: o.report })
 }
 
 fn write_walls(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
+    let v2 = o.v2;
     // wall types: materials, layer sets and the type entities, before the walls that use them
     let mut materials: BTreeMap<&str, u32> = BTreeMap::new();
     let mut type_ids: Vec<(u32, u32)> = Vec::new(); // (type entity, layer set)
-    for (ti, t) in scene.wall_types.iter().enumerate() {
+    if o.v2 && !scene.wall_types.is_empty() {
+        o.report.warnings.push("IFC2X3: wall types and layer sets are not written (the walls keep their thickness)".into());
+    }
+    for (ti, t) in scene.wall_types.iter().enumerate().filter(|_| !v2) {
         t.check().map_err(|e| ExportError::Unsupported(format!("wall type {}: {e}", t.name)))?;
         // IFC counts the layers across the wall from the right of travel to the left; the type lists them from the exterior, on the left
         let (core_a, core_b) = t.core_range();
@@ -735,11 +778,11 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         }
         let shape = o.shape(&solids);
         let g = o.gid(w.id, 0);
-        let wall = o.s.add(format!("IFCWALL({g},$,{},$,$,#{pl},#{shape},$,.STANDARD.)", string(&w.name)));
+        let wall = o.s.add(format!("IFCWALL({g},$,{},$,$,#{pl},#{shape},{})", string(&w.name), o.tail4(".STANDARD.")));
         o.contain(st, wall);
         o.report.walls += 1;
         o.wall_entities.push(wall);
-        if let Some(ti) = w.wall_type {
+        if let Some(ti) = w.wall_type.filter(|_| !v2) {
             let (t, (_, ls)) = (scene.wall_types.get(ti).ok_or_else(|| ExportError::Unsupported(format!("wall {}: no wall type {ti}", w.name)))?, type_ids[ti]);
             if (t.thickness() - c.thickness).abs() > 1e-9 {
                 return Err(ExportError::Unsupported(format!("wall {}: the layers of type {} add up to {} m but the wall is {} m thick", w.name, t.name, t.thickness(), c.thickness)));
@@ -786,7 +829,7 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
                 let shape = o.shape(&[solid]);
                 let name = pen.map_or_else(|| format!("Opening {k}"), |p| p.id.to_string());
                 let g = o.gid(w.id, k);
-                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&name)));
+                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&name), o.tail4(".OPENING.")));
                 let g = o.gen_gid();
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{wall},#{oe})"));
                 o.report.openings += 1;
@@ -818,7 +861,10 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         }
     }
     // joins between wall elements
-    for j in &scene.wall_joins {
+    if o.v2 && !scene.wall_joins.is_empty() {
+        o.report.warnings.push("IFC2X3: wall joins are not written".into());
+    }
+    for j in scene.wall_joins.iter().filter(|_| !v2) {
         let (Some(a), Some(b)) = (o.wall_entities.get(j.a).copied(), o.wall_entities.get(j.b).copied()) else {
             return Err(ExportError::Unsupported(format!("wall join {}-{}: no such wall", j.a, j.b)));
         };
@@ -853,7 +899,7 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, c.base_z - elev], None, None, c.height);
         let shape = o.shape(&[solid]);
         let g = o.gid(c.id, 0);
-        let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},$,.COLUMN.)", string(&c.name)));
+        let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},{})", string(&c.name), o.tail4(".COLUMN.")));
         o.contain(st, e);
         o.column_entities.push(e);
     }
@@ -910,7 +956,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
                 let opl = o.place(Some(pl), [0.0; 3], None, None);
                 let shape = o.shape(&[solid]);
                 let g = o.gid(item.id, k);
-                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&format!("Shaft {}", sh.name))));
+                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&format!("Shaft {}", sh.name)), o.tail4(".OPENING.")));
                 let g = o.gen_gid();
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
                 o.report.openings += 1;
@@ -930,7 +976,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             let opl = o.place(Some(pl), [0.0; 3], None, None);
             let shape = o.shape(&[solid]);
             let g = o.gid(item.id, k);
-            let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&p.id.to_string())));
+            let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&p.id.to_string()), o.tail4(".OPENING.")));
             let g = o.gen_gid();
             o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
             o.report.openings += 1;
@@ -1001,7 +1047,9 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
             }
             o.pset(sp, "OpenBIM_RoomLighting", own);
         }
-        write_boundaries(o, r, sp);
+        if !o.v2 {
+            write_boundaries(o, r, sp);
+        }
     }
     Ok(())
 }

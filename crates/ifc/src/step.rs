@@ -92,4 +92,37 @@ impl Step {
         o.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
         o
     }
+
+    /// The whole file as IFC2X3. Every rooted entity (`IFCxxx('<22 character GlobalId>',$,...`) gets the owner history
+    /// entity `oh`, which 2x3 requires and IFC4 does not.
+    pub fn finish_2x3(&self, name: &str, timestamp: &str, oh: u32) -> String {
+        let mut o = String::new();
+        o.push_str("ISO-10303-21;\nHEADER;\n");
+        o.push_str("FILE_DESCRIPTION(('ViewDefinition [CoordinationView_V2.0]'),'2;1');\n");
+        o.push_str(&format!("FILE_NAME({},{},(''),(''),'openbim','openbim','');\n", string(name), string(timestamp)));
+        o.push_str("FILE_SCHEMA(('IFC2X3'));\nENDSEC;\nDATA;\n");
+        for (i, l) in self.lines.iter().enumerate() {
+            o.push_str(&format!("#{}={};\n", i + 1, with_owner(l, oh)));
+        }
+        o.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
+        o
+    }
+}
+
+/// `IFCxxx('<GlobalId>',$,rest` becomes `IFCxxx('<GlobalId>',#oh,rest`; other entities are as they were.
+fn with_owner(line: &str, oh: u32) -> String {
+    let Some(open) = line.find("('") else { return line.to_string() };
+    let head = &line[..open];
+    if oh == 0 || !head.starts_with("IFC") || !head.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+        return line.to_string();
+    }
+    let rest = &line[open + 2..];
+    let (id, after) = match rest.get(..22) {
+        Some(id) if !id.contains('\'') => (id, &rest[22..]),
+        _ => return line.to_string(),
+    };
+    match after.strip_prefix("',$,") {
+        Some(tail) => format!("{head}('{id}',#{oh},{tail}"),
+        None => line.to_string(),
+    }
 }

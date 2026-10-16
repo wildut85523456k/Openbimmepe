@@ -302,3 +302,28 @@ fn quantities_with_a_unit_are_written_as_that_measure() {
     assert!(out.text.contains("'handle_height',$,IFCLENGTHMEASURE(1.0)"));
     assert!(!out.text.contains("'handle_height',$,IFCREAL"));
 }
+
+#[test]
+fn the_ifc2x3_export_has_the_2x3_header_an_owner_history_and_the_same_ids() {
+    let a = export_ifc2x3(&scene(vec![wall(5)])).unwrap();
+    let b = export_ifc2x3(&scene(vec![wall(5)])).unwrap();
+    assert_eq!(a.text, b.text);
+    assert!(a.text.contains("FILE_SCHEMA(('IFC2X3'))") && !a.text.contains("IFC4"));
+    // the wall keeps the id it has in the IFC4 file, and points at the owner history; it has no predefined type
+    let oh = a.text.lines().find(|l| l.contains("=IFCOWNERHISTORY(")).and_then(|l| l.split('=').next()).unwrap().to_string();
+    let w = format!("IFCWALL('{}',{oh},'W',$,$,", global_id(1, 0, 5));
+    assert!(a.text.lines().any(|l| l.contains(&w) && l.ends_with(",$);")), "wall line");
+    // every rooted entity has the owner history, none has $ there
+    let mut rooted = 0;
+    for l in a.text.lines() {
+        let Some((_, body)) = l.split_once('=') else { continue };
+        let Some((_, after)) = body.split_once("('") else { continue };
+        if after.len() > 25 && after.as_bytes()[22] == b'\'' && !body.starts_with("IFCPROPERTYSINGLEVALUE") && !body.starts_with("IFCQUANTITY") {
+            rooted += 1;
+            assert!(after[23..].starts_with(",#"), "rooted entity without owner history: {l}");
+        }
+    }
+    assert!(rooted >= 5, "{rooted}");
+    // without a map conversion
+    assert!(!a.text.contains("IFCMAPCONVERSION"));
+}

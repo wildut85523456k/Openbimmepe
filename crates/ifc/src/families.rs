@@ -338,3 +338,53 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
     }
     Ok(())
 }
+
+/// IFC2X3: the doors and windows only, as plain boxes in their wall openings. Luminaires and other families have no
+/// place in a 2x3 shell file (a 2x3 light fixture is a flow terminal, which DIALux ignores); they are counted in the warnings.
+pub(crate) fn write_openings_2x3(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    let mut skipped = 0usize;
+    for it in &scene.items {
+        let Some(fam) = scene.families.get(it.family).map(|f| &f.family) else {
+            return Err(ExportError::Unsupported(format!("{}: no family {}", it.name, it.family)));
+        };
+        let cat = fam.category();
+        let (Category::Door | Category::Window, Some([ow, oh_, sill])) = (cat, it.instance.opening) else {
+            skipped += 1;
+            continue;
+        };
+        let st = o.storey_for(it.frame.origin[2]);
+        let elev = o.storeys[st].2;
+        let thick = it.host.and_then(|(wi, _, _)| scene.walls.get(wi)).map_or(0.1, |w| w.chain.thickness.min(0.1));
+        let [x, y] = it.frame.x;
+        let origin = [it.frame.origin[0], it.frame.origin[1], it.frame.origin[2] - elev + sill];
+        let pl = o.place(Some(o.storeys[st].1), origin, None, Some([x, y, 0.0]));
+        let prof = o.rect_profile(0.0, 0.0, ow, thick);
+        let solid = o.extrusion(prof, [0.0; 3], None, None, oh_);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(it.id, 0);
+        let (hh, ww) = (o.r(oh_, "height"), o.r(ow, "width"));
+        let e = o.s.add(format!("{}({g},$,{},$,$,#{pl},#{shape},$,{hh},{ww})", upper(cat.ifc_class()), string(&it.name)));
+        o.contain(st, e);
+        o.item_entities.push(e);
+        o.report.items += 1;
+        match cat {
+            Category::Door => o.qto(e, "Qto_DoorBaseQuantities", &crate::quantities::opening_item(ow, oh_)),
+            _ => o.qto(e, "Qto_WindowBaseQuantities", &crate::quantities::opening_item(ow, oh_)),
+        }
+        if let Some((wi, seg, centre)) = it.host {
+            let want = [centre - ow / 2.0, ow, sill, oh_];
+            match o.opening_ids.iter().find(|(w, s, b, _)| *w == wi && *s == seg && (0..4).all(|i| (b[i] - want[i]).abs() < 1e-9)).map(|x| x.3) {
+                Some(op) => {
+                    let g = o.gen_gid();
+                    o.s.add(format!("IFCRELFILLSELEMENT({g},$,$,$,#{op},#{e})"));
+                }
+                None => o.report.warnings.push(format!("{}: no wall opening of its size was found to fill", it.name)),
+            }
+        }
+    }
+    if skipped > 0 {
+        o.report.warnings.push(format!("IFC2X3: {skipped} placed families (luminaires, furniture, equipment) are not written; use the luminaire schedule"));
+    }
+    Ok(())
+}

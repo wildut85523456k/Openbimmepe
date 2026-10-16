@@ -246,7 +246,8 @@ fn main() {
     let path = args.get(1).expect("usage: ifc_scene OUT.ifc [edit]");
     let edit = args.get(2).is_some_and(|a| a == "edit");
     let scene = build_scene(edit);
-    let out = export(&scene).expect("export");
+    let v2 = args.get(2).is_some_and(|a| a == "ifc2x3");
+    let out = if v2 { openbim_ifc::export_ifc2x3(&scene) } else { export(&scene) }.expect("export");
     std::fs::write(path, out.text.as_bytes()).expect("write");
     println!("PROJECT {} {}", scene.project_key, scene.project_name);
     println!("COUNTS walls={} openings={} slabs={} segments={} fittings={} ports={} connections={}", out.report.walls, out.report.openings, out.report.slabs, out.report.segments, out.report.fittings, out.report.ports, out.report.connections);
