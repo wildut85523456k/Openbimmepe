@@ -9,7 +9,7 @@ const ROW: f32 = 28.0;
 
 fn node_rect(origin: Pos2, node: &Node) -> Rect {
     let rows = node.kind.inputs().len().max(1);
-    Rect::from_min_size(origin + Vec2::from(node.position), Vec2::new(WIDTH, HEADER + ROW * rows as f32))
+    Rect::from_min_size(origin + Vec2::from(node.position), Vec2::new(WIDTH, HEADER + ROW * rows as f32 + 56.0))
 }
 
 fn port_position(rect: Rect, input: Option<usize>) -> Pos2 {
@@ -134,6 +134,19 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
         ui.ctx().data_mut(|data|data.insert_temp(cancel_key,true));
     }
     let cancelled = ui.ctx().data(|data|data.get_temp::<bool>(cancel_key).unwrap_or(false));
+    // Capture the socket on press, before the enclosing scroll area can claim
+    // the gesture. Include the visible edge and a small outside hit margin.
+    if !cancelled && ui.input(|i|i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        if let Some(pointer)=ui.ctx().pointer_interact_pos().filter(|p|canvas.contains(*p)) {
+            if let Some(node)=graph.nodes.iter().rev().find(|n| {
+                let rect=node_rect(canvas.min,n);
+                Rect::from_min_max(egui::pos2(rect.center().x,rect.top()+HEADER),egui::pos2(rect.right()+10.0,rect.top()+HEADER+ROW)).contains(pointer)
+            }) {
+                *pending=Some(node.id);
+                ui.ctx().data_mut(|data|data.insert_temp(drag_key,true));
+            }
+        }
+    }
     let was_connector_drag = ui.ctx().data(|data|data.get_temp::<bool>(drag_key).unwrap_or(false));
     let mut connection_target = None;
     let mut rerouted = false;
@@ -207,7 +220,11 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
         for (index, ty) in inputs.iter().enumerate() {
             let cell = Rect::from_min_size(egui::pos2(rect.left(), header.bottom() + index as f32 * ROW), Vec2::new(WIDTH * 0.5, ROW));
             let response = ui.interact(cell.intersect(canvas), ui.id().with(("input-row", node.id, index)), Sense::click());
-            if response.contains_pointer() { connection_target=Some((node.id,index)); }
+            // Hover ownership belongs to the dragged output during a drag;
+            // drop targeting must use geometry, not widget hover ownership.
+            if ui.ctx().pointer_interact_pos().is_some_and(|p|canvas.contains(p) && cell.expand2(Vec2::new(10.0,0.0)).contains(p)) {
+                connection_target=Some((node.id,index));
+            }
             let compatible = pending.and_then(|id| graph.nodes.iter().find(|n| n.id == id))
                 .is_some_and(|source| source.id != node.id && source.kind.output() == *ty);
             if response.hovered() {
@@ -241,7 +258,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
         if !cancelled && (response.drag_started() || response.dragged()) {
             *pending=Some(node.id);
             ui.ctx().data_mut(|data|data.insert_temp(drag_key,true));
-        } else if response.clicked() { *pending = if selected { None } else { Some(node.id) }; }
+        } else if response.clicked() && !was_connector_drag { *pending = if selected { None } else { Some(node.id) }; }
         response.on_hover_text(format!("{} | {:?}\nDrag to a compatible input and release; click-click also works", output_name(&node.kind), node.kind.output()));
     }
     if was_connector_drag && !cancelled && ui.input(|i|i.pointer.button_released(egui::PointerButton::Primary)) {
@@ -252,8 +269,11 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
                 connect=Some(Wire { from,to,input,route:None });
                 *status="Connected. Click Preview to evaluate the graph.".into();
             } else { *status="Connection rejected: incompatible connector types".into(); }
-        } else { *status="Connection cancelled: release on a compatible input connector".into(); }
-        *pending=None;
+            *pending=None;
+        } else if ui.input(|i|i.pointer.is_decidedly_dragging()) {
+            *status="Connection cancelled: release on a compatible input connector".into();
+            *pending=None;
+        }
         ui.ctx().data_mut(|data|data.insert_temp(drag_key,false));
     }
     if ui.input(|i|i.key_pressed(egui::Key::Escape)) {
@@ -261,6 +281,38 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<u64>, sta
     }
     if ui.input(|i|i.pointer.button_released(egui::PointerButton::Primary)) {
         ui.ctx().data_mut(|data| { data.insert_temp(drag_key,false);data.insert_temp(cancel_key,false); });
+    }
+    // Edit values directly inside each block, outside the port hit regions.
+    for node in &mut graph.nodes {
+        let rect=node_rect(canvas.min,node);
+        let editor=Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.bottom()-52.0),rect.right_bottom()-Vec2::splat(8.0));
+        ui.scope_builder(egui::UiBuilder::new().id_salt(("block-editor",node.id)).max_rect(editor),|ui| {
+            ui.set_clip_rect(editor.intersect(canvas));
+            match &mut node.kind {
+                NodeKind::Length { metres } => { changed |= ui.add(egui::DragValue::new(metres).speed(0.01).suffix(" m")).changed(); }
+                NodeKind::Ratio { value } => { changed |= ui.add(egui::DragValue::new(value).speed(0.001)).changed(); }
+                NodeKind::Python { expression,.. } => { changed |= ui.text_edit_singleline(expression).changed(); }
+                NodeKind::Read { property } | NodeKind::Set { property } => {
+                    egui::ComboBox::from_id_salt("property").selected_text(format!("{property:?}")).show_ui(ui,|ui| {
+                        for p in [openbim_automation::Property::Width,openbim_automation::Property::Height,openbim_automation::Property::Elevation,openbim_automation::Property::Slope] {
+                            changed |= ui.selectable_value(property,p,format!("{p:?}")).changed();
+                        }
+                    });
+                }
+                NodeKind::Selection { ids } => {
+                    let key=ui.id().with("selection-text");
+                    let mut text=ui.ctx().data(|d|d.get_temp::<String>(key)).unwrap_or_else(||ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", "));
+                    let response=ui.add(egui::TextEdit::singleline(&mut text).hint_text("Element IDs, comma separated"));
+                    if response.changed() {
+                        if let Ok(parsed)=text.split(',').map(str::trim).filter(|v|!v.is_empty()).map(str::parse::<u64>).collect::<Result<Vec<_>,_>>() {
+                            *ids=parsed; changed=true;
+                        }
+                    }
+                    if response.has_focus() { ui.ctx().data_mut(|d|d.insert_temp(key,text)); }
+                    else { ui.ctx().data_mut(|d|d.remove::<String>(key)); }
+                }
+            }
+        });
     }
     if rerouted { *status="Wire path adjusted; its data connection is unchanged.".into(); }
     if let Some(connection) = connect {
@@ -289,7 +341,7 @@ mod tests {
 
     fn frame(ctx:&egui::Context,graph:&mut Graph,pending:&mut Option<u64>,events:Vec<Event>)->egui::FullOutput {
         let mut output=ctx.run_ui(RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1000.0,600.0))),events,..Default::default() },|ui| {
-            show(ui,graph,pending,&mut String::new());
+            egui::ScrollArea::vertical().show(ui,|ui| { show(ui,graph,pending,&mut String::new()); });
         });
         output.textures_delta.clear();
         output
@@ -299,6 +351,20 @@ mod tests {
     }
     fn first_curve(output:&egui::FullOutput)->egui::epaint::CubicBezierShape {
         output.shapes.iter().find_map(|s|if let egui::Shape::CubicBezier(curve)=&s.shape {Some(curve.clone())}else{None}).expect("Visible wire")
+    }
+    #[test]
+    fn socket_edge_drag_in_one_motion_keeps_output_fanout() {
+        let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
+        let shape=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![]));
+        let start=shape.points[0]+Vec2::new(2.0,0.0);
+        let finish=shape.points[3]-Vec2::new(2.0,0.0);
+        graph.wires.retain(|w|!(w.to==2 && w.input==0));
+        frame(&ctx,&mut graph,&mut pending,vec![]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
+        frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(finish),button(finish,false)]);
+        assert_eq!(graph.wires.iter().filter(|w|w.from==1).count(),2);
+        assert_eq!(graph.wires.iter().filter(|w|w.to==2 && w.input==0).count(),1);
+        graph.validate().unwrap();
     }
     #[test]
     fn dragging_and_releasing_a_wire_preserves_its_connection() {
@@ -346,3 +412,4 @@ mod tests {
         assert!(pending.is_none());
     }
 }
+
