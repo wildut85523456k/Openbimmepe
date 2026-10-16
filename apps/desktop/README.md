@@ -1,39 +1,42 @@
-# OpenBIM desktop (egui)
+# OpenBIM desktop (Rust / egui)
 
-On 15 Oct 2026 egui was chosen as the UI toolkit: the whole app is in Rust, drawn with wgpu next to the future 3D viewport. This replaces the Qt 6 and web-shell options (issue #22).
-
-**Status:** this is a UI shell around a sample scene. Duct width, height, elevation and slope are stored in an in-memory Rust document and can be undone. There is no file save or load, no IFC, no model geometry and no collaboration yet.
+The desktop uses Rust, egui and wgpu. There is no Qt or web shell.
 
 ## Run
 
-```bash
-cargo run -p openbim-desktop
+```sh
+cargo run --locked -p openbim-desktop
 ```
 
-On Linux the usual X11/Wayland and OpenGL libraries must be installed.
+On Windows the MSVC build tools and Windows SDK are required. Retain the tested
+local Cargo.lock correction to windows 0.62.0; this change does not modify it.
+On Linux install the usual X11/Wayland and graphics libraries.
 
-## What it has
+## Current features
 
-- **Quick-access toolbar** with the 3D common icons: New, Open, Save, Undo, Redo, Measure and Settings.
-- **14 ribbon tabs**, each with an icon. The Systems tab has HVAC, Plumbing & Piping, Electrical and All sub-tabs.
-- **Ribbon panels** of large icon buttons, with the group title underneath, using the icons in `assets/icons/`. Every command has a stable ID, which is also its icon ID. Duct, Pipe and Wall start their tools. The other commands report in the status bar that they are not implemented yet.
-- **Light and Dark themes.** Line-drawing icons switch to their dark variant.
-- **Compact Properties and Project Browser palettes** with a resizable split, selection-specific grouped parameters, searchable view hierarchy and double-click view opening. The selected duct has shared size, elevation and slope controls in Properties and the contextual options bar, with Apply, Reset and Undo. See `docs/palettes-contextual-editing.md`. The sample plan supports wheel zoom, middle-drag pan and click selection.
+- Reviewed 3D icon artwork, DPI-aware filtering, quick-access bar, 14 ribbon tabs,
+  Systems discipline sub-tabs, contextual parameter controls and Light/Dark themes.
+- Compact Properties palette and searchable Project Browser with adjustable widths
+  and split, close/restore, and double-click view opening.
+- Document-driven Level 1, Level 2 and Mechanical plan footprints and orbitable
+  orthographic 3D views of actual in-memory walls, grids, levels, ducts and pipes.
+- Geometry picking, category-specific parameters, endpoint editing, finite signed
+  slope, Apply/Reset and atomic Undo. Level changes move dependent geometry.
+- Wheel zoom, middle-drag pan, right-drag 3D orbit and Fit.
 
-## Not yet
+The initial sample is created through document transactions and excluded from
+user Undo history. Changes are in memory and disappear when the app closes.
 
-- The 3D view.
-- Real model geometry and picking.
-- Docking for the panels: they are fixed side panels today.
-- Redo.
-- Full Revit shortcut matching through `openbim-keymap::Matcher`.
-- French labels.
-- Persistence and IFC.
+## Scope and review
 
-`crates/document` is still a separate transaction model and must be merged with `crates/oplog` (issue #24).
+See `docs/spatial-model-rendering.md` for controls, geometry contracts, review
+steps and renderer limitations. `docs/palettes-contextual-editing.md` records the
+previous UI milestone, whose illustrative-renderer limits are now superseded.
 
-## Verified on 15 Oct 2026
+The renderer is a small-model, depth-sorted orthographic projection. Full view
+ranges/cut planes, hidden-surface handling, joined/layered walls, openings, slabs,
+placement tools, grips, on-canvas dimensions, full Revit shortcuts, docking,
+persistence, IFC integration and collaboration remain future work.
 
-- `cargo build -p openbim-desktop` builds with no warnings.
-- The app was run on Linux in a virtual display. Screenshots were checked for the Systems tab (HVAC and Electrical), Modify, and Annotate in Dark mode.
-- It has not yet been run on macOS or Windows.
+`crates/document` is still separate from `crates/oplog` (issue #24). The interfaces
+are kept transaction-based so subsequent integration can use the same edits.

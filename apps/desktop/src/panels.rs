@@ -1,5 +1,5 @@
 //! Compact Revit-style palettes around the existing sample document.
-use crate::{ribbon, Desktop, SampleElement, View};
+use crate::{ribbon, Desktop, View};
 use eframe::egui::{self, RichText, Vec2};
 
 fn title_bar(ui: &mut egui::Ui, title: &str, visible: &mut bool) {
@@ -67,105 +67,151 @@ fn read_only_group(ui: &mut egui::Ui, name: &str, query: &str, rows: &[(&str, &s
     ui.separator();
 }
 
-pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
-    title_bar(ui, "Properties", &mut app.show_properties);
-    let duct_exists = app.document.get(crate::ElementId(1)).is_some();
-    let (category, family_type, icon) = match app.selected {
-        Some(SampleElement::Duct) if duct_exists => ("Ducts (1)", "Rectangular Duct", "duct"),
-        Some(SampleElement::Ahu) => ("Mechanical Equipment (1)", "Sample AHU", "ahu"),
-        Some(SampleElement::Room) => ("Rooms (1)", "Sample Room", "room"),
-        _ => ("View Properties", "Current View", "view"),
+#[derive(Clone, Copy)]
+enum Field { Width, Height, Elevation, Slope, X1, Y1, X2, Y2 }
+
+fn dimensions(category: openbim_document::Category) -> &'static [Field] {
+    use openbim_document::Category as C;
+    match category {
+        C::Wall => &[Field::Width, Field::Height, Field::Elevation],
+        C::Duct => &[Field::Width, Field::Height, Field::Elevation, Field::Slope],
+        C::Pipe => &[Field::Width, Field::Elevation, Field::Slope],
+        C::Level => &[Field::Elevation], _ => &[],
+    }
+}
+
+fn field_name(field: Field, category: openbim_document::Category) -> &'static str {
+    use openbim_document::Category as C;
+    match field {
+        Field::Width if category == C::Wall => "Thickness (mm)",
+        Field::Width if category == C::Pipe => "Diameter (mm)",
+        Field::Width => "Width (mm)", Field::Height => "Height (mm)",
+        Field::Elevation if category == C::Level => "Elevation (mm)",
+        Field::Elevation if category == C::Wall => "Base Offset (mm)",
+        Field::Elevation => "Middle Elevation (mm)", Field::Slope => "Slope (%)",
+        Field::X1 => "Start X (mm)", Field::Y1 => "Start Y (mm)",
+        Field::X2 => "End X (mm)", Field::Y2 => "End Y (mm)",
+    }
+}
+
+fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
+    let value = match field {
+        Field::Width => &mut app.width_mm, Field::Height => &mut app.height_mm,
+        Field::Elevation => &mut app.elevation_mm, Field::Slope => &mut app.slope_percent,
+        Field::X1 => &mut app.axis_mm[0], Field::Y1 => &mut app.axis_mm[1],
+        Field::X2 => &mut app.axis_mm[2], Field::Y2 => &mut app.axis_mm[3],
     };
+    let editor = egui::DragValue::new(value).speed(if matches!(field, Field::Slope) { 0.1 } else { 1.0 });
+    ui.add(if matches!(field, Field::Width | Field::Height) { editor.range(1.0..=100_000.0) } else { editor });
+}
+
+fn edit_group(app: &mut Desktop, ui: &mut egui::Ui, name: &str, query: &str,
+    category: openbim_document::Category, fields: &[Field]) {
+    if fields.is_empty() || (!matches(query, name) && !fields.iter().any(|f| matches(query, field_name(*f, category)))) { return; }
+    egui::CollapsingHeader::new(RichText::new(name).strong()).id_salt(("edit", name))
+        .default_open(true).open(if query.is_empty() { None } else { Some(true) }).show(ui, |ui| {
+            egui::Grid::new(("editable_rows", name)).num_columns(2).striped(true)
+                .spacing([8.0, 4.0]).show(ui, |ui| {
+                    for field in fields {
+                        let label = field_name(*field, category);
+                        if !matches(query, name) && !matches(query, label) { continue; }
+                        ui.add_sized([ui.available_width() * 0.46, 18.0], egui::Label::new(label));
+                        editor(app, ui, *field);
+                        ui.end_row();
+                    }
+                });
+        });
+    ui.separator();
+}
+
+fn category_info(category: openbim_document::Category) -> (&'static str, &'static str, &'static str) {
+    use openbim_document::Category as C;
+    match category {
+        C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
+        C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
+        C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
+    }
+}
+
+pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    let element = app.selected_id().and_then(|id| app.document.get(id)).cloned();
+    ui.horizontal_wrapped(|ui| {
+        let Some(el) = element else { ui.strong("Modify | Select"); return; };
+        ui.strong(format!("Modify | {}", category_info(el.category).0));
+        ui.separator();
+        let fields = if el.category == openbim_document::Category::Grid {
+            &[Field::X1, Field::Y1, Field::X2, Field::Y2][..]
+        } else { dimensions(el.category) };
+        for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
+        let pending = app.has_pending_edit();
+        if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() {
+            if el.id == crate::ElementId(1) { app.apply_duct_edit(); } else { app.apply_selected_edit(); }
+        }
+        if ui.add_enabled(pending, egui::Button::new("Reset")).clicked() { app.sync_duct_controls(); }
+    });
+}
+
+pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
+    use openbim_document::Geometry;
+    title_bar(ui, "Properties", &mut app.show_properties);
+    let element = app.selected_id().and_then(|id| app.document.get(id)).cloned();
+    let (category, family_type, icon) = element.as_ref().map(|el| category_info(el.category))
+        .unwrap_or(("View Properties", "Current View", "view"));
     ui.horizontal(|ui| {
         ui.add(ribbon::icon_image(ui, icon, app.dark, Vec2::splat(40.0)));
         ui.vertical(|ui| {
             ui.label(RichText::new(category).strong());
-            // Only one sample type exists. The selector explicitly shows that
-            // state rather than offering fictitious families or types.
             egui::ComboBox::from_id_salt("property_type").width(180.0)
                 .selected_text(family_type).show_ui(ui, |ui| {
-                    ui.label(family_type);
-                    ui.weak("No additional types loaded");
+                    ui.label(family_type); ui.weak("No additional types loaded");
                 });
         });
     });
-    ui.horizontal(|ui| {
-        ui.weak("Instance parameters");
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("Edit Type").on_hover_text("Type editing is not connected yet").clicked() {
-                app.message = "Type editing is not implemented in the sample document".into();
+    if ui.small_button("Edit Type").clicked() { app.message = "Type editing is not implemented yet".into(); }
+    ui.add(egui::TextEdit::singleline(&mut app.property_query).hint_text("Search parameters").desired_width(f32::INFINITY));
+    let query = app.property_query.trim().to_lowercase();
+    ui.separator();
+    egui::ScrollArea::vertical().id_salt("property_parameters")
+        .max_height((ui.available_height() - 50.0).max(20.0)).auto_shrink([false, false]).show(ui, |ui| {
+            if let Some(el) = &element {
+                ui.push_id(el.id.0, |ui| {
+                    if let Some(Geometry::Linear { level, .. }) = el.geometry {
+                        let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
+                        read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
+                    }
+                    edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category));
+                    if let Some(Geometry::Linear { start, end, level }) = el.geometry {
+                        let length = (end[0] - start[0]).hypot(end[1] - start[1]);
+                        let start_z = app.document.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;
+                        let length_text = format!("{:.1}", length * 1000.0);
+                        let end_text = format!("{:.1}", (start_z + length * el.slope_ratio.unwrap_or(0.0)) * 1000.0);
+                        read_only_group(ui, "Derived Geometry", &query,
+                            &[("Run Length (mm)", &length_text), ("End Elevation (mm)", &end_text)]);
+                    }
+                    if matches!(el.geometry, Some(Geometry::Linear { .. } | Geometry::Grid { .. })) {
+                        edit_group(app, ui, "Location", &query, el.category, &[Field::X1, Field::Y1, Field::X2, Field::Y2]);
+                    }
+                    let id = el.id.0.to_string();
+                    read_only_group(ui, "Identity Data", &query, &[("Name", &el.name), ("Element ID", &id)]);
+                });
+            } else {
+                read_only_group(ui, "Graphics", &query, &[("View Name", view_name(app.view)), ("Projection", "Orthographic")]);
             }
         });
-    });
-    ui.add(egui::TextEdit::singleline(&mut app.property_query)
-        .hint_text("Search parameters").desired_width(f32::INFINITY));
     ui.separator();
-    let query = app.property_query.trim().to_lowercase();
-    let editable = app.selected == Some(SampleElement::Duct) && duct_exists;
-    let footer_height = if editable { 47.0 } else { 22.0 };
-    egui::ScrollArea::vertical().id_salt("property_parameters")
-        .max_height((ui.available_height() - footer_height).max(20.0))
-        .auto_shrink([false, false]).show(ui, |ui| {
-            ui.push_id(category, |ui| match app.selected {
-                Some(SampleElement::Duct) if duct_exists => {
-                    read_only_group(ui, "Constraints", &query, &[
-                        ("Reference Level", "Level 1"), ("Justification", "Middle")]);
-                    read_only_group(ui, "Mechanical", &query, &[
-                        ("System Classification", "Supply Air"), ("System Name", "Supply Air 1 (sample)")]);
-                    let names = ["Width (mm)", "Height (mm)", "Middle Elevation (mm)", "Slope (%)"];
-                    if matches(&query, "Dimensions") || names.iter().any(|s| matches(&query, s)) {
-                        egui::CollapsingHeader::new(RichText::new("Dimensions").strong())
-                            .default_open(true).open(if query.is_empty() { None } else { Some(true) })
-                            .show(ui, |ui| {
-                                egui::Grid::new("duct_dimensions").num_columns(2).striped(true)
-                                    .spacing([8.0, 4.0]).show(ui, |ui| {
-                                        for (index, value) in [&mut app.width_mm, &mut app.height_mm,
-                                            &mut app.elevation_mm, &mut app.slope_percent].into_iter().enumerate() {
-                                            if !matches(&query, "Dimensions") && !matches(&query, names[index]) { continue; }
-                                            ui.add_sized([ui.available_width() * 0.46, 18.0], egui::Label::new(names[index]));
-                                            let editor = egui::DragValue::new(value).speed(if index == 3 { 0.1 } else { 1.0 });
-                                            ui.add(if index < 2 { editor.range(1.0..=100_000.0) } else { editor });
-                                            ui.end_row();
-                                        }
-                                    });
-                            });
-                        ui.separator();
-                    }
-                    read_only_group(ui, "Identity Data", &query, &[("Name", "Sample Supply Air Duct"), ("Element ID", "1")]);
-                }
-                Some(SampleElement::Ahu) => {
-                    read_only_group(ui, "Mechanical", &query, &[("Category", "Mechanical Equipment"), ("System", "Supply Air (sample)")]);
-                    read_only_group(ui, "Identity Data", &query, &[("Name", "Sample AHU"), ("Model status", "Illustration only")]);
-                }
-                Some(SampleElement::Room) => {
-                    read_only_group(ui, "Identity Data", &query, &[("Name", "Sample Room"), ("Model status", "Illustration only")]);
-                    read_only_group(ui, "Dimensions", &query, &[("Area", "Not calculated"), ("Volume", "Not calculated")]);
-                }
-                _ => {
-                    let name = view_name(app.view);
-                    read_only_group(ui, "Graphics", &query, &[("View Name", name), ("View Scale", "1:100 (sample)")]);
-                    read_only_group(ui, "Identity Data", &query, &[("Model status", "Sample view")]);
-                }
-            });
-        });
-    ui.separator();
-    if editable {
-        let changed = app.document.get(crate::ElementId(1)).is_some_and(|duct|
-            (duct.width_m * 1000.0 - app.width_mm).abs() > 1e-6 ||
-            (duct.height_m * 1000.0 - app.height_mm).abs() > 1e-6 ||
-            (duct.elevation_m * 1000.0 - app.elevation_mm).abs() > 1e-6 ||
-            (duct.slope_ratio.unwrap_or(0.0) * 100.0 - app.slope_percent).abs() > 1e-6);
+    if element.is_some() {
+        let pending = app.has_pending_edit();
         ui.horizontal(|ui| {
-            if ui.add_enabled(changed, egui::Button::new("Apply")).clicked() { app.apply_duct_edit(); }
-            if ui.add_enabled(changed, egui::Button::new("Reset")).clicked() { app.sync_duct_controls(); }
-            if changed { ui.weak("Pending changes"); }
+            if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() { app.apply_selected_edit(); }
+            if ui.add_enabled(pending, egui::Button::new("Reset")).clicked() { app.sync_duct_controls(); }
+            if pending { ui.weak("Pending changes"); }
         });
     }
-    ui.label(RichText::new("Sample / in memory").small().weak());
+    ui.label(RichText::new("In memory / not saved").small().weak());
 }
 
 pub fn view_name(view: View) -> &'static str {
-    match view { View::Plan => "Level 1", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical" }
+    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical" }
 }
 
 struct Node {
@@ -177,7 +223,7 @@ const fn folder(name: &'static str, children: &'static [Node]) -> Node { Node { 
 const fn view(name: &'static str, view: View) -> Node { Node { name, view: Some(view), children: &[] } }
 const TREE: &[Node] = &[
     folder("Views (all)", &[
-        folder("Floor Plans", &[view("Level 1", View::Plan), view("M-101 - Mechanical", View::Mechanical)]),
+        folder("Floor Plans", &[view("Level 1", View::Plan), view("Level 2", View::UpperPlan), view("M-101 - Mechanical", View::Mechanical)]),
         folder("Ceiling Plans", &[]),
         folder("3D Views", &[view("{3D}", View::ThreeD)]),
         folder("Elevations", &[]), folder("Sections", &[]), folder("Legends", &[]),
@@ -238,6 +284,7 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SampleElement;
 
     #[test]
     fn browser_search_keeps_ancestors_of_matching_views() {
@@ -251,11 +298,12 @@ mod tests {
     fn selection_edit_targets_duct_and_is_undoable() {
         let mut app = Desktop::sample();
         let initial = app.document.revision();
-        app.selected = Some(SampleElement::Ahu);
+        app.select_element(Some(crate::ElementId(2)));
         app.width_mm = 600.0;
         app.apply_duct_edit();
         assert_eq!(app.document.revision(), initial);
-        app.selected = Some(SampleElement::Duct);
+        app.select_element(Some(crate::ElementId(1)));
+        app.width_mm = 600.0;
         app.slope_percent = 2.0;
         app.apply_duct_edit();
         assert_eq!(app.document.get(crate::ElementId(1)).unwrap().width_m, 0.6);
@@ -271,7 +319,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = Desktop::sample();
         let revision = app.document.revision();
-        for selection in [None, Some(SampleElement::Duct), Some(SampleElement::Ahu), Some(SampleElement::Room)] {
+        for selection in [None, Some(SampleElement::Duct), Some(SampleElement::Model(crate::ElementId(20))), Some(SampleElement::Model(crate::ElementId(10))), Some(SampleElement::Model(crate::ElementId(100)))] {
             app.selected = selection;
             for (properties, browser) in [(true, true), (true, false), (false, true)] {
                 app.show_properties = properties;

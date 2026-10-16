@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+mod spatial;
+pub use spatial::{Geometry, Mesh};
 
 /// Document-local, stable element identity. Future versions require
 /// a project-scoped ID allocation strategy for collaborative editing.
@@ -18,6 +20,8 @@ pub enum Category {
     Duct,
     Pipe,
     Equipment,
+    Level,
+    Grid,
 }
 
 impl Category {
@@ -37,6 +41,8 @@ pub struct Element {
     /// direction. UI percent = ratio * 100. No geometry is generated here.
     /// Only ducts and pipes support this parameter.
     pub slope_ratio: Option<f64>,
+    /// Optional spatial definition; parameter-only elements remain supported.
+    pub geometry: Option<Geometry>,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -77,6 +83,7 @@ pub enum Command {
         elevation_m: f64,
     },
     SetSlope { id: ElementId, slope_ratio: f64 },
+    SetGeometry { id: ElementId, geometry: Geometry },
     Delete { id: ElementId },
 }
 
@@ -89,6 +96,7 @@ pub enum EditError {
     EmptyTransaction,
     RevisionOverflow,
     UnsupportedProperty(ElementId),
+    InvalidGeometry(ElementId),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -105,6 +113,8 @@ impl Document {
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
+    /// Establish a loaded/new sample as the undo baseline, without changing its revision.
+    pub fn clear_undo_history(&mut self) { self.history.clear(); }
 
     /// Apply a batch atomically. A failed batch never updates state or history.
     /// The expected document revision protects against stale UI commands;
@@ -125,12 +135,16 @@ impl Document {
                         width_m: *width_m, height_m: *height_m,
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
+                        geometry: None,
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
                 }
                 Command::Resize { id, width_m, height_m } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if matches!(el.category, Category::Level | Category::Grid) {
+                        return Err(EditError::UnsupportedProperty(*id));
+                    }
                     el.width_m = *width_m;
                     el.height_m = *height_m;
                     if !el.valid() { return Err(EditError::InvalidElement); }
@@ -138,6 +152,7 @@ impl Document {
                 }
                 Command::MoveElevation { id, elevation_m } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category == Category::Grid { return Err(EditError::UnsupportedProperty(*id)); }
                     el.elevation_m = *elevation_m;
                     if !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
@@ -149,11 +164,17 @@ impl Document {
                     if !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
+                Command::SetGeometry { id, geometry } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    el.geometry = Some(*geometry);
+                    el.revision = revision;
+                }
                 Command::Delete { id } => {
                     if trial.remove(id).is_none() { return Err(EditError::NotFound(*id)); }
                 }
             }
         }
+        spatial::validate(&trial)?;
         self.history.push(std::mem::replace(&mut self.elements, trial));
         self.revision = revision;
         Ok(revision)
