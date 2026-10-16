@@ -16,13 +16,14 @@ Select Systems > Duct → contextual **Modify | Place Duct** appears → choose 
 Select connected Supply Air segments → change width or route → system browser identifies impacted equipment, branches, clashes, disconnected ends → accept changes or cancel.
 **Done when:** no hidden disconnected endpoints; edits are atomic; system geometry and metadata agree.
 
-## WF-COLLAB-01 — Multi-user central model
-Two users open same project revision. User A edits duct A, user B edits wall B; both commit. User A and B attempt conflicting edits of hosted geometry.
-**Done when:** nonconflicting commits succeed; conflicts are explicit, no silent lost updates; crash/restart reconstructs committed state; offline unsynced changes are clearly labeled.
+## WF-COLLAB-01 — Discipline models on a shared folder
+Two mechanical designers open the mechanical model on a shared folder. A borrows and edits duct A; B borrows and edits duct B; both sync. B tries to edit duct A while A holds it; then both edit a locked element. The plumbing and electrical models and the architect's model are linked to the central file, and clash detection runs there and in a standalone copy.
+**Done when:** non-clashing edits arrive on both sides; editing a borrowed element is refused with its owner shown; an edit on a locked element becomes a documented change request; other clashes keep the last writer and flag the losing edit; linked models stay read only; crash/restart rebuilds the committed state; offline changes are clearly labelled. Run on a server share and on a cloud-synced folder.
 
-## WF-AUTO-01 — Python and visual nodes
-Select all supply-air ducts → read velocities → calculate proposed sizes → preview changed elements → request commit through BIM transaction.
-**Done when:** scripts and graphs run against typed public APIs; dry-run is possible; errors identify affected elements; undo works; unsanctioned server-side filesystem/model mutations are impossible.
+## WF-AUTO-01 — Firestop records from a site inspection (OpenBIM Graph and MCP)
+Read a site-inspection CSV of firestop records → match each row to its wall penetration by stable ID → preview the changed records → accept → check the IFC export → undo. Run once from an OpenBIM Graph graph and once from an MCP client.
+**Done when:** both clients go through the same typed command API; values carry units; nothing changes before the user accepts; a locked wall turns its rows into change requests; errors name the affected elements; undo works; a graph or MCP client cannot act beyond its declared permissions.
+Later (M6): supply-air ducts → read velocities → propose sizes from the app's calculation module → preview → commit.
 
 ## Cross-cutting tests
 - Keyboard/mouse Revit-style behavior, conflict resolution and override persistence.

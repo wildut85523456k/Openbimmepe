@@ -5,9 +5,9 @@ Source: user-provided *Revit-Style App UI.pdf* (one-page Systems / Place Duct co
 
 ## Goals
 - Familiar Revit-style **ribbon + contextual Modify bar + Properties + Project Browser + tabbed drawing viewport + status bar**.
-- Linux and Windows desktop clients, primarily Rust-backed.
+- Linux and Windows desktop clients, written entirely in Rust with egui (decided 15 Oct 2026). Python runs only in the external automation app, OpenBIM Graph.
 - Same command semantics in standalone and multi-user central-model modes.
-- IFC-native interoperable BIM workflows, with an application-owned parametric model.
+- IFC-native interoperable BIM workflows, with an application-owned parametric model: the project is stored in its own format (operation log and snapshots), and IFC4 is the exchange format, read and written in Rust with stable GlobalIds.
 - Design, Coordination and Automation workspaces.
 - Close keyboard and mouse parity; provide customizable presets, not copies of Autodesk assets.
 
@@ -15,19 +15,23 @@ Source: user-provided *Revit-Style App UI.pdf* (one-page Systems / Place Duct co
 - [01 — UI specification](01-ui-specification.md): screen regions and interactions derived from supplied reference.
 - [02 — Interaction and workflow acceptance criteria](02-workflows-and-acceptance.md): Architecture, Structure, MEP, collaboration and automation.
 - [03 — Implementation architecture](03-implementation-architecture.md): Rust command boundary, GUI toolkit evaluation, state and multi-user concerns.
-- [04 — Dynamo-like automation study](04-visual-automation.md): visual graph and Python integration concept.
+- [04 — Automation](04-visual-automation.md): Dynamo-like graph app (OpenBIM Graph) and MCP server for AI automation runs.
 - [05 — Prioritized implementation backlog](05-backlog.md): dependencies, phases and verifiable exit criteria.
 
 ## Evidence versus proposals
 **Observed in supplied PDF:** Systems ribbon tools (Mechanical Equipment, Air Terminal, Duct, Duct Fitting, Flex Duct, Pipe, Pipe Fitting, Plumbing Fixture, Sprinkler, Cable Tray, Lighting Fixture, Device, Component, Model Line); contextual **Modify | Place Duct** bar (Width, Height, Middle Elevation, Inherit Elevation, Inherit Size, Apply); docked Properties and Project Browser; Level 1 / 3D / M-101 tabs; plan with AHU, terminals, grids, rooms; ViewCube, drawing scale and Mechanical workset status.
 
-**Design proposals (not present in PDF):** detachable/split views, search and parameter favorites, live collaborative presence, Design/Coordination/Automation workspaces, command palette, Python console, node editor, IFC round-trip workflows.
+**Design proposals (not present in PDF):** detachable/split views, search and parameter favorites, live collaborative presence, Design/Coordination/Automation workspaces, command palette, OpenBIM Graph (separate egui program, as close to Dynamo as possible), MCP server, IFC round-trip workflows.
 
-## Decision log (open)
-1. Select GUI toolkit after an executable Qt / Slint / egui prototype using shared Rust model API.
-2. Define native project storage and IFC import/export policy.
-3. Confirm exact Revit keyboard shortcut mapping from lawful user-provided export.
-4. Define the shared document/transaction API before developing scripting or production UI.
-5. Set product branding and avoid distributing proprietary Autodesk icons/other UI assets.
+## Decision log
+Settled (the design record is the Claude Doc "Open BIM Platform: Design and Decisions"):
+1. **GUI toolkit: egui, all in Rust** (15 Oct 2026, issue #22). Qt 6, Slint and the web shell are dropped.
+2. **Storage and IFC:** own project format (operation log and snapshots); IFC4 for exchange, read and written in Rust inside the app; element IDs and GlobalIds stable (13 and 15 Oct 2026).
+3. **Shortcuts:** Revit's standard shortcuts as defaults, checked against Autodesk's published list, all customizable in settings (14–15 Oct 2026, #15).
+4. **Collaboration:** no server. Discipline models (mechanical, plumbing, electrical) on a shared folder, a server share or a cloud-synced folder, each linked to the central file where clashes are found. Element borrowing is required; locked elements turn edits into change requests (15 Oct 2026).
+5. **Automation:** one Rust command API for the ribbon, OpenBIM Graph and an MCP server; Python only in OpenBIM Graph (16 Oct 2026, see 04).
+6. **Branding:** no Autodesk icons or assets; own ribbon icons, with non-trademark IFC import/export icons.
 
-This folder intentionally contains specifications only. Add runnable UI prototype code in a separate application crate once the GUI technology decision is made.
+Still open: define the shared document and transaction API (BIM-001/002, AUTO-001) before production UI and automation work.
+
+The egui application lives in `apps/desktop` (branch `feature/rust-gui` until merged).
