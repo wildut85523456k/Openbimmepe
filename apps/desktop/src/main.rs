@@ -7,6 +7,9 @@ mod ribbon;
 mod panels;
 mod model_view;
 mod model_edit;
+mod automation;
+mod automation_canvas;
+mod automation_icons;
 
 use openbim_document::{Document, ElementId};
 use eframe::egui::{self, Vec2};
@@ -21,6 +24,7 @@ enum Tool { Select, Duct, Pipe, Wall }
 enum SampleElement { Duct, Model(ElementId) }
 
 struct Desktop {
+    automation: automation::Automation,
     document: Document,
     workspace: Workspace,
     view: View,
@@ -65,6 +69,7 @@ impl Desktop {
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
+            automation: automation::Automation::default(),
             document,
             workspace: Workspace::Design, view: View::Mechanical, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
@@ -74,7 +79,7 @@ impl Desktop {
             camera_yaw: 0.7, camera_pitch: 0.6,
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
-            message: "Sample scene — no BIM edits are saved".into(),
+            message: "Sample scene - no BIM edits are saved".into(),
             show_properties: true, show_browser: true, show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
@@ -125,6 +130,15 @@ impl Desktop {
     /// Commands without an implementation yet report it in the status bar.
     fn run_command(&mut self, id: &str, label: &str) {
         match id {
+            "automation_editor" | "automation_player" => {
+                self.workspace = Workspace::Automation;
+                self.automation.player = id == "automation_player";
+            }
+            "automation_mcp" | "automation_snapshot" => {
+                self.workspace = Workspace::Automation;
+                self.automation.show_mcp = true;
+                if id == "automation_snapshot" { self.automation.export_snapshot(&self.document); }
+            }
             "duct" => self.choose_tool(Tool::Duct),
             "pipe" => self.choose_tool(Tool::Pipe),
             "wall" => self.choose_tool(Tool::Wall),
@@ -233,12 +247,13 @@ impl eframe::App for Desktop {
             match self.workspace {
                 Workspace::Design => self.viewport(ui),
                 Workspace::Coordination => {
-                    ui.heading("Coordination — planned");
+                    ui.heading("Coordination - planned");
                     ui.label("Federated IFC models, clash detection and issue tracking require the shared BIM document core.");
                 }
                 Workspace::Automation => {
-                    ui.heading("Automation — planned");
-                    ui.label("Dynamo-like typed graph editor (external automation software) — planned.");
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if self.automation.ui(ui, &mut self.document) { self.sync_duct_controls(); }
+                    });
                 }
             }
         });
@@ -256,7 +271,7 @@ impl eframe::App for Desktop {
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions { viewport: egui::ViewportBuilder::default()
-        .with_title("OpenBIM — Revit-style Desktop Prototype")
+        .with_title("OpenBIM - Revit-style Desktop Prototype")
         .with_inner_size([1440.0, 850.0])
         .with_min_inner_size([900.0, 550.0]), ..Default::default() };
     eframe::run_native("OpenBIM Desktop Prototype", options,

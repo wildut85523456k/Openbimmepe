@@ -156,8 +156,12 @@ const VIEW: &[Group] = &[
         c("zoom_in", "Zoom In"), c("zoom_out", "Zoom Out"), c("pan", "Pan"), c("orbit", "Orbit"), c("search", "Find"),
     ]},
 ];
-const MANAGE: &[Group] = &[Group { title: "Settings", commands: &[c("settings", "Settings")] }];
-const ADDINS: &[Group] = &[Group { title: "Automation", commands: &[c("new", "New Graph")] }];
+const MANAGE: &[Group] = &[
+    Group { title: "Settings", commands: &[c("settings", "Settings")] },
+    Group { title: "Automation", commands: &[c("automation_editor", "Graph Editor"), c("automation_player", "Player")] },
+    Group { title: "AI Integration", commands: &[c("automation_mcp", "MCP Setup"), c("automation_snapshot", "Export Snapshot")] },
+];
+const ADDINS: &[Group] = &[Group { title: "Automation", commands: &[c("automation_editor", "Graph Editor"), c("automation_player", "Player")] }];
 const MODIFY: &[Group] = &[
     Group { title: "Select", commands: &[c("select", "Modify")] },
     Group { title: "Clipboard", commands: &[c("copy", "Copy")] },
@@ -195,6 +199,7 @@ pub fn groups(tab: &str, systems_sub: &str) -> Vec<&'static Group> {
 
 /// The icon for a command ID; unknown IDs fall back to the generic component icon.
 pub fn icon_image(ui: &egui::Ui, id: &str, dark: bool, size: Vec2) -> egui::Image<'static> {
+    if id.starts_with("automation_") { return crate::automation_icons::image(ui, id, dark, size); }
     let icon = icons::find(id).or_else(|| icons::find("component")).expect("component icon is embedded");
     let (bytes, theme) = match (dark, icon.dark) {
         (true, Some(d)) => (d, "dark"),
@@ -341,7 +346,7 @@ mod tests {
                 }
             }
         }
-        let missing: Vec<_> = ids.iter().filter(|id| icons::find(id).is_none()).collect();
+        let missing: Vec<_> = ids.iter().filter(|id| icons::find(id).is_none() && !["automation_editor", "automation_player", "automation_mcp", "automation_snapshot"].contains(id)).collect();
         assert!(missing.is_empty(), "ribbon IDs without an icon: {missing:?}");
     }
 

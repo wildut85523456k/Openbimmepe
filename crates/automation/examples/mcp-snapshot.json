@@ -1,0 +1,12 @@
+{
+  "document_id": "mcp-example",
+  "revision": 42,
+  "elements": [
+    { "id": 1, "category": "Duct", "name": "Supply Air Branch", "width_m": 0.2, "height_m": 0.3, "elevation_m": 2.7, "slope_ratio": 0.01 },
+    { "id": 2, "category": "Pipe", "name": "Chilled Water Supply", "width_m": 0.08, "height_m": 0.08, "elevation_m": 2.5, "slope_ratio": 0.02 },
+    { "id": 3, "category": "Wall", "name": "Service Corridor", "width_m": 0.2, "height_m": 3.0, "elevation_m": 0.0, "slope_ratio": null },
+    { "id": 4, "category": "Duct", "name": "Return Air Main", "width_m": 0.4, "height_m": 0.25, "elevation_m": 2.9, "slope_ratio": -0.005 },
+    { "id": 5, "category": "Pipe", "name": "Drainage Branch", "width_m": 0.1, "height_m": 0.1, "elevation_m": 1.2, "slope_ratio": 0.01 },
+    { "id": 6, "category": "Equipment", "name": "AHU-01", "width_m": 1.2, "height_m": 1.4, "elevation_m": 0.0, "slope_ratio": null }
+  ]
+}

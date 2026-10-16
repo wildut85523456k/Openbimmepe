@@ -15,3 +15,6 @@ openbim-document = { path = "../../crates/document" }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[dependencies.openbim-automation]
+path = '../../crates/automation'
