@@ -413,7 +413,7 @@ mod tests {
     fn dragging_and_releasing_a_wire_preserves_its_connection() {
         let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
         let output=frame(&ctx,&mut graph,&mut pending,vec![]);
-        let shape=output.shapes.iter().filter_map(|s|if let egui::Shape::CubicBezier(c)=&s.shape {Some(c)}else{None}).last().unwrap();
+        let shape=output.shapes.iter().filter_map(|s|if let egui::Shape::CubicBezier(c)=&s.shape {Some(c)}else{None}).next_back().unwrap();
         let start=shape.sample(0.5);let finish=start+Vec2::new(0.0,50.0);
         frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
         frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(finish)]);
