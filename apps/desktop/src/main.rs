@@ -4,6 +4,7 @@
 
 mod icons;
 mod ribbon;
+mod panels;
 
 use openbim_document::{Command, Document, ElementId, Category};
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
@@ -28,10 +29,12 @@ struct Desktop {
     width_mm: f64,
     height_mm: f64,
     elevation_mm: f64,
+    slope_percent: f64,
     inherit_size: bool,
     inherit_elevation: bool,
     property_query: String,
     browser_query: String,
+    browser_selected: String,
     message: String,
     show_properties: bool,
     show_browser: bool,
@@ -46,6 +49,10 @@ impl Desktop {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+        Self::sample()
+    }
+
+    fn sample() -> Self {
         let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
@@ -64,8 +71,10 @@ impl Desktop {
             workspace: Workspace::Design, view: View::Mechanical, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
+            slope_percent: 0.0,
             inherit_size: false, inherit_elevation: false,
             property_query: String::new(), browser_query: String::new(),
+            browser_selected: String::new(),
             message: "Sample scene — no BIM edits are saved".into(),
             show_properties: true, show_browser: true, show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
@@ -173,10 +182,13 @@ impl Desktop {
                 Tool::Duct => "Modify | Place Duct",
                 Tool::Pipe => "Modify | Place Pipe",
                 Tool::Wall => "Modify | Place Wall",
+                Tool::Select if self.selected == Some(SampleElement::Duct) => "Modify | Ducts",
                 Tool::Select => "Modify | Select",
             };
             ui.strong(label);
-            if self.tool != Tool::Select {
+            let selected_duct = self.selected == Some(SampleElement::Duct)
+                && self.document.get(ElementId(1)).is_some();
+            if selected_duct && matches!(self.tool, Tool::Select | Tool::Duct) {
                 ui.separator();
                 ui.label("Width (mm)");
                 ui.add(egui::DragValue::new(&mut self.width_mm).range(1.0..=100_000.0).speed(10.0));
@@ -184,60 +196,20 @@ impl Desktop {
                 ui.add(egui::DragValue::new(&mut self.height_mm).range(1.0..=100_000.0).speed(10.0));
                 ui.label("Middle Elevation (mm)");
                 ui.add(egui::DragValue::new(&mut self.elevation_mm).speed(50.0));
-                ui.checkbox(&mut self.inherit_elevation, "Inherit Elevation");
-                ui.checkbox(&mut self.inherit_size, "Inherit Size");
+                if self.document.get(ElementId(1)).is_some_and(|el| el.slope_ratio.is_some()) {
+                    ui.label("Slope (%)");
+                    ui.add(egui::DragValue::new(&mut self.slope_percent).speed(0.1));
+                }
+                if self.tool == Tool::Duct {
+                    ui.add_enabled(false, egui::Checkbox::new(&mut self.inherit_elevation, "Inherit Elevation"));
+                    ui.add_enabled(false, egui::Checkbox::new(&mut self.inherit_size, "Inherit Size"));
+                }
                 if ui.button("Apply").clicked() {
                     self.apply_duct_edit();
                 }
-            }
-        });
-    }
-
-    fn properties(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Properties");
-        ui.text_edit_singleline(&mut self.property_query);
-        let q = self.property_query.to_lowercase();
-        let matches = |s: &str| q.is_empty() || s.to_lowercase().contains(&q);
-        let title = match self.selected { Some(SampleElement::Duct) => "Duct",
-            Some(SampleElement::Ahu) => "Mechanical Equipment",
-            Some(SampleElement::Room) => "Room",
-            None => "No selection" };
-        ui.label(title);
-        if ui.button("Edit Type").clicked() {
-            self.message = "Family type editing requires the shared document API".into();
-        }
-        if matches("Constraints") { ui.collapsing("Constraints", |ui| {
-            ui.label("Reference Level: Level 1");
-            ui.label("Justification: Middle");
-        }); }
-        if matches("Mechanical") { ui.collapsing("Mechanical", |ui| {
-            ui.label("System Classification: Supply Air");
-            ui.label("System Name: Supply Air 1 (sample)");
-        }); }
-        if matches("Dimensions") { ui.collapsing("Dimensions", |ui| {
-            ui.horizontal(|ui| { ui.label("Width (mm)"); ui.add(egui::DragValue::new(&mut self.width_mm).range(1.0..=100_000.0)); });
-            ui.horizontal(|ui| { ui.label("Height (mm)"); ui.add(egui::DragValue::new(&mut self.height_mm).range(1.0..=100_000.0)); });
-            ui.horizontal(|ui| { ui.label("Middle Elevation (mm)"); ui.add(egui::DragValue::new(&mut self.elevation_mm)); });
-            ui.small(format!("Document revision: {} (in memory only)", self.document.revision()));
-        }); }
-    }
-
-    fn browser(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Project Browser");
-        ui.text_edit_singleline(&mut self.browser_query);
-        let q = self.browser_query.to_lowercase();
-        ui.collapsing("Views (Mechanical)", |ui| {
-            for (label, view) in [
-                ("Floor Plans / Level 1", View::Plan),
-                ("3D Views / {3D}", View::ThreeD),
-                ("Floor Plans / M-101 - Mechanical", View::Mechanical),
-            ] {
-                if (q.is_empty() || label.to_lowercase().contains(&q))
-                    && ui.selectable_label(self.view == view, label).clicked() { self.view = view; }
-            }
-            for label in ["Ceiling Plans", "Elevations", "Sections", "Legends",
-                          "Schedules/Quantities", "Sheets (all)", "Families"] {
-                if q.is_empty() || label.to_lowercase().contains(&q) { ui.label(label); }
+                if ui.button("Reset").clicked() { self.sync_duct_controls(); }
+            } else if self.tool != Tool::Select {
+                ui.weak("Placement preview — select the sample duct to edit its parameters");
             }
         });
     }
@@ -306,11 +278,16 @@ impl Desktop {
 
 impl Desktop {
     fn apply_duct_edit(&mut self) {
+        if self.selected != Some(SampleElement::Duct) {
+            self.message = "Select the sample duct to edit its parameters".into();
+            return;
+        }
         let id = ElementId(1);
         let revision = self.document.revision();
         let result = self.document.transact(revision, &[
             Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 },
             Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 },
+            Command::SetSlope { id, slope_ratio: self.slope_percent / 100.0 },
         ]);
         match result {
             Ok(new_rev) => self.message = format!("Duct parameters committed to in-memory document revision {new_rev}"),
@@ -323,6 +300,7 @@ impl Desktop {
             self.width_mm = duct.width_m * 1000.0;
             self.height_mm = duct.height_m * 1000.0;
             self.elevation_mm = duct.elevation_m * 1000.0;
+            self.slope_percent = duct.slope_ratio.unwrap_or(0.0) * 100.0;
         }
     }
 
@@ -339,14 +317,14 @@ impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.choose_tool(Tool::Select); }
-        if ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
+        if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
             self.selected = Some(match self.selected {
                 Some(SampleElement::Duct) => SampleElement::Ahu,
                 Some(SampleElement::Ahu) => SampleElement::Room,
                 _ => SampleElement::Duct,
             });
         }
-        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
+        if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
             self.undo_document();
         }
         egui::Panel::top("header").show(ui, |ui| {
@@ -368,12 +346,8 @@ impl eframe::App for Desktop {
             });
         });
         if self.show_properties || self.show_browser {
-            egui::Panel::left("side").default_size(285.0).resizable(true).show(ui, |ui| {
-                if self.show_properties { egui::ScrollArea::vertical().id_salt("properties").max_height(ui.available_height() * 0.55)
-                    .show(ui, |ui| self.properties(ui)); }
-                ui.separator();
-                if self.show_browser { egui::ScrollArea::vertical().id_salt("browser").show(ui, |ui| self.browser(ui)); }
-            });
+            egui::Panel::left("side").default_size(310.0).min_size(260.0)
+                .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));
         }
         egui::CentralPanel::default().show(ui, |ui| {
             match self.workspace {

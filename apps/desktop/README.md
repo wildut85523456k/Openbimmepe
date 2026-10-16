@@ -2,7 +2,7 @@
 
 On 15 Oct 2026 egui was chosen as the UI toolkit: the whole app is in Rust, drawn with wgpu next to the future 3D viewport. This replaces the Qt 6 and web-shell options (issue #22).
 
-**Status:** this is a UI shell around a sample scene. Duct width, height and elevation are stored in an in-memory Rust document and can be undone. There is no file save or load, no IFC, no model geometry and no collaboration yet.
+**Status:** this is a UI shell around a sample scene. Duct width, height, elevation and slope are stored in an in-memory Rust document and can be undone. There is no file save or load, no IFC, no model geometry and no collaboration yet.
 
 ## Run
 
@@ -18,7 +18,7 @@ On Linux the usual X11/Wayland and OpenGL libraries must be installed.
 - **14 ribbon tabs**, each with an icon. The Systems tab has HVAC, Plumbing & Piping, Electrical and All sub-tabs.
 - **Ribbon panels** of large icon buttons, with the group title underneath, using the icons in `assets/icons/`. Every command has a stable ID, which is also its icon ID. Duct, Pipe and Wall start their tools. The other commands report in the status bar that they are not implemented yet.
 - **Light and Dark themes.** Line-drawing icons switch to their dark variant.
-- **Properties and Project Browser panels**, the options bar for duct size and elevation, and the sample plan, which supports wheel zoom, middle-drag pan and click selection.
+- **Compact Properties and Project Browser palettes** with a resizable split, selection-specific grouped parameters, searchable view hierarchy and double-click view opening. The selected duct has shared size, elevation and slope controls in Properties and the contextual options bar, with Apply, Reset and Undo. See `docs/palettes-contextual-editing.md`. The sample plan supports wheel zoom, middle-drag pan and click selection.
 
 ## Not yet
 

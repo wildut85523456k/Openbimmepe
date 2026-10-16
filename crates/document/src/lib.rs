@@ -20,6 +20,10 @@ pub enum Category {
     Equipment,
 }
 
+impl Category {
+    pub fn supports_slope(self) -> bool { matches!(self, Self::Duct | Self::Pipe) }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Element {
     pub id: ElementId,
@@ -29,6 +33,10 @@ pub struct Element {
     pub width_m: f64,
     pub height_m: f64,
     pub elevation_m: f64,
+    /// Signed rise / horizontal run, along the element's future start-to-end
+    /// direction. UI percent = ratio * 100. No geometry is generated here.
+    /// Only ducts and pipes support this parameter.
+    pub slope_ratio: Option<f64>,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -42,6 +50,10 @@ impl Element {
             && self.elevation_m.is_finite()
             && self.width_m > 0.0
             && self.height_m > 0.0
+            && match self.slope_ratio {
+                Some(slope) => self.category.supports_slope() && slope.is_finite(),
+                None => !self.category.supports_slope(),
+            }
     }
 }
 
@@ -64,6 +76,7 @@ pub enum Command {
         id: ElementId,
         elevation_m: f64,
     },
+    SetSlope { id: ElementId, slope_ratio: f64 },
     Delete { id: ElementId },
 }
 
@@ -75,6 +88,7 @@ pub enum EditError {
     RevisionConflict { expected: u64, actual: u64 },
     EmptyTransaction,
     RevisionOverflow,
+    UnsupportedProperty(ElementId),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -110,6 +124,7 @@ impl Document {
                         id: *id, category: *category, name: name.clone(),
                         width_m: *width_m, height_m: *height_m,
                         elevation_m: *elevation_m, revision,
+                        slope_ratio: category.supports_slope().then_some(0.0),
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -124,6 +139,13 @@ impl Document {
                 Command::MoveElevation { id, elevation_m } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     el.elevation_m = *elevation_m;
+                    if !el.valid() { return Err(EditError::InvalidElement); }
+                    el.revision = revision;
+                }
+                Command::SetSlope { id, slope_ratio } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if !el.category.supports_slope() { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.slope_ratio = Some(*slope_ratio);
                     if !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
@@ -212,5 +234,40 @@ mod tests {
         d.transact(1, &[Command::Delete { id: ElementId(1) }]).unwrap();
         d.undo().unwrap();
         assert_eq!(d.get(ElementId(1)).unwrap().id, ElementId(1));
+    }
+
+    #[test]
+    fn duct_and_pipe_slope_edits_are_signed_and_undoable() {
+        for category in [Category::Duct, Category::Pipe] {
+            let mut d = Document::new();
+            let mut command = create(1);
+            if let Command::Create { category: kind, .. } = &mut command { *kind = category; }
+            d.transact(0, &[command]).unwrap();
+            d.transact(1, &[Command::SetSlope { id: ElementId(1), slope_ratio: -0.02 }]).unwrap();
+            assert_eq!(d.get(ElementId(1)).unwrap().slope_ratio, Some(-0.02));
+            d.undo().unwrap();
+            assert_eq!(d.get(ElementId(1)).unwrap().slope_ratio, Some(0.0));
+        }
+    }
+
+    #[test]
+    fn invalid_slope_rolls_back_batch_and_other_categories_reject_slope() {
+        let mut d = Document::new();
+        d.transact(0, &[create(1)]).unwrap();
+        assert_eq!(d.transact(1, &[
+            Command::Resize { id: ElementId(1), width_m: 0.8, height_m: 0.6 },
+            Command::SetSlope { id: ElementId(1), slope_ratio: f64::INFINITY },
+        ]), Err(EditError::InvalidElement));
+        assert_eq!(d.get(ElementId(1)).unwrap().width_m, 0.2);
+        assert_eq!(d.revision(), 1);
+        for category in [Category::Wall, Category::Equipment] {
+            let mut d = Document::new();
+            let mut command = create(1);
+            if let Command::Create { category: kind, .. } = &mut command { *kind = category; }
+            d.transact(0, &[command]).unwrap();
+            assert_eq!(d.get(ElementId(1)).unwrap().slope_ratio, None);
+            assert_eq!(d.transact(1, &[Command::SetSlope { id: ElementId(1), slope_ratio: 0.02 }]),
+                Err(EditError::UnsupportedProperty(ElementId(1))));
+        }
     }
 }
