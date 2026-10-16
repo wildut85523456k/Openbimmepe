@@ -9,12 +9,27 @@ empty space, the source itself or an incompatible input cancels without replacin
 an existing connection. Escape cancels. The earlier click-output/click-input
 gesture remains supported.
 
+An output may feed several inputs. Each input accepts one source; replacing it
+preserves other outgoing links. Current node kinds expose one output port each;
+multiple distinct outputs are not yet supported. Edge-drop regression tests run
+inside the scrolling canvas and cover a press/move/release in one motion.
+
+## Edit a block
+
+Edit length, ratio, selected property, numeric Python expression or comma-separated
+element IDs in the block footer. Header dragging moves the block. These changes
+invalidate the existing preview; Preview must run again before Apply.
+
 ## Reshape an existing connection
 
 Drag the blue curve, or its circular route handle, then release. Its endpoints
 remain attached to the same ports. Double-click the curve to restore its automatic
 route. An adjusted wire uses two smooth Bezier segments through the chosen route
 point; output and input tangents remain horizontal.
+
+Use the manual route point to guide the line around blocks. This is a single
+waypoint, not automatic obstacle avoidance: a curve can still cross another block.
+Multiple independent bend points and obstacle-aware routing remain future work.
 
 The optional wire `route` field stores an integer offset from the port midpoint.
 It is saved in graph JSON and moves with the midpoint when nodes are repositioned.

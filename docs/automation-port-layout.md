@@ -14,10 +14,16 @@ in the same frame. Wires are painted behind the node bodies.
 Drag an output row to a compatible input row and release to connect. Click-click
 also works. While connecting,
 a blue curve follows the pointer; compatible inputs highlight blue and invalid
-inputs red. Clicking the selected output again or pressing Escape cancels.
+inputs red. Pressing Escape cancels.
 Right-click an input row to disconnect only that input. Replacing a connection
 preserves the existing one-input/one-source rule. The whole port row is a hit
 target and its tooltip reports the port's quantity/element type.
+
+An output supports multiple outgoing wires; each input has one source. Current
+node kinds have one output port each. Distinct multiple output ports remain a
+future schema/runtime increment. Block footers provide inline numeric, property,
+expression and element-ID editors. Socket hit targets include the outside edge;
+drop detection uses pointer geometry rather than widget hover ownership.
 
 Existing graph positions and model transaction semantics are preserved. Manual
 wire routes use an optional layout field; see automation-wire-interactions.md.
@@ -25,7 +31,8 @@ Light and dark themes have
 separate separator, body and wire colours.
 
 Verification: desktop Cargo check and the automation/desktop test suite passed
-(34 successful tests, one optional Python-interpreter test skipped), along with
+(historical full-suite result: 49 successful tests, one optional Python test
+skipped; latest connector/inline-edit change: 13 desktop tests passed), along with
 whitespace and reverse patch application checks. The egui 0.36 CubicBezierShape
 signature was checked against its published API documentation. Visual acceptance
 still requires opening the desktop to review both themes, multi-input Set nodes,

@@ -17,6 +17,27 @@ Drag headers, add nodes, connect output to input, and right-click headers to
 delete. Player hides the canvas. Copy/paste JSON provides graph interchange;
 native file dialogs and automatic saving are not implemented.
 
+## Interaction design and current limits
+
+Blocks use input ports on the left and output ports on the right, separated by
+dark lines. Drag an output to a compatible input and release. Each input takes
+one source; a valid replacement affects only that input. One output may feed
+many inputs. Current node kinds each expose one output port: distinct multiple
+output ports remain future work and must be addressed explicitly in graph schema,
+validation, execution and MCP before adding such node kinds.
+
+Edit numeric values, properties, Python expressions and element IDs inside the
+block. The existing top-level controls remain available, including in Player.
+Drag headers to move blocks and blue curves to reroute wires. Routing currently
+uses one waypoint; automatic obstacle avoidance and multiple waypoints are not
+implemented. Save routes through graph JSON; automatic file saving is absent.
+
+See [wire interactions](automation-wire-interactions.md). Revit/Dynamo-like
+interaction is the usability reference; complete feature parity is not claimed.
+The shared command registry, visual model preview, graph debugger and live central
+transactions from the original architecture remain targets. Current automation
+uses the host Document transaction validator and does not bypass it.
+
 ## Execution contract
 
 Schema version 1 contains node IDs, typed node kinds, layout and wires.
@@ -32,7 +53,8 @@ validator. An opaque plan retains its exact snapshot. Apply rejects a stale or
 different document and executes the complete batch atomically, with one undo
 checkpoint. No-op plans do not create transactions. Width and height writes
 compose; competing writers fail. Redo awaits support in the document core.
-Slope changes only stored parameters, not geometry or connectors. Preview runs
+For spatial duct and pipe elements, slope updates the derived mesh through the
+host spatial model. Logical MEP connector/fitting propagation is not implemented. Preview runs
 on a background thread with Stop/cancellation. Python expression nodes run in
 a separate process when enabled by the host. See automation-runner.md.
 
@@ -48,7 +70,7 @@ display resolution with light/dark colours. Existing approved art is unchanged.
 2. Full Python scripting and packages with explicit permissions. The current
    external worker supports typed numeric expressions with cancellation and
    process deadlines. Python cannot mutate document memory directly.
-3. Search, canvas pan/zoom, graph undo/redo, editable selections, file dialogs,
+3. Search, canvas pan/zoom, graph undo/redo, viewport-based selections, file dialogs,
    diagnostics, preview highlighting and persistent graphs.
 4. Filters, nested lists/lacing, explicit conversions, expressions and subgraphs.
 5. Persistent project IDs and creation bindings; geometry, architecture,

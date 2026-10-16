@@ -1,6 +1,18 @@
 # 04 — Dynamo-like visual automation study
 
-Status: **proposal; not currently implemented**.
+Status: **native foundation implemented; full workflow remains a target**. See
+[implementation status](../automation.md) and [interaction contract](../automation-wire-interactions.md).
+
+Decision: use an independent Rust graph/runtime and egui desktop editor, with
+external Python processes. Dynamo, DesignScript, Revit APIs and .NET are not
+runtime dependencies. The candidate approaches below record the original study;
+embedded Python and compatibility importers are not commitments.
+
+Current scope: typed JSON graphs, snapshot previews, atomic apply/undo, inline
+block editors, connector drag/release, manually adjusted curves, a restricted
+numeric Python worker and a separate read-only snapshot MCP server. Docking,
+search, graph debugger, general scripting, live MCP and full BIM node families
+remain incomplete. The proposed Python API below is still illustrative.
 
 ## Outcome
 Users can build reusable node graphs or Python scripts that query and manipulate open BIM models while remaining transactionally safe in standalone or central-project mode.
