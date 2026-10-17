@@ -481,10 +481,56 @@ fn elbow_bend(f: &Fitting) -> Option<Mesh> {
     skin(&rings, std::slice::from_ref(&ring), &out, false, &cap_out)
 }
 
-/// A fitting: an elbow with a consistent bend radius is a bend; anything else is the straight stubs it takes from
+/// The points of a section on the plane through `o` spanned by `x` and `y`. A round section is a 32-gon; a
+/// rectangular one has its corners only when `rect_corners` (when both ends of a loft are rectangles), otherwise it
+/// is sampled at the same 32 angles as a round one so that the two ends of a loft pair up.
+fn section_points(size: RunSize, o: V3, x: V3, y: V3, rect_corners: bool) -> Vec<V3> {
+    let at = |q: P| [o[0] + x[0] * q[0] + y[0] * q[1], o[1] + x[1] * q[0] + y[1] * q[1], o[2] + x[2] * q[0] + y[2] * q[1]];
+    match size {
+        RunSize::Round { diameter } => loop_points(&Loop::Circle { c: [0.0, 0.0], r: diameter / 2.0 }).into_iter().map(at).collect(),
+        RunSize::Rect { width, height, .. } if rect_corners => [[-width / 2.0, -height / 2.0], [width / 2.0, -height / 2.0], [width / 2.0, height / 2.0], [-width / 2.0, height / 2.0]].into_iter().map(at).collect(),
+        RunSize::Rect { width, height, .. } => (0..CIRCLE_SIDES).map(|k| {
+            let a = std::f64::consts::TAU * k as f64 / CIRCLE_SIDES as f64;
+            let (c, s) = (a.cos(), a.sin());
+            let r = (width / 2.0 / c.abs().max(1e-12)).min(height / 2.0 / s.abs().max(1e-12));
+            at([r * c, r * s])
+        }).collect(),
+    }
+}
+
+/// A transition: the section changes linearly from one end to the other (a frustum, or a duct that changes size).
+fn transition_loft(f: &Fitting) -> Option<Mesh> {
+    if !matches!(f.kind, FittingKind::Transition) || f.ports.len() != 2 || f.trim.len() != 2 { return None; }
+    let (u0, u1) = (unit3(f.ports[0]), unit3(f.ports[1]));
+    let p0 = [f.at[0] + u0[0] * f.trim[0], f.at[1] + u0[1] * f.trim[0], f.at[2] + u0[2] * f.trim[0]];
+    let p1 = [f.at[0] + u1[0] * f.trim[1], f.at[1] + u1[1] * f.trim[1], f.at[2] + u1[2] * f.trim[1]];
+    let d = sub3(p1, p0);
+    let len = dot3(d, d).sqrt();
+    if len.is_nan() || len <= 1e-9 { return None; }
+    let d = unit3(d);
+    let frame = |size: RunSize| -> (V3, V3) {
+        let x = match size { RunSize::Round { .. } => perp(d), RunSize::Rect { roll, .. } => unit3(cross3(up_for(d, roll), d)) };
+        (x, cross3(d, x))
+    };
+    let both_rect = matches!((f.port_sizes[0], f.port_sizes[1]), (RunSize::Rect { .. }, RunSize::Rect { .. }));
+    let (x0, y0) = frame(f.port_sizes[0]);
+    let (x1, y1) = frame(f.port_sizes[1]);
+    let ring0 = section_points(f.port_sizes[0], p0, x0, y0, both_rect);
+    let ring1 = section_points(f.port_sizes[1], p1, x1, y1, both_rect);
+    let n = ring0.len();
+    // the 2D shape of the end caps: the first ring in its own plane
+    let flat: Vec<P> = ring0.iter().map(|p| { let r = sub3(*p, p0); [dot3(r, x0), dot3(r, y0)] }).collect();
+    let centres = [p0, p1];
+    let rings = vec![vec![ring0, ring1]];
+    let out = |_r: usize, k: usize, j: usize| -> V3 { let p = rings[0][j][k]; let q = rings[0][j][(k + 1) % n]; let m = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, (p[2] + q[2]) / 2.0]; sub3(m, centres[j]) };
+    let cap_out = move |is_end: bool, _p: V3| -> V3 { if is_end { d } else { [-d[0], -d[1], -d[2]] } };
+    skin(&rings, &[flat], &out, false, &cap_out)
+}
+
+/// A fitting: an elbow with a consistent bend radius is a bend, a transition a loft; anything else is the straight stubs it takes from
 /// each leg, as in the IFC export.
 fn fitting_mesh(f: &Fitting) -> Option<Mesh> {
-    if let Some(m) = elbow_bend(f) { return Some(m); }
+    if let Some(m) = elbow_bend(f).or_else(|| transition_loft(f)) { return Some(m); }
     let mut out = Mesh::default();
     for k in 0..f.ports.len() {
         let Some(m) = straight_piece(f.port_sizes[k], f.at, unit3(f.ports[k]), f.trim[k]) else { continue };

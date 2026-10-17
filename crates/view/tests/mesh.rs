@@ -326,3 +326,37 @@ fn sweeps_follow_the_path_with_mitred_bends_and_are_closed() {
     let (lo, hi) = bounds(&e.mesh);
     assert!((lo[2] - 0.5).abs() < 1e-9 && (hi[2] - 0.6).abs() < 1e-9 && (hi[0] - 4.05).abs() < 1e-9 && (hi[1] - 3.0).abs() < 1e-9, "{lo:?} {hi:?}");
 }
+
+fn transition(a: openbim_place::penetrations::RunSize, b: openbim_place::penetrations::RunSize, l: f64) -> ElementMesh {
+    use openbim_family::{Domain, System};
+    use openbim_route::{graph::{NetFitting, Network}, Fitting, FittingKind};
+    let mut net = Network::new(1);
+    net.fittings.push(NetFitting { id: 1, domain: Domain::Duct, system: System::SupplyAir, fitting: Fitting {
+        type_name: "T".into(), part_code: String::new(), kind: FittingKind::Transition, at: [1.0, 2.0, 3.0],
+        ports: vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], port_sizes: vec![a, b], radius: 0.0, trim: vec![0.0, l] } });
+    let mut s = scene();
+    s.networks = vec![net];
+    let u = MeshCache::new().update(&s).unwrap();
+    u.meshes.iter().find(|m| m.element.kind == Kind::Fitting).unwrap().as_ref().clone()
+}
+
+#[test]
+fn a_transition_is_a_loft_from_one_section_to_the_other() {
+    use openbim_place::penetrations::RunSize::{Rect, Round};
+    // round to round: a frustum of a pyramid on regular 32-gons, volume h/3 (A0 + A1 + sqrt(A0 A1)) exactly
+    let area = |r: f64| 0.5 * 32.0 * r * r * (std::f64::consts::TAU / 32.0).sin();
+    let (a0, a1) = (area(0.05), area(0.1));
+    let e = transition(Round { diameter: 0.1 }, Round { diameter: 0.2 }, 0.4);
+    assert!(watertight(&e.mesh));
+    assert!((e.mesh.volume() - 0.4 / 3.0 * (a0 + a1 + (a0 * a1).sqrt())).abs() < 1e-9, "{}", e.mesh.volume());
+    let (lo, hi) = bounds(&e.mesh);
+    assert!((lo[0] - 1.0).abs() < 1e-9 && (hi[0] - 1.4).abs() < 1e-9 && (hi[1] - 2.1).abs() < 1e-9, "{lo:?} {hi:?}");
+    // rectangle to rectangle: the area is quadratic along the length, so Simpson's rule is exact
+    let e = transition(Rect { width: 0.3, height: 0.2, roll: 0.0 }, Rect { width: 0.2, height: 0.2, roll: 0.0 }, 0.5);
+    assert!(watertight(&e.mesh));
+    let want = 0.5 / 6.0 * (0.06 + 4.0 * 0.25 * 0.2 + 0.04);
+    assert!((e.mesh.volume() - want).abs() < 1e-9, "{} vs {want}", e.mesh.volume());
+    // round to rectangular: a closed solid of positive volume between the two
+    let e = transition(Round { diameter: 0.2 }, Rect { width: 0.3, height: 0.2, roll: 0.0 }, 0.5);
+    assert!(watertight(&e.mesh) && e.mesh.volume() > 0.5 * 0.03 && e.mesh.volume() < 0.5 * 0.06);
+}
