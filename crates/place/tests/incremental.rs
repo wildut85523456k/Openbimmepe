@@ -124,3 +124,46 @@ fn most_edits_take_the_quick_path_and_the_rest_the_full_build() {
     assert_eq!(describe(&b), keep);
     assert_eq!(m.placements[0], pl(1, 0, 11, 1.5));
 }
+
+#[test]
+fn a_result_that_does_not_belong_to_the_model_is_never_patched() {
+    // the result of another model: wrong number of placements, of chains
+    let mut m = model(start());
+    let mut other = model(start()[..8].to_vec()).build().unwrap();
+    assert!(!m.update_quick(&mut other, 0, pl(0, 0, 0, 1.5)));
+    let mut fewer = { let mut o = model(start()); o.chains.pop(); o.runs.clear(); o.placements.retain(|p| p.chain < 2); o };
+    let mut fb = fewer.build().unwrap();
+    assert!(!m.update_quick(&mut fb, 0, pl(0, 0, 0, 1.5)));
+    // the same model with a chain taken away after the build: the counts of chains differ
+    let mut b = m.build().unwrap();
+    m.chains.push(WallChain::new(vec![[300.0, 0.0], [304.0, 0.0]], false, 0.2, 3.0));
+    assert!(!m.update_quick(&mut b, 0, pl(0, 0, 0, 1.5)));
+    // update_built then falls back to the full build and the answer is the true one
+    m.update_built(&mut b, 0, pl(0, 0, 0, 1.5)).unwrap();
+    assert_eq!(b.volume.to_bits(), m.build().unwrap().volume.to_bits());
+    let _ = &mut fewer;
+}
+
+#[test]
+fn a_position_that_is_not_a_number_is_refused_as_the_full_build_refuses_it() {
+    for bad in [f64::NAN, f64::INFINITY] {
+        let mut m = model(start());
+        let mut b = m.build().unwrap();
+        let keep = describe(&b);
+        assert!(!m.update_quick(&mut b, 0, pl(0, 0, 0, bad)));
+        assert_eq!(m.update_built(&mut b, 0, pl(0, 0, 0, bad)).unwrap_err(), PlaceError::NotFinite { placement: 0 });
+        assert_eq!(describe(&b), keep);
+        assert_eq!(m.placements[0], pl(0, 0, 0, 2.0));
+    }
+    // a segment that does not exist, while the family and chain are good
+    let mut m = model(start());
+    let mut b = m.build().unwrap();
+    assert!(!m.update_quick(&mut b, 0, pl(0, 0, 12, 1.0)));
+    assert!(!m.update_quick(&mut b, 0, pl(9, 0, 0, 1.0)));
+    assert!(!m.update_quick(&mut b, 0, pl(0, 9, 0, 1.0)));
+    // the old position of the placement no longer exists in the chain (the chain was shortened after the build)
+    let mut m = model(start());
+    let mut b = m.build().unwrap();
+    m.chains[0].points.truncate(6);
+    assert!(!m.update_quick(&mut b, 11, pl(3, 0, 1, 1.0)));
+}
