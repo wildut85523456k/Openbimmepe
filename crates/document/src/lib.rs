@@ -176,6 +176,7 @@ impl Document {
     /// The next element number that no element has.
     pub fn next_id(&self) -> ElementId { ElementId(self.elements.keys().next_back().map_or(1, |k| k.0 + 1)) }
     /// Places a beam on `level` from `start` to `end` in one undoable transaction.
+    #[allow(clippy::too_many_arguments)] // a beam is a level, two points, three sizes and a section
     pub fn place_beam(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64, section: Section) -> Result<ElementId, EditError> {
         let id = self.next_id();
         let n = self.elements.values().filter(|e| e.category == Category::Beam).count() + 1;
