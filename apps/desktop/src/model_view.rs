@@ -69,7 +69,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let mut bounds = Rect::NOTHING;
     let mut meshes = Vec::new();
     for el in app.document.elements() {
-        if let Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. }) = &el.geometry {
+        // a footing hosted by a wall is on the wall's level
+        let hosted = match el.geometry { Some(Geometry::OnWall { host }) => app.document.get(host).and_then(|w| match w.geometry { Some(Geometry::Linear { level, .. }) => Some(level), _ => None }), _ => None };
+        if let Some(level) = hosted.as_ref().or(match &el.geometry { Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. }) => Some(level), _ => None }) {
             if !three_d && *level != level_id { continue; }
             if let Some(mesh) = app.document.mesh(el.id) {
                 for vertex in &mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
@@ -129,7 +131,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
             Category::Beam => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
-            Category::Footing => Color32::from_rgb(160, 150, 135),
+            Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
             Category::Duct => Color32::from_rgb(70, 157, 194),
             Category::Pipe => Color32::from_rgb(136, 153, 166),
@@ -150,7 +152,15 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if app.tool == crate::Tool::Footing && !three_d {
+    if app.tool == crate::Tool::WallFooting && !three_d {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id);
+                match hit { Some(id) => app.wall_footing_click(id), None => app.message = "Wall footing: click a wall".into() }
+            }
+        }
+    } else if app.tool == crate::Tool::Footing && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }

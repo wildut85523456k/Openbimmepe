@@ -75,6 +75,18 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 slabs.push(SlabItem { id: el.id.0, slab, role: SlabRole::PadFooting, room_bounding: false });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
+            (Category::WallFooting, Some(Geometry::OnWall { host })) => {
+                let wall = doc.get(host).ok_or("a wall footing's wall is gone")?;
+                let Some(Geometry::Linear { start, end, level }) = wall.geometry else { return Err("a wall footing's host has no axis".into()) };
+                let (dx, dy) = (end[0] - start[0], end[1] - start[1]);
+                let len = dx.hypot(dy);
+                let (nx, ny) = (-dy / len * el.width_m / 2.0, dx / len * el.width_m / 2.0);
+                let top = level_of(level).ok_or("a wall footing lies on a level that is gone")? + wall.elevation_m + el.elevation_m;
+                let outline = vec![[start[0] - nx, start[1] - ny], [end[0] - nx, end[1] - ny], [end[0] + nx, end[1] + ny], [start[0] + nx, start[1] + ny]];
+                let slab = openbim_place::floors::Slab { name: el.name.clone(), top, thickness: el.height_m, outline, fire_rating_min: None };
+                slabs.push(SlabItem { id: el.id.0, slab, role: SlabRole::StripFooting, room_bounding: false });
+                if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
+            }
             (Category::Level | Category::Grid, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
             (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,

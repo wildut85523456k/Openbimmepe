@@ -76,6 +76,8 @@ fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
     d.place_column(ElementId(10), ElementId(11), [2.0, 2.0], &ColumnSpec { width_m: 0.4, depth_m: 0.4, base_offset_m: 0.1, section: Section::Circle, material: Material::Concrete }).unwrap();
     d.place_slab(ElementId(10), &SlabSpec { outline: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]], thickness_m: 0.25, top_offset_m: -0.05, kind: SlabKind::Foundation, material: Material::Concrete }).unwrap();
     d.place_footing(ElementId(10), [2.0, 2.0], &openbim_document::FootingSpec { width_m: 1.5, length_m: 2.0, thickness_m: 0.5, top_offset_m: -0.1, material: Material::Concrete }).unwrap();
+    let wall = d.elements().find(|e| e.category == openbim_document::Category::Wall).unwrap().id;
+    d.place_wall_footing(wall, &openbim_document::WallFootingSpec { width_m: 0.6, depth_m: 0.4, top_offset_m: -0.05, material: Material::Concrete }).unwrap();
     let json = Snapshot::capture("doc", &d).to_json().unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();
     let rebuilt = back.materialize().unwrap();
@@ -85,5 +87,5 @@ fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
                    (el.category, el.width_m, el.height_m, el.elevation_m, el.slope_ratio, el.geometry, el.section, el.usage, el.material, &el.outline, el.slab_kind), "{}", el.name);
     }
     assert_eq!(d.elements().count(), rebuilt.elements().count());
-    assert!(json.contains("IShape") && json.contains("\"Brace\"") && json.contains("Point") && json.contains("Area") && json.contains("Foundation") && json.contains("Pad"));
+    assert!(json.contains("IShape") && json.contains("\"Brace\"") && json.contains("Point") && json.contains("Area") && json.contains("Foundation") && json.contains("Pad") && json.contains("OnWall"));
 }

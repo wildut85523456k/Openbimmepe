@@ -14,6 +14,8 @@ pub enum Geometry {
     Area { level: ElementId },
     /// a pad footing centred on `at`, `thickness_m` thick
     Pad { at: [f64; 2], level: ElementId, thickness_m: f64 },
+    /// a strip footing hosted by the wall `host`, along its axis
+    OnWall { host: ElementId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,9 +59,13 @@ fn valid_ring(r: &[[f64; 2]]) -> bool {
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
     for el in elements.values() {
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
+            Some(Geometry::OnWall { host }) => {
+                el.category == Category::WallFooting
+                    && elements.get(host).is_some_and(|w| w.category == Category::Wall && matches!(w.geometry, Some(Geometry::Linear { .. })))
+            }
             Some(Geometry::Pad { at, level, thickness_m }) => {
                 el.category == Category::Footing && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
                     && thickness_m.is_finite() && *thickness_m > 0.0 && *thickness_m <= 5.0
@@ -112,6 +118,20 @@ impl Document {
             vertices.extend(section.iter().map(|p| [p[0], p[1], z1]));
             let mut faces: Vec<Vec<usize>> = vec![(0..n).rev().collect(), (n..2 * n).collect()];
             for i in 0..n { faces.push(vec![i, (i + 1) % n, (i + 1) % n + n, i + n]); }
+            return Some(Mesh { vertices, faces });
+        }
+        if let Some(Geometry::OnWall { host }) = el.geometry {
+            let wall = self.get(host)?;
+            let Some(Geometry::Linear { start, end, level }) = wall.geometry else { return None };
+            let (dx, dy) = (end[0] - start[0], end[1] - start[1]);
+            let len = dx.hypot(dy);
+            let (nx, ny) = (-dy / len * el.width_m / 2.0, dx / len * el.width_m / 2.0);
+            let top = self.get(level)?.elevation_m + wall.elevation_m + el.elevation_m;
+            let ring = [[start[0] - nx, start[1] - ny], [end[0] - nx, end[1] - ny], [end[0] + nx, end[1] + ny], [start[0] + nx, start[1] + ny]];
+            let mut vertices: Vec<[f64; 3]> = ring.iter().map(|p| [p[0], p[1], top - el.height_m]).collect();
+            vertices.extend(ring.iter().map(|p| [p[0], p[1], top]));
+            let mut faces = vec![vec![3, 2, 1, 0], vec![4, 5, 6, 7]];
+            for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
         }
         if let Some(Geometry::Pad { at, level, thickness_m }) = el.geometry {

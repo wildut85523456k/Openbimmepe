@@ -29,6 +29,9 @@ pub enum Category {
     /// An isolated (pad) footing: `width_m` by `height_m` in plan, as thick as its pad geometry says, its top
     /// `elevation_m` above the level.
     Footing,
+    /// A strip footing under a wall: `width_m` wide, `height_m` deep, along the wall it is hosted by; its top is
+    /// `elevation_m` above the base of the wall.
+    WallFooting,
     Duct,
     Pipe,
     Equipment,
@@ -88,6 +91,16 @@ impl SlabKind {
     pub fn name(self) -> &'static str {
         match self { SlabKind::Floor => "Floor", SlabKind::Foundation => "Foundation" }
     }
+}
+
+/// A strip footing to lay under a wall.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WallFootingSpec {
+    pub width_m: f64,
+    pub depth_m: f64,
+    /// how far above the base of the wall the top of the footing is (negative: below)
+    pub top_offset_m: f64,
+    pub material: Material,
 }
 
 /// An isolated footing to lay.
@@ -202,7 +215,7 @@ impl Element {
     fn valid(&self) -> bool {
         (matches!(self.category, Category::Beam | Category::Column) || self.section == Section::Rectangle)
             && (self.category == Category::Beam || self.usage == Usage::Girder)
-            && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing) || self.material == Material::Unspecified)
+            && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting) || self.material == Material::Unspecified)
             && (self.category == Category::Slab || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
             && (self.category != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
             && (!matches!(self.category, Category::Beam | Category::Column) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
@@ -360,6 +373,17 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// Lays a strip footing under the wall `host`: it follows the wall wherever it goes.
+    pub fn place_wall_footing(&mut self, host: ElementId, f: &WallFootingSpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::WallFooting).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::WallFooting, name: format!("Wall Footing {n}"), width_m: f.width_m, height_m: f.depth_m, elevation_m: f.top_offset_m },
+            Command::SetMaterial { id, material: f.material },
+            Command::SetGeometry { id, geometry: Geometry::OnWall { host } },
+        ])?;
+        Ok(id)
+    }
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
@@ -437,7 +461,7 @@ impl Document {
                 }
                 Command::SetMaterial { id, material } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::Slab | Category::Footing) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.material = *material;
                     el.revision = revision;
                 }

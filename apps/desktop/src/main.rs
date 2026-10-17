@@ -23,7 +23,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing }
+enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing, WallFooting }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -89,7 +89,7 @@ impl Desktop {
     }
 
     fn sample() -> Self {
-        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing"])
+        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing", "Wall Footing"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
             ("Duct", &["D D"]),
@@ -99,6 +99,7 @@ impl Desktop {
             ("Column", &["C L"]),
             ("Slab", &["S L"]),
             ("Footing", &["F T"]),
+            ("Wall Footing", &["W F"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
@@ -132,6 +133,7 @@ impl Desktop {
             Tool::Column => "Column: click its place in a plan view; it stands from that level to the next one up (Esc ends).".into(),
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
             Tool::Footing => "Isolated footing: click its place in a plan view; it is as wide and long as the options bar says, under the level (Esc ends).".into(),
+            Tool::WallFooting => "Wall footing: click a wall in a plan view; the footing runs under it and follows it (Esc ends).".into(),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -186,6 +188,7 @@ impl Desktop {
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
+            "footing" => self.choose_tool(Tool::WallFooting),
             "foundation" => self.choose_tool(Tool::Footing),
             "slab" => { self.slab_kind_pick = openbim_document::SlabKind::Foundation; self.choose_tool(Tool::Slab) }
             "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
@@ -227,7 +230,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

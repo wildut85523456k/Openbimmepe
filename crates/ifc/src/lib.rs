@@ -167,6 +167,8 @@ pub enum SlabRole {
     Foundation,
     /// an isolated footing under a column: an IfcFooting PAD_FOOTING, which bounds no room
     PadFooting,
+    /// a strip footing under a wall: an IfcFooting STRIP_FOOTING, which bounds no room
+    StripFooting,
 }
 
 pub struct SlabItem {
@@ -1077,8 +1079,9 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, bottom], None, None, s.thickness);
         let shape = o.shape(&[solid]);
         let g = o.gid(item.id, 0);
-        if item.role == SlabRole::PadFooting {
-            let f = o.s.add(format!("IFCFOOTING({g},$,{},$,$,#{pl},#{shape},$,.PAD_FOOTING.)", string(&s.name)));
+        if matches!(item.role, SlabRole::PadFooting | SlabRole::StripFooting) {
+            let kind = if item.role == SlabRole::PadFooting { "PAD_FOOTING" } else { "STRIP_FOOTING" };
+            let f = o.s.add(format!("IFCFOOTING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));
             o.contain(st, f);
             // keeps the slab numbering that room boundaries use
             o.slab_entities.push(f);
