@@ -57,5 +57,10 @@ fn main() {
     };
     let v = plan_view(&scene, 0, ViewRange::new(2.3, cut, 0.0, -1.0).unwrap()).unwrap();
     std::fs::write(&out, svg_with(&v, &look)).unwrap();
+    // a section along x = 3 from the front to the back of the building, looking towards -x... the left of the line
+    let sv = section_view(&scene, Section { a: [3.0, -1.0], b: [3.0, 7.0], bottom: -1.0, top: 3.6, depth: 10.0 }).unwrap();
+    let sec_out = out.replace(".svg", ".section.svg");
+    std::fs::write(&sec_out, section_svg_with(&sv, &look)).unwrap();
+    println!("section: {} shapes, {:?} -> {sec_out}", sv.items.len(), sv.warnings);
     println!("{} shapes -> {out}", v.items.len());
 }

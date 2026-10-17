@@ -14,6 +14,8 @@
 #![forbid(unsafe_code)]
 
 mod draw;
+mod section;
+pub use section::{section_view, section_svg, section_svg_with, Label, Section, SectionView};
 pub use draw::{svg, svg_with, Paint, SvgStyle};
 
 use openbim_family::PlanShape;
@@ -22,7 +24,7 @@ use openbim_ifc::{FamilyItem, Scene};
 use rayon::prelude::*;
 
 type P = [f64; 2];
-const EPS: f64 = 1e-9;
+pub(crate) const EPS: f64 = 1e-9;
 
 /// The four heights of a view, in metres *above the level* (negative = below it). They must satisfy
 /// `depth <= bottom <= cut <= top`.
@@ -48,6 +50,7 @@ pub enum ViewError {
     BadRange(&'static str),
     /// the wall element with this number cannot be drawn
     Wall { id: u64, err: GeomError },
+    BadSection(&'static str),
 }
 
 impl std::fmt::Display for ViewError {
@@ -56,6 +59,7 @@ impl std::fmt::Display for ViewError {
             ViewError::NoSuchLevel(i) => write!(f, "no level {i}"),
             ViewError::BadRange(why) => write!(f, "view range: {why}"),
             ViewError::Wall { id, err } => write!(f, "wall {id}: {err:?}"),
+            ViewError::BadSection(why) => write!(f, "section: {why}"),
         }
     }
 }
@@ -76,6 +80,8 @@ pub enum Class {
     Symbol,
     /// the tinted floor of a room, and the room separation lines of the level (these ignore the view range)
     Room,
+    /// a level line in a section
+    Datum,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +94,7 @@ pub enum Kind {
     Room,
     /// a line that bounds rooms where there is no wall
     SeparationLine,
+    Level,
 }
 
 /// The element a shape belongs to: its kind and its element number in the model.
@@ -141,21 +148,23 @@ pub struct PlanView {
 
 impl PlanView {
     /// Smallest box around everything, `[min_x, min_y, max_x, max_y]`; None when the view is empty.
-    pub fn bounds(&self) -> Option<[f64; 4]> {
-        let mut b: Option<[f64; 4]> = None;
-        let mut add = |p: P| {
-            b = Some(match b { None => [p[0], p[1], p[0], p[1]], Some(o) => [o[0].min(p[0]), o[1].min(p[1]), o[2].max(p[0]), o[3].max(p[1])] });
-        };
-        for it in &self.items {
-            match &it.shape {
-                Shape::Fill(poly) => poly.iter().for_each(|&p| add(p)),
-                Shape::Region { outer, .. } => outer.iter().for_each(|&p| add(p)),
-                Shape::Line(a, c) => { add(*a); add(*c); }
-                Shape::Arc { c, r, .. } | Shape::Circle { c, r } => { add([c[0] - r, c[1] - r]); add([c[0] + r, c[1] + r]); }
-            }
+    pub fn bounds(&self) -> Option<[f64; 4]> { bounds_of(&self.items) }
+}
+
+pub(crate) fn bounds_of(items: &[Item]) -> Option<[f64; 4]> {
+    let mut b: Option<[f64; 4]> = None;
+    let mut add = |p: P| {
+        b = Some(match b { None => [p[0], p[1], p[0], p[1]], Some(o) => [o[0].min(p[0]), o[1].min(p[1]), o[2].max(p[0]), o[3].max(p[1])] });
+    };
+    for it in items {
+        match &it.shape {
+            Shape::Fill(poly) => poly.iter().for_each(|&p| add(p)),
+            Shape::Region { outer, .. } => outer.iter().for_each(|&p| add(p)),
+            Shape::Line(a, c) => { add(*a); add(*c); }
+            Shape::Arc { c, r, .. } | Shape::Circle { c, r } => { add([c[0] - r, c[1] - r]); add([c[0] + r, c[1] + r]); }
         }
-        b
     }
+    b
 }
 
 /// Build the plan view of level `level` of `scene`.
@@ -188,7 +197,7 @@ pub fn plan_view(scene: &Scene, level: usize, range: ViewRange) -> Result<PlanVi
 }
 
 /// The range in absolute heights.
-struct Abs {
+pub(crate) struct Abs {
     top: f64,
     cut: f64,
     bottom: f64,
@@ -209,10 +218,10 @@ fn classify(z0: f64, z1: f64, r: &Abs) -> Option<Class> {
 
 // ------------------------------------------------------------------ intervals along a wall segment
 
-type Spans = Vec<(f64, f64)>;
+pub(crate) type Spans = Vec<(f64, f64)>;
 
 /// `set` without `(a, b)`; `set` is sorted and disjoint.
-fn subtract(set: Spans, a: f64, b: f64) -> Spans {
+pub(crate) fn subtract(set: Spans, a: f64, b: f64) -> Spans {
     let mut out = Vec::with_capacity(set.len() + 1);
     for (s, e) in set {
         if b <= s || a >= e { out.push((s, e)); continue; }

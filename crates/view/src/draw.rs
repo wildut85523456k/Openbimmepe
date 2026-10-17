@@ -1,7 +1,7 @@
 //! Drawing views as SVG. One unit is one metre, y up; line weights are in metres on paper at 1:1, so a caller who wants
 //! a scale applies it to the whole page. The look is a style, not data: the same view can be drawn as Revit draws it
 //! (white cut walls with heavy outlines, hatched concrete), as solid poche, or shaded grey.
-use crate::{Class, Item, Kind, PlanView, RoomTag, Shape};
+use crate::{Class, Item, Kind, Label, PlanView, RoomTag, Shape};
 use std::fmt::Write;
 
 type P = [f64; 2];
@@ -72,11 +72,11 @@ impl SvgStyle {
 pub fn svg(v: &PlanView) -> String { svg_with(v, &SvgStyle::revit()) }
 
 pub fn svg_with(v: &PlanView, st: &SvgStyle) -> String {
-    page(&v.level_name, v.bounds().unwrap_or([0.0, 0.0, 1.0, 1.0]), &v.items, &v.tags, st)
+    page(&v.level_name, v.bounds().unwrap_or([0.0, 0.0, 1.0, 1.0]), &v.items, &v.tags, &[], st)
 }
 
 /// The page for any list of items; `bounds` is `[min_x, min_y, max_x, max_y]`.
-pub(crate) fn page(title: &str, bounds: [f64; 4], items: &[Item], tags: &[RoomTag], st: &SvgStyle) -> String {
+pub(crate) fn page(title: &str, bounds: [f64; 4], items: &[Item], tags: &[RoomTag], labels: &[Label], st: &SvgStyle) -> String {
     let [x0, y0, x1, y1] = bounds;
     let m = 0.5;
     let mut s = String::new();
@@ -114,6 +114,7 @@ pub(crate) fn page(title: &str, bounds: [f64; 4], items: &[Item], tags: &[RoomTa
         Class::Cut => format!("stroke=\"black\" stroke-width=\"{}\"", st.cut_width),
         Class::Below | Class::Symbol => format!("stroke=\"black\" stroke-width=\"{}\"", st.projection_width),
         Class::Overhead => format!("stroke=\"black\" stroke-width=\"{}\" stroke-dasharray=\"0.15 0.1\"", st.projection_width),
+        Class::Datum => format!("stroke=\"{}\" stroke-width=\"{}\" stroke-dasharray=\"0.3 0.08 0.05 0.08\"", st.beyond_colour, st.projection_width),
         Class::Beyond => format!("stroke=\"{}\" stroke-width=\"{}\"", st.beyond_colour, st.beyond_width),
     };
     for it in items {
@@ -147,6 +148,11 @@ pub(crate) fn page(title: &str, bounds: [f64; 4], items: &[Item], tags: &[RoomTa
     if st.tags {
         for t in tags {
             let _ = write!(s, "<g font-family=\"sans-serif\" font-size=\"0.22\" text-anchor=\"middle\" fill=\"#333\"><text x=\"{}\" y=\"{}\">{}</text><text x=\"{}\" y=\"{}\" font-size=\"0.18\">{:.1} m²</text></g>", t.at[0], -t.at[1], esc(&t.name), t.at[0], -t.at[1] + 0.28, t.area);
+        }
+    }
+    if st.tags {
+        for l in labels {
+            let _ = write!(s, "<text font-family=\"sans-serif\" font-size=\"0.2\" fill=\"#333\" x=\"{}\" y=\"{}\">{}</text>", l.at[0] + 0.1, -l.at[1] - 0.05, esc(&l.text));
         }
     }
     s.push_str("</svg>");
