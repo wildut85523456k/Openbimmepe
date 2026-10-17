@@ -137,10 +137,10 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
     for el in elements.values() {
         if let Some(p) = el.parent {
             // a beam made by a beam system points at it
-            if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| s.category == Category::BeamSystem)) { return Err(EditError::InvalidElement); }
+            if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss))) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
             Some(Geometry::OnWall { host }) => {
@@ -171,7 +171,8 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Linear { start, end, level }) => {
                 let datum = elements.get(level).filter(|l| l.category == Category::Level
                     && l.geometry == Some(Geometry::Level));
-                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe)
+                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe | Category::Truss)
+                    && (el.category != Category::Truss || (0.05..=1000.0).contains(&el.spacing_m))
                     && valid_axis(*start, *end) && datum.is_some()
                     && el.width_m <= 1e6 && el.height_m <= 1e6
                     && (el.category != Category::Pipe || (el.width_m - el.height_m).abs() <= 1e-9)
@@ -268,7 +269,7 @@ impl Document {
             for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
         }
-        if el.category == Category::BeamSystem { return None; }
+        if matches!(el.category, Category::BeamSystem | Category::Truss) { return None; }
         if let Some(Geometry::Area { level }) = el.geometry {
             // the slab hangs from its top, which is `elevation_m` above the level
             let ring = &el.outline;
@@ -660,5 +661,32 @@ mod tests {
         // deleting the system takes its beams along
         d.delete_beam_system(sys).unwrap();
         assert!(d.get(sys).is_none() && d.get(kids[0]).is_none());
+    }
+
+    #[test]
+    fn a_warren_truss_is_made_of_chords_and_diagonals_that_follow_its_edits() {
+        use crate::{Command, TrussSpec, Usage};
+        let mut d = Document::spatial_sample();
+        let spec = TrussSpec { start: [0.0, 1.0], end: [8.0, 1.0], spacing_m: 2.0, depth_m: 1.0, member_m: 0.1, elevation_m: 2.0, material: Material::Steel };
+        let t = d.place_truss(ElementId(10), &spec).unwrap();
+        let kids = d.system_beams(t);
+        // 4 panels: bottom chord, top chord and 8 diagonals
+        assert_eq!(kids.len(), 10);
+        assert_eq!(kids.iter().filter(|k| d.get(**k).unwrap().usage == Usage::Brace).count(), 8);
+        let top = d.get(kids[1]).unwrap();
+        assert_eq!(top.elevation_m, 3.0);
+        let Some(Geometry::Linear { start, end, .. }) = top.geometry else { panic!() };
+        assert!((start[0] - 1.0).abs() < 1e-9 && (end[0] - 7.0).abs() < 1e-9, "the top chord runs between the first and last apex");
+        // the diagonals climb and fall by the depth over half a panel
+        assert!((d.get(kids[2]).unwrap().slope_ratio.unwrap() - 1.0).abs() < 1e-9 && (d.get(kids[3]).unwrap().slope_ratio.unwrap() + 1.0).abs() < 1e-9);
+        // a longer panel gives fewer members, undo brings them back
+        d.edit_truss(t, &TrussSpec { spacing_m: 4.0, ..spec }).unwrap();
+        assert_eq!(d.system_beams(t).len(), 6);
+        d.undo().unwrap();
+        assert_eq!(d.system_beams(t).len(), 10);
+        assert!(d.edit_truss(t, &TrussSpec { spacing_m: 0.0, ..spec }).is_err());
+        assert!(d.transact(d.revision(), &[Command::SetParent { id: kids[0], parent: Some(kids[1]) }]).is_err());
+        d.delete_beam_system(t).unwrap();
+        assert!(d.get(t).is_none() && d.get(kids[0]).is_none());
     }
 }

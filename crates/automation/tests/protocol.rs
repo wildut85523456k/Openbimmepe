@@ -79,6 +79,7 @@ fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
     let wall = d.elements().find(|e| e.category == openbim_document::Category::Wall).unwrap().id;
     d.place_wall_footing(wall, &openbim_document::WallFootingSpec { width_m: 0.6, depth_m: 0.4, top_offset_m: -0.05, material: Material::Concrete }).unwrap();
     d.place_beam_system(ElementId(10), &openbim_document::BeamSystemSpec { outline: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [0.0, 3.0]], spacing_m: 1.0, angle_deg: 90.0, width_m: 0.1, depth_m: 0.2, elevation_m: 2.8, section: Section::Rectangle, usage: Usage::Joist, material: Material::Timber }).unwrap();
+    d.place_truss(ElementId(10), &openbim_document::TrussSpec { start: [0.0, 5.0], end: [6.0, 5.0], spacing_m: 2.0, depth_m: 0.8, member_m: 0.08, elevation_m: 2.0, material: Material::Steel }).unwrap();
     let first = d.elements().find(|e| e.category == openbim_document::Category::Beam && e.parent.is_some()).unwrap().id;
     d.transact(d.revision(), &[openbim_document::Command::SetJoins { id: first, start: false, end: true }]).unwrap();
     let json = Snapshot::capture("doc", &d).to_json().unwrap();

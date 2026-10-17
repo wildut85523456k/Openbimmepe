@@ -74,6 +74,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
+        C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
         C::BeamSystem => &[Field::Spacing, Field::Angle, Field::Width, Field::Height, Field::Elevation],
         C::Footing => &[Field::Width, Field::Height, Field::Thickness, Field::Elevation],
         C::WallFooting => &[Field::Width, Field::Height, Field::Elevation],
@@ -125,6 +126,10 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
     use openbim_document::Category as C;
     match field {
         Field::Thickness => "Thickness (mm)",
+        Field::Spacing if category == C::Truss => "Panel Length (mm)",
+        Field::Width if category == C::Truss => "Member Size (mm)",
+        Field::Height if category == C::Truss => "Truss Depth (mm)",
+        Field::Elevation if category == C::Truss => "Bottom Chord Elevation (mm)",
         Field::Spacing => "Spacing (mm)", Field::Angle => "Angle (deg)",
         Field::Height if category == C::BeamSystem => "Beam Depth (mm)",
         Field::Width if category == C::BeamSystem => "Beam Width (mm)",
@@ -188,6 +193,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Footing => ("Structural Foundations (1)", "Isolated Footing", "foundation"),
         C::WallFooting => ("Structural Foundations (1)", "Strip Footing", "footing"),
         C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
+        C::Truss => ("Structural Trusses (1)", "Warren Truss", "truss"),
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
@@ -227,6 +233,18 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             for field in dimensions(cat, 0).iter().copied() {
                 if matches!(field, Field::Elevation) { ui.label(field_name(field, cat)); ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0)); continue; }
                 ui.label(field_name(field, cat));
+                editor(app, ui, field);
+            }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::Truss {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Truss");
+            ui.separator();
+            usage_material_combos(app, ui, false);
+            for field in dimensions(openbim_document::Category::Truss, 0).iter().copied() {
+                ui.label(field_name(field, openbim_document::Category::Truss));
                 editor(app, ui, field);
             }
         });
@@ -371,7 +389,8 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Derived Geometry", &query, &[("Corners", &corners), ("Area (m²)", &area)]);
                     }
                     if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column | openbim_document::Category::BeamSystem) { section_combo(app, ui); usage_material_combos(app, ui, el.category != openbim_document::Category::Column); }
-                    if el.category == openbim_document::Category::BeamSystem {
+                    if el.category == openbim_document::Category::Truss { usage_material_combos(app, ui, false); }
+                    if matches!(el.category, openbim_document::Category::BeamSystem | openbim_document::Category::Truss) {
                         let n = app.document.system_beams(el.id).len().to_string();
                         read_only_group(ui, "Derived Geometry", &query, &[("Beams", &n)]);
                     }

@@ -149,8 +149,8 @@ impl Snapshot {
             material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
             outline: e.outline.clone(),
             slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
-            spacing_m: (e.category == Category::BeamSystem).then_some(e.spacing_m),
-            angle_deg: (e.category == Category::BeamSystem).then_some(e.angle_deg),
+            spacing_m: matches!(e.category, Category::BeamSystem | Category::Truss).then_some(e.spacing_m),
+            angle_deg: matches!(e.category, Category::BeamSystem | Category::Truss).then_some(e.angle_deg),
             parent: e.parent.map(|p| p.0),
             join_ends: (e.join_ends != [true; 2]).then_some(e.join_ends),
         }).collect() }
@@ -165,7 +165,7 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),

@@ -36,6 +36,10 @@ pub enum Category {
     /// the section of its beams, `elevation_m` the height of their centre lines above the level. The beams are
     /// elements of their own, with this system as their `parent`.
     BeamSystem,
+    /// A flat Warren truss along an axis on a level: `width_m` is the size of its members, `height_m` its depth,
+    /// `elevation_m` the height of its bottom chord above the level and `spacing_m` the panel length it aims for.
+    /// Its chords and diagonals are beams of their own, with the truss as their `parent`.
+    Truss,
     Duct,
     Pipe,
     Equipment,
@@ -130,6 +134,21 @@ pub struct BeamSystemSpec {
     pub elevation_m: f64,
     pub section: Section,
     pub usage: Usage,
+    pub material: Material,
+}
+
+/// A flat Warren truss to build along `start`..`end` on a level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrussSpec {
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    /// the panel length aimed for; the truss has the whole number of equal panels nearest to it
+    pub spacing_m: f64,
+    pub depth_m: f64,
+    /// width and depth of every member
+    pub member_m: f64,
+    /// height of the bottom chord's centre line above the level
+    pub elevation_m: f64,
     pub material: Material,
 }
 
@@ -240,16 +259,17 @@ impl Element {
     pub fn is_round(&self) -> bool { self.category == Category::Pipe || (matches!(self.category, Category::Beam | Category::Column) && self.section == Section::Circle) }
 
     fn valid(&self) -> bool {
-        (matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem) || self.section == Section::Rectangle)
-            && (matches!(self.category, Category::Beam | Category::BeamSystem) || self.usage == Usage::Girder)
-            && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem) || self.material == Material::Unspecified)
-            && (matches!(self.category, Category::Slab | Category::BeamSystem) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
+        (matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || self.section == Section::Rectangle)
+            && (matches!(self.category, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
+            && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
+            && (matches!(self.category, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
             && (self.category == Category::Beam || self.join_ends == [true; 2])
-            && (self.category == Category::BeamSystem || (self.spacing_m == 0.0 && self.angle_deg == 0.0))
+            && (matches!(self.category, Category::BeamSystem | Category::Truss) || (self.spacing_m == 0.0 && self.angle_deg == 0.0))
+            && (self.category != Category::Truss || self.angle_deg == 0.0)
             && (self.category != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category == Category::Beam || self.parent.is_none())
             && (self.category != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
-            && (!matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
+            && (!matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
             && self.width_m.is_finite()
@@ -442,6 +462,79 @@ impl Document {
         Ok(ops)
     }
 
+    /// The members of a Warren truss as (start, end, centre-line height at the start, rise, brace?) along its axis.
+    pub fn truss_members(spec: &TrussSpec) -> Vec<([f64; 2], [f64; 2], f64, f64, bool)> {
+        let (dx, dy) = (spec.end[0] - spec.start[0], spec.end[1] - spec.start[1]);
+        let len = dx.hypot(dy);
+        if len < 1e-6 || spec.spacing_m.is_nan() || spec.spacing_m <= 0.0 { return Vec::new(); }
+        let n = ((len / spec.spacing_m).round() as usize).clamp(1, 200);
+        let p = len / n as f64;
+        let at = |s: f64| [spec.start[0] + dx * s / len, spec.start[1] + dy * s / len];
+        let d = spec.depth_m;
+        let mut out = vec![(at(0.0), at(len), 0.0, 0.0, false)];
+        if n > 1 { out.push((at(p / 2.0), at(len - p / 2.0), d, 0.0, false)); }
+        for i in 0..n {
+            let x = i as f64 * p;
+            out.push((at(x), at(x + p / 2.0), 0.0, d, true));
+            out.push((at(x + p / 2.0), at(x + p), d, -d, true));
+        }
+        out
+    }
+
+    fn truss_commands(&self, name: &str, id: ElementId, level: ElementId, spec: &TrussSpec, first: u64) -> Vec<Command> {
+        let mut ops = Vec::new();
+        for (i, (a, b, z, rise, brace)) in Self::truss_members(spec).into_iter().enumerate() {
+            let bid = ElementId(first + i as u64);
+            let run = (b[0] - a[0]).hypot(b[1] - a[1]);
+            let part = if brace { "Diagonal" } else if z == 0.0 { "Bottom Chord" } else { "Top Chord" };
+            ops.extend([
+                Command::Create { id: bid, category: Category::Beam, name: format!("{name} {part} {}", i + 1), width_m: spec.member_m, height_m: spec.member_m, elevation_m: spec.elevation_m + z },
+                Command::SetUsage { id: bid, usage: if brace { Usage::Brace } else { Usage::Girder } },
+                Command::SetMaterial { id: bid, material: spec.material },
+                Command::SetSlope { id: bid, slope_ratio: rise / run },
+                Command::SetGeometry { id: bid, geometry: Geometry::Linear { start: a, end: b, level } },
+                Command::SetParent { id: bid, parent: Some(id) },
+            ]);
+        }
+        let _ = id;
+        ops
+    }
+
+    /// Builds a truss on `level`: the truss and its members, in one undoable transaction.
+    pub fn place_truss(&mut self, level: ElementId, spec: &TrussSpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Truss).count() + 1;
+        let name = format!("Truss {n}");
+        let mut ops = vec![
+            Command::Create { id, category: Category::Truss, name: name.clone(), width_m: spec.member_m, height_m: spec.depth_m, elevation_m: spec.elevation_m },
+            Command::SetMaterial { id, material: spec.material },
+            Command::SetBeamSystem { id, spacing_m: spec.spacing_m, angle_deg: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start: spec.start, end: spec.end, level } },
+        ];
+        ops.extend(self.truss_commands(&name, id, level, spec, id.0 + 1));
+        self.transact(self.revision, &ops)?;
+        Ok(id)
+    }
+
+    /// Changes a truss and makes its members again, in one transaction.
+    pub fn edit_truss(&mut self, id: ElementId, spec: &TrussSpec) -> Result<(), EditError> {
+        let t = self.elements.get(&id).filter(|e| e.category == Category::Truss).ok_or(EditError::NotFound(id))?;
+        let Some(Geometry::Linear { level, .. }) = t.geometry else { return Err(EditError::InvalidElement) };
+        let name = t.name.clone();
+        let first = self.next_id().0;
+        let mut ops = vec![
+            Command::Resize { id, width_m: spec.member_m, height_m: spec.depth_m },
+            Command::MoveElevation { id, elevation_m: spec.elevation_m },
+            Command::SetMaterial { id, material: spec.material },
+            Command::SetBeamSystem { id, spacing_m: spec.spacing_m, angle_deg: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start: spec.start, end: spec.end, level } },
+        ];
+        ops.extend(self.system_beams(id).into_iter().map(|b| Command::Delete { id: b }));
+        ops.extend(self.truss_commands(&name, id, level, spec, first));
+        self.transact(self.revision, &ops)?;
+        Ok(())
+    }
+
     /// Lays a beam system on `level`: the system and its beams, in one undoable transaction.
     pub fn place_beam_system(&mut self, level: ElementId, spec: &BeamSystemSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();
@@ -490,7 +583,7 @@ impl Document {
 
     /// Deletes a beam system with its beams, in one transaction.
     pub fn delete_beam_system(&mut self, id: ElementId) -> Result<(), EditError> {
-        if self.elements.get(&id).is_none_or(|e| e.category != Category::BeamSystem) { return Err(EditError::NotFound(id)); }
+        if self.elements.get(&id).is_none_or(|e| !matches!(e.category, Category::BeamSystem | Category::Truss)) { return Err(EditError::NotFound(id)); }
         let mut ops: Vec<Command> = self.system_beams(id).into_iter().map(|b| Command::Delete { id: b }).collect();
         ops.push(Command::Delete { id });
         self.transact(self.revision, &ops)?;
@@ -537,7 +630,7 @@ impl Document {
                     el.width_m = *width_m;
                     el.height_m = *height_m;
                     // a beam is checked whole at the end, so that a size and a section can change together
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && !el.valid() { return Err(EditError::InvalidElement); }
+                    if !matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) && !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
                 Command::MoveElevation { id, elevation_m } => {
@@ -556,19 +649,19 @@ impl Document {
                 }
                 Command::SetUsage { id, usage } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::BeamSystem) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.usage = *usage;
                     el.revision = revision;
                 }
                 Command::SetOutline { id, outline } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Slab | Category::BeamSystem) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.outline = outline.clone();
                     el.revision = revision;
                 }
                 Command::SetBeamSystem { id, spacing_m, angle_deg } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::BeamSystem { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     (el.spacing_m, el.angle_deg) = (*spacing_m, *angle_deg);
                     el.revision = revision;
                 }
@@ -592,13 +685,13 @@ impl Document {
                 }
                 Command::SetMaterial { id, material } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.material = *material;
                     el.revision = revision;
                 }
                 Command::SetSection { id, section } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.section = *section;
                     if *section == Section::Circle { el.height_m = el.width_m; }
                     el.revision = revision;

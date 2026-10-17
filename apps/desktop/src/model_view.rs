@@ -129,7 +129,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     for (id, category, mesh) in meshes {
         let color = match category {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
-            Category::Beam | Category::BeamSystem => Color32::from_rgb(176, 140, 104),
+            Category::Beam | Category::BeamSystem | Category::Truss => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
             Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
@@ -192,6 +192,12 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.column_click(level_id, to_model(p)); } }
+    } else if app.tool == crate::Tool::Truss && !three_d {
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.truss_click(level_id, to_model(p)); } }
     } else if app.tool == crate::Tool::Beam && !three_d {
         // two clicks place a beam, snapped to 50 mm; Esc ends the tool
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());

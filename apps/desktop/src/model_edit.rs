@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
+use openbim_document::{TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -24,7 +24,8 @@ impl Desktop {
             if let (Category::Footing, Some(Geometry::Pad { thickness_m, .. })) = (el.category, el.geometry) { (self.material_pick, self.footing_thickness_mm) = (el.material, thickness_m * 1000.0); }
             if el.category == Category::WallFooting { self.material_pick = el.material; }
             if el.category == Category::Beam { self.join_pick = el.join_ends; }
-            if el.category == Category::BeamSystem { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
+            if matches!(el.category, Category::BeamSystem | Category::Truss) { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
+            if el.category == Category::Truss { self.material_pick = el.material; }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
@@ -52,7 +53,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && {
@@ -71,7 +72,8 @@ impl Desktop {
             _ => false,
         };
         let system = el.category == Category::BeamSystem && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(el.angle_deg, self.angle_deg) || el.usage != self.usage_pick || el.material != self.material_pick);
-        let kind = system || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
+        let truss = el.category == Category::Truss && (differs(el.spacing_m * 1000.0, self.spacing_mm) || el.material != self.material_pick);
+        let kind = system || truss || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
             || (el.category == Category::WallFooting && el.material != self.material_pick)
             || (el.category == Category::Beam && el.join_ends != self.join_pick)
@@ -202,6 +204,17 @@ impl Desktop {
         }
     }
 
+    /// A click of the Truss tool in the plan of `level`: the first sets the start, the second builds the truss.
+    pub(crate) fn truss_click(&mut self, level: ElementId, point: [f64; 2]) {
+        let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Truss: click the end".into(); return; };
+        let m = |v: f64| v / 1000.0;
+        let spec = TrussSpec { start, end: point, spacing_m: m(self.spacing_mm), depth_m: m(self.height_mm), member_m: m(self.width_mm), elevation_m: m(self.elevation_mm), material: self.material_pick };
+        match self.document.place_truss(level, &spec) {
+            Ok(id) => { self.beam_start = None; self.message = format!("Truss {} placed with {} members; undo removes it", id.0, self.document.system_beams(id).len()); }
+            Err(error) => self.message = format!("Truss rejected ({error:?}); click another end"),
+        }
+    }
+
     /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
     /// tool stays on for the next one.
     pub(crate) fn beam_click(&mut self, level: ElementId, point: [f64; 2]) {
@@ -227,6 +240,17 @@ impl Desktop {
         if matches!(el.category, Category::Footing | Category::WallFooting) {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 });
             commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
+        if el.category == Category::Truss {
+            let Some(Geometry::Linear { start: _, end: _, .. }) = el.geometry else { return; };
+            let m = |v: f64| v / 1000.0;
+            let spec = TrussSpec { start: [m(self.axis_mm[0]), m(self.axis_mm[1])], end: [m(self.axis_mm[2]), m(self.axis_mm[3])], spacing_m: m(self.spacing_mm),
+                depth_m: m(self.height_mm), member_m: m(self.width_mm), elevation_m: m(self.elevation_mm), material: self.material_pick };
+            match self.document.edit_truss(id, &spec) {
+                Ok(()) => { self.sync_duct_controls(); self.message = format!("Truss {} updated; its members were made again", id.0); }
+                Err(error) => self.message = format!("Edit rejected: {error:?}"),
+            }
+            return;
         }
         if el.category == Category::BeamSystem {
             let Some(Geometry::Area { level }) = el.geometry else { return; };
@@ -669,5 +693,28 @@ mod tests {
         assert_eq!(app.document.system_beams(sys).len(), 2);
         app.undo_document();
         assert_eq!(app.document.system_beams(sys).len(), 4);
+    }
+
+    #[test]
+    fn a_truss_is_built_by_two_clicks_edited_by_panel_length_and_exported_as_members() {
+        let mut app = Desktop::sample();
+        app.run_command("truss", "Truss");
+        assert!(app.tool == Tool::Truss);
+        (app.spacing_mm, app.width_mm, app.height_mm, app.elevation_mm) = (2000.0, 100.0, 1000.0, 2000.0);
+        app.material_pick = openbim_document::Material::Steel;
+        app.truss_click(ElementId(10), [0.0, 1.0]);
+        app.truss_click(ElementId(10), [8.0, 1.0]);
+        let t = app.document.elements().find(|e| e.category == Category::Truss).expect("built").id;
+        assert_eq!(app.document.system_beams(t).len(), 10);
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCBEAM(").count() + out.text.matches("IFCMEMBER(").count(), 10);
+        app.select_element(Some(t));
+        assert!(!app.has_pending_edit());
+        app.spacing_mm = 4000.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.system_beams(t).len(), 6);
+        app.undo_document();
+        assert_eq!(app.document.system_beams(t).len(), 10);
     }
 }
