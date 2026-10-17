@@ -79,6 +79,13 @@ pub fn datums(doc: &Document) -> Vec<Datum> {
     out
 }
 
+/// The storeys of the project as height bands: each level up to the next one, the top level up to `top`.
+pub fn level_bands(doc: &Document, top: f64) -> Vec<(String, f64, f64)> {
+    let mut lv: Vec<(String, f64)> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level))).map(|e| (e.name.clone(), e.elevation_m)).collect();
+    lv.sort_by(|a, b| a.1.total_cmp(&b.1));
+    (0..lv.len()).map(|i| (lv[i].0.clone(), lv[i].1, lv.get(i + 1).map_or(top.max(lv[i].1), |n| n.1))).collect()
+}
+
 /// The sun of a view at the project's site: place, angle to true north and clock come from the project, date and time
 /// stay the view's own.
 pub fn sun_at(site: &Site, sun: openbim_viewport_egui::Sun) -> openbim_viewport_egui::Sun {
@@ -154,6 +161,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let model = app.view3d.model_bounds();
     if let (Some(sec), Some(b)) = (&mut app.view3d.section, model) {
         ui.horizontal_wrapped(|ui| {
+            ui.label("Storey");
+            for (name, lo, hi) in level_bands(&app.document, b.max[2]) {
+                if ui.small_button(&name).on_hover_text(format!("{lo:.3} m to {hi:.3} m")).clicked() {
+                    (sec.min, sec.max) = ([b.min[0], b.min[1], lo.max(b.min[2])], [b.max[0], b.max[1], hi.min(b.max[2])]);
+                }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
             for (k, axis) in ["X", "Y", "Z"].iter().enumerate() {
                 ui.label(*axis);
                 let (mut lo, mut hi) = (sec.min[k], sec.max[k]);
@@ -192,6 +207,15 @@ mod tests {
         }
         // levels and grids are not solids
         assert!(b.elements.iter().all(|e| matches!(e.kind, Kind::Wall | Kind::Segment | Kind::Family)));
+    }
+
+    #[test]
+    fn each_level_is_a_band_up_to_the_next_one() {
+        let b = level_bands(&Document::spatial_sample(), 6.0);
+        assert_eq!(b.len(), 2);
+        assert!(b[0].1 < b[0].2 && (b[0].2 - b[1].1).abs() < 1e-9, "the first band ends where the second starts: {b:?}");
+        assert!((b[1].2 - 6.0).abs() < 1e-9, "the top level runs to the top of the model");
+        assert!(b[1].0.contains("Level 2"));
     }
 
     #[test]
