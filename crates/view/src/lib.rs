@@ -263,7 +263,7 @@ fn polygon_at(poly: &[P], z: f64) -> Spans {
         if (p[1] <= z) != (q[1] <= z) { xs.push(p[0] + (z - p[1]) / (q[1] - p[1]) * (q[0] - p[0])); }
     }
     xs.sort_by(|a, b| a.total_cmp(b));
-    xs.chunks_exact(2).map(|c| (c[0], c[1])).collect()
+    xs.as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).collect()
 }
 
 // ------------------------------------------------------------------ walls
@@ -384,7 +384,7 @@ fn label_point(outline: &[P], holes: &[Vec<P>]) -> Option<P> {
             }
         }
         xs.sort_by(|a, b| a.total_cmp(b));
-        for c in xs.chunks_exact(2) {
+        for c in xs.as_chunks::<2>().0 {
             let mid = [(c[0] + c[1]) / 2.0, y];
             if c[1] - c[0] > best.map_or(0.0, |b| b.0) && in_room(outline, holes, mid) { best = Some((c[1] - c[0], mid)); }
         }

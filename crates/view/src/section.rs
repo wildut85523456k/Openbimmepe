@@ -121,7 +121,7 @@ fn ring_spans(ring: &[P], fr: &Fr) -> Spans {
         if (wa < 0.0) != (wb < 0.0) { us.push(ua + (0.0 - wa) / (wb - wa) * (ub - ua)); }
     }
     us.sort_by(|a, b| a.total_cmp(b));
-    us.chunks_exact(2).filter_map(|c| { let (a, b) = (c[0].max(0.0), c[1].min(fr.len)); if b - a > EPS { Some((a, b)) } else { None } }).collect()
+    us.as_chunks::<2>().0.iter().filter_map(|c| { let (a, b) = (c[0].max(0.0), c[1].min(fr.len)); if b - a > EPS { Some((a, b)) } else { None } }).collect()
 }
 
 fn rect_ring(u0: f64, u1: f64, z0: f64, z1: f64) -> Vec<P> { vec![[u0, z0], [u1, z0], [u1, z1], [u0, z1]] }
@@ -217,7 +217,7 @@ fn wall_items(id: u64, c: &WallChain, fr: &Fr, sec: &Section) -> Result<WallDraw
                         if (a[0] <= s0) != (b[0] <= s0) { zs.push(c.base_z + a[1] + (s0 - a[0]) / (b[0] - a[0]) * (b[1] - a[1])); }
                     }
                     zs.sort_by(|a, b| a.total_cmp(b));
-                    for pair in zs.chunks_exact(2) {
+                    for pair in zs.as_chunks::<2>().0 {
                         let (zl, zh) = (pair[0].max(z0), pair[1].min(z1));
                         if zh - zl > EPS { holes.push(rect_ring(ua, ub, zl, zh)); }
                     }
