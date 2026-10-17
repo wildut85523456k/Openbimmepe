@@ -65,6 +65,7 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
     let size = [width as f64, height as f64];
     let mut img = Image { width, height, rgba: BACKGROUND.iter().chain(&[255]).copied().cycle().take(width * height * 4).collect() };
     let mut depth = vec![f64::INFINITY; width * height];
+    let mut owner = vec![u32::MAX; width * height];
     let eye = cam.eye();
     let (r, u, f) = (cam.right(), cam.up(), cam.forward());
     let headlight = |n: V| -> f64 {
@@ -74,7 +75,7 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
         dot(n, unit(l)).max(0.0)
     };
 
-    struct Tri { p: [[f64; 3]; 3], colour: [u8; 3] }
+    struct Tri { p: [[f64; 3]; 3], colour: [u8; 3], el: u32 }
     let mut tris: Vec<Tri> = Vec::new();
     let mut normals: Vec<V> = Vec::with_capacity(b.tris.len());
     for (ti, t) in b.tris.iter().enumerate() {
@@ -98,7 +99,7 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
                 [0, 1, 2].map(|c| (base[c] * k.min(1.0) * 255.0).round() as u8)
             }
         };
-        tris.push(Tri { p: [p0, p1, p2], colour });
+        tris.push(Tri { p: [p0, p1, p2], colour, el: b.tri_element[ti] });
     }
 
     // fill
@@ -120,8 +121,26 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
                 let i = y * width + x;
                 if z < depth[i] {
                     depth[i] = z;
+                    owner[i] = t.el;
                     if style != Style::Wireframe {
                         img.rgba[i * 4..i * 4 + 3].copy_from_slice(&t.colour);
+                    }
+                }
+            }
+        }
+    }
+
+    // Where two elements meet (the end of a wall in the face of another, a column on a slab) no edge of either mesh
+    // lies on the line, so find it in the picture: neighbouring pixels of different elements at nearly the same depth.
+    // A big difference in depth is a silhouette; the mesh edges draw those.
+    if style == Style::HiddenLine {
+        for y in 0..height {
+            for x in 0..width {
+                let i = y * width + x;
+                if owner[i] == u32::MAX { continue; }
+                for j in [if x + 1 < width { Some(i + 1) } else { None }, if y + 1 < height { Some(i + width) } else { None }].into_iter().flatten() {
+                    if owner[j] != u32::MAX && owner[j] != owner[i] && (depth[i] - depth[j]).abs() < 0.01 * depth[i].min(depth[j]) {
+                        img.rgba[i * 4..i * 4 + 3].copy_from_slice(&EDGE);
                     }
                 }
             }

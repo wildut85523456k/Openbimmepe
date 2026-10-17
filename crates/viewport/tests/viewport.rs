@@ -157,3 +157,36 @@ fn hidden_line_draws_edges_that_are_seen_and_not_those_behind_a_face() {
     let (mx, my) = ((f0[0] + f1[0]) / 2.0, (f0[1] + f1[1]) / 2.0);
     assert!((-1i32..=1).any(|dy| (-1i32..=1).any(|dx| wf.pixel((mx as i32 + dx) as usize, (my as i32 + dy) as usize)[0] < 80)));
 }
+
+/// Walls that meet: the end of one runs into the face of the other, so no edge of either mesh lies on the line
+/// where their faces cross. It has to be drawn all the same.
+fn t_junction() -> Batch {
+    let mut s = Scene {
+        project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+        levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
+        walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
+        families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+    };
+    s.walls = vec![
+        WallItem { id: 1, name: "A".into(), chain: WallChain::new(vec![[-3.0, 0.0], [3.0, 0.0]], false, 0.2, 2.0), wall_type: None, room_bounding: true },
+        WallItem { id: 2, name: "B".into(), chain: WallChain::new(vec![[0.0, 0.0], [0.0, -3.0]], false, 0.15, 2.0), wall_type: None, room_bounding: true },
+    ];
+    Batch::new(&MeshCache::new().update(&s).unwrap().meshes)
+}
+
+#[test]
+fn hidden_line_draws_the_line_where_two_walls_meet() {
+    let b = t_junction();
+    let mut c = Camera::default_3d([0.0, -1.0, 1.0], 12.0);
+    c.fit([-3.0, -3.0, 0.0], [3.0, 0.1, 2.0], 4.0 / 3.0);
+    let img = render(&b, &c, 800, 600, Style::HiddenLine);
+    // B's east face (x = 0.075) meets A's south face (y = -0.1): a vertical line from z = 0 to 2
+    for z in [0.4, 1.0, 1.6] {
+        let p = c.project([0.075, -0.1, z], [800.0, 600.0]).unwrap();
+        let dark = (-1i32..=1).any(|dx| (-1i32..=1).any(|dy| img.pixel((p[0] as i32 + dx) as usize, (p[1] as i32 + dy) as usize)[0] < 80));
+        assert!(dark, "no line at z = {z}, pixel {p:?}");
+    }
+    // and nothing is drawn in the middle of the open face of A, away from any edge
+    let q = c.project([2.0, -0.1, 1.0], [800.0, 600.0]).unwrap();
+    assert_eq!(img.pixel(q[0] as usize, q[1] as usize), [255, 255, 255]);
+}
