@@ -1088,6 +1088,36 @@ fn a_beam_is_a_closed_box_and_a_free_void_cuts_a_hole_through_it() {
 }
 
 #[test]
+fn a_free_void_cuts_a_hole_through_a_column_and_a_distant_one_cuts_nothing() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{Axis, Family, Request};
+    use openbim_geom::profile::Profile;
+    use openbim_ifc::{ColumnItem, FamilyItem, FamilyRef, Frame};
+    let mut s = scene();
+    // 0.4 x 0.4 on (3, 3), from 0 to 3 m
+    s.columns = vec![ColumnItem::from_profile(5, "C", &Profile::Rect { width: 0.4, depth: 0.4 }, [3.0, 3.0], 0.0, 3.0, true).unwrap()];
+    assert!((find(&scene_meshes(&s).unwrap(), 5).mesh.volume() - 0.48).abs() < 1e-9);
+    // a sleeve 0.2 along x, 1 across y (the column is 0.4 of it), 0.2 high
+    let fam = Family {
+        name: "Sleeve".into(),
+        forms: vec![FormDef::extrusion("sleeve", Axis::Z, "0", "0.2", ProfileDef::rect("0", "-0.5", "0.2", "0.5")).void()],
+        ..Default::default()
+    }.compile().unwrap();
+    let inst = fam.solve(&Request::default()).unwrap();
+    s.families = vec![FamilyRef { id: 1, family: fam }];
+    let item = |x, z| FamilyItem { id: 7, name: "Sl".into(), family: 0, type_name: None, frame: Frame { origin: [x, 3.0, z], x: [1.0, 0.0] }, instance: inst.clone(), host: None };
+    s.items = vec![item(2.9, 1.0)];
+    let m = scene_meshes(&s).unwrap();
+    assert!(find(&m, 5).warnings.is_empty(), "{:?}", find(&m, 5).warnings);
+    assert!((find(&m, 5).mesh.volume() - (0.48 - 0.2 * 0.4 * 0.2)).abs() < 1e-9, "{}", find(&m, 5).mesh.volume());
+    // beside the column, and above it, it cuts nothing
+    for it in [item(5.0, 1.0), item(2.9, 3.5)] {
+        s.items = vec![it];
+        assert!((find(&scene_meshes(&s).unwrap(), 5).mesh.volume() - 0.48).abs() < 1e-9);
+    }
+}
+
+#[test]
 fn circle_and_i_beams_have_the_volume_of_their_section() {
     use openbim_geom::profile::{polygon_area, Profile};
     use openbim_ifc::BeamItem;

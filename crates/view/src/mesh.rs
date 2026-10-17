@@ -664,7 +664,8 @@ enum Src<'a> {
     Wall(&'a WallChain, WallMaterials, Vec<TriMesh>),
     /// a slab, its holes, and the voids of free-standing families that reach it (a shaft), in model coordinates
     Slab(&'a Slab, Vec<Vec<P>>, Vec<TriMesh>),
-    Column(&'a [P], f64, f64),
+    /// a column's footprint and its base and top, and the voids of free-standing families that reach it, in model coordinates
+    Column(&'a [P], f64, f64, Vec<TriMesh>),
     /// a beam, and the voids of free-standing families that reach it, in model coordinates
     Beam(&'a BeamItem, Vec<TriMesh>),
     Family(&'a Frame, &'a Instance),
@@ -679,7 +680,7 @@ enum Src<'a> {
 enum Key {
     Wall(WallChain, WallMaterials, Vec<TriMesh>),
     Slab(Slab, Vec<Vec<P>>, Vec<TriMesh>),
-    Column(Vec<P>, f64, f64),
+    Column(Vec<P>, f64, f64, Vec<TriMesh>),
     Beam(BeamItem, Vec<TriMesh>),
     Family(Frame, Instance),
     Run(Run),
@@ -694,7 +695,7 @@ impl Src<'_> {
             (Src::Wall(a, m, v), Key::Wall(b, n, w)) => *a == b && m == n && v == w,
             (Src::Slab(a, h, v), Key::Slab(b, g, w)) => *a == b && h == g && v == w,
             (Src::Beam(a, v), Key::Beam(b, w)) => *a == b && v == w,
-            (Src::Column(a, z, t), Key::Column(b, y, u)) => *a == b.as_slice() && z == y && t == u,
+            (Src::Column(a, z, t, v), Key::Column(b, y, u, w)) => *a == b.as_slice() && z == y && t == u && v == w,
             (Src::Family(a, i), Key::Family(b, j)) => *a == b && *i == j,
             (Src::Run(a), Key::Run(b)) => *a == b,
             (Src::Fitting(a, s), Key::Fitting(b, t)) => *a == b && s == t,
@@ -709,7 +710,7 @@ impl Src<'_> {
         match self {
             Src::Wall(c, m, v) => Key::Wall((*c).clone(), m.clone(), v.clone()),
             Src::Slab(s, h, v) => Key::Slab((*s).clone(), h.clone(), v.clone()),
-            Src::Column(f, a, b) => Key::Column(f.to_vec(), *a, *b),
+            Src::Column(f, a, b, v) => Key::Column(f.to_vec(), *a, *b, v.clone()),
             Src::Beam(b, v) => Key::Beam((*b).clone(), v.clone()),
             Src::Family(f, i) => Key::Family(**f, (*i).clone()),
             Src::Run(r) => Key::Run((*r).clone()),
@@ -756,7 +757,17 @@ impl Src<'_> {
                 }
                 plain(m)
             }
-            Src::Column(f, z0, z1) => plain(prism(f, &[], *z0, *z1).ok_or_else(bad)?),
+            Src::Column(f, z0, z1, voids) => {
+                let mut m = prism(f, &[], *z0, *z1).ok_or_else(bad)?;
+                if !voids.is_empty() {
+                    let whole = TriMesh { verts: m.verts.clone(), tris: m.tris.clone() };
+                    match meshing::cut(&whole, voids) {
+                        Some(t) => m = to_mesh(t),
+                        None => warnings.push("a void of a family could not be cut out of the column".into()),
+                    }
+                }
+                plain(m)
+            }
             Src::Family(f, i) => {
                 let (m, p, w) = family_parts(f, i);
                 warnings = w;
@@ -918,7 +929,10 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
                 id: c.id,
             },
             0,
-            Src::Column(&c.footprint, c.base_z, c.base_z + c.height),
+            Src::Column(&c.footprint, c.base_z, c.base_z + c.height, {
+                let r = |k: usize| (c.footprint.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min), c.footprint.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
+                reaching(&free_voids, [r(0).0, r(1).0, c.base_z], [r(0).1, r(1).1, c.base_z + c.height])
+            }),
         ));
     }
     for it in &scene.items {
