@@ -712,6 +712,20 @@ fn total_with<F: Fn(&WallChain) -> Result<f64, GeomError> + Sync>(chains: &[Wall
     Ok(parts?.iter().sum())
 }
 
+/// The total of per-chain volumes added the way `total_volume_parallel` adds them (in chunks of 2048 chains, then the
+/// chunk sums), so a caller that keeps the volume of each chain gets the same bits as the function that computes them all.
+pub fn combine_chain_volumes(volumes: &[f64]) -> f64 {
+    let parts: Vec<f64> = volumes.chunks(CHUNK).map(|ch| { let mut s = 0.0; for v in ch { s += v; } s }).collect();
+    parts.iter().sum()
+}
+
+/// Volume of one chain from the volumes of its segments: added in segment order, as `total_volume_serial` does.
+pub fn chain_volume_from_segments(segments: &[f64]) -> f64 {
+    let mut s = 0.0;
+    for v in segments { s += v; }
+    s
+}
+
 /// Total exact volume of all chains, evaluated in parallel (same result as the serial version, bit for bit).
 pub fn total_volume_parallel(chains: &[WallChain]) -> Result<f64, GeomError> { total_with(chains, true, chain_volume_par) }
 
