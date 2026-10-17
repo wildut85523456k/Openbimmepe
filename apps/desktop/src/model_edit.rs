@@ -242,7 +242,7 @@ impl Desktop {
             commands.push(Command::SetMaterial { id, material: self.material_pick });
         }
         if el.category == Category::Truss {
-            let Some(Geometry::Linear { start: _, end: _, .. }) = el.geometry else { return; };
+            let Some(Geometry::Linear { .. }) = el.geometry else { return; };
             let m = |v: f64| v / 1000.0;
             let spec = TrussSpec { start: [m(self.axis_mm[0]), m(self.axis_mm[1])], end: [m(self.axis_mm[2]), m(self.axis_mm[3])], spacing_m: m(self.spacing_mm),
                 depth_m: m(self.height_mm), member_m: m(self.width_mm), elevation_m: m(self.elevation_mm), material: self.material_pick };

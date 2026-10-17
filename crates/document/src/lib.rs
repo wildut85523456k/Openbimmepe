@@ -137,6 +137,9 @@ pub struct BeamSystemSpec {
     pub material: Material,
 }
 
+/// One member of a truss: start, end, height of its centre line at the start, rise, and whether it is a diagonal.
+pub type TrussMember = ([f64; 2], [f64; 2], f64, f64, bool);
+
 /// A flat Warren truss to build along `start`..`end` on a level.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrussSpec {
@@ -463,7 +466,7 @@ impl Document {
     }
 
     /// The members of a Warren truss as (start, end, centre-line height at the start, rise, brace?) along its axis.
-    pub fn truss_members(spec: &TrussSpec) -> Vec<([f64; 2], [f64; 2], f64, f64, bool)> {
+    pub fn truss_members(spec: &TrussSpec) -> Vec<TrussMember> {
         let (dx, dy) = (spec.end[0] - spec.start[0], spec.end[1] - spec.start[1]);
         let len = dx.hypot(dy);
         if len < 1e-6 || spec.spacing_m.is_nan() || spec.spacing_m <= 0.0 { return Vec::new(); }
