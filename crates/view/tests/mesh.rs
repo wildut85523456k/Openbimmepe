@@ -172,3 +172,99 @@ fn a_window_is_meshed_from_its_solids_with_their_materials() {
     assert_eq!(w.parts.iter().any(|p| p.material.is_some()), has_material);
     assert_eq!(w.parts.last().unwrap().tris.end, w.mesh.tris.len());
 }
+
+fn bounds(m: &openbim_geom::Mesh) -> ([f64; 3], [f64; 3]) {
+    let mut lo = [f64::MAX; 3];
+    let mut hi = [f64::MIN; 3];
+    for v in &m.verts { for k in 0..3 { lo[k] = lo[k].min(v[k]); hi[k] = hi[k].max(v[k]); } }
+    (lo, hi)
+}
+
+#[test]
+fn every_family_of_the_library_is_meshed_from_its_solids() {
+    use openbim_family::{library, Request};
+    use openbim_ifc::{FamilyItem, FamilyRef, Frame};
+    let fams = library::all().unwrap();
+    assert!(fams.len() >= 5);
+    for (k, fam) in fams.iter().enumerate() {
+        let inst = fam.solve(&Request::default()).unwrap();
+        let want: f64 = inst.solids.iter().map(|(_, b)| b.volume()).sum();
+        let mut s = scene();
+        let frame = Frame { origin: [2.0, 2.0, 0.5], x: [0.6, 0.8] }; // turned, so that every transform is used
+        s.families = vec![FamilyRef { id: 1, family: fam.clone() }];
+        s.items = vec![FamilyItem { id: 7, name: fam.name().into(), family: 0, type_name: None, frame, instance: inst, host: None }];
+        let m = scene_meshes(&s).unwrap();
+        let e = find(&m, 7);
+        assert!(e.warnings.is_empty(), "{}: {:?}", fam.name(), e.warnings);
+        assert!((e.mesh.volume() - want).abs() < 1e-9 * (1.0 + want), "{} (family {k}): mesh {} boxes {}", fam.name(), e.mesh.volume(), want);
+        assert!(e.mesh.verts.iter().flatten().all(|x| x.is_finite()));
+        assert!(e.mesh.tris.iter().flatten().all(|&i| (i as usize) < e.mesh.verts.len()));
+    }
+}
+
+#[test]
+fn extrusions_in_every_work_plane_are_meshed_in_place_and_revolves_are_reported() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{Axis, Family, Request};
+    use openbim_ifc::{FamilyItem, FamilyRef, Frame};
+    let rect = |u0, v0, u1, v1| ProfileDef::rect(u0, v0, u1, v1);
+    let fam = Family { name: "F".into(), forms: vec![
+        FormDef::extrusion("z", Axis::Z, "0", "3", rect("0", "0", "0.4", "0.2")),
+        FormDef::extrusion("x", Axis::X, "5", "6", rect("1", "0", "2", "1")),
+        FormDef::extrusion("y", Axis::Y, "7", "8", rect("0", "3", "1", "4")),
+        FormDef::extrusion("c", Axis::Z, "0", "2", ProfileDef::circle("10", "0", "0.1")),
+        FormDef::revolve("r", Axis::Z, "0", true, "0", "360", rect("1", "0", "2", "1")),
+    ], ..Default::default() }.compile().unwrap();
+    let inst = fam.solve(&Request::default()).unwrap();
+    let forms = inst.forms.clone();
+    let mut s = scene();
+    s.families = vec![FamilyRef { id: 1, family: fam }];
+    s.items = vec![FamilyItem { id: 7, name: "F".into(), family: 0, type_name: None, frame: Frame { origin: [0.0; 3], x: [1.0, 0.0] }, instance: inst, host: None }];
+    let m = scene_meshes(&s).unwrap();
+    let e = find(&m, 7);
+    assert_eq!(e.warnings, vec!["a revolve is not drawn in 3D yet".to_string()]);
+    // the first three are boxes: their volumes add up exactly; the circle is a 32-gon, a little less than the circle
+    let boxes: f64 = forms[..3].iter().map(|f| f.volume()).sum();
+    let circle = forms[3].volume();
+    let got = e.mesh.volume();
+    assert!(got > boxes + 0.99 * circle && got < boxes + circle, "{got} vs {boxes} + {circle}");
+    // the x-plane box sits at x 5..6, y 1..2, z 0..1
+    let (lo, hi) = bounds(&e.mesh);
+    assert!((hi[0] - 10.1).abs() < 1e-9 && lo[0].abs() < 1e-9 && (hi[1] - 8.0).abs() < 1e-9, "{lo:?} {hi:?}");
+    assert!(e.mesh.volume() > 0.0);
+}
+
+#[test]
+fn pipes_ducts_and_fittings_are_meshed_and_a_change_to_one_remeshes_only_it() {
+    use openbim_family::{Domain, System};
+    use openbim_place::penetrations::{Run, RunSize};
+    use openbim_route::{graph::{NetFitting, NetSegment, Network}, Fitting, FittingKind};
+    let mut net = Network::new(1);
+    net.segments.push(NetSegment { id: 1, run: Run::round("p", Domain::Pipe, System::ChilledWaterSupply, [0.0, 0.0, 2.5], [4.0, 0.0, 2.5], 0.1) });
+    net.segments.push(NetSegment { id: 2, run: Run::rect("d", Domain::Duct, System::SupplyAir, [0.0, 1.0, 2.5], [0.0, 1.0, 3.5], 0.4, 0.2) });
+    net.fittings.push(NetFitting { id: 3, domain: Domain::Pipe, system: System::ChilledWaterSupply, fitting: Fitting {
+        type_name: "Elbow".into(), part_code: String::new(), kind: FittingKind::Elbow { angle: 90.0 }, at: [4.0, 0.0, 2.5],
+        ports: vec![[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], port_sizes: vec![RunSize::Round { diameter: 0.1 }; 2], radius: 0.15, trim: vec![0.15, 0.15] } });
+    let mut s = scene();
+    s.networks = vec![net];
+    let mut cache = MeshCache::new();
+    let u = cache.update(&s).unwrap();
+    let find_kind = |u: &Update, k: Kind, id: u64| u.meshes.iter().find(|m| m.element.kind == k && m.element.id == id).unwrap().clone();
+    let pipe = find_kind(&u, Kind::Segment, 1);
+    let polygon_area = 0.5 * 32.0 * 0.05f64.powi(2) * (std::f64::consts::TAU / 32.0).sin();
+    assert!((pipe.mesh.volume() - polygon_area * 4.0).abs() < 1e-9);
+    let (lo, hi) = bounds(&pipe.mesh);
+    assert!((lo[0]).abs() < 1e-9 && (hi[0] - 4.0).abs() < 1e-9 && lo[2] > 2.44 && hi[2] < 2.56);
+    assert_eq!(pipe.parts[0].material.as_deref(), Some(System::ChilledWaterSupply.ifc_system()));
+    let duct = find_kind(&u, Kind::Segment, 2);
+    assert!((duct.mesh.volume() - 0.4 * 0.2 * 1.0).abs() < 1e-9, "{}", duct.mesh.volume());
+    let (lo, hi) = bounds(&duct.mesh);
+    assert!((hi[2] - 3.5).abs() < 1e-9 && (lo[2] - 2.5).abs() < 1e-9);
+    let elbow = find_kind(&u, Kind::Fitting, 3);
+    assert!((elbow.mesh.volume() - polygon_area * 0.3).abs() < 1e-9);
+    // a longer pipe: only the pipe is meshed again
+    s.networks[0].segments[0].run.b = [3.0, 0.0, 2.5];
+    let v = cache.update(&s).unwrap();
+    assert_eq!(v.rebuilt, vec![Element { kind: Kind::Segment, id: 1 }]);
+    assert!((find_kind(&v, Kind::Segment, 1).mesh.volume() - polygon_area * 3.0).abs() < 1e-9);
+}

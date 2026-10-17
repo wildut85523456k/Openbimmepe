@@ -11,6 +11,7 @@ openbim-arch = { path = "../arch" }
 openbim-family = { path = "../family" }
 openbim-ifc = { path = "../ifc" }
 openbim-place = { path = "../place" }
+openbim-route = { path = "../route" }
 rayon = "1.10"
 earcutr = "0.5.0"
 

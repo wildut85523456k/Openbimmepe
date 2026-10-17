@@ -13,6 +13,8 @@ rayon = "1.10"
 [dev-dependencies]
 openbim-arch = { path = "../arch" }
 openbim-place = { path = "../place" }
+openbim-family = { path = "../family" }
+openbim-route = { path = "../route" }
 openbim-ifc = { path = "../ifc" }
 
 [lints.rust]

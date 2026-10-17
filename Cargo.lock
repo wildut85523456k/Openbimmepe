@@ -419,6 +419,7 @@ dependencies = [
  "openbim-geom",
  "openbim-ifc",
  "openbim-place",
+ "openbim-route",
  "rayon",
 ]
 
@@ -427,9 +428,11 @@ name = "openbim-viewport"
 version = "0.0.1"
 dependencies = [
  "openbim-arch",
+ "openbim-family",
  "openbim-geom",
  "openbim-ifc",
  "openbim-place",
+ "openbim-route",
  "openbim-view",
  "rayon",
 ]

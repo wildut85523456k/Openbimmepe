@@ -100,6 +100,10 @@ pub enum Kind {
     /// a line that bounds rooms where there is no wall
     SeparationLine,
     Level,
+    /// a straight run of duct, pipe, conduit or cable tray
+    Segment,
+    /// an elbow, tee, tap or transition of a service network
+    Fitting,
 }
 
 /// The element a shape belongs to: its kind and its element number in the model.

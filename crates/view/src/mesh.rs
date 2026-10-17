@@ -10,7 +10,9 @@
 //! each in scene order, and does not depend on the number of threads.
 
 use crate::{slab_holes, Element, Kind, ViewError};
-use openbim_family::Instance;
+use openbim_family::{forms::Loop, mep::up_for, Axis, Form, FormGeom, Instance, System};
+use openbim_place::penetrations::{Run, RunSize};
+use openbim_route::Fitting;
 use openbim_geom::{Mesh, WallChain};
 use openbim_ifc::{Frame, Scene};
 use openbim_place::floors::Slab;
@@ -47,6 +49,8 @@ pub struct ElementMesh {
     pub element: Element,
     pub mesh: Mesh,
     pub parts: Vec<Part>,
+    /// what could not be drawn of this element (for instance a revolve in a family)
+    pub warnings: Vec<String>,
 }
 
 // ------------------------------------------------------------------ geometry
@@ -188,20 +192,127 @@ fn family_mesh(frame: &Frame, inst: &Instance) -> Mesh {
     out
 }
 
-/// Meshes of the solids of a family item, each triangle tagged with the material of its solid.
-fn family_parts(frame: &Frame, inst: &Instance) -> (Mesh, Vec<Part>) {
+const CIRCLE_SIDES: usize = 32;
+
+fn loop_points(l: &Loop) -> Vec<P> {
+    match l {
+        Loop::Poly(p) => p.clone(),
+        Loop::Circle { c, r } => (0..CIRCLE_SIDES).map(|k| { let a = std::f64::consts::TAU * k as f64 / CIRCLE_SIDES as f64; [c[0] + r * a.cos(), c[1] + r * a.sin()] }).collect(),
+    }
+}
+
+/// An extrusion form in the model. None for revolves and sweeps, which are not drawn yet.
+fn form_mesh(frame: &Frame, f: &Form) -> Option<Mesh> {
+    let FormGeom::Extrusion { plane, from, to } = f.geom else { return None };
+    let outer = loop_points(&f.outer);
+    let holes: Vec<Vec<P>> = f.holes.iter().map(loop_points).collect();
+    let mut m = prism(&outer, &holes, 0.0, 1.0)?;
+    for v in &mut m.verts {
+        let (u, w, t) = (v[0], v[1], v[2]);
+        let off = from + t * (to - from);
+        let q = match plane { Axis::Z => [u, w, off], Axis::X => [off, u, w], Axis::Y => [w, off, u] };
+        let xy = f.xf.apply([q[0], q[1]]);
+        let g = frame.point([xy[0], xy[1], 0.0]);
+        *v = [g[0], g[1], frame.origin[2] + f.dz + q[2]];
+    }
+    if m.volume() < 0.0 { for t in &mut m.tris { t.swap(1, 2); } } // the plane may be left-handed, or `to` below `from`
+    Some(m)
+}
+
+/// Meshes of the solids and extrusions of a family item, each triangle tagged with its material.
+fn family_parts(frame: &Frame, inst: &Instance) -> (Mesh, Vec<Part>, Vec<String>) {
     let mut mesh = Mesh::default();
     let mut mat_of_tri: Vec<Option<&str>> = Vec::new();
-    for (k, _) in inst.solids.iter().enumerate() {
-        let one = Instance { solids: vec![inst.solids[k]], xf: vec![inst.xf.get(k).copied().flatten()], ..inst.clone() };
-        let m = family_mesh(frame, &one);
-        let mat = inst.materials.get(k).copied().flatten().and_then(|i| inst.strings.get(i as usize)).map(|s| s.as_str());
+    let mut warnings = Vec::new();
+    fn add<'a>(m: Mesh, mat: Option<&'a str>, mesh: &mut Mesh, mats: &mut Vec<Option<&'a str>>) {
         let base = mesh.verts.len() as u32;
         mesh.verts.extend(m.verts);
-        for t in m.tris { mesh.tris.push([t[0] + base, t[1] + base, t[2] + base]); mat_of_tri.push(mat); }
+        for t in m.tris { mesh.tris.push([t[0] + base, t[1] + base, t[2] + base]); mats.push(mat); }
     }
+    for (k, _) in inst.solids.iter().enumerate() {
+        let one = Instance { solids: vec![inst.solids[k]], xf: vec![inst.xf.get(k).copied().flatten()], ..inst.clone() };
+        let mat = inst.materials.get(k).copied().flatten().and_then(|i| inst.strings.get(i as usize)).map(|s| s.as_str());
+        add(family_mesh(frame, &one), mat, &mut mesh, &mut mat_of_tri);
+    }
+    for (k, f) in inst.forms.iter().enumerate() {
+        let mat = inst.form_materials.get(k).copied().flatten().and_then(|i| inst.strings.get(i as usize)).map(|s| s.as_str());
+        match form_mesh(frame, f) {
+            Some(m) => add(m, mat, &mut mesh, &mut mat_of_tri),
+            None => warnings.push(match f.geom { FormGeom::Revolve { .. } => "a revolve is not drawn in 3D yet", _ => "a sweep is not drawn in 3D yet" }.to_string()),
+        }
+    }
+    warnings.dedup();
     let tag = mesh.tris.iter().zip(&mat_of_tri).map(|(&t, &m)| (vertical_kind(normal(&mesh, t)), m)).collect();
-    group(mesh, tag)
+    let (mesh, parts) = group(mesh, tag);
+    (mesh, parts, warnings)
+}
+
+// ------------------------------------------------------------------ service networks
+
+type V3 = [f64; 3];
+fn sub3(a: V3, b: V3) -> V3 { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+fn cross3(a: V3, b: V3) -> V3 { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
+fn unit3(a: V3) -> V3 { let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt(); if l == 0.0 { a } else { [a[0] / l, a[1] / l, a[2] / l] } }
+
+/// A direction square to `d` (the same rule as the IFC export uses for round sections).
+fn perp(d: V3) -> V3 {
+    let h = if d[0].abs() <= d[1].abs() && d[0].abs() <= d[2].abs() { [1.0, 0.0, 0.0] } else if d[1].abs() <= d[2].abs() { [0.0, 1.0, 0.0] } else { [0.0, 0.0, 1.0] };
+    unit3(cross3(d, h))
+}
+
+/// A straight piece with the section `size` from `at` along the unit vector `d` for `len` metres: a cylinder
+/// (an n-gon prism) or a box. Triangles face outward.
+fn straight_piece(size: RunSize, at: V3, d: V3, len: f64) -> Option<Mesh> {
+    if len.is_nan() || len <= 1e-9 { return None; }
+    let (x, ring): (V3, Vec<[f64; 2]>) = match size {
+        RunSize::Round { diameter } => (perp(d), loop_points(&Loop::Circle { c: [0.0, 0.0], r: diameter / 2.0 })),
+        RunSize::Rect { width, height, roll } => {
+            let (w, h) = (width / 2.0, height / 2.0);
+            (unit3(cross3(up_for(d, roll), d)), vec![[-w, -h], [w, -h], [w, h], [-w, h]])
+        }
+    };
+    let y = cross3(d, x);
+    let n = ring.len() as u32;
+    let mut m = Mesh::default();
+    for k in 0..2 {
+        let o = [at[0] + d[0] * len * k as f64, at[1] + d[1] * len * k as f64, at[2] + d[2] * len * k as f64];
+        for q in &ring { m.verts.push([o[0] + x[0] * q[0] + y[0] * q[1], o[1] + x[1] * q[0] + y[1] * q[1], o[2] + x[2] * q[0] + y[2] * q[1]]); }
+    }
+    for i in 0..n {
+        let j = (i + 1) % n;
+        m.tris.push([i, j, j + n]);
+        m.tris.push([i, j + n, i + n]);
+    }
+    for i in 1..n - 1 {
+        m.tris.push([n, n + i, n + i + 1]); // far end, facing along d
+        m.tris.push([0, i + 1, i]); // near end
+    }
+    if m.volume() < 0.0 { for t in &mut m.tris { t.swap(1, 2); } }
+    Some(m)
+}
+
+fn run_mesh(r: &Run) -> Option<Mesh> {
+    let d = sub3(r.b, r.a);
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    straight_piece(r.size, r.a, unit3(d), len)
+}
+
+/// A fitting is drawn as the short stubs it takes from each leg, as in the IFC export.
+fn fitting_mesh(f: &Fitting) -> Option<Mesh> {
+    let mut out = Mesh::default();
+    for k in 0..f.ports.len() {
+        let Some(m) = straight_piece(f.port_sizes[k], f.at, unit3(f.ports[k]), f.trim[k]) else { continue };
+        let base = out.verts.len() as u32;
+        out.verts.extend(m.verts);
+        out.tris.extend(m.tris.iter().map(|t| [t[0] + base, t[1] + base, t[2] + base]));
+    }
+    if out.tris.is_empty() { None } else { Some(out) }
+}
+
+/// One part, one material: the system the piece belongs to.
+fn one_part(mesh: Mesh, system: System) -> (Mesh, Vec<Part>) {
+    let n = mesh.tris.len();
+    (mesh, vec![Part { face: FaceKind::Side, material: Some(system.ifc_system().to_string()), tris: 0..n }])
 }
 
 // ------------------------------------------------------------------ inputs and cache
@@ -212,6 +323,8 @@ enum Src<'a> {
     Slab(&'a Slab, Vec<Vec<P>>),
     Column(&'a [P], f64, f64),
     Family(&'a Frame, &'a Instance),
+    Run(&'a Run),
+    Fitting(&'a Fitting, System),
 }
 
 /// The same inputs, kept by the cache.
@@ -220,6 +333,8 @@ enum Key {
     Slab(Slab, Vec<Vec<P>>),
     Column(Vec<P>, f64, f64),
     Family(Frame, Instance),
+    Run(Run),
+    Fitting(Fitting, System),
 }
 
 impl Src<'_> {
@@ -229,6 +344,8 @@ impl Src<'_> {
             (Src::Slab(a, h), Key::Slab(b, g)) => *a == b && h == g,
             (Src::Column(a, z, t), Key::Column(b, y, u)) => *a == b.as_slice() && z == y && t == u,
             (Src::Family(a, i), Key::Family(b, j)) => *a == b && *i == j,
+            (Src::Run(a), Key::Run(b)) => *a == b,
+            (Src::Fitting(a, s), Key::Fitting(b, t)) => *a == b && s == t,
             _ => false,
         }
     }
@@ -238,32 +355,43 @@ impl Src<'_> {
             Src::Slab(s, h) => Key::Slab((*s).clone(), h.clone()),
             Src::Column(f, a, b) => Key::Column(f.to_vec(), *a, *b),
             Src::Family(f, i) => Key::Family(**f, (*i).clone()),
+            Src::Run(r) => Key::Run((*r).clone()),
+            Src::Fitting(f, s) => Key::Fitting((*f).clone(), *s),
         }
     }
     fn build(&self, el: Element) -> Result<ElementMesh, ViewError> {
         let bad = || ViewError::Mesh { id: el.id };
+        let mut warnings = Vec::new();
         let (mesh, parts) = match self {
             Src::Wall(c, m) => wall_mesh(c, m).map_err(|err| ViewError::Wall { id: el.id, err })?,
             Src::Slab(s, holes) => plain(prism(&s.outline, holes, s.top - s.thickness, s.top).ok_or_else(bad)?),
             Src::Column(f, z0, z1) => plain(prism(f, &[], *z0, *z1).ok_or_else(bad)?),
-            Src::Family(f, i) => family_parts(f, i),
+            Src::Family(f, i) => { let (m, p, w) = family_parts(f, i); warnings = w; (m, p) }
+            Src::Run(r) => one_part(run_mesh(r).ok_or_else(bad)?, r.system),
+            Src::Fitting(f, s) => match fitting_mesh(f) { Some(m) => one_part(m, *s), None => (Mesh::default(), Vec::new()) },
         };
-        Ok(ElementMesh { element: el, mesh, parts })
+        Ok(ElementMesh { element: el, mesh, parts, warnings })
     }
 }
 
-fn sources(scene: &Scene) -> Vec<(Element, Src<'_>)> {
+/// Every element with its inputs. The number beside the element is the network it belongs to (0 for everything that is
+/// not a service piece): piece numbers are only unique within one network.
+fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
     let mut v = Vec::new();
-    for w in &scene.walls { v.push((Element { kind: Kind::Wall, id: w.id }, Src::Wall(&w.chain, wall_materials(scene, w.wall_type)))); }
-    for (i, s) in scene.slabs.iter().enumerate() { v.push((Element { kind: Kind::Slab, id: s.id }, Src::Slab(&s.slab, slab_holes(scene, i, &s.slab)))); }
-    for c in &scene.columns { v.push((Element { kind: Kind::Column, id: c.id }, Src::Column(&c.footprint, c.base_z, c.base_z + c.height))); }
-    for it in &scene.items { v.push((Element { kind: Kind::Family, id: it.id }, Src::Family(&it.frame, &it.instance))); }
+    for w in &scene.walls { v.push((Element { kind: Kind::Wall, id: w.id }, 0, Src::Wall(&w.chain, wall_materials(scene, w.wall_type)))); }
+    for (i, s) in scene.slabs.iter().enumerate() { v.push((Element { kind: Kind::Slab, id: s.id }, 0, Src::Slab(&s.slab, slab_holes(scene, i, &s.slab)))); }
+    for c in &scene.columns { v.push((Element { kind: Kind::Column, id: c.id }, 0, Src::Column(&c.footprint, c.base_z, c.base_z + c.height))); }
+    for it in &scene.items { v.push((Element { kind: Kind::Family, id: it.id }, 0, Src::Family(&it.frame, &it.instance))); }
+    for (ni, net) in scene.networks.iter().enumerate() {
+        for sg in &net.segments { v.push((Element { kind: Kind::Segment, id: sg.id }, ni as u32, Src::Run(&sg.run))); }
+        for nf in &net.fittings { v.push((Element { kind: Kind::Fitting, id: nf.id }, ni as u32, Src::Fitting(&nf.fitting, nf.system))); }
+    }
     v
 }
 
 /// Meshes of every wall, slab, column and family solid in the scene.
 pub fn scene_meshes(scene: &Scene) -> Result<Vec<ElementMesh>, ViewError> {
-    sources(scene).par_iter().map(|(el, s)| s.build(*el)).collect::<Vec<_>>().into_iter().collect()
+    sources(scene).par_iter().map(|(el, _, s)| s.build(*el)).collect::<Vec<_>>().into_iter().collect()
 }
 
 /// What `MeshCache::update` found.
@@ -280,7 +408,7 @@ pub struct Update {
 /// Meshes kept between edits; see the module notes.
 #[derive(Default)]
 pub struct MeshCache {
-    entries: HashMap<Element, (Key, Arc<ElementMesh>)>,
+    entries: HashMap<(Element, u32), (Key, Arc<ElementMesh>)>,
 }
 
 impl MeshCache {
@@ -291,27 +419,29 @@ impl MeshCache {
     /// Bring the cache to the state of `scene`, meshing only what changed. On an error the cache is left as it was.
     pub fn update(&mut self, scene: &Scene) -> Result<Update, ViewError> {
         let src = sources(scene);
-        let built: Vec<Option<Result<ElementMesh, ViewError>>> = src.par_iter().map(|(el, s)| {
-            if self.entries.get(el).is_some_and(|(k, _)| s.same(k)) { None } else { Some(s.build(*el)) }
+        let built: Vec<Option<Result<ElementMesh, ViewError>>> = src.par_iter().map(|(el, own, s)| {
+            if self.entries.get(&(*el, *own)).is_some_and(|(k, _)| s.same(k)) { None } else { Some(s.build(*el)) }
         }).collect();
         let mut fresh = Vec::new();
         for b in built.iter().flatten() { if let Err(e) = b { return Err(e.clone()); } }
         let mut meshes = Vec::with_capacity(src.len());
         let mut rebuilt = Vec::new();
-        for ((el, s), b) in src.iter().zip(built) {
+        for ((el, own, s), b) in src.iter().zip(built) {
             match b {
-                None => meshes.push(self.entries[el].1.clone()),
+                None => meshes.push(self.entries[&(*el, *own)].1.clone()),
                 Some(r) => {
                     let m = Arc::new(r.expect("errors returned above"));
                     meshes.push(m.clone());
-                    fresh.push((*el, s.own(), m));
+                    fresh.push(((*el, *own), s.own(), m));
                     rebuilt.push(*el);
                 }
             }
         }
-        let now: HashSet<Element> = src.iter().map(|(e, _)| *e).collect();
-        let removed: Vec<Element> = { let mut r: Vec<Element> = self.entries.keys().filter(|e| !now.contains(e)).copied().collect(); r.sort_by_key(|e| (e.id, format!("{:?}", e.kind))); r };
-        for e in &removed { self.entries.remove(e); }
+        let now: HashSet<(Element, u32)> = src.iter().map(|(e, o, _)| (*e, *o)).collect();
+        let mut gone: Vec<(Element, u32)> = self.entries.keys().filter(|e| !now.contains(e)).copied().collect();
+        gone.sort_by_key(|(e, o)| (*o, e.id, format!("{:?}", e.kind)));
+        for e in &gone { self.entries.remove(e); }
+        let removed: Vec<Element> = gone.into_iter().map(|(e, _)| e).collect();
         for (el, k, m) in fresh { self.entries.insert(el, (k, m)); }
         Ok(Update { meshes, rebuilt, removed })
     }
