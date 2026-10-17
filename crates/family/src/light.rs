@@ -2,7 +2,7 @@
 //! beyond its place in the model. The position, the turn and the mounting height come from where the luminaire is
 //! placed; the data below comes from the family author (or the manufacturer's data sheet). No standard values are
 //! shipped: every number is typed in, and every field is optional until a calculation needs it.
-use crate::{clean_text, FamilyError};
+use crate::{clean_text, Family, FamilyError, TypeDef};
 
 /// How the luminaire is fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -135,4 +135,86 @@ impl LightingDef {
         }
         m
     }
+}
+
+/// One type made from one photometric file by `types_from_imports`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariantType {
+    /// the name of the type in the family
+    pub type_name: String,
+    /// the name the file is to be kept under in the project (no folder); put `imports[import].data` there
+    pub file_name: String,
+    /// index into the list that was imported
+    pub import: usize,
+}
+
+/// What `types_from_imports` did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VariantReport {
+    pub added: Vec<VariantType>,
+    /// files that could not be read, and types that were given another name because theirs was taken
+    pub warnings: Vec<String>,
+}
+
+fn flat(name: &str) -> String {
+    let n = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    n.chars().filter(|c| !c.is_control()).take(120).collect::<String>().trim().to_string()
+}
+
+fn stem(file: &str) -> &str {
+    let l = file.to_ascii_lowercase();
+    if l.ends_with(".ies") || l.ends_with(".ldt") { &file[..file.len() - 4] } else { file }
+}
+
+/// Add one type to `fam` for each photometric file in `imports` that was read (a manufacturer's archive holds one
+/// file per variant: a power setting, a colour temperature, an optic). Each type carries the lighting data its file
+/// gives, on top of the family's own `lighting` (mounting, IP code and dimming, which files do not state). Types are
+/// named after the files; a name or file name that is already taken gets " (2)", " (3)" ... The family is changed only
+/// when every type can be added; the files that were read are listed so the caller can keep them in the project.
+pub fn types_from_imports(fam: &mut Family, imports: &[openbim_photo::Imported]) -> Result<VariantReport, FamilyError> {
+    let base = fam.lighting.clone().unwrap_or_default();
+    let mut report = VariantReport::default();
+    let mut types: Vec<TypeDef> = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    for (k, im) in imports.iter().enumerate() {
+        let p = match &im.result {
+            Ok(p) => p,
+            Err(e) => {
+                report.warnings.push(format!("{}: not used, {e}", flat(&im.name)));
+                continue;
+            }
+        };
+        let file = flat(&im.name);
+        if file.is_empty() {
+            report.warnings.push(format!("file {}: not used, it has no name", k + 1));
+            continue;
+        }
+        let unique = |want: &str, taken: &dyn Fn(&str) -> bool| -> String {
+            let mut n = want.to_string();
+            let mut i = 2;
+            while taken(&n) {
+                n = format!("{want} ({i})");
+                i += 1;
+            }
+            n
+        };
+        // a taken file name is numbered before its extension, so that it stays an .ies or .ldt file
+        let file_name = {
+            let base = stem(&file);
+            let ext = &file[base.len()..];
+            unique(base, &|n| files.iter().any(|f| *f == format!("{n}{ext}"))) + ext
+        };
+        let wanted: String = stem(&file).chars().take(64).collect();
+        let type_name = unique(&wanted, &|n| fam.types.iter().chain(types.iter()).any(|t| t.name == n));
+        if type_name != wanted {
+            report.warnings.push(format!("{file}: the type is called '{type_name}' because '{wanted}' was taken"));
+        }
+        let l = LightingDef::from_photometry(p, &file_name, base.clone());
+        l.check()?;
+        types.push(TypeDef { name: type_name.clone(), lighting: Some(l), ..Default::default() });
+        files.push(file_name.clone());
+        report.added.push(VariantType { type_name, file_name, import: k });
+    }
+    fam.types.extend(types);
+    Ok(report)
 }

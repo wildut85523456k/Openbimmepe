@@ -13,6 +13,7 @@ openbim-photo = { path = "../photo" }
 [dev-dependencies]
 proptest = "1"
 openbim-arch = { path = "../arch" }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints.rust]
 unsafe_code = "forbid"

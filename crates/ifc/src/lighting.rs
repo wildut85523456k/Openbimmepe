@@ -95,7 +95,7 @@ pub fn room_schedule(scene: &Scene) -> (String, Vec<String>) {
     let mut flux = vec![0.0; scene.rooms.len()];
     let mut power = vec![0.0; scene.rooms.len()];
     for it in &scene.items {
-        let Some(l) = scene.families.get(it.family).and_then(|f| f.family.lighting()) else { continue };
+        let Some(l) = scene.families.get(it.family).and_then(|f| f.family.lighting_for(it.type_name.as_deref())) else { continue };
         if let Some(r) = room_at(scene, [it.frame.origin[0], it.frame.origin[1]], it.frame.origin[2]) {
             count[r] += 1;
             flux[r] += l.flux_lm.unwrap_or(0.0) * l.dimming.unwrap_or(1.0);
@@ -133,7 +133,7 @@ pub fn luminaire_schedule(scene: &Scene) -> (String, Vec<String>) {
     let mut warnings = Vec::new();
     for it in &scene.items {
         let Some(fr) = scene.families.get(it.family) else { continue };
-        let Some(l) = fr.family.lighting() else { continue };
+        let Some(l) = fr.family.lighting_for(it.type_name.as_deref()) else { continue };
         let p = [it.frame.origin[0], it.frame.origin[1]];
         let z = it.frame.origin[2];
         let room = room_at(scene, p, z).map(|k| &scene.rooms[k]);

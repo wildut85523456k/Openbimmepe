@@ -5,7 +5,7 @@ use crate::{compile_library, Dim, NUMBER, U_VALUE, ArrayDef, Axis::*, Category, 
 
 fn chk(name: &str, expr: &str) -> CheckDef { CheckDef { name: name.into(), expr: expr.into() } }
 fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
-    TypeDef { name: name.into(), values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(), texts: vec![] }
+    TypeDef { name: name.into(), values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(), texts: vec![], lighting: None }
 }
 
 /// Lever handle on both faces of a leaf. Origin: centre of the back plate on the leaf's mid plane.

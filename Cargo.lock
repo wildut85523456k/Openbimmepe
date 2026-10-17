@@ -335,6 +335,7 @@ dependencies = [
  "openbim-sketch",
  "proptest",
  "rayon",
+ "zip",
 ]
 
 [[package]]
@@ -353,6 +354,7 @@ dependencies = [
  "openbim-arch",
  "openbim-family",
  "openbim-geom",
+ "openbim-photo",
  "openbim-place",
  "openbim-route",
 ]

@@ -1028,7 +1028,7 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(&clear));
         o.pset(sp, "OpenBIM_SpaceVolumes", vec![("SlabToSlabVolume", Val::Vol(vols.slab_to_slab)), ("CeilingVoidVolume", Val::Vol(vols.ceiling_void)), ("FloorBuildUpVolume", Val::Vol(vols.floor_build_up))]);
         if let Some(rl) = scene.room_lighting.get(&r.id) {
-            let n = scene.items.iter().filter(|it| scene.families.get(it.family).is_some_and(|f| f.family.lighting().is_some()) && lighting::room_at(scene, [it.frame.origin[0], it.frame.origin[1]], it.frame.origin[2]) == Some(ri)).count();
+            let n = scene.items.iter().filter(|it| scene.families.get(it.family).is_some_and(|f| f.family.lighting_for(it.type_name.as_deref()).is_some()) && lighting::room_at(scene, [it.frame.origin[0], it.frame.origin[1]], it.frame.origin[2]) == Some(ri)).count();
             let mut common = vec![("ArtificialLighting", Val::Bool(n > 0))];
             if let Some(v) = rl.required_lux {
                 common.push(("Illuminance", Val::Real(v)));

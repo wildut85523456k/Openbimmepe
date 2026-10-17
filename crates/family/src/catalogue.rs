@@ -159,7 +159,7 @@ impl Catalogue {
             let mut types = Vec::new();
             for (name, cells) in &t.rows {
                 if fam.types.iter().any(|x| x.name == *name) { return Err(CatError::DuplicateType { family: t.family.clone(), type_name: name.clone() }); }
-                let mut td = TypeDef { name: name.clone(), values: vec![], texts: vec![] };
+                let mut td = TypeDef { name: name.clone(), values: vec![], texts: vec![], lighting: None };
                 for ((c, cell), numeric) in t.columns.iter().zip(cells).zip(&kinds) {
                     if cell.is_empty() { continue; }
                     if *numeric {

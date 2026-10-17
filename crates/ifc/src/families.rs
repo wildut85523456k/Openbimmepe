@@ -213,7 +213,7 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 for (name, list) in split.sets {
                     psets.push(format!("#{}", o.pset_entity(name, list)));
                 }
-                if let Some(l) = fam.lighting() {
+                if let Some(l) = fam.lighting_for(it.type_name.as_deref()) {
                     // what a lighting program needs; standard sets where IFC has the field, the rest in our own
                     let mut common = vec![("LightFixtureMountingType", Val::Label(l.mounting.ifc().to_string()))];
                     if let Some(w) = l.power_w {

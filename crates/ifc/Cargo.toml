@@ -14,3 +14,6 @@ openbim-route = { path = "../route" }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[dev-dependencies]
+openbim-photo = { path = "../photo" }
