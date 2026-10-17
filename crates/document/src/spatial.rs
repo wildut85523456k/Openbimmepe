@@ -10,6 +10,8 @@ pub enum Geometry {
     Linear { start: [f64; 2], end: [f64; 2], level: ElementId },
     /// a point on `level` with something standing from there up to the level `top` (a column)
     Point { at: [f64; 2], level: ElementId, top: ElementId },
+    /// a slab lies on `level`; its outline is the element's
+    Area { level: ElementId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,12 +25,44 @@ fn valid_axis(start: [f64; 2], end: [f64; 2]) -> bool {
         && (end[0] - start[0]).hypot(end[1] - start[1]) > 1e-6
 }
 
+/// A simple polygon: 3 to 1000 finite corners, some area, and no edge crossing another.
+fn valid_ring(r: &[[f64; 2]]) -> bool {
+    let n = r.len();
+    if !(3..=1000).contains(&n) || r.iter().any(|p| !p[0].is_finite() || !p[1].is_finite() || p[0].abs() > 1e6 || p[1].abs() > 1e6) {
+        return false;
+    }
+    if openbim_geom::profile::polygon_area(r).abs() < 1e-6 {
+        return false;
+    }
+    let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    let on = |a: [f64; 2], b: [f64; 2], p: [f64; 2]| {
+        cross(a, b, p).abs() < 1e-12 && p[0] >= a[0].min(b[0]) - 1e-12 && p[0] <= a[0].max(b[0]) + 1e-12 && p[1] >= a[1].min(b[1]) - 1e-12 && p[1] <= a[1].max(b[1]) + 1e-12
+    };
+    // non-adjacent edges may neither cross nor touch
+    let hit = |a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]| {
+        let (d1, d2, d3, d4) = (cross(c, d, a), cross(c, d, b), cross(a, b, c), cross(a, b, d));
+        (d1 * d2 < 0.0 && d3 * d4 < 0.0) || on(c, d, a) || on(c, d, b) || on(a, b, c) || on(a, b, d)
+    };
+    for i in 0..n {
+        for j in (i + 2)..n {
+            if i == 0 && j == n - 1 { continue; }
+            if hit(r[i], r[(i + 1) % n], r[j], r[(j + 1) % n]) { return false; }
+        }
+    }
+    true
+}
+
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
     for el in elements.values() {
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
+            Some(Geometry::Area { level }) => {
+                el.category == Category::Slab && valid_ring(&el.outline)
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+                    && el.elevation_m.abs() <= 1e6
+            }
             Some(Geometry::Point { at, level, top }) => {
                 let lv = |id: &ElementId| elements.get(id).filter(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level));
                 el.category == Category::Column
@@ -71,6 +105,28 @@ impl Document {
             vertices.extend(section.iter().map(|p| [p[0], p[1], z1]));
             let mut faces: Vec<Vec<usize>> = vec![(0..n).rev().collect(), (n..2 * n).collect()];
             for i in 0..n { faces.push(vec![i, (i + 1) % n, (i + 1) % n + n, i + n]); }
+            return Some(Mesh { vertices, faces });
+        }
+        if let Some(Geometry::Area { level }) = el.geometry {
+            // the slab hangs from its top, which is `elevation_m` above the level
+            let ring = &el.outline;
+            let n = ring.len();
+            let top = self.get(level)?.elevation_m + el.elevation_m;
+            let bottom = top - el.height_m;
+            let mut vertices: Vec<[f64; 3]> = ring.iter().map(|p| [p[0], p[1], bottom]).collect();
+            vertices.extend(ring.iter().map(|p| [p[0], p[1], top]));
+            let ccw = openbim_geom::profile::polygon_area(ring) > 0.0;
+            let mut faces: Vec<Vec<usize>> = Vec::new();
+            for t in openbim_geom::profile::triangulate(ring)? {
+                // each triangle is wound on its own: counter-clockwise on top, clockwise underneath
+                let [a, b, c] = if openbim_geom::profile::polygon_area(&[ring[t[0]], ring[t[1]], ring[t[2]]]) > 0.0 { t } else { [t[0], t[2], t[1]] };
+                faces.push(vec![a + n, b + n, c + n]);
+                faces.push(vec![c, b, a]);
+            }
+            for i in 0..n {
+                let j = (i + 1) % n;
+                faces.push(if ccw { vec![i, j, j + n, i + n] } else { vec![j, i, i + n, j + n] });
+            }
             return Some(Mesh { vertices, faces });
         }
         let Geometry::Linear { start, end, level } = el.geometry.as_ref()? else { return None; };
@@ -150,6 +206,7 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Material, SlabKind, SlabSpec};
     #[test]
     fn a_beam_takes_a_round_or_an_i_section_changes_with_its_size_and_the_sections_are_validated() {
         use crate::Section;
@@ -307,5 +364,72 @@ mod tests {
         }
         assert!(d.transact(d.revision(), &[Command::Resize { id: ElementId(2), width_m: 0.2, height_m: 0.1 }]).is_err());
         assert_eq!(d, before);
+    }
+
+    fn slab(outline: Vec<[f64; 2]>) -> SlabSpec {
+        SlabSpec { outline, thickness_m: 0.2, top_offset_m: 0.0, kind: SlabKind::Floor, material: Material::Concrete }
+    }
+
+    fn volume(mesh: &Mesh) -> f64 {
+        // divergence theorem over fan-triangulated faces: positive when the faces face outwards
+        let mut v = 0.0;
+        for f in &mesh.faces {
+            for k in 1..f.len() - 1 {
+                let (a, b, c) = (mesh.vertices[f[0]], mesh.vertices[f[k]], mesh.vertices[f[k + 1]]);
+                v += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0;
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn slabs_are_placed_validated_undone_and_meshed_closed() {
+        let mut d = Document::spatial_sample();
+        let level = ElementId(10);
+        let before = d.clone();
+        // an L-shaped slab, 5 x 4 minus a 2 x 2 corner = 16 m2, in both windings
+        let l = vec![[0.0, 0.0], [5.0, 0.0], [5.0, 2.0], [3.0, 2.0], [3.0, 4.0], [0.0, 4.0]];
+        let mut rev = l.clone();
+        rev.reverse();
+        for ring in [l.clone(), rev] {
+            let id = d.place_slab(level, &slab(ring)).unwrap();
+            let el = d.get(id).unwrap();
+            assert_eq!((el.category, el.material, el.slab_kind), (Category::Slab, Material::Concrete, SlabKind::Floor));
+            let mesh = d.mesh(id).unwrap();
+            assert!((volume(&mesh) - 16.0 * 0.2).abs() < 1e-9, "volume {}", volume(&mesh));
+        }
+        // refused: too few corners, no area, a bow-tie, a vertex touching an edge, a foundation outline on a missing level
+        for bad in [
+            vec![[0.0, 0.0], [1.0, 0.0]],
+            vec![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]],
+            vec![[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0]],
+            vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [2.0, 0.0], [0.0, 4.0]],
+            vec![[0.0, 0.0], [f64::NAN, 0.0], [1.0, 1.0]],
+        ] {
+            let n = d.elements().count();
+            assert!(d.place_slab(level, &slab(bad)).is_err());
+            assert_eq!(d.elements().count(), n);
+        }
+        assert!(d.place_slab(ElementId(9999), &slab(l)).is_err());
+        // undo takes the slabs away again
+        while d.undo().unwrap() {}
+        assert_eq!(d.elements().count(), before.elements().count());
+        assert!(d.elements().all(|e| e.category != Category::Slab));
+    }
+
+    #[test]
+    fn a_foundation_slab_hangs_from_its_top_and_keeps_its_kind() {
+        let mut d = Document::spatial_sample();
+        let spec = SlabSpec { outline: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]], thickness_m: 0.5, top_offset_m: -0.1, kind: SlabKind::Foundation, material: Material::Concrete };
+        let id = d.place_slab(ElementId(10), &spec).unwrap();
+        let mesh = d.mesh(id).unwrap();
+        let zs: Vec<f64> = mesh.vertices.iter().map(|v| v[2]).collect();
+        let base = d.get(ElementId(10)).unwrap().elevation_m;
+        assert!((zs.iter().cloned().fold(f64::MIN, f64::max) - (base - 0.1)).abs() < 1e-9);
+        assert!((zs.iter().cloned().fold(f64::MAX, f64::min) - (base - 0.6)).abs() < 1e-9);
+        assert_eq!(d.get(id).unwrap().slab_kind, SlabKind::Foundation);
+        // only slabs take an outline or a kind
+        assert!(d.transact(d.revision(), &[Command::SetSlabKind { id: ElementId(2), kind: SlabKind::Foundation }]).is_err());
+        assert!(d.transact(d.revision(), &[Command::SetOutline { id: ElementId(2), outline: vec![] }]).is_err());
     }
 }

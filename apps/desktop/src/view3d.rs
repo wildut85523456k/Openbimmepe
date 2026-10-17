@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 fn kind(c: Category) -> Option<Kind> {
-    match c { Category::Wall => Some(Kind::Wall), Category::Beam => Some(Kind::Beam), Category::Column => Some(Kind::Column), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
+    match c { Category::Wall => Some(Kind::Wall), Category::Beam => Some(Kind::Beam), Category::Column => Some(Kind::Column), Category::Slab => Some(Kind::Slab), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
 }
 
 /// The element of the view that stands for a document element.
@@ -38,7 +38,8 @@ pub fn batch(doc: &Document) -> Batch {
             continue;
         }
         let Some(mesh) = doc.mesh(el.id) else { continue };
-        meshes.push((Element { kind: k, id: el.id.0 }, mesh, false));
+        // a slab's outline is not convex, but its faces are wound outward by construction
+        meshes.push((Element { kind: k, id: el.id.0 }, mesh, el.category == Category::Slab));
     }
     let mut origin = [f64::MAX; 3];
     for (_, m, _) in &meshes { for v in &m.vertices { for k in 0..3 { origin[k] = origin[k].min(v[k]); } } }

@@ -73,6 +73,7 @@ enum Field { Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2,
 fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Field] {
     use openbim_document::Category as C;
     match category {
+        C::Slab => &[Field::Width, Field::Elevation],
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
         C::Column => match section {
             1 => &[Field::Diameter, Field::Elevation],
@@ -120,7 +121,8 @@ fn section_combo(app: &mut Desktop, ui: &mut egui::Ui) {
 fn field_name(field: Field, category: openbim_document::Category) -> &'static str {
     use openbim_document::Category as C;
     match field {
-        Field::Width if category == C::Wall => "Thickness (mm)",
+        Field::Width if category == C::Wall || category == C::Slab => "Thickness (mm)",
+        Field::Elevation if category == C::Slab => "Top Offset (mm)",
         Field::Width if category == C::Pipe => "Diameter (mm)",
         Field::Height if category == C::Beam => "Depth (mm)",
         Field::Width if category == C::Beam => "Width (mm)",
@@ -171,13 +173,38 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
     match category {
         C::Beam => ("Structural Framing (1)", "Rectangular Beam", "beam"),
         C::Column => ("Structural Columns (1)", "Rectangular Column", "structural_column"),
+        C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
 
+/// The kind and the material of a slab.
+fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
+    ui.label("Kind");
+    egui::ComboBox::from_id_salt("slab_kind").selected_text(app.slab_kind_pick.name()).show_ui(ui, |ui| {
+        for k in openbim_document::SlabKind::ALL { ui.selectable_value(&mut app.slab_kind_pick, k, k.name()); }
+    });
+    usage_material_combos(app, ui, false);
+}
+
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Slab {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Slab");
+            ui.separator();
+            slab_combos(app, ui);
+            ui.label("Thickness (mm)");
+            ui.add(egui::DragValue::new(&mut app.slab_thickness_mm).speed(1.0).range(1.0..=5000.0));
+            ui.label("Top Offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0));
+            ui.label(format!("{} corners", app.slab_points.len()));
+            if ui.add_enabled(app.slab_points.len() >= 3, egui::Button::new("Finish")).clicked() { app.finish_slab(app.plan_level()); }
+            if ui.add_enabled(!app.slab_points.is_empty(), egui::Button::new("Clear")).clicked() { app.slab_points.clear(); }
+        });
+        return;
+    }
     if app.tool == crate::Tool::Column {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Structural Column");
@@ -265,9 +292,19 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
                     }
+                    if let Some(Geometry::Area { level }) = el.geometry {
+                        let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
+                        read_only_group(ui, "Constraints", &query, &[("Level", level_name)]);
+                    }
                     if let Some(Geometry::Linear { level, .. }) = el.geometry {
                         let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
+                    }
+                    if el.category == openbim_document::Category::Slab {
+                        slab_combos(app, ui);
+                        let area = openbim_geom::profile::polygon_area(&el.outline).abs();
+                        let (corners, area) = (el.outline.len().to_string(), format!("{area:.3}"));
+                        read_only_group(ui, "Derived Geometry", &query, &[("Corners", &corners), ("Area (m²)", &area)]);
                     }
                     if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column) { section_combo(app, ui); usage_material_combos(app, ui, el.category == openbim_document::Category::Beam); }
                     edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));

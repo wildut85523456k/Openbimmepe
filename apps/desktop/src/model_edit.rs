@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{BeamSpec, Category, ColumnSpec, Command, Geometry, Section, Usage};
+use openbim_document::{BeamSpec, Category, ColumnSpec, Command, Geometry, Section, SlabKind, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -21,6 +21,7 @@ impl Desktop {
             self.height_mm = el.height_m * 1000.0;
             self.elevation_mm = el.elevation_m * 1000.0;
             self.slope_percent = el.slope_ratio.unwrap_or(0.0) * 100.0;
+            if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
                 (self.section_pick, self.web_mm, self.flange_mm) = match el.section {
@@ -47,9 +48,9 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab)
             && (differs(el.width_m * 1000.0, self.width_mm)
-                || (!el.is_round() && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
+                || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column) && {
             let want = self.section_from_controls();
             match (el.section, want) {
@@ -65,7 +66,8 @@ impl Desktop {
                     .any(|(a, b)| differs(a * 1000.0, b)),
             _ => false,
         };
-        let kind = (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column) && el.material != self.material_pick);
+        let kind = (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
+            || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick);
         size || section || kind || elevation || slope || axis
     }
 
@@ -74,12 +76,15 @@ impl Desktop {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         match crate::export::export_ifc(&self.document, "Project1", 1, &crate::export::iso_time(secs)) {
             Ok(out) => match std::fs::write("openbim-export.ifc", &out.text) {
-                Ok(()) => self.message = format!("Exported openbim-export.ifc: {} walls, {} beams, {} columns. {}", out.walls, out.beams, out.columns, out.warnings.join("; ")),
+                Ok(()) => self.message = format!("Exported openbim-export.ifc: {} walls, {} beams, {} columns, {} slabs. {}", out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
                 Err(e) => self.message = format!("Could not write openbim-export.ifc: {e}"),
             },
             Err(e) => self.message = format!("IFC export failed: {e}"),
         }
     }
+
+    /// The level of the plan view on show.
+    pub(crate) fn plan_level(&self) -> ElementId { ElementId(if self.view == crate::View::UpperPlan { 11 } else { 10 }) }
 
     /// The levels of the document, lowest first: (id, name, elevation).
     pub(crate) fn levels(&self) -> Vec<(ElementId, String, f64)> {
@@ -137,6 +142,26 @@ impl Desktop {
         };
     }
 
+    /// A click of the Slab tool in the plan of `level`: a corner, or the closing of the outline when it lands on the
+    /// first corner of a polygon that has three or more.
+    pub(crate) fn slab_click(&mut self, level: ElementId, at: [f64; 2], closing: bool) {
+        if closing && self.slab_points.len() >= 3 { return self.finish_slab(level); }
+        if self.slab_points.last() == Some(&at) { return; }
+        self.slab_points.push(at);
+        self.message = format!("Slab: {} corners; Enter closes the outline", self.slab_points.len());
+    }
+
+    /// Lays the slab drawn so far on `level` with the thickness, top offset, kind and material of the options bar.
+    pub(crate) fn finish_slab(&mut self, level: ElementId) {
+        let m = |v: f64| v / 1000.0;
+        let spec = SlabSpec { outline: self.slab_points.clone(), thickness_m: m(self.slab_thickness_mm), top_offset_m: m(self.slab_offset_mm),
+            kind: self.slab_kind_pick, material: self.material_pick };
+        match self.document.place_slab(level, &spec) {
+            Ok(id) => { self.slab_points.clear(); self.message = format!("{} {} placed; undo removes it", self.slab_kind_pick.name(), id.0); }
+            Err(error) => self.message = format!("Slab rejected ({error:?}); Backspace takes a corner back"),
+        }
+    }
+
     /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
     /// tool stays on for the next one.
     pub(crate) fn beam_click(&mut self, level: ElementId, point: [f64; 2]) {
@@ -159,6 +184,11 @@ impl Desktop {
         if !self.has_pending_edit() { return; }
         let id = el.id;
         let mut commands = Vec::new();
+        if el.category == Category::Slab {
+            commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.width_mm / 1000.0 });
+            commands.push(Command::SetSlabKind { id, kind: self.slab_kind_pick });
+            commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
         if matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe) {
             let round = el.category == Category::Pipe || (matches!(el.category, Category::Beam | Category::Column) && self.section_pick == 1);
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
@@ -398,5 +428,54 @@ mod tests {
         assert_eq!(pipe.width_m, 0.15);
         assert_eq!(pipe.height_m, 0.15);
         assert_eq!(pipe.slope_ratio, Some(-0.02));
+    }
+
+    #[test]
+    fn slabs_are_drawn_by_clicks_closed_in_3d_edited_into_foundations_and_exported() {
+        let mut app = Desktop::sample();
+        app.run_command("structural_floor", "Floor");
+        assert!(app.tool == Tool::Slab && app.slab_kind_pick == openbim_document::SlabKind::Floor);
+        app.material_pick = openbim_document::Material::Concrete;
+        // a bow-tie is refused and keeps its corners so that one can be taken back
+        for p in [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0]] { app.slab_click(ElementId(10), p, false); }
+        app.finish_slab(ElementId(10));
+        assert!(app.message.contains("rejected") && app.slab_points.len() == 4, "{}", app.message);
+        app.slab_points.clear();
+        // an L of 16 m2, 200 mm thick; the closing click is the first corner again
+        for p in [[0.0, 0.0], [5.0, 0.0], [5.0, 2.0], [3.0, 2.0], [3.0, 4.0], [0.0, 4.0]] { app.slab_click(ElementId(10), p, false); }
+        app.slab_click(ElementId(10), [0.0, 0.0], true);
+        assert!(app.slab_points.is_empty(), "{}", app.message);
+        assert!(app.tool == Tool::Slab, "the tool stays on");
+        let id = app.document.elements().find(|e| e.category == Category::Slab).expect("placed").id;
+        let batch = crate::view3d::batch(&app.document);
+        let ei = batch.elements.iter().position(|e| e.id == id.0 && e.kind == openbim_view::Kind::Slab).expect("in 3D") as u32;
+        let volume = |batch: &openbim_view::Batch| -> f64 {
+            batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
+                let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+                (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+            }).sum()
+        };
+        assert!((volume(&batch) - 3.2).abs() < 1e-3, "{}", volume(&batch));
+        // select it: thickness and top offset are its dimensions; make it a 300 mm foundation sunk 100 mm
+        app.select_element(Some(id));
+        assert!(!app.has_pending_edit());
+        (app.width_mm, app.elevation_mm, app.slab_kind_pick) = (300.0, -100.0, openbim_document::SlabKind::Foundation);
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        let el = app.document.get(id).unwrap();
+        assert_eq!((el.height_m, el.elevation_m, el.slab_kind), (0.3, -0.1, openbim_document::SlabKind::Foundation));
+        assert!((volume(&crate::view3d::batch(&app.document)) - 4.8).abs() < 1e-3);
+        // exported as an IfcSlab BASESLAB with its concrete, and the outline kept
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-17T00:00:00").unwrap();
+        assert_eq!(out.slabs, 1);
+        assert_eq!(out.text.matches("IFCSLAB(").count(), 1);
+        assert!(out.text.contains(".BASESLAB."), "foundation");
+        assert!(out.text.contains("IFCMATERIAL('Concrete')"));
+        assert!(out.text.contains("IFCARBITRARYCLOSEDPROFILEDEF") || out.text.contains("IFCPOLYLINE"), "outline");
+        // undo takes the foundation edit back, then the slab
+        app.undo_document();
+        assert_eq!(app.document.get(id).unwrap().slab_kind, openbim_document::SlabKind::Floor);
+        app.undo_document();
+        assert!(app.document.elements().all(|e| e.category != Category::Slab));
     }
 }

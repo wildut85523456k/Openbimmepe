@@ -23,7 +23,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall, Beam, Column }
+enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -53,6 +53,12 @@ struct Desktop {
     beam_start: Option<[f64; 2]>,
     /// the level the options bar places beams on; the lowest when None
     beam_level: Option<ElementId>,
+    /// the corners of the slab being drawn in a plan view
+    slab_points: Vec<[f64; 2]>,
+    slab_thickness_mm: f64,
+    /// how far above its level the top of a new slab is
+    slab_offset_mm: f64,
+    slab_kind_pick: openbim_document::SlabKind,
     camera_yaw: f32,
     camera_pitch: f32,
     view3d: openbim_viewport_egui::Viewport3d,
@@ -81,7 +87,7 @@ impl Desktop {
     }
 
     fn sample() -> Self {
-        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column"])
+        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
             ("Duct", &["D D"]),
@@ -89,6 +95,7 @@ impl Desktop {
             ("Wall", &["W A"]),
             ("Beam", &["B M"]),
             ("Column", &["C L"]),
+            ("Slab", &["S L"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
@@ -99,6 +106,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
+            slab_points: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor,
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -112,12 +120,14 @@ impl Desktop {
     fn choose_tool(&mut self, tool: Tool) {
         self.tool = tool;
         self.beam_start = None;
+        self.slab_points.clear();
         self.message = match tool {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),
             Tool::Duct => "Duct command preview only; routing engine is not connected yet.".into(),
             Tool::Pipe => "Pipe command preview only; routing engine is not connected yet.".into(),
             Tool::Beam => "Beam: click the start and the end in a plan view (Esc ends), or type the ends in the options bar and press Place Beam.".into(),
             Tool::Column => "Column: click its place in a plan view; it stands from that level to the next one up (Esc ends).".into(),
+            Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -171,6 +181,8 @@ impl Desktop {
             "wall" => self.choose_tool(Tool::Wall),
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
+            "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
+            "slab" => { self.slab_kind_pick = openbim_document::SlabKind::Foundation; self.choose_tool(Tool::Slab) }
             "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
@@ -210,7 +222,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

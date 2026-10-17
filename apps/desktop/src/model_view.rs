@@ -43,7 +43,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
     if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
-    let level_id = ElementId(if app.view == View::UpperPlan { 11 } else { 10 });
+    let level_id = app.plan_level();
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);
     let three_d = app.view == View::ThreeD;
     ui.horizontal(|ui| {
@@ -69,7 +69,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let mut bounds = Rect::NOTHING;
     let mut meshes = Vec::new();
     for el in app.document.elements() {
-        if let Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. }) = &el.geometry {
+        if let Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level }) = &el.geometry {
             if !three_d && *level != level_id { continue; }
             if let Some(mesh) = app.document.mesh(el.id) {
                 for vertex in &mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
@@ -129,6 +129,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
             Category::Beam => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
+            Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
             Category::Duct => Color32::from_rgb(70, 157, 194),
             Category::Pipe => Color32::from_rgb(136, 153, 166),
             _ => Color32::GRAY,
@@ -148,7 +149,29 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if app.tool == crate::Tool::Column && !three_d {
+    if app.tool == crate::Tool::Slab && !three_d {
+        // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
+        let pts: Vec<Pos2> = app.slab_points.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+        let stroke = Stroke::new(2.0, Color32::from_rgb(70, 130, 200));
+        if let (Some(last), Some(h)) = (pts.last(), response.hover_pos()) {
+            painter.line_segment([*last, h], Stroke::new(1.0, stroke.color.gamma_multiply(0.6)));
+        }
+        for w in pts.windows(2) { painter.line_segment([w[0], w[1]], stroke); }
+        for (i, p) in pts.iter().enumerate() { painter.circle_filled(*p, if i == 0 { 5.0 } else { 3.5 }, stroke.color); }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if app.slab_points.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.slab_points.clear(); }
+        } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.slab_points.pop();
+        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= 3 { app.finish_slab(level_id);
+        } else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let closing = pts.first().is_some_and(|f| f.distance(p) < 10.0);
+                app.slab_click(level_id, to_model(p), closing);
+            }
+        }
+    } else if app.tool == crate::Tool::Column && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }

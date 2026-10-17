@@ -12,6 +12,7 @@ pub enum SnapshotGeometry {
     Grid { start:[f64;2],end:[f64;2] },
     Linear { start:[f64;2],end:[f64;2],level:u64 },
     Point { at:[f64;2],level:u64,top:u64 },
+    Area { level:u64 },
 }
 impl From<Geometry> for SnapshotGeometry {
     fn from(value:Geometry)->Self {
@@ -20,6 +21,7 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::Grid { start,end }=>Self::Grid { start,end },
             Geometry::Linear { start,end,level }=>Self::Linear { start,end,level:level.0 },
             Geometry::Point { at,level,top }=>Self::Point { at,level:level.0,top:top.0 },
+            Geometry::Area { level }=>Self::Area { level:level.0 },
         }
     }
 }
@@ -30,6 +32,7 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::Grid { start,end }=>Self::Grid { start,end },
             SnapshotGeometry::Linear { start,end,level }=>Self::Linear { start,end,level:ElementId(level) },
             SnapshotGeometry::Point { at,level,top }=>Self::Point { at,level:ElementId(level),top:ElementId(top) },
+            SnapshotGeometry::Area { level }=>Self::Area { level:ElementId(level) },
         }
     }
 }
@@ -55,6 +58,12 @@ pub struct SnapshotElement {
     /// the structural material of a beam: Concrete, Steel or Timber
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub material:Option<String>,
+    /// the plan outline of a slab
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub outline:Vec<[f64;2]>,
+    /// the kind of a slab when it is not a Floor: Foundation
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub slab_kind:Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -121,6 +130,8 @@ impl Snapshot {
             geometry:e.geometry.map(Into::into), section: SnapshotSection::from_document(e.section),
             usage: (e.usage != openbim_document::Usage::Girder).then(|| e.usage.name().to_string()),
             material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
+            outline: e.outline.clone(),
+            slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -133,7 +144,7 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),
@@ -156,6 +167,13 @@ impl Snapshot {
             }
             if let Some(section) = &el.section {
                 ops.push(Command::SetSection { id: ElementId(el.id), section: section.to_document()? });
+            }
+            if let Some(k) = &el.slab_kind {
+                let kind = openbim_document::SlabKind::ALL.into_iter().find(|x| x.name() == k).ok_or(format!("Unsupported slab kind {k}"))?;
+                ops.push(Command::SetSlabKind { id: ElementId(el.id), kind });
+            }
+            if !el.outline.is_empty() {
+                ops.push(Command::SetOutline { id: ElementId(el.id), outline: el.outline.clone() });
             }
             if let Some(geometry)=el.geometry {
                 ops.push(Command::SetGeometry { id:ElementId(el.id),geometry:geometry.into() });

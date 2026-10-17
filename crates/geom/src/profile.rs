@@ -73,3 +73,19 @@ impl Profile {
 pub fn polygon_area(p: &[[f64; 2]]) -> f64 {
     (0..p.len()).map(|i| { let (a, b) = (p[i], p[(i + 1) % p.len()]); a[0] * b[1] - b[0] * a[1] }).sum::<f64>() / 2.0
 }
+
+/// Triangles (indices into `ring`) that tile a simple polygon, whichever way it runs; None when it cannot be tiled.
+pub fn triangulate(ring: &[[f64; 2]]) -> Option<Vec<[usize; 3]>> {
+    if ring.len() < 3 {
+        return None;
+    }
+    let flat: Vec<f64> = ring.iter().flat_map(|p| [p[0], p[1]]).collect();
+    let idx = earcutr::earcut(&flat, &[], 2).ok()?;
+    if idx.len() % 3 != 0 || idx.iter().any(|&k| k >= ring.len()) {
+        return None;
+    }
+    let tris: Vec<[usize; 3]> = idx.chunks(3).map(|t| [t[0], t[1], t[2]]).collect();
+    // the triangles must cover exactly the polygon
+    let got: f64 = tris.iter().map(|t| polygon_area(&[ring[t[0]], ring[t[1]], ring[t[2]]]).abs()).sum();
+    ((got - polygon_area(ring).abs()).abs() <= 1e-7 * got.max(1.0)).then_some(tris)
+}

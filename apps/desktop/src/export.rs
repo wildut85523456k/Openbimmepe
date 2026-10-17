@@ -2,13 +2,14 @@
 use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_geom::WallChain;
-use openbim_ifc::{BeamItem, ColumnItem, FramingUsage, Scene, WallItem};
+use openbim_ifc::{BeamItem, ColumnItem, FramingUsage, Scene, SlabItem, SlabRole, WallItem};
 
 pub struct Exported {
     pub text: String,
     pub walls: usize,
     pub beams: usize,
     pub columns: usize,
+    pub slabs: usize,
     pub warnings: Vec<String>,
 }
 
@@ -41,7 +42,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
-    let (mut walls, mut beams, mut columns) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut walls, mut beams, mut columns, mut slabs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&str, usize>::new();
     for el in doc.elements() {
@@ -59,6 +60,13 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 columns.push(column_item(doc, el).ok_or_else(|| format!("column {} has no height or a section that does not check", el.name))?);
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
+            (Category::Slab, Some(Geometry::Area { level })) => {
+                let top = level_of(level).ok_or("a slab lies on a level that is gone")? + el.elevation_m;
+                let slab = openbim_place::floors::Slab { name: el.name.clone(), top, thickness: el.height_m, outline: el.outline.clone(), fire_rating_min: None };
+                let role = if el.slab_kind == openbim_document::SlabKind::Foundation { SlabRole::Foundation } else { SlabRole::Structure };
+                slabs.push(SlabItem { id: el.id.0, slab, role, room_bounding: true });
+                if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
+            }
             (Category::Level | Category::Grid, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
             (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,
@@ -69,7 +77,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
-        walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: columns.clone(), shafts: vec![],
+        walls, wall_penetrations: vec![], firestops: Default::default(), slabs, columns: columns.clone(), shafts: vec![],
         floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(),
@@ -78,7 +86,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
     if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
-    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: beams.len(), columns: columns.len(), warnings })
+    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: beams.len(), columns: columns.len(), slabs: scene.slabs.len(), warnings })
 }
 
 /// `2026-10-17T19:34:56` for a number of seconds since 1970 (UTC).

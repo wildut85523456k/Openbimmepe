@@ -23,6 +23,9 @@ pub enum Category {
     /// A vertical structural member at a point, from its base level (plus `elevation_m`) up to its top level:
     /// `width_m` across and `height_m` deep (its section), with a `section` and a `material`.
     Column,
+    /// A horizontal slab on a level: a polygon `outline` in plan, as thick as `width_m` and `height_m` (equal),
+    /// its top `elevation_m` above the level.
+    Slab,
     Duct,
     Pipe,
     Equipment,
@@ -65,6 +68,33 @@ pub struct ColumnSpec {
     /// how far above its base level the foot of the column is
     pub base_offset_m: f64,
     pub section: Section,
+    pub material: Material,
+}
+
+/// What a slab is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SlabKind {
+    #[default]
+    Floor,
+    /// a structural slab on the ground
+    Foundation,
+}
+
+impl SlabKind {
+    pub const ALL: [SlabKind; 2] = [SlabKind::Floor, SlabKind::Foundation];
+    pub fn name(self) -> &'static str {
+        match self { SlabKind::Floor => "Floor", SlabKind::Foundation => "Foundation" }
+    }
+}
+
+/// A slab to lay.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlabSpec {
+    pub outline: Vec<[f64; 2]>,
+    pub thickness_m: f64,
+    /// how far above its level the top of the slab is
+    pub top_offset_m: f64,
+    pub kind: SlabKind,
     pub material: Material,
 }
 
@@ -135,6 +165,9 @@ pub struct Element {
     pub usage: Usage,
     /// The structural material of a beam.
     pub material: Material,
+    /// The plan outline of a slab (counter-clockwise or clockwise); empty for everything else.
+    pub outline: Vec<[f64; 2]>,
+    pub slab_kind: SlabKind,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -155,7 +188,9 @@ impl Element {
     fn valid(&self) -> bool {
         (matches!(self.category, Category::Beam | Category::Column) || self.section == Section::Rectangle)
             && (self.category == Category::Beam || self.usage == Usage::Girder)
-            && (matches!(self.category, Category::Beam | Category::Column) || self.material == Material::Unspecified)
+            && (matches!(self.category, Category::Beam | Category::Column | Category::Slab) || self.material == Material::Unspecified)
+            && (self.category == Category::Slab || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
+            && (self.category != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
             && (!matches!(self.category, Category::Beam | Category::Column) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
@@ -222,6 +257,10 @@ pub enum Command {
     SetSection { id: ElementId, section: Section },
     /// What a beam is for.
     SetUsage { id: ElementId, usage: Usage },
+    /// The plan outline of a slab.
+    SetOutline { id: ElementId, outline: Vec<[f64; 2]> },
+    /// Floor or foundation slab.
+    SetSlabKind { id: ElementId, kind: SlabKind },
     /// The structural material of a beam.
     SetMaterial { id: ElementId, material: Material },
     SetGeometry { id: ElementId, geometry: Geometry },
@@ -283,6 +322,19 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// Lays a slab on `level`: `outline` in plan, `thickness_m` thick with its top `top_offset_m` above the level.
+    pub fn place_slab(&mut self, level: ElementId, slab: &SlabSpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Slab).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Slab, name: format!("{} {n}", slab.kind.name()), width_m: slab.thickness_m, height_m: slab.thickness_m, elevation_m: slab.top_offset_m },
+            Command::SetSlabKind { id, kind: slab.kind },
+            Command::SetMaterial { id, material: slab.material },
+            Command::SetOutline { id, outline: slab.outline.clone() },
+            Command::SetGeometry { id, geometry: Geometry::Area { level } },
+        ])?;
+        Ok(id)
+    }
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
@@ -310,6 +362,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor,
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -345,9 +398,21 @@ impl Document {
                     el.usage = *usage;
                     el.revision = revision;
                 }
+                Command::SetOutline { id, outline } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Slab { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.outline = outline.clone();
+                    el.revision = revision;
+                }
+                Command::SetSlabKind { id, kind } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Slab { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.slab_kind = *kind;
+                    el.revision = revision;
+                }
                 Command::SetMaterial { id, material } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Column) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Column | Category::Slab) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.material = *material;
                     el.revision = revision;
                 }

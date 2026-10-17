@@ -2396,6 +2396,7 @@ dependencies = [
  "openbim-geom",
  "openbim-ifc",
  "openbim-keymap",
+ "openbim-place",
  "openbim-view",
  "openbim-viewport-egui",
 ]

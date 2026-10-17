@@ -163,6 +163,8 @@ pub enum SlabRole {
     FloorFinish,
     /// a false ceiling hung under a slab: written as an IfcCovering (ceiling)
     Ceiling,
+    /// a structural slab on the ground: an IfcSlab BASESLAB, a floor for the rooms above it like Structure
+    Foundation,
 }
 
 pub struct SlabItem {
@@ -1073,7 +1075,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, bottom], None, None, s.thickness);
         let shape = o.shape(&[solid]);
         let g = o.gid(item.id, 0);
-        if item.role != SlabRole::Structure {
+        if matches!(item.role, SlabRole::FloorFinish | SlabRole::Ceiling) {
             let kind = if item.role == SlabRole::FloorFinish { "FLOORING" } else { "CEILING" };
             let cov = o.s.add(format!("IFCCOVERING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));
             o.contain(st, cov);
@@ -1081,9 +1083,11 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             o.report.slabs += 1;
             continue;
         }
-        let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,.FLOOR.)", string(&s.name)));
+        let slab_type = if item.role == SlabRole::Foundation { ".BASESLAB." } else { ".FLOOR." };
+        let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,{slab_type})", string(&s.name)));
         o.contain(st, slab);
         o.slab_entities.push(slab);
+        o.member_entities.push((item.id, slab));
         o.report.slabs += 1;
         let mut void_area = 0.0;
         for sh in scene.shafts.iter().filter(|sh| s.top > sh.z_bottom + 1e-6 && s.top < sh.z_top - 1e-6) {

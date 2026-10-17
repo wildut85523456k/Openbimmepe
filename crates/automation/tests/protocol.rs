@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 fn request() -> PreviewRequest {
     PreviewRequest { version:1,request_id:"test-run".into(),snapshot:Snapshot {
         document_id:"test-document".into(),revision:42,elements:vec![SnapshotElement {
-            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,
+            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slab_kind:None,
         }],
     },graph:Graph::example(vec![1]) }
 }
@@ -69,19 +69,20 @@ fn spatial_snapshot_preserves_meshes_levels_and_host_constraints() {
 #[test]
 fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
     use openbim_automation::protocol::Snapshot;
-    use openbim_document::{BeamSpec, ColumnSpec, Document, ElementId, Material, Section, Usage};
+    use openbim_document::{BeamSpec, ColumnSpec, Document, ElementId, Material, Section, SlabKind, SlabSpec, Usage};
     let mut d = Document::spatial_sample();
     d.place_beam(ElementId(10), &BeamSpec { section: Section::IShape { web_m: 0.01, flange_m: 0.02 }, usage: Usage::Joist, material: Material::Steel, ..BeamSpec::level([0.0, 1.0], [4.0, 1.0], 0.2, 0.4, 2.8) }).unwrap();
     d.place_beam(ElementId(10), &BeamSpec { usage: Usage::Brace, slope_ratio: 0.75, section: Section::Circle, ..BeamSpec::level([5.0, 1.0], [5.0, 5.0], 0.1, 0.1, 0.2) }).unwrap();
     d.place_column(ElementId(10), ElementId(11), [2.0, 2.0], &ColumnSpec { width_m: 0.4, depth_m: 0.4, base_offset_m: 0.1, section: Section::Circle, material: Material::Concrete }).unwrap();
+    d.place_slab(ElementId(10), &SlabSpec { outline: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]], thickness_m: 0.25, top_offset_m: -0.05, kind: SlabKind::Foundation, material: Material::Concrete }).unwrap();
     let json = Snapshot::capture("doc", &d).to_json().unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();
     let rebuilt = back.materialize().unwrap();
     for el in d.elements() {
         let r = rebuilt.get(el.id).unwrap_or_else(|| panic!("{:?} lost", el.id));
-        assert_eq!((r.category, r.width_m, r.height_m, r.elevation_m, r.slope_ratio, r.geometry, r.section, r.usage, r.material),
-                   (el.category, el.width_m, el.height_m, el.elevation_m, el.slope_ratio, el.geometry, el.section, el.usage, el.material), "{}", el.name);
+        assert_eq!((r.category, r.width_m, r.height_m, r.elevation_m, r.slope_ratio, r.geometry, r.section, r.usage, r.material, &r.outline, r.slab_kind),
+                   (el.category, el.width_m, el.height_m, el.elevation_m, el.slope_ratio, el.geometry, el.section, el.usage, el.material, &el.outline, el.slab_kind), "{}", el.name);
     }
     assert_eq!(d.elements().count(), rebuilt.elements().count());
-    assert!(json.contains("IShape") && json.contains("\"Brace\"") && json.contains("Point"));
+    assert!(json.contains("IShape") && json.contains("\"Brace\"") && json.contains("Point") && json.contains("Area") && json.contains("Foundation"));
 }

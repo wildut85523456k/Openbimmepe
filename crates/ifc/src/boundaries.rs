@@ -416,7 +416,7 @@ pub fn room_extent(scene: &Scene, r: &RoomItem) -> Extent {
         }
         let bottom = s.top - s.thickness;
         match item.role {
-            SlabRole::Structure => {
+            SlabRole::Structure | SlabRole::Foundation => {
                 if (s.top - z0).abs() <= TOL {
                     if e.floor.is_none() {
                         e.floor = Some(si);
