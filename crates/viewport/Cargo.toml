@@ -1,0 +1,21 @@
+[package]
+name = "openbim-viewport"
+version = "0.0.1"
+edition = "2021"
+description = "3D viewport logic: Revit-style camera and mouse controls, ViewCube snapping, and a software renderer with Shaded, Consistent Colors, Hidden Line and Wireframe styles"
+publish = false
+
+[dependencies]
+openbim-view = { path = "../view" }
+openbim-geom = { path = "../geom" }
+rayon = "1.10"
+
+[dev-dependencies]
+openbim-arch = { path = "../arch" }
+openbim-place = { path = "../place" }
+openbim-family = { path = "../family" }
+openbim-route = { path = "../route" }
+openbim-ifc = { path = "../ifc" }
+
+[lints.rust]
+unsafe_code = "forbid"

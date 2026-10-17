@@ -18,6 +18,7 @@ mod families;
 pub mod guid;
 pub mod boundaries;
 pub mod georef;
+pub mod lighting;
 pub mod pset_map;
 pub mod walls;
 pub mod quantities;
@@ -161,6 +162,8 @@ pub struct Scene {
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
     pub rooms: Vec<RoomItem>,
+    /// lighting inputs of rooms, by the room's element number
+    pub room_lighting: std::collections::BTreeMap<u64, lighting::RoomLighting>,
     pub wall_types: Vec<walls::WallType>,
     /// where one wall element meets another (see `walls::find_joins`)
     pub wall_joins: Vec<walls::WallJoin>,
@@ -379,9 +382,15 @@ struct Out<'a> {
     /// the virtual element of each separation line that a boundary used
     virtual_entities: BTreeMap<usize, u32>,
     item_entities: Vec<u32>,
+    /// writing IFC2X3 (for DIALux and other readers that stop at 2x3) instead of IFC4
+    v2: bool,
 }
 
 impl<'a> Out<'a> {
+    /// The attribute list tail of an element that has a predefined type in IFC4 only: `$` then the type.
+    fn tail4(&self, t: &str) -> String {
+        if self.v2 { "$".into() } else { format!("$,{t}") }
+    }
     fn r(&mut self, x: f64, what: &str) -> String {
         if !x.is_finite() {
             self.bad.get_or_insert_with(|| what.to_string());
@@ -507,7 +516,8 @@ impl<'a> Out<'a> {
                 quantities::Kind::Area => ("IFCQUANTITYAREA", 0),
                 quantities::Kind::Volume => ("IFCQUANTITYVOLUME", 0),
             };
-            ids.push(format!("#{}", self.s.add(format!("{class}({},$,$,{v},$)", string(q.name)))));
+            let ent = if self.v2 { format!("{class}({},$,$,{v})", string(q.name)) } else { format!("{class}({},$,$,{v},$)", string(q.name)) };
+            ids.push(format!("#{}", self.s.add(ent)));
         }
         let g = self.gen_gid();
         let eq = self.s.add(format!("IFCELEMENTQUANTITY({g},$,{},$,$,({}))", string(name), ids.join(",")));
@@ -577,13 +587,24 @@ fn size_props(size: RunSize) -> Vec<(&'static str, Val)> {
 
 /// Write the scene as IFC4.
 pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
+    export_as(scene, false)
+}
+
+/// Write the scene as IFC2X3, the schema DIALux evo reads best: the building shell, rooms, doors and windows.
+/// What 2x3 cannot carry (service networks, wall types, joins, space boundaries, map conversion, luminaires)
+/// is left out and named in the report's warnings.
+pub fn export_ifc2x3(scene: &Scene) -> Result<Exported, ExportError> {
+    export_as(scene, true)
+}
+
+fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     if scene.project_key > guid::MAX_PROJECT_KEY {
         return Err(ExportError::BadKey);
     }
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new() };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {
@@ -604,7 +625,7 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     let u_vol = o.s.add("IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)".into());
     let u_ang = o.s.add("IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)".into());
     let units = o.s.add(format!("IFCUNITASSIGNMENT((#{u_len},#{u_area},#{u_vol},#{u_ang}))"));
-    if let Some(gr) = &scene.georef {
+    if let (false, Some(gr)) = (v2, &scene.georef) {
         let opt = |v: &Option<String>| v.as_ref().map_or("$".to_string(), |t| string(t));
         let crs = o.s.add(format!("IFCPROJECTEDCRS({},$,{},{},{},{},#{u_len})", string(&gr.crs.name), opt(&gr.crs.geodetic_datum), opt(&gr.crs.vertical_datum), opt(&gr.crs.map_projection), opt(&gr.crs.map_zone)));
         let (origin, (a, b)) = gr.map_conversion();
@@ -612,11 +633,22 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
         o.s.add(format!("IFCMAPCONVERSION(#{ctx},#{crs},{})", vals.join(",")));
         o.report.map_conversions = 1;
     }
+    // IFC2X3 insists on an owner history for every rooted entity; `Step::finish_2x3` points them all at this one
+    let oh = if v2 {
+        let org = o.s.add("IFCORGANIZATION($,'openbim',$,$,$)".into());
+        let per = o.s.add("IFCPERSON($,'openbim',$,$,$,$,$,$)".into());
+        let pao = o.s.add(format!("IFCPERSONANDORGANIZATION(#{per},#{org},$)"));
+        let app = o.s.add(format!("IFCAPPLICATION(#{org},'0.1','openbim','openbim')"));
+        o.s.add(format!("IFCOWNERHISTORY(#{pao},#{app},$,.ADDED.,$,$,$,0)"))
+    } else {
+        0
+    };
     let g = o.gen_gid();
     let project = o.s.add(format!("IFCPROJECT({g},$,{},$,$,$,$,(#{ctx}),#{units})", string(&scene.project_name)));
     // spatial structure
     // the site carries the whole model, so it is where the file's origin is moved to
     let site_pl = match &scene.georef {
+        _ if v2 => o.place(None, [0.0; 3], None, None),
         Some(gr) if gr.coordinate_base == georef::CoordinateBase::SharedCoordinates => {
             let (a, b) = gr.x_axis();
             o.place(None, gr.origin_shared(), Some([0.0, 0.0, 1.0]), Some([a, b, 0.0]))
@@ -656,11 +688,21 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{bld},({}))", storey_ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
 
     write_walls(&mut o)?;
-    families::write_families(&mut o)?;
+    if v2 {
+        families::write_openings_2x3(&mut o)?;
+    } else {
+        families::write_families(&mut o)?;
+    }
     write_slabs(&mut o)?;
     write_columns(&mut o)?;
     write_spaces(&mut o)?;
-    write_networks(&mut o)?;
+    if v2 {
+        if !scene.networks.is_empty() {
+            o.report.warnings.push("IFC2X3: service networks are not written".into());
+        }
+    } else {
+        write_networks(&mut o)?;
+    }
 
     // containment, per storey
     let contained = std::mem::take(&mut o.contained);
@@ -675,16 +717,20 @@ pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
     if let Some(id) = o.dup {
         return Err(ExportError::DuplicateId(id));
     }
-    let text = o.s.finish(&scene.project_name, &scene.timestamp);
+    let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp) };
     Ok(Exported { text, report: o.report })
 }
 
 fn write_walls(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
+    let v2 = o.v2;
     // wall types: materials, layer sets and the type entities, before the walls that use them
     let mut materials: BTreeMap<&str, u32> = BTreeMap::new();
     let mut type_ids: Vec<(u32, u32)> = Vec::new(); // (type entity, layer set)
-    for (ti, t) in scene.wall_types.iter().enumerate() {
+    if o.v2 && !scene.wall_types.is_empty() {
+        o.report.warnings.push("IFC2X3: wall types and layer sets are not written (the walls keep their thickness)".into());
+    }
+    for (ti, t) in scene.wall_types.iter().enumerate().filter(|_| !v2) {
         t.check().map_err(|e| ExportError::Unsupported(format!("wall type {}: {e}", t.name)))?;
         // IFC counts the layers across the wall from the right of travel to the left; the type lists them from the exterior, on the left
         let (core_a, core_b) = t.core_range();
@@ -732,11 +778,11 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         }
         let shape = o.shape(&solids);
         let g = o.gid(w.id, 0);
-        let wall = o.s.add(format!("IFCWALL({g},$,{},$,$,#{pl},#{shape},$,.STANDARD.)", string(&w.name)));
+        let wall = o.s.add(format!("IFCWALL({g},$,{},$,$,#{pl},#{shape},{})", string(&w.name), o.tail4(".STANDARD.")));
         o.contain(st, wall);
         o.report.walls += 1;
         o.wall_entities.push(wall);
-        if let Some(ti) = w.wall_type {
+        if let Some(ti) = w.wall_type.filter(|_| !v2) {
             let (t, (_, ls)) = (scene.wall_types.get(ti).ok_or_else(|| ExportError::Unsupported(format!("wall {}: no wall type {ti}", w.name)))?, type_ids[ti]);
             if (t.thickness() - c.thickness).abs() > 1e-9 {
                 return Err(ExportError::Unsupported(format!("wall {}: the layers of type {} add up to {} m but the wall is {} m thick", w.name, t.name, t.thickness(), c.thickness)));
@@ -783,7 +829,7 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
                 let shape = o.shape(&[solid]);
                 let name = pen.map_or_else(|| format!("Opening {k}"), |p| p.id.to_string());
                 let g = o.gid(w.id, k);
-                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&name)));
+                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&name), o.tail4(".OPENING.")));
                 let g = o.gen_gid();
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{wall},#{oe})"));
                 o.report.openings += 1;
@@ -815,7 +861,10 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         }
     }
     // joins between wall elements
-    for j in &scene.wall_joins {
+    if o.v2 && !scene.wall_joins.is_empty() {
+        o.report.warnings.push("IFC2X3: wall joins are not written".into());
+    }
+    for j in scene.wall_joins.iter().filter(|_| !v2) {
         let (Some(a), Some(b)) = (o.wall_entities.get(j.a).copied(), o.wall_entities.get(j.b).copied()) else {
             return Err(ExportError::Unsupported(format!("wall join {}-{}: no such wall", j.a, j.b)));
         };
@@ -850,7 +899,7 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, c.base_z - elev], None, None, c.height);
         let shape = o.shape(&[solid]);
         let g = o.gid(c.id, 0);
-        let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},$,.COLUMN.)", string(&c.name)));
+        let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},{})", string(&c.name), o.tail4(".COLUMN.")));
         o.contain(st, e);
         o.column_entities.push(e);
     }
@@ -907,7 +956,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
                 let opl = o.place(Some(pl), [0.0; 3], None, None);
                 let shape = o.shape(&[solid]);
                 let g = o.gid(item.id, k);
-                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&format!("Shaft {}", sh.name))));
+                let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&format!("Shaft {}", sh.name)), o.tail4(".OPENING.")));
                 let g = o.gen_gid();
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
                 o.report.openings += 1;
@@ -927,7 +976,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             let opl = o.place(Some(pl), [0.0; 3], None, None);
             let shape = o.shape(&[solid]);
             let g = o.gid(item.id, k);
-            let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},$,.OPENING.)", string(&p.id.to_string())));
+            let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&p.id.to_string()), o.tail4(".OPENING.")));
             let g = o.gen_gid();
             o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
             o.report.openings += 1;
@@ -944,7 +993,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
 
 fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
-    for r in &scene.rooms {
+    for (ri, r) in scene.rooms.iter().enumerate() {
         let room = &r.room;
         if room.level >= scene.levels.all().len() {
             return Err(ExportError::Unsupported(format!("room {}: no level {}", room.name, room.level)));
@@ -978,7 +1027,29 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         clear.height = ext.ceiling_z - ext.floor_z;
         o.qto(sp, "Qto_SpaceBaseQuantities", &quantities::space(&clear));
         o.pset(sp, "OpenBIM_SpaceVolumes", vec![("SlabToSlabVolume", Val::Vol(vols.slab_to_slab)), ("CeilingVoidVolume", Val::Vol(vols.ceiling_void)), ("FloorBuildUpVolume", Val::Vol(vols.floor_build_up))]);
-        write_boundaries(o, r, sp);
+        if let Some(rl) = scene.room_lighting.get(&r.id) {
+            let n = scene.items.iter().filter(|it| scene.families.get(it.family).is_some_and(|f| f.family.lighting_for(it.type_name.as_deref()).is_some()) && lighting::room_at(scene, [it.frame.origin[0], it.frame.origin[1]], it.frame.origin[2]) == Some(ri)).count();
+            let mut common = vec![("ArtificialLighting", Val::Bool(n > 0))];
+            if let Some(v) = rl.required_lux {
+                common.push(("Illuminance", Val::Real(v)));
+            }
+            o.pset(sp, "Pset_SpaceLightingRequirements", common);
+            let mut own = Vec::new();
+            for (n, v) in [("WorkPlaneHeight", rl.work_plane_height_m), ("BoundaryZone", rl.boundary_zone_m)] {
+                if let Some(v) = v {
+                    own.push((n, Val::LenAny(v)));
+                }
+            }
+            for (n, v) in [("MaintenanceFactor", rl.maintenance_factor), ("MinimumUniformity", rl.min_uniformity), ("MaximumUGR", rl.max_ugr), ("MinimumCRI", rl.min_cri), ("ReflectanceCeiling", rl.reflectance_ceiling), ("ReflectanceWalls", rl.reflectance_walls), ("ReflectanceFloor", rl.reflectance_floor)] {
+                if let Some(v) = v {
+                    own.push((n, Val::Real(v)));
+                }
+            }
+            o.pset(sp, "OpenBIM_RoomLighting", own);
+        }
+        if !o.v2 {
+            write_boundaries(o, r, sp);
+        }
     }
     Ok(())
 }
@@ -1060,13 +1131,78 @@ fn nest(o: &mut Out, parent: u32, ports: &[u32]) {
     o.s.add(format!("IFCRELNESTS({g},$,$,$,#{parent},({}))", ports.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
 }
 
+/// The flow direction of every port of the pieces of a network, from the way the medium goes through the equipment
+/// connectors it is linked to: a run or fitting port that receives the flow is a SINK, one it passes on is a SOURCE.
+/// The direction spreads from each equipment connector through the pieces it reaches (a piece receiving at one port
+/// passes on at its others, and the port linked to a SINK is a SOURCE). A port the flow never reaches, or one reached
+/// both ways (a loop, or two flows meeting), is left as SOURCEANDSINK: the file does not claim more than the network says.
+fn piece_flow(net: &openbim_route::graph::Network) -> (Vec<Vec<FlowDir>>, Vec<Vec<FlowDir>>) {
+    let mut segs: Vec<Vec<FlowDir>> = net.segments.iter().map(|_| vec![FlowDir::Both; 2]).collect();
+    let mut fits: Vec<Vec<FlowDir>> = net.fittings.iter().map(|f| vec![FlowDir::Both; f.fitting.ports.len()]).collect();
+    let mut partner: BTreeMap<PortRef, PortRef> = BTreeMap::new();
+    for (a, b) in net.links() {
+        partner.insert(*a, *b);
+        partner.insert(*b, *a);
+    }
+    let opposite = |d: FlowDir| if d == FlowDir::In { FlowDir::Out } else { FlowDir::In };
+    // every (port, direction) the flow can give a port, found from all the equipment at once: a port that gets both
+    // directions is where two flows meet, whatever the order they are followed in
+    let mut reached: std::collections::BTreeSet<(PortRef, bool)> = std::collections::BTreeSet::new();
+    let mut work: Vec<(PortRef, FlowDir)> = Vec::new();
+    for (a, b) in net.links() {
+        for (e, q) in [(a, b), (b, a)] {
+            if let NodeRef::Equipment(i) = e.node {
+                if let (Some(eq), false) = (net.equipment.get(i), matches!(q.node, NodeRef::Equipment(_))) {
+                    match eq.flow_dir {
+                        FlowDir::Out => work.push((*q, FlowDir::In)),
+                        FlowDir::In => work.push((*q, FlowDir::Out)),
+                        FlowDir::Both => {}
+                    }
+                }
+            }
+        }
+    }
+    while let Some((p, d)) = work.pop() {
+        if matches!(p.node, NodeRef::Equipment(_)) || !reached.insert((p, d == FlowDir::In)) {
+            continue;
+        }
+        let n = match p.node {
+            NodeRef::Segment(_) => 2,
+            NodeRef::Fitting(i) => fits.get(i).map_or(0, Vec::len),
+            NodeRef::Equipment(_) => 0,
+        };
+        if let Some(s) = partner.get(&p) {
+            work.push((*s, opposite(d)));
+        }
+        for k in (0..n).filter(|&k| k != p.port) {
+            work.push((PortRef { node: p.node, port: k }, opposite(d)));
+        }
+    }
+    for &(p, is_in) in &reached {
+        if reached.contains(&(p, !is_in)) {
+            continue; // reached both ways: stays SOURCEANDSINK
+        }
+        let d = if is_in { FlowDir::In } else { FlowDir::Out };
+        let slot = match p.node {
+            NodeRef::Segment(i) => segs.get_mut(i).and_then(|v| v.get_mut(p.port)),
+            NodeRef::Fitting(i) => fits.get_mut(i).and_then(|v| v.get_mut(p.port)),
+            NodeRef::Equipment(_) => None,
+        };
+        if let Some(x) = slot {
+            *x = d;
+        }
+    }
+    (segs, fits)
+}
+
 fn write_networks(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
     for (ni, net) in scene.networks.iter().enumerate() {
         let mut segs: Vec<PieceOut> = Vec::new();
         let mut fits: Vec<PieceOut> = Vec::new();
         let mut by_system: BTreeMap<u8, Vec<u32>> = BTreeMap::new();
-        for sg in &net.segments {
+        let (seg_flow, fit_flow) = piece_flow(net);
+        for (si, sg) in net.segments.iter().enumerate() {
             let r = &sg.run;
             let d = sub(r.b, r.a);
             let len = dot(d, d).sqrt();
@@ -1093,13 +1229,13 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             let mut props = size_props(r.size);
             props.push(("System", Val::Label(r.system.ifc_system().into())));
             o.pset(e, "OpenBIM_Mep", props);
-            let p0 = write_port(o, (sg.id, 0x1000), "Start", pl, [0.0; 3], [0.0, 0.0, -1.0], (r.domain, r.system, FlowDir::Both));
-            let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system, FlowDir::Both));
+            let p0 = write_port(o, (sg.id, 0x1000), "Start", pl, [0.0; 3], [0.0, 0.0, -1.0], (r.domain, r.system, seg_flow[si][0]));
+            let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system, seg_flow[si][1]));
             nest(o, e, &[p0, p1]);
             by_system.entry(r.system.code()).or_default().push(e);
             segs.push(PieceOut { ports: vec![p0, p1] });
         }
-        for nf in &net.fittings {
+        for (fi, nf) in net.fittings.iter().enumerate() {
             let f: &Fitting = &nf.fitting;
             let st = o.storey_for(f.at[2]);
             let elev = o.storeys[st].2;
@@ -1133,9 +1269,9 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             props.push(("Legs", Val::Int(f.ports.len() as i64)));
             o.pset(e, "OpenBIM_Mep", props);
             let mut ports = Vec::new();
-            for k in 0..f.ports.len() {
+            for (k, &leg_flow) in fit_flow[fi].iter().enumerate() {
                 let loc = [f.ports[k][0] * f.trim[k], f.ports[k][1] * f.trim[k], f.ports[k][2] * f.trim[k]];
-                ports.push(write_port(o, (nf.id, 0x1000 + k as u16), &format!("Leg {}", k + 1), pl, loc, unit(f.ports[k]), (nf.domain, nf.system, FlowDir::Both)));
+                ports.push(write_port(o, (nf.id, 0x1000 + k as u16), &format!("Leg {}", k + 1), pl, loc, unit(f.ports[k]), (nf.domain, nf.system, leg_flow)));
             }
             nest(o, e, &ports);
             by_system.entry(nf.system.code()).or_default().push(e);
@@ -1203,6 +1339,60 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn eq(flow: FlowDir, x: f64, dir: f64) -> openbim_route::graph::NetEquipment {
+        use openbim_family::mep::{Domain, System};
+        openbim_route::graph::NetEquipment { element: 1, connector: "c".into(), domain: Domain::Pipe, system: System::ChilledWaterSupply, flow_dir: flow, pos: [x, 0.0, 0.0], dir: [dir, 0.0, 0.0], size: openbim_place::penetrations::RunSize::Round { diameter: 0.1 } }
+    }
+    fn pipe(net: &mut Network, id: u64) {
+        use openbim_family::mep::{Domain, System};
+        net.segments.push(openbim_route::graph::NetSegment { id, run: openbim_place::penetrations::Run::round("p", Domain::Pipe, System::ChilledWaterSupply, [id as f64, 0.0, 0.0], [id as f64 + 1.0, 0.0, 0.0], 0.1) });
+    }
+    fn port(node: NodeRef, port: usize) -> PortRef { PortRef { node, port } }
+
+    #[test]
+    fn flow_goes_from_the_equipment_through_the_pieces_and_meets_where_two_flows_meet() {
+        use FlowDir::*;
+        use NodeRef::*;
+        // equipment that gives, two runs, equipment that takes: the flow runs along
+        let mut n = Network::new(100);
+        n.equipment.push(eq(Out, 1.0, 1.0));
+        n.equipment.push(eq(In, 3.0, -1.0));
+        pipe(&mut n, 1);
+        pipe(&mut n, 2);
+        n.link(port(Equipment(0), 0), port(Segment(0), 0)).unwrap();
+        n.link(port(Segment(0), 1), port(Segment(1), 0)).unwrap();
+        n.link(port(Segment(1), 1), port(Equipment(1), 0)).unwrap();
+        let (s, f) = piece_flow(&n);
+        assert_eq!(s, vec![vec![In, Out], vec![In, Out]]);
+        assert!(f.is_empty());
+        // the same chain seen only from the equipment that takes: the flow is known backwards
+        let mut m = Network::new(100);
+        m.equipment.push(eq(In, 3.0, -1.0));
+        pipe(&mut m, 1);
+        pipe(&mut m, 2);
+        m.link(port(Segment(0), 1), port(Segment(1), 0)).unwrap();
+        m.link(port(Segment(1), 1), port(Equipment(0), 0)).unwrap();
+        assert_eq!(piece_flow(&m).0, vec![vec![In, Out], vec![In, Out]]);
+        // equipment that works both ways says nothing; a run no equipment is linked to stays both ways
+        let mut b = Network::new(100);
+        b.equipment.push(eq(Both, 1.0, 1.0));
+        pipe(&mut b, 1);
+        pipe(&mut b, 2);
+        b.link(port(Equipment(0), 0), port(Segment(0), 0)).unwrap();
+        assert_eq!(piece_flow(&b).0, vec![vec![Both, Both], vec![Both, Both]]);
+        // two sources feeding one run from both ends: the flows meet, whichever is followed first
+        for flip in [false, true] {
+            let mut c = Network::new(100);
+            let (first, second) = (eq(Out, 1.0, 1.0), eq(Out, 2.0, -1.0));
+            let (a, z) = if flip { (1, 0) } else { (0, 1) };
+            if flip { c.equipment.extend([second, first]) } else { c.equipment.extend([first, second]) }
+            pipe(&mut c, 1);
+            c.link(port(Equipment(a), 0), port(Segment(0), 0)).unwrap();
+            c.link(port(Equipment(z), 0), port(Segment(0), 1)).unwrap();
+            assert_eq!(piece_flow(&c).0, vec![vec![Both, Both]], "flip {flip}");
+        }
+    }
 
     #[test]
     fn a_value_is_written_as_the_kind_it_measures() {

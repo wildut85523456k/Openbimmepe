@@ -135,7 +135,7 @@ fn solids_take_their_material_from_a_value_and_nested_families_pass_it_on() {
     assert_eq!(i.strings.len(), 3, "each distinct material is stored once");
     // a type may change a material, and the handle finish reaches the nested handle
     let mut f = door();
-    f.types.push(TypeDef { name: "Oak".into(), values: vec![], texts: vec![("leaf_material".into(), "Oak veneer".into()), ("handle_finish".into(), "Brushed steel".into())] });
+    f.types.push(TypeDef { name: "Oak".into(), values: vec![], texts: vec![("leaf_material".into(), "Oak veneer".into()), ("handle_finish".into(), "Brushed steel".into())], ..Default::default() });
     let c2 = compile_library(&[handle(), f]).unwrap().remove(1);
     let i = c2.solve(&Request { type_name: Some("Oak"), ..Default::default() }).unwrap();
     for k in 0..i.solids.len() {
@@ -151,7 +151,7 @@ fn solids_take_their_material_from_a_value_and_nested_families_pass_it_on() {
     assert!(i.strings.contains(&"Glass".to_string()) && i.strings.contains(&"Frame material".to_string()) && i.strings.len() == 2);
     // an empty or damaged material name is refused
     let mut bad = door();
-    bad.types.push(TypeDef { name: "Bad".into(), values: vec![], texts: vec![("leaf_material".into(), "x\ny".into())] });
+    bad.types.push(TypeDef { name: "Bad".into(), values: vec![], texts: vec![("leaf_material".into(), "x\ny".into())], ..Default::default() });
     let c3 = compile_library(&[handle(), bad]).unwrap().remove(1);
     assert!(matches!(c3.solve(&Request { type_name: Some("Bad"), ..Default::default() }), Err(FamilyError::BadText { .. })));
     // a solid cannot take its material from a number
@@ -418,7 +418,7 @@ fn a_loop_path_starts_where_the_loop_starts() {
 
 #[test]
 fn material_names_are_limited_to_128_characters() {
-    let with = |n: usize| { let mut f = door(); f.types.push(TypeDef { name: "T".into(), values: vec![], texts: vec![("leaf_material".into(), "m".repeat(n))] }); compile_library(&[handle(), f]).unwrap().remove(1) };
+    let with = |n: usize| { let mut f = door(); f.types.push(TypeDef { name: "T".into(), values: vec![], texts: vec![("leaf_material".into(), "m".repeat(n))], ..Default::default() }); compile_library(&[handle(), f]).unwrap().remove(1) };
     assert!(with(128).solve(&Request { type_name: Some("T"), ..Default::default() }).is_ok());
     assert!(matches!(with(129).solve(&Request { type_name: Some("T"), ..Default::default() }), Err(FamilyError::BadText { .. })));
 }

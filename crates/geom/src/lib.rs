@@ -42,7 +42,7 @@ pub enum GeomError {
 type P = [f64; 2];
 
 /// A rectangular opening through a wall. `offset` is measured along the wall centreline from its start.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Opening {
     pub offset: f64,
     pub width: f64,
@@ -51,14 +51,14 @@ pub struct Opening {
 }
 
 /// A line that a free wall end is extended to (for T-junctions: the face of the host wall).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StopLine {
     pub point: P,
     pub dir: P,
 }
 
 /// A chain of walls along a polyline centreline, closed or open, with one thickness.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WallChain {
     pub points: Vec<P>,
     pub closed: bool,
@@ -710,6 +710,20 @@ fn total_with<F: Fn(&WallChain) -> Result<f64, GeomError> + Sync>(chains: &[Wall
         chains.chunks(CHUNK).map(|ch| sum_chunk(ch, &f)).collect()
     };
     Ok(parts?.iter().sum())
+}
+
+/// The total of per-chain volumes added the way `total_volume_parallel` adds them (in chunks of 2048 chains, then the
+/// chunk sums), so a caller that keeps the volume of each chain gets the same bits as the function that computes them all.
+pub fn combine_chain_volumes(volumes: &[f64]) -> f64 {
+    let parts: Vec<f64> = volumes.chunks(CHUNK).map(|ch| { let mut s = 0.0; for v in ch { s += v; } s }).collect();
+    parts.iter().sum()
+}
+
+/// Volume of one chain from the volumes of its segments: added in segment order, as `total_volume_serial` does.
+pub fn chain_volume_from_segments(segments: &[f64]) -> f64 {
+    let mut s = 0.0;
+    for v in segments { s += v; }
+    s
 }
 
 /// Total exact volume of all chains, evaluated in parallel (same result as the serial version, bit for bit).

@@ -6,6 +6,7 @@ description = "Operation log: transactions, undo/redo, crash-safe binary log wit
 publish = false
 
 [dev-dependencies]
+openbim-photo = { path = "../photo" }
 proptest = "1"
 
 [lints.rust]

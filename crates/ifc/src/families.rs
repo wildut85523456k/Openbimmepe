@@ -4,7 +4,8 @@
 //! more mullions) keeps its own extruded bodies and is still an occurrence of the type.
 //!
 //! Boxes and extruded or revolved forms are written as `IfcExtrudedAreaSolid` and `IfcRevolvedAreaSolid`, never
-//! as meshes. Swept forms are written as `IfcFixedReferenceSweptAreaSolid` along the path with the profile's up fixed. Doors and windows fill their wall opening
+//! as meshes (blends have no such solid in IFC and are written as an `IfcFacetedBrep`; voids are cut out with
+//! `IfcBooleanResult`). Swept forms are written as `IfcFixedReferenceSweptAreaSolid` along the path with the profile's up fixed. Doors and windows fill their wall opening
 //! (`IfcRelFillsElement`); connectors become ports nested in the occurrence, and a network joins them.
 use super::*;
 use openbim_family::forms::{Form, FormGeom, Loop};
@@ -20,9 +21,12 @@ fn rot(f: &Form, v: V3) -> V3 {
     [v[0] * ax[0] + v[1] * ay[0], v[0] * ax[1] + v[1] * ay[1], v[2]]
 }
 
-/// The shapes of an instance, in the family frame.
-fn solids(o: &mut Out, inst: &Instance, name: &str) -> Vec<u32> {
+/// The shapes of an instance, in the family frame, and the kind of representation they make: swept solids; clipping
+/// when voids are cut out of them by `IfcBooleanResult`; a boundary representation when a blend is among them.
+fn solids(o: &mut Out, inst: &Instance, name: &str) -> (Vec<u32>, &'static str) {
     let mut out = Vec::new();
+    let mut voids = Vec::new();
+    let mut kind = "SweptSolid";
     for (n, (_, b)) in inst.solids.iter().enumerate() {
         let c = [(b.min[0] + b.max[0]) / 2.0, (b.min[1] + b.max[1]) / 2.0];
         let (centre, ax) = match inst.xf[n] {
@@ -37,12 +41,40 @@ fn solids(o: &mut Out, inst: &Instance, name: &str) -> Vec<u32> {
         out.push(o.extrusion(prof, [0.0, 0.0, b.min[2]], None, None, b.max[2] - b.min[2]));
     }
     for f in &inst.forms {
-        match write_form(o, f) {
+        let written = match f.geom {
+            FormGeom::Blend { .. } | FormGeom::SweptBlend { .. } => { kind = "Brep"; write_brep(o, f) }
+            _ => write_form(o, f),
+        };
+        match written {
+            Some(s) if f.void => voids.push(s),
             Some(s) => out.push(s),
             None => o.report.warnings.push(format!("{name}: a form was not written")),
         }
     }
-    out
+    if !voids.is_empty() && !out.is_empty() {
+        // every solid with every void cut out of it, one `IfcBooleanResult` after the other
+        for item in out.iter_mut() {
+            for v in &voids {
+                *item = o.s.add(format!("IFCBOOLEANRESULT(.DIFFERENCE.,#{item},#{v})"));
+            }
+        }
+        if kind != "Brep" { kind = "Clipping"; }
+    }
+    (out, kind)
+}
+
+/// A blend as a closed `IfcFacetedBrep` of triangles (IFC has no solid that changes its section).
+fn write_brep(o: &mut Out, f: &Form) -> Option<u32> {
+    let m = f.mesh()?;
+    let pts: Vec<u32> = m.verts.iter().map(|&v| o.p3(v)).collect();
+    let mut faces = Vec::with_capacity(m.tris.len());
+    for t in &m.tris {
+        let ring = o.s.add(format!("IFCPOLYLOOP((#{},#{},#{}))", pts[t[0] as usize], pts[t[1] as usize], pts[t[2] as usize]));
+        let bound = o.s.add(format!("IFCFACEOUTERBOUND(#{ring},.T.)"));
+        faces.push(format!("#{}", o.s.add(format!("IFCFACE((#{bound}))"))));
+    }
+    let shell = o.s.add(format!("IFCCLOSEDSHELL(({}))", faces.join(",")));
+    Some(o.s.add(format!("IFCFACETEDBREP(#{shell})")))
 }
 
 fn curve(o: &mut Out, l: &Loop) -> u32 {
@@ -84,6 +116,7 @@ fn write_form(o: &mut Out, f: &Form) -> Option<u32> {
     let (plane, offset) = match &f.geom {
         FormGeom::Extrusion { plane, from, to } => (*plane, from.min(*to)),
         FormGeom::Revolve { plane, offset, .. } => (*plane, *offset),
+        FormGeom::Blend { .. } | FormGeom::SweptBlend { .. } => return None,
         FormGeom::Sweep { z, path } => {
             // `IfcFixedReferenceSweptAreaSolid` takes the profile's x along the fixed reference ("up" here) and its y
             // along (direction of travel x up), which is to the right; our profile has u to the left and v up, so
@@ -130,7 +163,7 @@ fn write_form(o: &mut Out, f: &Form) -> Option<u32> {
             let a = o.r(angle.to_radians(), "angle");
             o.s.add(format!("IFCREVOLVEDAREASOLID(#{prof},#{pos},#{ax},{a})"))
         }
-        FormGeom::Sweep { .. } => return None,
+        FormGeom::Sweep { .. } | FormGeom::Blend { .. } | FormGeom::SweptBlend { .. } => return None,
     })
 }
 
@@ -190,11 +223,11 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 // the type: its shared shape comes from the first occurrence
                 let slot = it.type_name.as_deref().and_then(|t| fam.type_names().iter().position(|n| *n == t)).map_or(0, |i| i + 1);
                 let tname = it.type_name.clone().unwrap_or_else(|| fam.name().to_string());
-                let body = solids(o, &it.instance, &it.name);
+                let (body, kind) = solids(o, &it.instance, &it.name);
                 let map = if body.is_empty() {
                     None
                 } else {
-                    let rep = o.shape_rep("SweptSolid", &body);
+                    let rep = o.shape_rep(kind, &body);
                     let org = o.axis([0.0; 3], None, None);
                     Some(o.s.add(format!("IFCREPRESENTATIONMAP(#{org},#{rep})")))
                 };
@@ -212,6 +245,42 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 }
                 for (name, list) in split.sets {
                     psets.push(format!("#{}", o.pset_entity(name, list)));
+                }
+                if let Some(l) = fam.lighting_for(it.type_name.as_deref()) {
+                    // what a lighting program needs; standard sets where IFC has the field, the rest in our own
+                    let mut common = vec![("LightFixtureMountingType", Val::Label(l.mounting.ifc().to_string()))];
+                    if let Some(w) = l.power_w {
+                        common.push(("TotalWattage", Val::Real(w)));
+                    }
+                    psets.push(format!("#{}", o.pset_entity("Pset_LightFixtureTypeCommon", common)));
+                    let mut maker = Vec::new();
+                    if let Some(m) = &l.manufacturer {
+                        maker.push(("Manufacturer", Val::Label(m.clone())));
+                    }
+                    if let Some(a) = &l.article {
+                        maker.push(("ArticleNumber", Val::Label(a.clone())));
+                    }
+                    if !maker.is_empty() {
+                        psets.push(format!("#{}", o.pset_entity("Pset_ManufacturerTypeInformation", maker)));
+                    }
+                    let mut own = Vec::new();
+                    if let Some(f) = &l.photometry {
+                        own.push(("PhotometryFile", Val::Label(f.clone())));
+                    }
+                    for (n, f) in [("PictureFile", &l.picture), ("DatasheetFile", &l.datasheet)] {
+                        if let Some(f) = f {
+                            own.push((n, Val::Label(f.clone())));
+                        }
+                    }
+                    for (n, v) in [("LuminousFlux", l.flux_lm), ("ColourTemperature", l.cct_k), ("ColourRenderingIndex", l.cri), ("DimmingLevel", l.dimming)] {
+                        if let Some(v) = v {
+                            own.push((n, Val::Real(v)));
+                        }
+                    }
+                    if let Some(ip) = &l.ip {
+                        own.push(("IngressProtection", Val::Label(ip.clone())));
+                    }
+                    psets.push(format!("#{}", o.pset_entity("OpenBIM_Lighting", own)));
                 }
                 let tid = (0xFFFF_FFFEu64 << 32) | (u64::from(fr.id) << 16) | slot as u64;
                 let g = o.gid(tid, 0);
@@ -239,11 +308,12 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 Some(o.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
             }
             _ => {
-                let body = solids(o, &it.instance, &it.name);
+                let (body, kind) = solids(o, &it.instance, &it.name);
                 if body.is_empty() {
                     None
                 } else {
-                    Some(o.shape(&body))
+                    let rep = o.shape_rep(kind, &body);
+                    Some(o.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
                 }
             }
         };
@@ -304,6 +374,56 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
         let gid = o.gen_gid();
         let occs: Vec<String> = g.occurrences.iter().map(|i| format!("#{i}")).collect();
         o.s.add(format!("IFCRELDEFINESBYTYPE({gid},$,$,$,({}),#{})", occs.join(","), g.type_entity));
+    }
+    Ok(())
+}
+
+/// IFC2X3: the doors and windows only, as plain boxes in their wall openings. Luminaires and other families have no
+/// place in a 2x3 shell file (a 2x3 light fixture is a flow terminal, which DIALux ignores); they are counted in the warnings.
+pub(crate) fn write_openings_2x3(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    let mut skipped = 0usize;
+    for it in &scene.items {
+        let Some(fam) = scene.families.get(it.family).map(|f| &f.family) else {
+            return Err(ExportError::Unsupported(format!("{}: no family {}", it.name, it.family)));
+        };
+        let cat = fam.category();
+        let (Category::Door | Category::Window, Some([ow, oh_, sill])) = (cat, it.instance.opening) else {
+            skipped += 1;
+            continue;
+        };
+        let st = o.storey_for(it.frame.origin[2]);
+        let elev = o.storeys[st].2;
+        let thick = it.host.and_then(|(wi, _, _)| scene.walls.get(wi)).map_or(0.1, |w| w.chain.thickness.min(0.1));
+        let [x, y] = it.frame.x;
+        let origin = [it.frame.origin[0], it.frame.origin[1], it.frame.origin[2] - elev + sill];
+        let pl = o.place(Some(o.storeys[st].1), origin, None, Some([x, y, 0.0]));
+        let prof = o.rect_profile(0.0, 0.0, ow, thick);
+        let solid = o.extrusion(prof, [0.0; 3], None, None, oh_);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(it.id, 0);
+        let (hh, ww) = (o.r(oh_, "height"), o.r(ow, "width"));
+        let e = o.s.add(format!("{}({g},$,{},$,$,#{pl},#{shape},$,{hh},{ww})", upper(cat.ifc_class()), string(&it.name)));
+        o.contain(st, e);
+        o.item_entities.push(e);
+        o.report.items += 1;
+        match cat {
+            Category::Door => o.qto(e, "Qto_DoorBaseQuantities", &crate::quantities::opening_item(ow, oh_)),
+            _ => o.qto(e, "Qto_WindowBaseQuantities", &crate::quantities::opening_item(ow, oh_)),
+        }
+        if let Some((wi, seg, centre)) = it.host {
+            let want = [centre - ow / 2.0, ow, sill, oh_];
+            match o.opening_ids.iter().find(|(w, s, b, _)| *w == wi && *s == seg && (0..4).all(|i| (b[i] - want[i]).abs() < 1e-9)).map(|x| x.3) {
+                Some(op) => {
+                    let g = o.gen_gid();
+                    o.s.add(format!("IFCRELFILLSELEMENT({g},$,$,$,#{op},#{e})"));
+                }
+                None => o.report.warnings.push(format!("{}: no wall opening of its size was found to fill", it.name)),
+            }
+        }
+    }
+    if skipped > 0 {
+        o.report.warnings.push(format!("IFC2X3: {skipped} placed families (luminaires, furniture, equipment) are not written; use the luminaire schedule"));
     }
     Ok(())
 }

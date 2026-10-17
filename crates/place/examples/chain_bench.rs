@@ -5,6 +5,10 @@ use openbim_geom::WallChain;
 use openbim_place::*;
 use std::time::Instant;
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn zigzag(n: usize, x0: f64) -> Vec<[f64; 2]> {
     // n segments of 4 m turning 90 degrees left and right in turn, so the chain never closes or crosses itself
     let mut p = vec![[x0, 0.0]];

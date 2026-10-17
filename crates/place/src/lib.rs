@@ -16,6 +16,9 @@ use rayon::prelude::*;
 
 pub const MAX_PLACEMENTS: usize = 5_000_000;
 
+/// Chains with more segments than this share their segments among the threads.
+const LONG_CHAIN: usize = 512;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placement {
     pub family: usize,
@@ -85,6 +88,17 @@ pub struct Built {
     pub volume: f64,
     /// the register of wall penetrations by service runs, ordered by wall, segment and position
     pub penetrations: Vec<Penetration>,
+    /// what `Model::update_built` reuses: the plan of each segment and the volume of each segment and chain
+    pub(crate) cache: BuiltCache,
+}
+
+/// Per chain: the plan of every segment (they depend on the centreline only), the exact volume of every segment with
+/// its openings cut, and the volume of the chain added in segment order.
+#[derive(Default)]
+pub(crate) struct BuiltCache {
+    plans: Vec<Vec<openbim_geom::SegmentPlan>>,
+    seg_volumes: Vec<Vec<f64>>,
+    chain_volumes: Vec<f64>,
 }
 
 /// What a lenient build skipped, and why.
@@ -124,51 +138,60 @@ pub struct WorldBox {
 }
 
 impl Model {
-    fn check_refs(&self) -> Result<(), PlaceError> {
+    /// Checks every reference; returns which chains are valid (each is validated once).
+    fn check_refs(&self) -> Result<Vec<bool>, PlaceError> {
         if self.placements.len() > MAX_PLACEMENTS { return Err(PlaceError::TooMany); }
         // each chain is validated once, not once per placement on it (that made a long chain cost n squared)
         let valid: Vec<bool> = self.chains.par_iter().map(|c| c.validate().is_ok()).collect();
-        for (k, p) in self.placements.iter().enumerate() {
-            if p.family >= self.families.len() { return Err(PlaceError::BadReference { placement: k, what: "no such family" }); }
-            let Some(c) = self.chains.get(p.chain) else { return Err(PlaceError::BadReference { placement: k, what: "no such wall chain" }) };
-            if !valid[p.chain] { continue; } // reported with the chain below
-            if p.segment >= c.segment_count() { return Err(PlaceError::BadReference { placement: k, what: "no such wall segment" }); }
-            if !p.centre.is_finite() { return Err(PlaceError::NotFinite { placement: k }); }
-        }
-        Ok(())
+        // the placements are checked on all threads; the one with the lowest number that is wrong is reported
+        let bad = self.placements.par_iter().enumerate().find_map_first(|(k, p)| {
+            if p.family >= self.families.len() { return Some(PlaceError::BadReference { placement: k, what: "no such family" }); }
+            let Some(c) = self.chains.get(p.chain) else { return Some(PlaceError::BadReference { placement: k, what: "no such wall chain" }) };
+            if !valid[p.chain] { return None; } // reported with the chain below
+            if p.segment >= c.segment_count() { return Some(PlaceError::BadReference { placement: k, what: "no such wall segment" }); }
+            if !p.centre.is_finite() { return Some(PlaceError::NotFinite { placement: k }); }
+            None
+        });
+        match bad { Some(e) => Err(e), None => Ok(valid) }
+    }
+
+    /// Solve placement `k` (its references must be good). `inject`: the family takes `wall_t` per instance.
+    fn solve_placement(&self, k: usize, inject: bool) -> Result<Instance, openbim_family::FamilyError> {
+        let p = &self.placements[k];
+        let mut ov: Vec<(&str, f64)> = p.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        if inject && !ov.iter().any(|(n, _)| *n == "wall_t") { ov.push(("wall_t", self.chains[p.chain].thickness)); }
+        self.families[p.family].solve(&Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
     }
 
     /// Solve every placement and cut the wall openings. Does not change the model.
     pub fn build(&self) -> Result<Built, PlaceError> {
-        self.check_refs()?;
-        for (i, c) in self.chains.iter().enumerate() { c.validate().map_err(|err| PlaceError::Chain { chain: i, err })?; }
+        let valid = self.check_refs()?;
+        if let Some(i) = valid.iter().position(|v| !v) { self.chains[i].validate().map_err(|err| PlaceError::Chain { chain: i, err })?; }
         if self.runs.len() > penetrations::MAX_RUNS { return Err(PlaceError::TooMany); }
         let (pens, issues) = penetrations::find(&self.chains, &self.runs, self.merge_gap);
         if let Some(i) = issues.first() { return Err(PlaceError::Run { run: i.run, problem: i.problem }); }
         let mut pens_by_chain: Vec<Vec<&Penetration>> = vec![Vec::new(); self.chains.len()];
         for p in &pens { pens_by_chain[p.id.chain].push(p); }
-        // 1. solve the families, one parallel batch per family
-        let mut instances: Vec<Option<Instance>> = vec![None; self.placements.len()];
-        for (fi, fam) in self.families.iter().enumerate() {
-            let idx: Vec<usize> = (0..self.placements.len()).filter(|&k| self.placements[k].family == fi).collect();
-            if idx.is_empty() { continue; }
-            let inject = fam.input_scope("wall_t") == Some(Scope::Instance);
-            // the request is made on the thread that solves it, so the work of building it is shared too
-            let solved: Vec<Result<Instance, openbim_family::FamilyError>> = idx.par_iter().map(|&k| {
-                let p = &self.placements[k];
-                let mut ov: Vec<(&str, f64)> = p.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
-                if inject && !ov.iter().any(|(n, _)| *n == "wall_t") { ov.push(("wall_t", self.chains[p.chain].thickness)); }
-                fam.solve(&Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
-            }).collect();
-            for (&k, r) in idx.iter().zip(solved) {
-                instances[k] = Some(r.map_err(|err| PlaceError::Family { placement: k, err })?);
+        // 1. solve every placement on all threads; the request is made on the thread that solves it, so the work of
+        // building it is shared too
+        let inject: Vec<bool> = self.families.iter().map(|f| f.input_scope("wall_t") == Some(Scope::Instance)).collect();
+        let solved: Result<Vec<Instance>, openbim_family::FamilyError> = (0..self.placements.len()).into_par_iter().map(|k| self.solve_placement(k, inject[self.placements[k].family])).collect();
+        let instances = match solved {
+            Ok(v) => v,
+            Err(_) => {
+                // the error to report is the first in family order, then placement order; replay to find it
+                for (fi, &inj) in inject.iter().enumerate() {
+                    for k in (0..self.placements.len()).filter(|&k| self.placements[k].family == fi) {
+                        if let Err(err) = self.solve_placement(k, inj) { return Err(PlaceError::Family { placement: k, err }); }
+                    }
+                }
+                unreachable!("a placement failed in parallel but not in the replay")
             }
-        }
-        let instances: Vec<Instance> = instances.into_iter().map(|i| i.expect("every placement solved")).collect();
+        };
         // 2. cut the openings, one chain per task; placements keep their order inside a chain
         let mut by_chain: Vec<Vec<usize>> = vec![Vec::new(); self.chains.len()];
         for (k, p) in self.placements.iter().enumerate() { by_chain[p.chain].push(k); }
-        let results: Vec<Result<WallChain, PlaceError>> = self.chains.par_iter().zip(by_chain.par_iter()).enumerate().map(|(ci, (c, ks))| {
+        let results: Vec<Result<(WallChain, Vec<openbim_geom::SegmentPlan>), PlaceError>> = self.chains.par_iter().zip(by_chain.par_iter()).enumerate().map(|(ci, (c, ks))| {
             let mut c = c.clone();
             let n = c.segment_count();
             if c.openings.len() < n { c.openings.resize(n, Vec::new()); }
@@ -218,11 +241,19 @@ impl Model {
                 c.openings[pen.id.segment].push(Opening { offset: pen.offset, width: pen.width, sill: pen.sill, height: pen.height });
                 c.segment_volume_exact(pen.id.segment, &plans[pen.id.segment]).map_err(|err| PlaceError::Penetration { id: pen.id, err })?;
             }
-            Ok(c)
+            Ok((c, plans))
         }).collect();
-        let chains = results.into_iter().collect::<Result<Vec<_>, _>>()?;
-        let volume = openbim_geom::total_volume_parallel(&chains).map_err(|err| PlaceError::Chain { chain: usize::MAX, err })?;
-        Ok(Built { chains, instances, volume, penetrations: pens })
+        let (chains, plans): (Vec<WallChain>, Vec<Vec<openbim_geom::SegmentPlan>>) = results.into_iter().collect::<Result<Vec<_>, _>>()?.into_iter().unzip();
+        // the volume of every segment, kept so that an edit can redo only the segments it touches; a long chain shares its
+        // segments among the threads, and the sums are made in segment, chain and chunk order whatever the thread count
+        let to_err = |err| PlaceError::Chain { chain: usize::MAX, err };
+        let seg_volumes: Vec<Vec<f64>> = chains.par_iter().zip(plans.par_iter()).map(|(c, pl)| -> Result<Vec<f64>, GeomError> {
+            if pl.len() > LONG_CHAIN { pl.par_iter().enumerate().map(|(i, p)| c.segment_volume_exact(i, p)).collect() }
+            else { pl.iter().enumerate().map(|(i, p)| c.segment_volume_exact(i, p)).collect() }
+        }).collect::<Result<_, _>>().map_err(to_err)?;
+        let chain_volumes: Vec<f64> = seg_volumes.iter().map(|v| openbim_geom::chain_volume_from_segments(v)).collect();
+        let volume = openbim_geom::combine_chain_volumes(&chain_volumes);
+        Ok(Built { chains, instances, volume, penetrations: pens, cache: BuiltCache { plans, seg_volumes, chain_volumes } })
     }
 
     /// Like `build`, but a bad element does not stop the model: a placement that cannot be solved, has a bad
@@ -330,6 +361,105 @@ impl Model {
         let volume = openbim_geom::total_volume_parallel(&good).map_err(|err| PlaceError::Chain { chain: usize::MAX, err })?;
         warnings.sort_by_key(|w| (w.placement.is_some() || w.run.is_some(), w.placement.unwrap_or(0), w.run.unwrap_or(0))); // chain warnings first, then by placement, then run
         Ok(LenientBuilt { chains, instances, volume, penetrations: pens, warnings })
+    }
+
+    /// Replace placement `index` and bring `built` (the result of `build` on this model) up to date, redoing only what the
+    /// change touches: the one placement is solved again, only the wall segments it leaves and enters get their openings
+    /// cut again, and only their volumes are computed again. The result is the one `build` gives for the changed model, bit
+    /// for bit. When the change cannot be made (a bad reference, a family that does not solve, an opening that does not
+    /// fit) the model and `built` stay as they were and the error is the one `build` reports.
+    pub fn update_built(&mut self, built: &mut Built, index: usize, new: Placement) -> Result<(), PlaceError> {
+        if index >= self.placements.len() { return Err(PlaceError::BadReference { placement: index, what: "no such placement" }); }
+        if self.update_quick(built, index, new.clone()) { return Ok(()); }
+        let old = std::mem::replace(&mut self.placements[index], new);
+        // anything out of the ordinary is left to the full build, which also gives the exact error
+        match self.build() {
+            Ok(b) => { *built = b; Ok(()) }
+            Err(e) => { self.placements[index] = old; Err(e) }
+        }
+    }
+
+    /// Only the quick path of `update_built`: false, with model and `built` unchanged, when the full build has to decide.
+    #[doc(hidden)]
+    pub fn update_quick(&mut self, built: &mut Built, index: usize, new: Placement) -> bool {
+        if index >= self.placements.len() { return false; }
+        let old = std::mem::replace(&mut self.placements[index], new);
+        if self.update_in_place(built, index, &old).is_some() { return true; }
+        self.placements[index] = old;
+        false
+    }
+
+    /// The quick path of `update_built`; None (with `built` unchanged) when the full build has to decide.
+    fn update_in_place(&self, built: &mut Built, index: usize, old: &Placement) -> Option<()> {
+        let n_ch = self.chains.len();
+        if built.instances.len() != self.placements.len() || built.chains.len() != n_ch || built.cache.plans.len() != n_ch || built.cache.chain_volumes.len() != n_ch { return None; }
+        let p = &self.placements[index];
+        if p.family >= self.families.len() || p.chain >= n_ch || p.segment >= self.chains[p.chain].segment_count() || !p.centre.is_finite() { return None; }
+        let inject = self.families[p.family].input_scope("wall_t") == Some(Scope::Instance);
+        let inst = self.solve_placement(index, inject).ok()?;
+        let mut segs = vec![(old.chain, old.segment)];
+        if (p.chain, p.segment) != (old.chain, old.segment) { segs.push((p.chain, p.segment)); }
+        if segs.iter().any(|&(c, s)| c >= n_ch || s >= self.chains[c].segment_count()) { return None; }
+        let instance_of = |k: usize| if k == index { &inst } else { &built.instances[k] };
+        // the openings of each segment as `build` makes them: those the chain came with, then the placements in order, then the penetrations
+        struct Seg { ci: usize, s: usize, ops: Vec<Opening>, pens: Vec<Opening>, polys: Vec<Vec<[f64; 2]>> }
+        let mut new_segs: Vec<Seg> = Vec::new();
+        for &(ci, s) in &segs {
+            let orig = &self.chains[ci];
+            let mut ops = orig.openings.get(s).cloned().unwrap_or_default();
+            let mut polys = orig.poly_openings.get(s).cloned().unwrap_or_default();
+            for (k, q) in self.placements.iter().enumerate() {
+                if q.chain != ci || q.segment != s { continue; }
+                let ins = instance_of(k);
+                if let Some([w, h, sill]) = ins.opening {
+                    if ins.opening_rise == 0.0 { ops.push(Opening { offset: q.centre - w / 2.0, width: w, sill, height: h }); }
+                    else { polys.push(ins.opening_outline(q.centre - w / 2.0)?); }
+                }
+            }
+            let pens = built.penetrations.iter().filter(|x| x.id.chain == ci && x.id.segment == s).map(|x| Opening { offset: x.offset, width: x.width, sill: x.sill, height: x.height }).collect();
+            new_segs.push(Seg { ci, s, ops, pens, polys });
+        }
+        // does any chain now hold (or stop holding) a polygon opening: the list of them is as long as the chain only then
+        let has_poly = |ci: usize| self.placements.iter().enumerate().any(|(k, q)| q.chain == ci && { let i = instance_of(k); i.opening.is_some() && i.opening_rise != 0.0 });
+        // work on the chains in `built`, keeping what is replaced so that a failure puts everything back
+        struct Undo { ci: usize, s: usize, ops: Vec<Opening>, polys: Option<Vec<Vec<[f64; 2]>>>, poly_len: usize }
+        let mut undo: Vec<Undo> = Vec::new();
+        let mut volumes: Vec<(usize, usize, f64)> = Vec::new();
+        let mut ok = true;
+        for sg in &new_segs {
+            let n = self.chains[sg.ci].segment_count();
+            let chain = &mut built.chains[sg.ci];
+            let orig_poly_len = self.chains[sg.ci].poly_openings.len();
+            let want = if has_poly(sg.ci) { orig_poly_len.max(n) } else { orig_poly_len };
+            undo.push(Undo { ci: sg.ci, s: sg.s, ops: std::mem::take(&mut chain.openings[sg.s]), polys: chain.poly_openings.get_mut(sg.s).map(std::mem::take), poly_len: chain.poly_openings.len() });
+            chain.poly_openings.resize(want, Vec::new());
+            if let Some(slot) = chain.poly_openings.get_mut(sg.s) { *slot = sg.polys.clone(); }
+            chain.openings[sg.s] = sg.ops.clone();
+            let plan = &built.cache.plans[sg.ci][sg.s];
+            let mut v = chain.segment_volume_exact(sg.s, plan);
+            for pen in &sg.pens {
+                if v.is_err() { break; }
+                chain.openings[sg.s].push(*pen);
+                v = chain.segment_volume_exact(sg.s, plan);
+            }
+            match v { Ok(x) => volumes.push((sg.ci, sg.s, x)), Err(_) => { ok = false; break; } }
+        }
+        if !ok {
+            for u in undo.into_iter().rev() {
+                let chain = &mut built.chains[u.ci];
+                chain.poly_openings.resize(u.poly_len, Vec::new());
+                if let (Some(pl), Some(slot)) = (u.polys, chain.poly_openings.get_mut(u.s)) { *slot = pl; }
+                chain.openings[u.s] = u.ops;
+            }
+            return None;
+        }
+        built.instances[index] = inst;
+        for (ci, s, x) in volumes { built.cache.seg_volumes[ci][s] = x; }
+        for sg in &new_segs {
+            built.cache.chain_volumes[sg.ci] = openbim_geom::chain_volume_from_segments(&built.cache.seg_volumes[sg.ci]);
+        }
+        built.volume = openbim_geom::combine_chain_volumes(&built.cache.chain_volumes);
+        Some(())
     }
 
     /// Replace one placement; keep the change only if the whole model still builds.

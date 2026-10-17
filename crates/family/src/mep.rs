@@ -363,6 +363,8 @@ impl ConnectorDef {
 pub enum PlanDef {
     Line { a: (String, String), b: (String, String), visible: Option<String> },
     Circle { c: (String, String), r: String, visible: Option<String> },
+    /// an arc about `c`, counter-clockwise from angle `a0` to angle `a1` (a door swing is one)
+    Arc { c: (String, String), r: String, a0: String, a1: String, visible: Option<String> },
 }
 
 impl PlanDef {
@@ -372,9 +374,12 @@ impl PlanDef {
     pub fn circle(c: (&str, &str), r: &str) -> Self {
         PlanDef::Circle { c: (c.0.into(), c.1.into()), r: r.into(), visible: None }
     }
+    pub fn arc(c: (&str, &str), r: &str, a0: &str, a1: &str) -> Self {
+        PlanDef::Arc { c: (c.0.into(), c.1.into()), r: r.into(), a0: a0.into(), a1: a1.into(), visible: None }
+    }
     pub fn visible_if(mut self, f: &str) -> Self {
         match &mut self {
-            PlanDef::Line { visible, .. } | PlanDef::Circle { visible, .. } => *visible = Some(f.into()),
+            PlanDef::Line { visible, .. } | PlanDef::Circle { visible, .. } | PlanDef::Arc { visible, .. } => *visible = Some(f.into()),
         }
         self
     }
@@ -407,6 +412,7 @@ enum CShape {
 pub(crate) enum CPlan {
     Line([Expr; 4], Option<Expr>),
     Circle([Expr; 3], Option<Expr>),
+    Arc([Expr; 5], Option<Expr>),
 }
 
 fn bad(name: &str, why: &'static str) -> FamilyError {
@@ -469,11 +475,12 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
     }
     let mut cp = Vec::new();
     for (i, d) in plan.iter().enumerate() {
-        let p = |part: &str, s: &str| parse(&format!("plan {i}.{part}"), s, false, if part == "visible" { NUM } else { LEN });
+        let p = |part: &str, s: &str| parse(&format!("plan {i}.{part}"), s, false, if part == "visible" { NUM } else if part == "a0" || part == "a1" { ANG } else { LEN });
         let vis = |v: &Option<String>| -> Result<Option<Expr>, FamilyError> { match v { Some(f) => Ok(Some(p("visible", f)?)), None => Ok(None) } };
         cp.push(match d {
             PlanDef::Line { a, b, visible } => CPlan::Line([p("x1", &a.0)?, p("y1", &a.1)?, p("x2", &b.0)?, p("y2", &b.1)?], vis(visible)?),
             PlanDef::Circle { c, r, visible } => CPlan::Circle([p("cx", &c.0)?, p("cy", &c.1)?, p("r", r)?], vis(visible)?),
+            PlanDef::Arc { c, r, a0, a1, visible } => CPlan::Arc([p("cx", &c.0)?, p("cy", &c.1)?, p("r", r)?, p("a0", a0)?, p("a1", a1)?], vis(visible)?),
         });
     }
     Ok((out, cp))
@@ -530,6 +537,8 @@ impl Connector {
 pub enum PlanShape {
     Line([f64; 4]),
     Circle { c: [f64; 2], r: f64 },
+    /// counter-clockwise from `a0` to `a1`, both in degrees; the sweep is `(a1 - a0)` taken into (0, 360]
+    Arc { c: [f64; 2], r: f64, a0: f64, a1: f64 },
 }
 
 fn flag(e: &Option<Expr>, vals: &[f64], label: &str) -> Result<bool, FamilyError> {
@@ -678,6 +687,24 @@ pub(crate) fn solve_plan(ps: &[CPlan], vals: &[f64]) -> Result<Vec<PlanShape>, F
                     return Err(FamilyError::Plan { index: i, why: "a circle needs a radius above 0" });
                 }
                 out.push(PlanShape::Circle { c: [cx, cy], r });
+            }
+            CPlan::Arc(e, vis) => {
+                if !flag(vis, vals, &format!("plan {i}.visible"))? {
+                    continue;
+                }
+                let (cx, cy, r) = (ev("cx", &e[0])?, ev("cy", &e[1])?, ev("r", &e[2])?);
+                if r <= 0.0 {
+                    return Err(FamilyError::Plan { index: i, why: "an arc needs a radius above 0" });
+                }
+                // angles are degrees; they are only meaningful modulo 360, so any finite value is fine
+                let (a0, a1) = (e[3].eval(vals).map_err(|err| FamilyError::Formula { name: format!("plan {i}.a0"), err })?, e[4].eval(vals).map_err(|err| FamilyError::Formula { name: format!("plan {i}.a1"), err })?);
+                if !a0.is_finite() || !a1.is_finite() {
+                    return Err(FamilyError::Plan { index: i, why: "an angle is not a finite number" });
+                }
+                if (a1 - a0).rem_euclid(360.0) == 0.0 {
+                    return Err(FamilyError::Plan { index: i, why: "an arc has no sweep" });
+                }
+                out.push(PlanShape::Arc { c: [cx, cy], r, a0, a1 });
             }
         }
     }

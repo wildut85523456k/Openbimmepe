@@ -277,6 +277,7 @@ fn cross_segment(r: &Run, c: &WallChain, i: usize) -> Cross {
 /// All penetrations of `runs` through `chains`, and the runs that have a problem. Merging uses `merge_gap`.
 /// The result depends only on its inputs, in a fixed order: by chain, segment, then position along the segment.
 pub fn find(chains: &[WallChain], runs: &[Run], merge_gap: f64) -> (Vec<Penetration>, Vec<RunIssue>) {
+    if runs.is_empty() { return (Vec::new(), Vec::new()); } // nothing to cross: skip validating and allocating per segment
     let mut issues = Vec::new();
     let mut found: Hits = chains.iter().map(|c| vec![Vec::new(); if c.validate().is_ok() { c.segment_count() } else { 0 }]).collect();
     let gap = if merge_gap.is_finite() && merge_gap > 0.0 { merge_gap } else { 0.0 };
@@ -371,7 +372,7 @@ pub fn find(chains: &[WallChain], runs: &[Run], merge_gap: f64) -> (Vec<Penetrat
 }
 
 /// A label as one cell of a comma separated file: no separators or quotes, and never read as a formula by a spreadsheet.
-pub(crate) fn csv_safe(label: &str) -> String {
+pub fn csv_safe(label: &str) -> String {
     let t = label.replace([',', '\n', '\r', '"'], " ");
     if t.starts_with(['=', '+', '-', '@']) { format!(" {t}") } else { t }
 }

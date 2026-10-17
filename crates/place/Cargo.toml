@@ -10,9 +10,14 @@ openbim-geom = { path = "../geom" }
 openbim-family = { path = "../family" }
 openbim-arch = { path = "../arch" }
 rayon = "1.10"
+mimalloc = { version = "0.1", optional = true }
 
 [dev-dependencies]
 proptest = "1"
+
+[features]
+# bench only: `--features mimalloc` swaps the allocator in chain_bench to see whether allocation limits the speed-up
+mimalloc = ["dep:mimalloc"]
 
 [lints.rust]
 unsafe_code = "forbid"

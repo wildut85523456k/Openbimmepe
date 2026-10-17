@@ -17,6 +17,9 @@ These are the **baseline**. The following additions are product proposals.
 - Panels (Properties, Project Browser, System Browser, Issues, Output) can dock, float, hide and resize. Persist layout per user.
 - Multiple projects, views and view types. Tab switch must not reset active selections unnecessarily.
 - Default layout mirrors PDF. Compact ribbon and narrow-screen layout available; all tools remain keyboard accessible.
+- All 14 ribbon tabs stay visible; tabs and tools not built yet are shown disabled.
+- UI language: English and French (Khmer later). Labels come from translations; commands, parameters and saved UI settings use stable IDs, never English labels.
+- The Analyze tab opens one window to choose the calculation; it becomes available once the design is complete enough.
 - Contextual tabs and ribbon controls are derived from **active command** and **selection**.
 - 2D plans, sections, elevations and 3D share one selection model; selection can highlight the same element in other views.
 - Navigation: middle mouse pan, wheel zoom, Shift+middle orbit (confirm details against adopted Revit-style preset); ESC cancels active command; TAB cycles candidates; SPACE flip/rotate during supported placements.
@@ -25,7 +28,7 @@ These are the **baseline**. The following additions are product proposals.
 
 ## Command model
 Each tool defines: stable command ID, label, icon identifier, active-document/selection applicability, parameter schema, transaction policy, preview handler, validation, execute handler and undo semantics.
-- Ribbon, shortcut, menu, command search, Python, and graph nodes dispatch to the **same** command registry.
+- Ribbon, shortcut, menu, command search, OpenBIM Graph nodes and MCP tools dispatch to the **same** command registry (`openbim-commands`, see 04).
 - UI previews are ephemeral; commit occurs only after validation.
 - Each tool has Escape/cancel and undo behavior documented.
 - Avoid using GUI event handlers to directly mutate geometry or IFC records.
@@ -37,14 +40,16 @@ Each tool defines: stable command ID, label, icon identifier, active-document/se
 - Host, system, constraints and document owner/revision exposed when relevant.
 
 ## Collaboration state
-- Connected/offline, local revision, central revision, pending edits, current owner/borrowed elements and conflicts.
-- On locked elements, show reason and safe actions (request ownership, inspect, cancel).
-- Do not imply a change is synchronized until acknowledged by the central server.
+There is no server: discipline models sit on a shared folder (server share or cloud-synced folder) and are linked to the central file.
+- Shown in the status bar: shared-folder reachable or offline, local revision, last revision seen from the others, pending edits, borrowed elements and conflicts.
+- Linked models (architecture, other disciplines) are read only.
+- On a locked element, show the reason and the safe actions: raise a change request (recorded with the clash results), inspect, cancel. Elsewhere the last writer wins and the losing edit is kept and flagged.
+- Do not show a change as synchronized until it is written to the shared folder and read back.
 
 ## Workspace tabs
 **Design:** authoring ribbon, properties, project browser, split 2D/3D views.
 **Coordination:** federated IFC models, compare revisions, visibility filters, clash/issue panels.
-**Automation:** node graph, library/search, Python editor, run/debug/output panels, model preview.
+**Automation:** graphs are built in OpenBIM Graph, a separate egui program launched from the Manage tab (Dynamo-like: library, canvas, Run bar, Watch nodes, Python Script node). Inside the app: a Player to run saved graphs, the 3D preview of proposed changes, and a panel for proposals coming from MCP clients.
 
 ## Non-goals for first UI milestone
 Pixel-perfect proprietary Revit branding; native RVT authoring; full Structure and MEP calculation suites; Dynamo .dyn compatibility.

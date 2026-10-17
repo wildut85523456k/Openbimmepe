@@ -86,6 +86,10 @@ pub enum FormKind {
     /// the path is in plan (x, y) at height `z`; the profile is drawn in the plane across the path: u to the left of
     /// the direction of travel, v up, with the path point as origin
     Sweep { z: String, path: Vec<(String, String)> },
+    /// the profile at `from` changes into the second profile at `to`, point for point (the plane's normal is the axis)
+    Blend { plane: Axis, from: String, to: String },
+    /// a sweep whose profile changes from the first profile at the start of the path to the second at its end
+    SweptBlend { z: String, path: Vec<(String, String)> },
 }
 
 /// Which part of the profile sits on the sweep path, or on the axis of a revolve.
@@ -110,18 +114,33 @@ pub struct FormDef {
     pub holes: Vec<ProfileDef>,
     pub material: Option<String>,
     pub visible: Option<String>,
+    /// a void cuts the solids of the family instead of adding to them
+    pub void: bool,
+    /// blends and swept blends: the profile at the other end
+    pub second: Option<ProfileDef>,
 }
 
 impl FormDef {
     pub fn extrusion(name: &str, plane: Axis, from: &str, to: &str, outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Extrusion { plane, from: from.into(), to: to.into() }, outer, holes: vec![], material: None, visible: None, align: None }
+        FormDef { name: name.into(), kind: FormKind::Extrusion { plane, from: from.into(), to: to.into() }, outer, holes: vec![], material: None, visible: None, align: None, void: false, second: None }
     }
     pub fn revolve(name: &str, plane: Axis, offset: &str, about_v: bool, at: &str, angle: &str, outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Revolve { plane, offset: offset.into(), about_v, at: at.into(), angle: angle.into() }, outer, holes: vec![], material: None, visible: None, align: None }
+        FormDef { name: name.into(), kind: FormKind::Revolve { plane, offset: offset.into(), about_v, at: at.into(), angle: angle.into() }, outer, holes: vec![], material: None, visible: None, align: None, void: false, second: None }
     }
     pub fn sweep(name: &str, z: &str, path: &[(&str, &str)], outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Sweep { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer, holes: vec![], material: None, visible: None, align: None }
+        FormDef { name: name.into(), kind: FormKind::Sweep { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer, holes: vec![], material: None, visible: None, align: None, void: false, second: None }
     }
+    /// A solid whose section changes from `bottom` at `from` to `top` at `to`. The profiles need the same number of
+    /// points (or both be circles); point 0 of one pairs with point 0 of the other, after both are put counter-clockwise.
+    pub fn blend(name: &str, plane: Axis, from: &str, to: &str, bottom: ProfileDef, top: ProfileDef) -> Self {
+        FormDef { name: name.into(), kind: FormKind::Blend { plane, from: from.into(), to: to.into() }, outer: bottom, holes: vec![], material: None, visible: None, align: None, void: false, second: Some(top) }
+    }
+    /// A sweep whose section changes along the path from `start` to `end`, in proportion to the distance along it.
+    pub fn swept_blend(name: &str, z: &str, path: &[(&str, &str)], start: ProfileDef, end: ProfileDef) -> Self {
+        FormDef { name: name.into(), kind: FormKind::SweptBlend { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer: start, holes: vec![], material: None, visible: None, align: None, void: false, second: Some(end) }
+    }
+    /// Make this form a void: it cuts the other solids of the family.
+    pub fn void(mut self) -> Self { self.void = true; self }
     pub fn align(mut self, a: Align) -> Self { self.align = Some(a); self }
     pub fn hole(mut self, p: ProfileDef) -> Self { self.holes.push(p); self }
     pub fn material(mut self, value_name: &str) -> Self { self.material = Some(value_name.into()); self }
@@ -155,6 +174,8 @@ pub(crate) enum CKind {
     Extrusion { plane: Axis, from: Expr, to: Expr },
     Revolve { plane: Axis, offset: Expr, about_v: bool, at: Expr, angle: Expr },
     Sweep { z: Expr, path: Vec<[Expr; 2]> },
+    Blend { plane: Axis, from: Expr, to: Expr },
+    SweptBlend { z: Expr, path: Vec<[Expr; 2]> },
 }
 pub(crate) struct CForm {
     pub name: String,
@@ -164,6 +185,8 @@ pub(crate) struct CForm {
     holes: Vec<CLoop>,
     pub material: Option<usize>,
     visible: Option<Expr>,
+    void: bool,
+    second: Option<CLoop>,
 }
 
 fn bad(name: &str, why: &'static str) -> FamilyError { FamilyError::Form { name: name.into(), why } }
@@ -217,22 +240,27 @@ pub(crate) fn compile(forms: &[FormDef], parse: Parse, material_slot: &dyn Fn(&s
         let kind = match &f.kind {
             FormKind::Extrusion { plane, from, to } => CKind::Extrusion { plane: *plane, from: pe("from", from)?, to: pe("to", to)? },
             FormKind::Revolve { plane, offset, about_v, at, angle } => CKind::Revolve { plane: *plane, offset: pe("offset", offset)?, about_v: *about_v, at: pe("at", at)?, angle: pa("angle", angle)? },
-            FormKind::Sweep { z, path } => {
+            FormKind::Sweep { z, path } | FormKind::SweptBlend { z, path } => {
                 if path.len() < 2 { return Err(bad(&f.name, "a sweep path needs at least 2 points")); }
                 if path.len() > MAX_PATH { return Err(FamilyError::TooMany("points in a sweep path")); }
                 let mut p = Vec::new();
                 for (i, (x, y)) in path.iter().enumerate() { p.push([pe(&format!("path.x{i}"), x)?, pe(&format!("path.y{i}"), y)?]); }
-                CKind::Sweep { z: pe("z", z)?, path: p }
+                if matches!(f.kind, FormKind::Sweep { .. }) { CKind::Sweep { z: pe("z", z)?, path: p } } else { CKind::SweptBlend { z: pe("z", z)?, path: p } }
             }
+            FormKind::Blend { plane, from, to } => CKind::Blend { plane: *plane, from: pe("from", from)?, to: pe("to", to)? },
         };
+        let blends = matches!(f.kind, FormKind::Blend { .. } | FormKind::SweptBlend { .. });
+        if blends != f.second.is_some() { return Err(bad(&f.name, if blends { "a blend needs a second profile" } else { "only a blend has a second profile" })); }
+        if blends && !f.holes.is_empty() { return Err(bad(&f.name, "a blend cannot have holes")); }
+        let second = match &f.second { Some(sp) => Some(compile_loop(&f.name, "second", sp, parse)?), None => None };
         if f.holes.len() > MAX_HOLES { return Err(FamilyError::TooMany("holes in a profile")); }
         let outer = compile_loop(&f.name, "outer", &f.outer, parse)?;
         let mut holes = Vec::new();
         for (i, h) in f.holes.iter().enumerate() { holes.push(compile_loop(&f.name, &format!("hole{i}"), h, parse)?); }
         let material = match &f.material { Some(m) => Some(material_slot(&f.name, m)?), None => None };
         let visible = match &f.visible { Some(v) => Some(pn("visible", v)?), None => None };
-        if f.align.is_some() && matches!(f.kind, FormKind::Extrusion { .. }) { return Err(bad(&f.name, "only a sweep or a revolve can be aligned to its path or axis")); }
-        out.push(CForm { name: f.name.clone(), align: f.align, kind, outer, holes, material, visible });
+        if f.align.is_some() && !matches!(f.kind, FormKind::Sweep { .. } | FormKind::Revolve { .. }) { return Err(bad(&f.name, "only a sweep or a revolve can be aligned to its path or axis")); }
+        out.push(CForm { name: f.name.clone(), align: f.align, kind, outer, holes, material, visible, void: f.void, second });
     }
     Ok(out)
 }
@@ -251,6 +279,10 @@ pub enum FormGeom {
     Extrusion { plane: Axis, from: f64, to: f64 },
     Revolve { plane: Axis, offset: f64, about_v: bool, at: f64, angle: f64 },
     Sweep { z: f64, path: Vec<[f64; 2]> },
+    /// `Form::outer` at `from`, `top` at `to`; the two loops are of the same kind and have as many points
+    Blend { plane: Axis, from: f64, to: f64, top: Loop },
+    /// `Form::outer` at the start of the path, `end` at its end
+    SweptBlend { z: f64, path: Vec<[f64; 2]>, end: Loop },
 }
 
 /// A solved form. `xf` and `dz` move it into the family's frame when it came from a nested family.
@@ -263,6 +295,8 @@ pub struct Form {
     pub holes: Vec<Loop>,
     pub xf: Xf,
     pub dz: f64,
+    /// a void cuts the other solids of the family; it adds no volume
+    pub void: bool,
 }
 
 type P2 = [f64; 2];
@@ -457,6 +491,34 @@ fn path_turns(path: &[P2]) -> Vec<f64> {
     (1..path.len() - 1).map(|i| { let (a, b) = (sub(path[i], path[i - 1]), sub(path[i + 1], path[i])); cross(a, b).atan2(dot(a, b)) }).collect()
 }
 
+/// The second profile of a blend, which has to be of the same kind as the first and have as many points.
+fn solve_second(name: &str, second: Option<&CLoop>, first: &Loop, vals: &[f64]) -> Result<Loop, FamilyError> {
+    let l = solve_loop(name, second.ok_or_else(|| bad(name, "a blend needs a second profile"))?, vals)?;
+    match (first, &l) {
+        (Loop::Circle { .. }, Loop::Circle { .. }) => Ok(l),
+        (Loop::Poly(a), Loop::Poly(b)) if a.len() == b.len() => Ok(l),
+        _ => Err(bad(name, "the two profiles of a blend need the same number of points (or both be circles)")),
+    }
+}
+
+/// Check a sweep path and give its height and points. `profiles` are the profiles that travel along it.
+fn solve_path(name: &str, z: &Expr, path: &[[Expr; 2]], ev: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>, profiles: &[&Loop]) -> Result<(f64, Vec<P2>), FamilyError> {
+    let z = ev(z, "z")?;
+    let mut p = Vec::with_capacity(path.len());
+    for q in path { p.push([ev(&q[0], "path.x")?, ev(&q[1], "path.y")?]); }
+    let len: Vec<f64> = (1..p.len()).map(|i| { let d = sub(p[i], p[i - 1]); (d[0] * d[0] + d[1] * d[1]).sqrt() }).collect();
+    if len.iter().any(|l| *l < crate::MIN_SIZE) { return Err(bad(name, "two path points coincide")); }
+    let turns = path_turns(&p);
+    if turns.iter().any(|t| t.abs().to_degrees() > MAX_TURN) { return Err(bad(name, "a path corner turns more than 150 degrees")); }
+    // the mitre cuts at both ends of a piece must not pass each other
+    let umax = profiles.iter().flat_map(|l| poly_pts(l)).map(|q| q[0].abs()).fold(0.0, f64::max);
+    let lead = |i: usize| if i == 0 || i == p.len() - 1 { 0.0 } else { umax * (turns[i - 1].abs() / 2.0).tan() };
+    for (i, li) in len.iter().enumerate() { if lead(i) + lead(i + 1) >= *li { return Err(bad(name, "the profile is too wide for a corner of the path")); } }
+    // the path may not cross itself
+    for i in 0..len.len() { for j in i + 2..len.len() { if segs_touch(p[i], p[i + 1], p[j], p[j + 1]) { return Err(bad(name, "the path crosses itself")); } } }
+    Ok((z, p))
+}
+
 pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, FamilyError> {
     let mut out = Vec::new();
     for (index, f) in forms.iter().enumerate() {
@@ -488,7 +550,7 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
                     let ok = match a { Align::Centre => true, Align::Left | Align::Right => *about_v, Align::Bottom | Align::Top => !*about_v };
                     if !ok { return Err(bad(name, "an axis parallel to v can lie on the left or right edge or the centre, an axis parallel to u on the bottom or top edge or the centre")); }
                 }
-                CKind::Extrusion { .. } => {}
+                CKind::Extrusion { .. } | CKind::Blend { .. } | CKind::SweptBlend { .. } => {}
             }
         }
         let geom = match &f.kind {
@@ -517,28 +579,38 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
                 FormGeom::Revolve { plane: *plane, offset, about_v: *about_v, at, angle }
             }
             CKind::Sweep { z, path } => {
-                let z = ev(z, "z")?;
-                let mut p = Vec::with_capacity(path.len());
-                for q in path { p.push([ev(&q[0], "path.x")?, ev(&q[1], "path.y")?]); }
-                let len: Vec<f64> = (1..p.len()).map(|i| { let d = sub(p[i], p[i - 1]); (d[0] * d[0] + d[1] * d[1]).sqrt() }).collect();
-                if len.iter().any(|l| *l < crate::MIN_SIZE) { return Err(bad(name, "two path points coincide")); }
-                let turns = path_turns(&p);
-                if turns.iter().any(|t| t.abs().to_degrees() > MAX_TURN) { return Err(bad(name, "a path corner turns more than 150 degrees")); }
-                // the mitre cuts at both ends of a piece must not pass each other
-                let umax = poly_pts(&outer).iter().map(|q| q[0].abs()).fold(0.0, f64::max);
-                let lead = |i: usize| if i == 0 || i == p.len() - 1 { 0.0 } else { umax * (turns[i - 1].abs() / 2.0).tan() };
-                for (i, li) in len.iter().enumerate() { if lead(i) + lead(i + 1) >= *li { return Err(bad(name, "the profile is too wide for a corner of the path")); } }
-                // the path may not cross itself
-                for i in 0..len.len() { for j in i + 2..len.len() { if segs_touch(p[i], p[i + 1], p[j], p[j + 1]) { return Err(bad(name, "the path crosses itself")); } } }
-                FormGeom::Sweep { z, path: p }
+                let p = solve_path(name, z, path, &ev, &[&outer])?;
+                FormGeom::Sweep { z: p.0, path: p.1 }
+            }
+            CKind::Blend { plane, from, to } => {
+                let (from, to) = (ev(from, "from")?, ev(to, "to")?);
+                if to - from <= crate::MIN_SIZE { return Err(bad(name, "the blend needs a positive length")); }
+                let top = solve_second(name, f.second.as_ref(), &outer, vals)?;
+                FormGeom::Blend { plane: *plane, from, to, top }
+            }
+            CKind::SweptBlend { z, path } => {
+                let end = solve_second(name, f.second.as_ref(), &outer, vals)?;
+                let p = solve_path(name, z, path, &ev, &[&outer, &end])?;
+                FormGeom::SweptBlend { z: p.0, path: p.1, end }
             }
         };
-        out.push(Form { index, geom, outer, holes, xf: Xf::IDENTITY, dz: 0.0 });
+        out.push(Form { index, geom, outer, holes, xf: Xf::IDENTITY, dz: 0.0, void: f.void });
     }
     Ok(out)
 }
 
 // ---------- measures ----------
+
+fn area_of(l: &Loop) -> f64 { moments(l).0 }
+
+/// The loop `t` of the way from `a` to `b` (same kind, same number of points).
+pub(crate) fn lerp_loop(a: &Loop, b: &Loop, t: f64) -> Loop {
+    match (a, b) {
+        (Loop::Poly(p), Loop::Poly(q)) => Loop::Poly(p.iter().zip(q).map(|(x, y)| [x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t]).collect()),
+        (Loop::Circle { c, r }, Loop::Circle { c: c2, r: r2 }) => Loop::Circle { c: [c[0] + (c2[0] - c[0]) * t, c[1] + (c2[1] - c[1]) * t], r: r + (r2 - r) * t },
+        _ => a.clone(),
+    }
+}
 
 fn map3(plane: Axis, offset: f64, u: f64, v: f64) -> [f64; 3] {
     match plane { Axis::Z => [u, v, offset], Axis::X => [offset, u, v], Axis::Y => [v, offset, u] }
@@ -563,6 +635,22 @@ impl Form {
                 let t: f64 = path_turns(path).iter().map(|th| (th / 2.0).tan()).sum();
                 a * total - 2.0 * mu * t
             }
+            // the area of a section is quadratic in the distance along, so Simpson's rule is exact
+            FormGeom::Blend { from, to, top, .. } => (to - from) / 6.0 * (a + 4.0 * area_of(&lerp_loop(&self.outer, top, 0.5)) + area_of(top)),
+            // exact for a straight path; at a bend the mitre is not taken into account
+            FormGeom::SweptBlend { path, end, .. } => {
+                let lens: Vec<f64> = (1..path.len()).map(|i| { let d = sub(path[i], path[i - 1]); (d[0] * d[0] + d[1] * d[1]).sqrt() }).collect();
+                let total: f64 = lens.iter().sum();
+                let mut at = 0.0;
+                let mut v = 0.0;
+                for l in &lens {
+                    let (t0, t1) = (at / total, (at + l) / total);
+                    let area = |t: f64| area_of(&lerp_loop(&self.outer, end, t));
+                    v += l / 6.0 * (area(t0) + 4.0 * area(0.5 * (t0 + t1)) + area(t1));
+                    at += l;
+                }
+                v
+            }
         }
     }
 
@@ -581,6 +669,15 @@ impl Form {
         match &self.geom {
             FormGeom::Extrusion { plane, from, to } => {
                 for w in [*from, *to] { for u in [ul.0, ul.1] { for v in [vl.0, vl.1] { add(map3(*plane, w, u, v)); } } }
+            }
+            FormGeom::Blend { plane, from, to, top } => {
+                // a blend is the hull of its two profiles: the boxes of both, each at its own end
+                for (l, w) in [(&self.outer, *from), (top, *to)] {
+                    let p = poly_pts(l);
+                    let (u0, u1) = (p.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max));
+                    let (v0, v1) = (p.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max));
+                    for u in [u0, u1] { for v in [v0, v1] { add(map3(*plane, w, u, v)); } }
+                }
             }
             FormGeom::Revolve { plane, offset, about_v, at, angle } => {
                 // every corner of the profile box, turned to the end angles and to each quarter turn in between
@@ -605,7 +702,16 @@ impl Form {
                     for a in &angles { add(rotate_about(p, axis_pt, axis_dir, a.to_radians())); }
                 }
             }
-            FormGeom::Sweep { z, path } => {
+            FormGeom::Sweep { z, path } | FormGeom::SweptBlend { z, path, .. } => {
+                // a swept blend: the box around both profiles
+                let (ul, vl) = match &self.geom {
+                    FormGeom::SweptBlend { end, .. } => {
+                        let e = poly_pts(end);
+                        let (eu, ev) = ((e.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), e.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max)), (e.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), e.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max)));
+                        ((ul.0.min(eu.0), ul.1.max(eu.1)), (vl.0.min(ev.0), vl.1.max(ev.1)))
+                    }
+                    _ => (ul, vl),
+                };
                 let n = path.len();
                 let dirs: Vec<P2> = (1..n).map(|i| { let d = sub(path[i], path[i - 1]); let l = (d[0] * d[0] + d[1] * d[1]).sqrt(); [d[0] / l, d[1] / l] }).collect();
                 for i in 0..n {

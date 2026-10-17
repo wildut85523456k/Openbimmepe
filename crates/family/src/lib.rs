@@ -16,7 +16,10 @@
 pub mod expr;
 pub mod display;
 pub mod mep;
+pub mod light;
 pub mod forms;
+pub mod meshing;
+mod csg;
 pub mod shared;
 pub mod catalogue;
 pub mod library;
@@ -155,6 +158,9 @@ pub struct TypeDef {
     pub values: Vec<(String, f64)>,
     /// choices, texts and materials
     pub texts: Vec<(String, String)>,
+    /// lighting data of this type (a luminaire family only): it replaces the family's own, so that each variant of a
+    /// luminaire (a power setting, a colour temperature) can carry its own photometric file, flux and power
+    pub lighting: Option<light::LightingDef>,
 }
 
 /// Where a nested family's text, choice or material value comes from.
@@ -232,6 +238,8 @@ pub struct Family {
     pub shared: Vec<String>,
     /// extrusions, revolves and sweeps
     pub forms: Vec<FormDef>,
+    /// lighting data, for a luminaire (category `LightFixture`)
+    pub lighting: Option<light::LightingDef>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -383,10 +391,13 @@ pub struct Inner {
     checks: Vec<(String, Expr)>,
     opening: Option<(Expr, Expr, Expr, Option<Expr>)>,
     types: Vec<CompiledType>,
+    /// lighting data of each type, in the order of `types`
+    type_lighting: Vec<Option<light::LightingDef>>,
     depth: usize,
     category: Category,
     host: Host,
     classification: Vec<(String, String)>,
+    lighting: Option<light::LightingDef>,
     connectors: Vec<mep::CConnector>,
     plan: Vec<mep::CPlan>,
     shared_ids: Vec<(String, u128)>,
@@ -693,7 +704,13 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
     }
     if depth > MAX_NEST_DEPTH { return Err(FamilyError::NestTooDeep); }
     let mut types = Vec::new();
+    let mut type_lighting = Vec::new();
     for t in &fam.types {
+        if let Some(l) = &t.lighting {
+            if fam.category != Category::LightFixture { return Err(FamilyError::BadMeta("lighting data belongs to a family of category light fixture")); }
+            l.check()?;
+        }
+        type_lighting.push(t.lighting.clone());
         let mut nums = Vec::new();
         for (nm, v) in &t.values {
             let i = *index.get(nm).ok_or_else(|| FamilyError::UnknownValue(nm.clone()))?;
@@ -725,10 +742,14 @@ fn compile_one(fam: &Family, kids: &HashMap<String, Compiled>, shared: Option<&S
         clean_text("classification", code, 64)?;
     }
     for (i, (s, _)) in fam.classification.iter().enumerate() { if fam.classification[..i].iter().any(|(o, _)| o == s) { return Err(FamilyError::BadMeta("a classification system is listed twice")); } }
+    if let Some(l) = &fam.lighting {
+        if fam.category != Category::LightFixture { return Err(FamilyError::BadMeta("lighting data belongs to a family of category light fixture")); }
+        l.check()?;
+    }
     let (connectors, plan) = mep::compile(&fam.connectors, &fam.plan, &parse)?;
     let forms = forms::compile(&fam.forms, &parse, &material_slot)?;
     let derived: Vec<usize> = (0..nvalues).filter(|&i| formulas[i].is_some() && fam.values[i].axis.is_none()).collect();
-    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, dims: dims_v, derived, order, solids, solid_names, nested, checks, opening, types, depth, category: fam.category, host, classification: fam.classification.clone(), connectors, plan, shared_ids, forms, form_names })))
+    Ok(Compiled(Arc::new(Inner { name: fam.name.clone(), names, index, nvalues, inputs, choice_flags, formulas, dims: dims_v, derived, order, solids, solid_names, nested, checks, opening, types, type_lighting, depth, category: fam.category, host, classification: fam.classification.clone(), lighting: fam.lighting.clone(), connectors, plan, shared_ids, forms, form_names })))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -801,6 +822,13 @@ impl Inner {
     /// Names of the family's types, in the order the author gave them.
     pub fn type_names(&self) -> Vec<&str> { self.types.iter().map(|t| t.0.as_str()).collect() }
     pub fn classification(&self) -> &[(String, String)] { &self.classification }
+    /// lighting data of a luminaire family
+    pub fn lighting(&self) -> Option<&light::LightingDef> { self.lighting.as_ref() }
+    /// lighting data of a luminaire of the named type: the type's own when it has them, else the family's
+    pub fn lighting_for(&self, type_name: Option<&str>) -> Option<&light::LightingDef> {
+        let own = type_name.and_then(|t| self.types.iter().position(|x| x.0 == t)).and_then(|i| self.type_lighting[i].as_ref());
+        own.or(self.lighting.as_ref())
+    }
     pub fn slot(&self, name: &str) -> Option<usize> { self.index.get(name).copied() }
     /// What a value measures: a length, an area, an angle, a plain number. Calculated values take it from their formula.
     pub fn value_dim(&self, name: &str) -> Option<Dim> { self.slot(name).map(|i| self.dims[i]) }
@@ -1032,7 +1060,7 @@ impl Inner {
                     let mut x = fm.xf.then(&Xf::translate(at[0], at[1]));
                     if let Some(t) = turn { x = x.then(&t); }
                     let m = match ci.form_materials[k] { Some(i) => Some(inst.intern(&ci.strings[i as usize])), None => None };
-                    inst.forms.push(Form { index: nd.form_offset + fm.index, geom: fm.geom.clone(), outer: fm.outer.clone(), holes: fm.holes.clone(), xf: x, dz: fm.dz + at[2] });
+                    inst.forms.push(Form { index: nd.form_offset + fm.index, geom: fm.geom.clone(), outer: fm.outer.clone(), holes: fm.holes.clone(), xf: x, dz: fm.dz + at[2], void: fm.void });
                     inst.form_materials.push(m);
                 }
                 // connectors of the nested family, moved and turned like its solids
@@ -1043,6 +1071,7 @@ impl Inner {
                     inst.plan.push(match *s {
                         PlanShape::Line([x1, y1, x2, y2]) => { let (a, b) = (mv(x1, y1), mv(x2, y2)); PlanShape::Line([a.0, a.1, b.0, b.1]) }
                         PlanShape::Circle { c, r } => { let p = mv(c[0], c[1]); PlanShape::Circle { c: [p.0, p.1], r } }
+                        PlanShape::Arc { c, r, a0, a1 } => { let p = mv(c[0], c[1]); let t = turn.map_or(0.0, |tf| tf.angle); PlanShape::Arc { c: [p.0, p.1], r, a0: a0 + t, a1: a1 + t } }
                     });
                 }
                 for c in &ci.connectors {

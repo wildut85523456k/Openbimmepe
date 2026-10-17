@@ -331,6 +331,60 @@ impl Ord for Item {
     }
 }
 
+/// The box of a zone, low and high corner.
+fn zone_box(shape: &Shape) -> ([f64; 3], [f64; 3]) {
+    match shape {
+        Shape::Hard { lo, hi } | Shape::Soft { lo, hi, .. } => (*lo, *hi),
+    }
+}
+
+/// A grid in plan over the zones of one search. Each cell lists, in ascending order, the zones whose box widened by
+/// the clearance reaches it; a query gives the zones of the cells a segment's box touches, each once, in ascending order.
+struct ZoneIndex {
+    lo: [f64; 2],
+    cell: f64,
+    n: [usize; 2],
+    cells: Vec<Vec<u32>>,
+}
+
+impl ZoneIndex {
+    const EPS: f64 = 1e-6;
+    fn new(boxes: &[([f64; 3], [f64; 3])], r: f64, lo: [f64; 2], hi: [f64; 2]) -> ZoneIndex {
+        // at most 64 cells along a side, and none narrower than a metre
+        let cell = ((hi[0] - lo[0]).max(hi[1] - lo[1]) / 64.0).max(1.0);
+        let n = [0, 1].map(|j| (((hi[j] - lo[j]) / cell).floor() as usize + 1).max(1));
+        let mut ix = ZoneIndex { lo, cell, n, cells: vec![Vec::new(); n[0] * n[1]] };
+        for (k, (zl, zh)) in boxes.iter().enumerate() {
+            let (c0, c1) = (ix.cell_of([zl[0] - r - Self::EPS, zl[1] - r - Self::EPS]), ix.cell_of([zh[0] + r + Self::EPS, zh[1] + r + Self::EPS]));
+            for cy in c0[1]..=c1[1] {
+                for cx in c0[0]..=c1[0] {
+                    ix.cells[cy * n[0] + cx].push(k as u32);
+                }
+            }
+        }
+        ix
+    }
+    fn cell_of(&self, p: [f64; 2]) -> [usize; 2] {
+        [0, 1].map(|j| (((p[j] - self.lo[j]) / self.cell).floor().max(0.0) as usize).min(self.n[j] - 1))
+    }
+    /// The zones that can be near the segment p-q, into `out`.
+    fn near(&self, p: [f64; 3], q: [f64; 3], out: &mut Vec<u32>) {
+        out.clear();
+        let c0 = self.cell_of([p[0].min(q[0]) - Self::EPS, p[1].min(q[1]) - Self::EPS]);
+        let c1 = self.cell_of([p[0].max(q[0]) + Self::EPS, p[1].max(q[1]) + Self::EPS]);
+        for cy in c0[1]..=c1[1] {
+            for cx in c0[0]..=c1[0] {
+                out.extend_from_slice(&self.cells[cy * self.n[0] + cx]);
+            }
+        }
+        if c0 != c1 {
+            out.sort_unstable();
+            out.dedup();
+        }
+    }
+}
+
+
 /// Find the best path for one request.
 pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
     let o = rq.opts;
@@ -415,19 +469,31 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
         }
     }
     let pos = |ix: [usize; 3]| [lines[0][ix[0]], lines[1][ix[1]], lines[2][ix[2]]];
+    // The zones are looked up through a grid of cells in plan, each holding the zones whose widened box reaches it, so
+    // a step costs the same however many zones the model has. A step is one pitch long: only the zones in the cells it
+    // touches are looked at, in the order of `zs`, which keeps every sum and list as it was.
+    let index = ZoneIndex::new(&zs.iter().map(|z| zone_box(z.shape)).collect::<Vec<_>>(), r, [bounds_lo[0], bounds_lo[1]], [bounds_hi[0], bounds_hi[1]]);
+    let scratch = std::cell::RefCell::new(Vec::<u32>::new());
     let blocked = |p: [f64; 3], q: [f64; 3]| -> bool {
-        zs.iter().any(|z| match z.shape {
-            Shape::Hard { lo, hi } => {
-                if (z.from_own && on_ray(p, q, a, d1)) || (z.to_own && on_ray(p, q, b, d2)) {
-                    return false;
+        let mut c = scratch.borrow_mut();
+        index.near(p, q, &mut c);
+        c.iter().any(|&i| {
+            let z = &zs[i as usize];
+            match z.shape {
+                Shape::Hard { lo, hi } => {
+                    if (z.from_own && on_ray(p, q, a, d1)) || (z.to_own && on_ray(p, q, b, d2)) {
+                        return false;
+                    }
+                    clip_box(p, q, [0, 1, 2].map(|i| lo[i] - r), [0, 1, 2].map(|i| hi[i] + r)).is_some()
                 }
-                clip_box(p, q, [0, 1, 2].map(|i| lo[i] - r), [0, 1, 2].map(|i| hi[i] + r)).is_some()
+                Shape::Soft { .. } => false,
             }
-            Shape::Soft { .. } => false,
         })
     };
     let inside_soft = |p: [f64; 3]| -> bool {
-        zs.iter().any(|z| match z.shape {
+        let mut c = scratch.borrow_mut();
+        index.near(p, p, &mut c);
+        c.iter().any(|&i| match zs[i as usize].shape {
             Shape::Soft { planes, z0, z1, lo, hi, .. } => near(p, p, lo, hi, r) && clip_prism(p, p, planes, *z0, *z1, r).is_some(),
             Shape::Hard { .. } => false,
         })
@@ -436,7 +502,10 @@ pub fn auto_route(rq: &AutoRequest) -> Result<AutoRoute, AutoError> {
     let soft_cost = |p: [f64; 3], q: [f64; 3], entered: &mut Vec<String>| -> f64 {
         let len = (0..3).map(|i| (q[i] - p[i]).powi(2)).sum::<f64>().sqrt();
         let mut extra = 0.0;
-        for z in &zs {
+        let mut c = scratch.borrow_mut();
+        index.near(p, q, &mut c);
+        for &i in c.iter() {
+            let z = &zs[i as usize];
             if let Shape::Soft { planes, z0, z1, cost, lo, hi } = z.shape {
                 if !near(p, q, lo, hi, r) {
                     continue;

@@ -12,6 +12,8 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Text(String),
+    /// binary content such as a photometric file kept in the project; at most `MAX_BLOB` bytes
+    Bytes(Vec<u8>),
 }
 
 /// One element: a kind and its properties.
@@ -58,6 +60,8 @@ pub struct Transaction {
 }
 
 pub const MAX_TEXT: usize = 1 << 20;
+/// largest binary value: an 8 MB photometric file fits
+pub const MAX_BLOB: usize = 8 << 20;
 pub const MAX_OPS: usize = 1 << 20;
 
 impl State {
@@ -85,6 +89,11 @@ impl State {
             Op::Set { id, prop, value } => {
                 if let Some(Value::Text(t)) = value {
                     if t.len() > MAX_TEXT {
+                        return Err(OpError::TooLong);
+                    }
+                }
+                if let Some(Value::Bytes(t)) = value {
+                    if t.len() > MAX_BLOB {
                         return Err(OpError::TooLong);
                     }
                 }
@@ -164,6 +173,11 @@ fn put_value(b: &mut Vec<u8>, v: &Value) {
         Value::Text(s) => {
             b.push(3);
             put_str(b, s);
+        }
+        Value::Bytes(d) => {
+            b.push(4);
+            put_u32(b, d.len() as u32);
+            b.extend_from_slice(d);
         }
     }
 }
@@ -250,6 +264,13 @@ impl<'a> Rd<'a> {
             1 => Value::Int(self.u64()? as i64),
             2 => Value::Bool(self.u8()? != 0),
             3 => Value::Text(self.str()?),
+            4 => {
+                let n = self.u32()? as usize;
+                if n > MAX_BLOB {
+                    return Err(DecodeError::TooBig);
+                }
+                Value::Bytes(self.take(n)?.to_vec())
+            }
             t => return Err(DecodeError::BadTag(t)),
         })
     }
@@ -567,4 +588,68 @@ pub fn merge(base: &State, a: &[Transaction], b: &[Transaction]) -> Result<Merge
         s.apply_all(&t.ops).map_err(|e| (t.seq, e))?;
     }
     Ok(Merged { state: s, conflicts })
+}
+
+// ---------- files kept in the project ----------
+
+/// Element kind of a file kept in the project (the letters "ASST").
+pub const KIND_ASSET: u32 = 0x4153_5354;
+/// Properties of an asset element.
+pub mod asset_prop {
+    /// file name, text
+    pub const NAME: u32 = 1;
+    /// what it is, text such as "photometry"
+    pub const ROLE: u32 = 2;
+    /// the file content, bytes
+    pub const DATA: u32 = 3;
+    /// CRC-32 of the content, integer, to notice damage
+    pub const CRC: u32 = 4;
+}
+
+impl State {
+    /// The element number of the asset with this file name and role.
+    pub fn find_asset(&self, role: &str, name: &str) -> Option<u64> {
+        self.elements.iter().find_map(|(id, e)| {
+            let is = e.kind == KIND_ASSET
+                && matches!(e.props.get(&asset_prop::NAME), Some(Value::Text(n)) if n == name)
+                && matches!(e.props.get(&asset_prop::ROLE), Some(Value::Text(r)) if r == role);
+            is.then_some(*id)
+        })
+    }
+
+    /// The content of an asset, checked against its stored CRC-32; None when it is missing or damaged.
+    pub fn asset_data(&self, id: u64) -> Option<&[u8]> {
+        let e = self.elements.get(&id).filter(|e| e.kind == KIND_ASSET)?;
+        match (e.props.get(&asset_prop::DATA), e.props.get(&asset_prop::CRC)) {
+            (Some(Value::Bytes(d)), Some(Value::Int(c))) if i64::from(crc32(d)) == *c => Some(d),
+            _ => None,
+        }
+    }
+}
+
+impl Doc {
+    /// Keep a file in the project under its name and role (one asset per pair; the same content again changes
+    /// nothing, other content replaces it). Returns the asset's element number. Undo takes the change back.
+    pub fn put_asset(&mut self, role: &str, name: &str, data: &[u8]) -> Result<u64, OpError> {
+        if data.len() > MAX_BLOB || name.len() > 255 || role.len() > 64 { return Err(OpError::TooLong); }
+        if let Some(id) = self.state.find_asset(role, name) {
+            if self.state.asset_data(id) == Some(data) { return Ok(id); }
+            let ops = vec![
+                Op::Set { id, prop: asset_prop::DATA, value: Some(Value::Bytes(data.to_vec())) },
+                Op::Set { id, prop: asset_prop::CRC, value: Some(Value::Int(i64::from(crc32(data)))) },
+            ];
+            self.edit(&format!("replace {name}"), ops)?;
+            return Ok(id);
+        }
+        let id = self.new_id();
+        let ops = vec![
+            Op::Create { id, kind: KIND_ASSET },
+            Op::Set { id, prop: asset_prop::NAME, value: Some(Value::Text(name.to_string())) },
+            Op::Set { id, prop: asset_prop::ROLE, value: Some(Value::Text(role.to_string())) },
+            Op::Set { id, prop: asset_prop::DATA, value: Some(Value::Bytes(data.to_vec())) },
+            Op::Set { id, prop: asset_prop::CRC, value: Some(Value::Int(i64::from(crc32(data)))) },
+        ];
+        self.edit(&format!("add {name}"), ops)?;
+        Ok(id)
+    }
 }

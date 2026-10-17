@@ -58,7 +58,7 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], pset_map: Default::default() }
+    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
     WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None, room_bounding: true }
@@ -301,4 +301,117 @@ fn quantities_with_a_unit_are_written_as_that_measure() {
     assert!(out.text.contains(&format!("'open_angle',$,IFCPLANEANGLEMEASURE({})", real(std::f64::consts::FRAC_PI_2))), "{}", out.text.lines().filter(|l| l.contains("open_angle")).collect::<Vec<_>>().join("\n"));
     assert!(out.text.contains("'handle_height',$,IFCLENGTHMEASURE(1.0)"));
     assert!(!out.text.contains("'handle_height',$,IFCREAL"));
+}
+
+#[test]
+fn the_ifc2x3_export_has_the_2x3_header_an_owner_history_and_the_same_ids() {
+    let a = export_ifc2x3(&scene(vec![wall(5)])).unwrap();
+    let b = export_ifc2x3(&scene(vec![wall(5)])).unwrap();
+    assert_eq!(a.text, b.text);
+    assert!(a.text.contains("FILE_SCHEMA(('IFC2X3'))") && !a.text.contains("IFC4"));
+    // the wall keeps the id it has in the IFC4 file, and points at the owner history; it has no predefined type
+    let oh = a.text.lines().find(|l| l.contains("=IFCOWNERHISTORY(")).and_then(|l| l.split('=').next()).unwrap().to_string();
+    let w = format!("IFCWALL('{}',{oh},'W',$,$,", global_id(1, 0, 5));
+    assert!(a.text.lines().any(|l| l.contains(&w) && l.ends_with(",$);")), "wall line");
+    // every rooted entity has the owner history, none has $ there
+    let mut rooted = 0;
+    for l in a.text.lines() {
+        let Some((_, body)) = l.split_once('=') else { continue };
+        let Some((_, after)) = body.split_once("('") else { continue };
+        if after.len() > 25 && after.as_bytes()[22] == b'\'' && !body.starts_with("IFCPROPERTYSINGLEVALUE") && !body.starts_with("IFCQUANTITY") {
+            rooted += 1;
+            assert!(after[23..].starts_with(",#"), "rooted entity without owner history: {l}");
+        }
+    }
+    assert!(rooted >= 5, "{rooted}");
+    // without a map conversion
+    assert!(!a.text.contains("IFCMAPCONVERSION"));
+}
+
+#[test]
+fn the_ifc2x3_export_writes_doors_and_windows_as_plain_boxes_and_counts_what_it_leaves_out() {
+    use openbim_family::{library, Category, Request};
+    let fams = library::all().unwrap();
+    let door = fams.iter().position(|f| f.category() == Category::Door).unwrap();
+    let other = fams.iter().position(|f| !matches!(f.category(), Category::Door | Category::Window)).unwrap();
+    let mut s = library_scene(&[]);
+    for (k, (fam, name)) in [(door, "D1"), (door, "D2"), (other, "E1"), (other, "E2")].into_iter().enumerate() {
+        let inst = fams[fam].solve(&Request::default()).unwrap();
+        s.items.push(FamilyItem { id: 10 + k as u64, name: name.into(), family: fam, type_name: None, frame: Frame { origin: [k as f64 * 2.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None });
+    }
+    let out = export_ifc2x3(&s).unwrap();
+    assert_eq!(out.report.items, 2);
+    assert_eq!(out.text.matches("IFCDOOR(").count(), 2);
+    // no IFC4 type entities, mapped items or ports; the doors keep the ids they have in the IFC4 file
+    for t in ["IFCDOORTYPE", "IFCMAPPEDITEM", "IFCDISTRIBUTIONPORT", "IFCREPRESENTATIONMAP"] {
+        assert!(!out.text.contains(t), "{t}");
+    }
+    let gid = global_id(1, 0, 10);
+    let line = out.text.lines().find(|l| l.contains(&format!("IFCDOOR('{gid}',#"))).expect("door line");
+    assert!(line.contains(",'D1',$,$,#") && line.ends_with(");"), "{line}");
+    // overall height and width are the last two attributes, after the tag
+    let attrs: Vec<&str> = line.trim_end_matches(");").rsplitn(3, ',').collect();
+    assert!(attrs[0].parse::<f64>().is_ok() && attrs[1].parse::<f64>().is_ok(), "{line}");
+    // the two other families are counted, once, in one warning
+    let w: Vec<&String> = out.report.warnings.iter().filter(|w| w.contains("placed families")).collect();
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("2 placed families"), "{}", w[0]);
+}
+
+#[test]
+fn a_swept_profile_is_written_turned_a_quarter_for_the_fixed_reference_sweep() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{compile_library, Category, Family, Request};
+    // a bar 0.04 wide (u) and 0.01 high (v) swept along x: IFC wants the profile's x along "up" and y to the right,
+    // so the corner (u 0.04, v 0.01) is written at (0.01, -0.04)
+    let f = Family {
+        name: "Bar".into(),
+        forms: vec![FormDef::sweep("bar", "0", &[("0", "0"), ("1", "0")], ProfileDef::rect("0", "0", "0.04", "0.01"))],
+        category: Category::Furniture,
+        ..Default::default()
+    };
+    let c = compile_library(std::slice::from_ref(&f)).unwrap();
+    let mut s = scene(vec![wall(5)]);
+    s.families = vec![FamilyRef { id: 1, family: c[0].clone() }];
+    let inst = c[0].solve(&Request::default()).unwrap();
+    s.items = vec![FamilyItem { id: 10, name: "B".into(), family: 0, type_name: None, frame: Frame { origin: [0.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None }];
+    let out = export(&s).unwrap();
+    assert_eq!(out.text.matches("IFCFIXEDREFERENCESWEPTAREASOLID(").count(), 1);
+    assert!(out.text.contains("IFCCARTESIANPOINT((0.01,-0.04))"), "turned corner missing");
+    assert!(!out.text.contains("IFCCARTESIANPOINT((0.04,0.01))"), "profile was written unturned");
+}
+
+#[test]
+fn a_blend_is_a_faceted_brep_and_a_void_is_cut_with_a_boolean_result() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{compile_library, Axis, Category, Family, Request};
+    let r = |a, b, c, d| ProfileDef::rect(a, b, c, d);
+    let plain = |forms| Family { name: "F".into(), forms, category: Category::Furniture, ..Default::default() };
+    let run = |forms: Vec<FormDef>| {
+        let f = plain(forms);
+        let c = compile_library(std::slice::from_ref(&f)).unwrap();
+        let mut s = scene(vec![wall(5)]);
+        s.families = vec![FamilyRef { id: 1, family: c[0].clone() }];
+        let inst = c[0].solve(&Request::default()).unwrap();
+        s.items = vec![FamilyItem { id: 10, name: "B".into(), family: 0, type_name: None, frame: Frame { origin: [0.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None }];
+        export(&s).unwrap()
+    };
+    // a blend: a closed brep, 2 caps and 4 sides in triangles; the body is a Brep representation
+    let out = run(vec![FormDef::blend("b", Axis::Z, "0", "1", r("0", "0", "1", "1"), r("0.25", "0.25", "0.75", "0.75"))]);
+    assert_eq!(out.text.matches("IFCFACETEDBREP(").count(), 1); // written once, in the type's shared map
+    assert!(out.text.contains("'Body','Brep'"));
+    assert_eq!(out.text.matches("IFCCLOSEDSHELL(").count(), 1);
+    assert_eq!(out.text.matches("IFCFACE((").count(), 12); // 2 caps and 4 sides, each in two triangles
+    assert!(!out.report.warnings.iter().any(|w| w.contains("form was not written")), "{:?}", out.report.warnings);
+    let walls_only = out.text.matches("IFCEXTRUDEDAREASOLID(").count(); // the wall of the scene has bodies of its own
+    // a void through an extrusion: one boolean difference per solid and void, and the body is a Clipping representation
+    let out = run(vec![
+        FormDef::extrusion("solid", Axis::Z, "0", "1", r("0", "0", "1", "1")),
+        FormDef::extrusion("hole", Axis::Z, "-1", "2", r("0.25", "0.25", "0.75", "0.75")).void(),
+    ]);
+    assert!(out.text.contains("IFCBOOLEANRESULT(.DIFFERENCE.,"));
+    assert!(out.text.contains("'Body','Clipping'"));
+    // the solid and the void are written once each, the void only as the operand of the difference
+    assert_eq!(out.text.matches("IFCEXTRUDEDAREASOLID(").count(), walls_only + 2);
+    assert_eq!(out.text.matches("IFCBOOLEANRESULT(").count(), 1);
 }

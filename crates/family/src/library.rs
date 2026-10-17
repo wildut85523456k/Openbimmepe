@@ -5,7 +5,7 @@ use crate::{compile_library, Dim, NUMBER, U_VALUE, ArrayDef, Axis::*, Category, 
 
 fn chk(name: &str, expr: &str) -> CheckDef { CheckDef { name: name.into(), expr: expr.into() } }
 fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
-    TypeDef { name: name.into(), values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(), texts: vec![] }
+    TypeDef { name: name.into(), values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(), texts: vec![], lighting: None }
 }
 
 /// Lever handle on both faces of a leaf. Origin: centre of the back plate on the leaf's mid plane.
@@ -104,6 +104,13 @@ pub fn door() -> Family {
         ],
         opening: Some(OpeningDef::new("width", "height", "0")),
         types: vec![ty("Type A", &[("width", 0.8)]), ty("Type B", &[("width", 1.2), ("height", 2.4)])],
+        // the swing as drawn in plan: the leaf open at 90 degrees towards +y and the arc its free end sweeps
+        plan: vec![
+            PlanDef::line(("x_in_left", "0"), ("x_in_left", "width - 2 * frame")).visible_if("swing.left"),
+            PlanDef::arc(("x_in_left", "0"), "width - 2 * frame", "0 deg", "90 deg").visible_if("swing.left"),
+            PlanDef::line(("x_in_right", "0"), ("x_in_right", "width - 2 * frame")).visible_if("swing.right"),
+            PlanDef::arc(("x_in_right", "0"), "width - 2 * frame", "90 deg", "180 deg").visible_if("swing.right"),
+        ],
         category: Category::Door,
         ..Default::default()
     }
@@ -218,6 +225,12 @@ pub fn window() -> Family {
         ],
         opening: Some(OpeningDef::new("width", "height", "sill")),
         types: vec![ty("Type A", &[("width", 1.8), ("height", 1.5)])],
+        // as drawn in plan: a line on each face of the wall and one through the glass
+        plan: vec![
+            PlanDef::line(("x_left", "y_front"), ("x_right", "y_front")),
+            PlanDef::line(("x_left", "0"), ("x_right", "0")),
+            PlanDef::line(("x_left", "y_back"), ("x_right", "y_back")),
+        ],
         category: Category::Window,
         ..Default::default()
     }

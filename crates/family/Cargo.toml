@@ -8,10 +8,13 @@ publish = false
 [dependencies]
 rayon = "1.10"
 openbim-sketch = { path = "../sketch" }
+openbim-photo = { path = "../photo" }
+earcutr = "0.5.0"
 
 [dev-dependencies]
 proptest = "1"
 openbim-arch = { path = "../arch" }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [lints.rust]
 unsafe_code = "forbid"

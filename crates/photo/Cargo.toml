@@ -1,0 +1,15 @@
+[package]
+name = "openbim-photo"
+version = "0.0.1"
+edition = "2021"
+description = "Photometric files of luminaires: IES (LM-63) and Eulumdat (LDT) readers, intensity table, luminous flux"
+publish = false
+
+[dependencies]
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
