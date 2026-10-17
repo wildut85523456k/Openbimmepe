@@ -662,7 +662,8 @@ fn one_part(mesh: Mesh, system: System) -> (Mesh, Vec<Part>) {
 enum Src<'a> {
     /// a wall, and the voids of the families hosted in it, in model coordinates
     Wall(&'a WallChain, WallMaterials, Vec<TriMesh>),
-    Slab(&'a Slab, Vec<Vec<P>>),
+    /// a slab, its holes, and the voids of free-standing families that reach it (a shaft), in model coordinates
+    Slab(&'a Slab, Vec<Vec<P>>, Vec<TriMesh>),
     Column(&'a [P], f64, f64),
     Family(&'a Frame, &'a Instance),
     Run(&'a Run),
@@ -675,7 +676,7 @@ enum Src<'a> {
 /// The same inputs, kept by the cache.
 enum Key {
     Wall(WallChain, WallMaterials, Vec<TriMesh>),
-    Slab(Slab, Vec<Vec<P>>),
+    Slab(Slab, Vec<Vec<P>>, Vec<TriMesh>),
     Column(Vec<P>, f64, f64),
     Family(Frame, Instance),
     Run(Run),
@@ -688,7 +689,7 @@ impl Src<'_> {
     fn same(&self, k: &Key) -> bool {
         match (self, k) {
             (Src::Wall(a, m, v), Key::Wall(b, n, w)) => *a == b && m == n && v == w,
-            (Src::Slab(a, h), Key::Slab(b, g)) => *a == b && h == g,
+            (Src::Slab(a, h, v), Key::Slab(b, g, w)) => *a == b && h == g && v == w,
             (Src::Column(a, z, t), Key::Column(b, y, u)) => *a == b.as_slice() && z == y && t == u,
             (Src::Family(a, i), Key::Family(b, j)) => *a == b && *i == j,
             (Src::Run(a), Key::Run(b)) => *a == b,
@@ -703,7 +704,7 @@ impl Src<'_> {
     fn own(&self) -> Key {
         match self {
             Src::Wall(c, m, v) => Key::Wall((*c).clone(), m.clone(), v.clone()),
-            Src::Slab(s, h) => Key::Slab((*s).clone(), h.clone()),
+            Src::Slab(s, h, v) => Key::Slab((*s).clone(), h.clone(), v.clone()),
             Src::Column(f, a, b) => Key::Column(f.to_vec(), *a, *b),
             Src::Family(f, i) => Key::Family(**f, (*i).clone()),
             Src::Run(r) => Key::Run((*r).clone()),
@@ -724,8 +725,20 @@ impl Src<'_> {
                 warnings = w;
                 (m, p)
             }
-            Src::Slab(s, holes) => {
-                plain(prism(&s.outline, holes, s.top - s.thickness, s.top).ok_or_else(bad)?)
+            Src::Slab(s, holes, voids) => {
+                let mut m = prism(&s.outline, holes, s.top - s.thickness, s.top).ok_or_else(bad)?;
+                if !voids.is_empty() {
+                    let whole = TriMesh {
+                        verts: m.verts.clone(),
+                        tris: m.tris.clone(),
+                    };
+                    match meshing::cut(&whole, voids) {
+                        Some(t) => m = to_mesh(t),
+                        None => warnings
+                            .push("a void of a family could not be cut out of the slab".into()),
+                    }
+                }
+                plain(m)
             }
             Src::Column(f, z0, z1) => plain(prism(f, &[], *z0, *z1).ok_or_else(bad)?),
             Src::Family(f, i) => {
@@ -782,14 +795,41 @@ impl Src<'_> {
 
 /// Every element with its inputs. The number beside the element is the network it belongs to (0 for everything that is
 /// not a service piece): piece numbers are only unique within one network.
+/// The voids whose box meets the box of the slab; the others cannot cut it.
+fn reaching(voids: &[TriMesh], slab: &Slab) -> Vec<TriMesh> {
+    let lo = |f: fn(&P) -> f64| slab.outline.iter().map(f).fold(f64::INFINITY, f64::min);
+    let hi = |f: fn(&P) -> f64| slab.outline.iter().map(f).fold(f64::NEG_INFINITY, f64::max);
+    let (x0, x1, y0, y1) = (lo(|p| p[0]), hi(|p| p[0]), lo(|p| p[1]), hi(|p| p[1]));
+    let (z0, z1) = (slab.top - slab.thickness, slab.top);
+    let meets = |m: &TriMesh| {
+        let r = |k: usize| {
+            (
+                m.verts.iter().map(|v| v[k]).fold(f64::INFINITY, f64::min),
+                m.verts
+                    .iter()
+                    .map(|v| v[k])
+                    .fold(f64::NEG_INFINITY, f64::max),
+            )
+        };
+        let (a, b, c) = (r(0), r(1), r(2));
+        a.0 < x1 && a.1 > x0 && b.0 < y1 && b.1 > y0 && c.0 < z1 && c.1 > z0
+    };
+    voids.iter().filter(|m| meets(m)).cloned().collect()
+}
+
 fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
     let mut v = Vec::new();
-    // the voids of hosted families, moved into the model, for the wall that hosts them
+    // the voids of families, moved into the model: those hosted in a wall cut that wall, the free-standing ones cut
+    // the slabs they reach (a shaft)
     let mut wall_voids: Vec<Vec<TriMesh>> = vec![Vec::new(); scene.walls.len()];
+    let mut free_voids: Vec<TriMesh> = Vec::new();
     for it in &scene.items {
-        let Some((wi, _, _)) = it.host else { continue };
-        let Some(list) = wall_voids.get_mut(wi) else {
-            continue;
+        let list = match it.host {
+            Some((wi, _, _)) => match wall_voids.get_mut(wi) {
+                Some(l) => l,
+                None => continue,
+            },
+            None => &mut free_voids,
         };
         for mut m in it.instance.voids() {
             for p in &mut m.verts {
@@ -820,7 +860,11 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
                 id: s.id,
             },
             0,
-            Src::Slab(&s.slab, slab_holes(scene, i, &s.slab)),
+            Src::Slab(
+                &s.slab,
+                slab_holes(scene, i, &s.slab),
+                reaching(&free_voids, &s.slab),
+            ),
         ));
     }
     for c in &scene.columns {

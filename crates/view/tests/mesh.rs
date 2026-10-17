@@ -986,3 +986,64 @@ fn a_void_of_a_hosted_family_cuts_the_wall_it_sits_in() {
         u.rebuilt
     );
 }
+
+#[test]
+fn a_free_standing_void_cuts_the_slab_it_passes_through() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{Axis, Family, Request, ValueDef};
+    use openbim_ifc::{FamilyItem, FamilyRef, Frame};
+    // a family that is only a void: a square shaft 0.5 x 0.5 and 0.5 high
+    let fam = Family {
+        name: "Shaft".into(),
+        values: vec![
+            ValueDef::plane("z0", Axis::Z, "0"),
+            ValueDef::plane("z1", Axis::Z, "0.5"),
+        ],
+        forms: vec![FormDef::extrusion(
+            "shaft",
+            Axis::Z,
+            "0",
+            "0.5",
+            ProfileDef::rect("0", "0", "0.5", "0.5"),
+        )
+        .void()],
+        ..Default::default()
+    }
+    .compile()
+    .unwrap();
+    let inst = fam.solve(&Request::default()).unwrap();
+    let mut s = scene();
+    let plain = find(&scene_meshes(&s).unwrap(), 2).mesh.volume();
+    let item = |z| FamilyItem {
+        id: 7,
+        name: "Sh".into(),
+        family: 0,
+        type_name: None,
+        frame: Frame {
+            origin: [2.0, 2.0, z],
+            x: [1.0, 0.0],
+        },
+        instance: inst.clone(),
+        host: None,
+    };
+    s.families = vec![FamilyRef {
+        id: 1,
+        family: fam.clone(),
+    }];
+    // through the slab (-0.3 to 0.2): 0.5 x 0.5 x 0.2 comes out
+    s.items = vec![item(-0.3)];
+    let m = scene_meshes(&s).unwrap();
+    assert!(
+        find(&m, 2).warnings.is_empty(),
+        "{:?}",
+        find(&m, 2).warnings
+    );
+    assert!(
+        (find(&m, 2).mesh.volume() - (plain - 0.05)).abs() < 1e-9,
+        "{}",
+        find(&m, 2).mesh.volume()
+    );
+    // well above it: nothing
+    s.items = vec![item(1.0)];
+    assert!((find(&scene_meshes(&s).unwrap(), 2).mesh.volume() - plain).abs() < 1e-9);
+}
