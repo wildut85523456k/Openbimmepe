@@ -161,6 +161,9 @@ pub fn luminaire_schedule(scene: &Scene) -> (String, Vec<String>) {
     (out, warnings)
 }
 
+/// A data sheet larger than this is named on the page but not put inside it.
+const MAX_EMBEDDED_SHEET: usize = 5 << 20;
+
 fn esc(s: &str) -> String {
     s.chars().map(|c| match c { '&' => "&amp;".into(), '<' => "&lt;".into(), '>' => "&gt;".into(), '"' => "&quot;".into(), '\'' => "&#39;".into(), c => c.to_string() }).collect()
 }
@@ -220,7 +223,11 @@ pub fn luminaire_catalogue_html(scene: &Scene, asset: &dyn Fn(&str, &str) -> Opt
                 None => warnings.push(format!("{title}: the data sheet {name} is not kept in the project")),
                 Some(d) => match check_attachment("datasheet", name, &d) {
                     Err(why) => warnings.push(format!("{title}: the data sheet {name} is not used: {why}")),
-                    Ok(()) => sheet = esc(name),
+                    Ok(()) if d.len() > MAX_EMBEDDED_SHEET => {
+                        warnings.push(format!("{title}: the data sheet {name} is over {} MB and is named but not embedded", MAX_EMBEDDED_SHEET >> 20));
+                        sheet = esc(name);
+                    }
+                    Ok(()) => sheet = format!("<a download=\"{0}\" href=\"data:application/pdf;base64,{1}\">{0}</a>", esc(name), base64(&d)),
                 },
             }
         }

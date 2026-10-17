@@ -90,7 +90,7 @@ fn the_luminaire_catalogue_page_embeds_checked_pictures_and_escapes_text() {
     assert!(w.is_empty(), "{w:?}");
     assert!(h.contains("src=\"data:image/png;base64,iVBORw0KGgoBAgME\""), "{h}");
     assert!(h.contains("A&lt;b&gt;&amp;Co") && !h.contains("A<b>") && h.contains("P&amp;Q"));
-    assert!(h.contains("<td>Placed</td><td>2</td>") && h.contains("<td>Data sheet</td><td>d.pdf</td>") && h.contains("1000 lm"));
+    assert!(h.contains("<td>Placed</td><td>2</td>") && h.contains("<td>Data sheet</td><td><a download=\"d.pdf\" href=\"data:application/pdf;base64,JVBERi0xLjQ=\">d.pdf</a></td>") && h.contains("1000 lm"));
     // a picture that is not what it says, and one that is missing: no image, a warning each
     let (h, w) = luminaire_catalogue_html(&mk("bad.png"), &files);
     assert!(!h.contains("<img") && h.contains("no picture") && w.len() == 1 && w[0].contains("PNG or JPEG"), "{w:?}");
@@ -99,4 +99,10 @@ fn the_luminaire_catalogue_page_embeds_checked_pictures_and_escapes_text() {
     // padding of the encoder
     let (h, _) = luminaire_catalogue_html(&mk("p.png"), &|r, n| if r == "picture" { Some([&png[..], &[9]].concat()) } else { files(r, n) });
     assert!(h.contains("iVBORw0KGgoBAgMECQ=="), "{h}");
+    // a data sheet over the limit is named, not embedded, with a warning
+    let big = |r: &str, n: &str| if r == "datasheet" { let mut v = b"%PDF-1.4".to_vec(); v.resize((5 << 20) + 1, 0); Some(v) } else { files(r, n) };
+    let (h, w) = luminaire_catalogue_html(&mk("p.png"), &big);
+    assert!(h.contains("<td>Data sheet</td><td>d.pdf</td>") && !h.contains("application/pdf") && w.len() == 1 && w[0].contains("5 MB"), "{w:?}");
+    let exact = |r: &str, n: &str| if r == "datasheet" { let mut v = b"%PDF-1.4".to_vec(); v.resize(5 << 20, 0); Some(v) } else { files(r, n) };
+    assert!(luminaire_catalogue_html(&mk("p.png"), &exact).0.contains("application/pdf"));
 }
