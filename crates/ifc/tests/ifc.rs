@@ -327,3 +327,33 @@ fn the_ifc2x3_export_has_the_2x3_header_an_owner_history_and_the_same_ids() {
     // without a map conversion
     assert!(!a.text.contains("IFCMAPCONVERSION"));
 }
+
+#[test]
+fn the_ifc2x3_export_writes_doors_and_windows_as_plain_boxes_and_counts_what_it_leaves_out() {
+    use openbim_family::{library, Category, Request};
+    let fams = library::all().unwrap();
+    let door = fams.iter().position(|f| f.category() == Category::Door).unwrap();
+    let other = fams.iter().position(|f| !matches!(f.category(), Category::Door | Category::Window)).unwrap();
+    let mut s = library_scene(&[]);
+    for (k, (fam, name)) in [(door, "D1"), (door, "D2"), (other, "E1"), (other, "E2")].into_iter().enumerate() {
+        let inst = fams[fam].solve(&Request::default()).unwrap();
+        s.items.push(FamilyItem { id: 10 + k as u64, name: name.into(), family: fam, type_name: None, frame: Frame { origin: [k as f64 * 2.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None });
+    }
+    let out = export_ifc2x3(&s).unwrap();
+    assert_eq!(out.report.items, 2);
+    assert_eq!(out.text.matches("IFCDOOR(").count(), 2);
+    // no IFC4 type entities, mapped items or ports; the doors keep the ids they have in the IFC4 file
+    for t in ["IFCDOORTYPE", "IFCMAPPEDITEM", "IFCDISTRIBUTIONPORT", "IFCREPRESENTATIONMAP"] {
+        assert!(!out.text.contains(t), "{t}");
+    }
+    let gid = global_id(1, 0, 10);
+    let line = out.text.lines().find(|l| l.contains(&format!("IFCDOOR('{gid}',#"))).expect("door line");
+    assert!(line.contains(",'D1',$,$,#") && line.ends_with(");"), "{line}");
+    // overall height and width are the last two attributes, after the tag
+    let attrs: Vec<&str> = line.trim_end_matches(");").rsplitn(3, ',').collect();
+    assert!(attrs[0].parse::<f64>().is_ok() && attrs[1].parse::<f64>().is_ok(), "{line}");
+    // the two other families are counted, once, in one warning
+    let w: Vec<&String> = out.report.warnings.iter().filter(|w| w.contains("placed families")).collect();
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("2 placed families"), "{}", w[0]);
+}

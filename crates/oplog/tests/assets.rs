@@ -73,3 +73,14 @@ fn photometric_files_from_an_import_are_kept_and_read_again_from_the_project() {
     let again = openbim_photo::parse(d.state.asset_data(id).unwrap(), "x.ies").unwrap();
     assert_eq!(again.manufacturer.as_deref(), Some("M"));
 }
+
+#[test]
+fn name_and_role_lengths_are_limited_exactly() {
+    let mut d = Doc::new(1);
+    assert!(d.put_asset("r", &"n".repeat(255), b"x").is_ok());
+    assert_eq!(d.put_asset("r", &"n".repeat(256), b"x"), Err(OpError::TooLong));
+    assert!(d.put_asset(&"r".repeat(64), "a", b"x").is_ok());
+    assert_eq!(d.put_asset(&"r".repeat(65), "a", b"x"), Err(OpError::TooLong));
+    // exactly the largest blob is kept
+    assert!(d.put_asset("r", "max", &vec![1u8; MAX_BLOB]).is_ok());
+}
