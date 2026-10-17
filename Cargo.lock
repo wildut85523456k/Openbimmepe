@@ -328,6 +328,7 @@ dependencies = [
 name = "openbim-family"
 version = "0.0.1"
 dependencies = [
+ "earcutr",
  "openbim-arch",
  "openbim-photo",
  "openbim-sketch",

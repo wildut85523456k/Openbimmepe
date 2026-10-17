@@ -9,6 +9,7 @@ publish = false
 rayon = "1.10"
 openbim-sketch = { path = "../sketch" }
 openbim-photo = { path = "../photo" }
+earcutr = "0.5.0"
 
 [dev-dependencies]
 proptest = "1"

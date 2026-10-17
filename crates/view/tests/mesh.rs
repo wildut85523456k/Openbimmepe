@@ -395,3 +395,33 @@ fn insulation_is_a_layer_round_runs_and_fittings_of_its_system_and_is_its_own_el
     assert_eq!(v.rebuilt.len(), 2);
     assert!(v.rebuilt.iter().all(|e| e.kind == Kind::Insulation));
 }
+
+#[test]
+fn blends_and_voids_reach_the_3d_mesh_in_the_model() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{Axis, Family, Request, ValueDef};
+    use openbim_ifc::{FamilyItem, FamilyRef, Frame};
+    let r = |a, b, c, d| ProfileDef::rect(a, b, c, d);
+    let fam = Family {
+        name: "F".into(),
+        values: vec![ValueDef::plane("x0", Axis::X, "0"), ValueDef::plane("x1", Axis::X, "1"), ValueDef::plane("y0", Axis::Y, "0"), ValueDef::plane("y1", Axis::Y, "1"), ValueDef::plane("z0", Axis::Z, "0"), ValueDef::plane("z1", Axis::Z, "1")],
+        solids: vec![openbim_family::SolidDef::new("box", ("x0", "x1"), ("y0", "y1"), ("z0", "z1"))],
+        forms: vec![
+            FormDef::extrusion("hole", Axis::Z, "-1", "2", r("0.25", "0.25", "0.75", "0.75")).void(),
+            FormDef::blend("b", Axis::Z, "2", "3", r("0", "0", "1", "1"), r("0.25", "0.25", "0.75", "0.75")),
+        ],
+        ..Default::default()
+    }.compile().unwrap();
+    let inst = fam.solve(&Request::default()).unwrap();
+    let mut s = scene();
+    s.families = vec![FamilyRef { id: 1, family: fam }];
+    s.items = vec![FamilyItem { id: 7, name: "F".into(), family: 0, type_name: None, frame: Frame { origin: [10.0, 20.0, 1.0], x: [0.0, 1.0] }, instance: inst, host: None }];
+    let e = find(&scene_meshes(&s).unwrap(), 7).clone();
+    assert!(e.warnings.is_empty());
+    // the box with its hole (0.75) and the blend above it (a frustum, 1/3 (1 + 0.5 + 0.25)): the blend is not cut
+    let want = 0.75 + (1.0 + 0.5 + 0.25) / 3.0;
+    assert!((e.mesh.volume() - want).abs() < 1e-9, "{} vs {want}", e.mesh.volume());
+    // turned a quarter and moved: the local x axis points along +y in the model
+    let (lo, hi) = bounds(&e.mesh);
+    assert!((lo[0] - 9.0).abs() < 1e-9 && (hi[0] - 10.0).abs() < 1e-9 && (lo[1] - 20.0).abs() < 1e-9 && (hi[1] - 21.0).abs() < 1e-9 && (lo[2] - 1.0).abs() < 1e-9 && (hi[2] - 4.0).abs() < 1e-9, "{lo:?} {hi:?}");
+}

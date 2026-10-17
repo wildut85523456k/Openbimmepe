@@ -18,6 +18,8 @@ pub mod display;
 pub mod mep;
 pub mod light;
 pub mod forms;
+pub mod meshing;
+mod csg;
 pub mod shared;
 pub mod catalogue;
 pub mod library;
@@ -1058,7 +1060,7 @@ impl Inner {
                     let mut x = fm.xf.then(&Xf::translate(at[0], at[1]));
                     if let Some(t) = turn { x = x.then(&t); }
                     let m = match ci.form_materials[k] { Some(i) => Some(inst.intern(&ci.strings[i as usize])), None => None };
-                    inst.forms.push(Form { index: nd.form_offset + fm.index, geom: fm.geom.clone(), outer: fm.outer.clone(), holes: fm.holes.clone(), xf: x, dz: fm.dz + at[2] });
+                    inst.forms.push(Form { index: nd.form_offset + fm.index, geom: fm.geom.clone(), outer: fm.outer.clone(), holes: fm.holes.clone(), xf: x, dz: fm.dz + at[2], void: fm.void });
                     inst.form_materials.push(m);
                 }
                 // connectors of the nested family, moved and turned like its solids

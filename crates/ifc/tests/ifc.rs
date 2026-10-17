@@ -380,3 +380,38 @@ fn a_swept_profile_is_written_turned_a_quarter_for_the_fixed_reference_sweep() {
     assert!(out.text.contains("IFCCARTESIANPOINT((0.01,-0.04))"), "turned corner missing");
     assert!(!out.text.contains("IFCCARTESIANPOINT((0.04,0.01))"), "profile was written unturned");
 }
+
+#[test]
+fn a_blend_is_a_faceted_brep_and_a_void_is_cut_with_a_boolean_result() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{compile_library, Axis, Category, Family, Request};
+    let r = |a, b, c, d| ProfileDef::rect(a, b, c, d);
+    let plain = |forms| Family { name: "F".into(), forms, category: Category::Furniture, ..Default::default() };
+    let run = |forms: Vec<FormDef>| {
+        let f = plain(forms);
+        let c = compile_library(std::slice::from_ref(&f)).unwrap();
+        let mut s = scene(vec![wall(5)]);
+        s.families = vec![FamilyRef { id: 1, family: c[0].clone() }];
+        let inst = c[0].solve(&Request::default()).unwrap();
+        s.items = vec![FamilyItem { id: 10, name: "B".into(), family: 0, type_name: None, frame: Frame { origin: [0.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None }];
+        export(&s).unwrap()
+    };
+    // a blend: a closed brep, 2 caps and 4 sides in triangles; the body is a Brep representation
+    let out = run(vec![FormDef::blend("b", Axis::Z, "0", "1", r("0", "0", "1", "1"), r("0.25", "0.25", "0.75", "0.75"))]);
+    assert_eq!(out.text.matches("IFCFACETEDBREP(").count(), 1); // written once, in the type's shared map
+    assert!(out.text.contains("'Body','Brep'"));
+    assert_eq!(out.text.matches("IFCCLOSEDSHELL(").count(), 1);
+    assert_eq!(out.text.matches("IFCFACE((").count(), 12); // 2 caps and 4 sides, each in two triangles
+    assert!(!out.report.warnings.iter().any(|w| w.contains("form was not written")), "{:?}", out.report.warnings);
+    let walls_only = out.text.matches("IFCEXTRUDEDAREASOLID(").count(); // the wall of the scene has bodies of its own
+    // a void through an extrusion: one boolean difference per solid and void, and the body is a Clipping representation
+    let out = run(vec![
+        FormDef::extrusion("solid", Axis::Z, "0", "1", r("0", "0", "1", "1")),
+        FormDef::extrusion("hole", Axis::Z, "-1", "2", r("0.25", "0.25", "0.75", "0.75")).void(),
+    ]);
+    assert!(out.text.contains("IFCBOOLEANRESULT(.DIFFERENCE.,"));
+    assert!(out.text.contains("'Body','Clipping'"));
+    // the solid and the void are written once each, the void only as the operand of the difference
+    assert_eq!(out.text.matches("IFCEXTRUDEDAREASOLID(").count(), walls_only + 2);
+    assert_eq!(out.text.matches("IFCBOOLEANRESULT(").count(), 1);
+}
