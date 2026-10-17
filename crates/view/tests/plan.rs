@@ -279,11 +279,32 @@ fn separation_lines_of_the_level_are_drawn_and_rooms_and_slabs_go_under_the_wall
     let first_wall = kinds.iter().position(|k| *k == Kind::Wall).unwrap();
     assert!(last_under < first_wall, "{kinds:?}");
     // the drawing: the region has evenodd fill, the tag text is escaped and upright, the separation line is a line
-    let d = svg(&v);
+    let d = svg_with(&v, &SvgStyle::shaded());
     assert!(d.contains("fill-rule=\"evenodd\"") && d.contains(">R</text>") && d.contains("8.0 m²"));
     let mut s2 = scene(vec![], vec![], vec![]);
     s2.rooms = vec![RoomItem { id: 9, room: Room { name: "A & B <c>".into(), usage: "".into(), occupancy: 0.0, level: 0, outline: rect(0.0, 0.0, 2.0, 2.0), holes: vec![], height: 2.7 } }];
     assert!(svg(&plan_view(&s2, 0, range()).unwrap()).contains("A &amp; B &lt;c&gt;"));
     // bounds include a region
     assert_eq!(plan_view(&s2, 0, range()).unwrap().bounds(), Some([0.0, 0.0, 2.0, 2.0]));
+}
+
+#[test]
+fn the_revit_look_has_white_walls_hatched_concrete_and_untinted_rooms() {
+    let mut s = scene(vec![straight()], vec![], vec![]);
+    s.slabs = vec![slab_at(1.3, 0.2)]; // cut by the plane at 1.2 m
+    s.rooms = vec![RoomItem { id: 9, room: Room { name: "R".into(), usage: "".into(), occupancy: 0.0, level: 0, outline: rect(0.0, 1.0, 4.0, 3.0), holes: vec![], height: 2.7 } }];
+    let v = plan_view(&s, 0, range()).unwrap();
+    let revit = svg(&v);
+    // the wall polygon is white, the slab region uses its hatch pattern (the second: columns have the first), the room has no tinted region, the tag stays
+    assert!(revit.contains("fill=\"white\" stroke=\"none\"") && revit.contains("url(#hatch1)") && revit.contains("<pattern id=\"hatch1\""));
+    assert!(!revit.contains("#e8eefc") && revit.contains(">R</text>"));
+    assert!(revit.contains("stroke-width=\"0.035\""));
+    // poche is black, shaded is grey with tinted rooms; the looks differ and each is repeatable
+    let poche = svg_with(&v, &SvgStyle::poche());
+    let shaded = svg_with(&v, &SvgStyle::shaded());
+    assert!(poche.contains("fill=\"black\" stroke=\"none\"") && !poche.contains("<pattern"));
+    assert!(shaded.contains("#cfcfcf") && shaded.contains("#e8eefc"));
+    assert!(revit != poche && revit != shaded && shaded == svg_with(&v, &SvgStyle::shaded()));
+    // tags can be switched off
+    assert!(!svg_with(&v, &SvgStyle { tags: false, ..SvgStyle::revit() }).contains(">R</text>"));
 }

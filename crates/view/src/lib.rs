@@ -13,6 +13,9 @@
 //! The model is not changed, results do not depend on the thread count, and bad data gives an error naming the wall.
 #![forbid(unsafe_code)]
 
+mod draw;
+pub use draw::{svg, svg_with, Paint, SvgStyle};
+
 use openbim_family::PlanShape;
 use openbim_geom::{GeomError, SegmentPlan, WallChain};
 use openbim_ifc::{FamilyItem, Scene};
@@ -414,63 +417,3 @@ fn family_items(it: &FamilyItem, r: &Abs) -> Vec<Item> {
     }).collect()
 }
 
-// ------------------------------------------------------------------ drawing
-
-/// Draw a plan view as an SVG page, one unit = one metre, y up. Line weights are in metres on paper at 1:1, so a
-/// caller who wants a scale applies it to the whole page. Cut parts are filled grey with a heavy outline, parts
-/// below the cut are thin, overhead parts dashed, beyond parts light grey, family symbols thin.
-pub fn svg(v: &PlanView) -> String {
-    use std::fmt::Write;
-    let [x0, y0, x1, y1] = v.bounds().unwrap_or([0.0, 0.0, 1.0, 1.0]);
-    let m = 0.5;
-    let mut s = String::new();
-    let _ = write!(s, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\">", x0 - m, -(y1 + m), x1 - x0 + 2.0 * m, y1 - y0 + 2.0 * m);
-    let _ = write!(s, "<title>{}</title><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"white\"/><g transform=\"scale(1,-1)\" fill=\"none\" stroke=\"black\" stroke-linecap=\"round\" stroke-linejoin=\"round\">", esc(&v.level_name), x0 - m, -(y1 + m), x1 - x0 + 2.0 * m, y1 - y0 + 2.0 * m);
-    let style = |c: Class| match c {
-        Class::Room => "stroke=\"#7a5aa6\" stroke-width=\"0.02\" stroke-dasharray=\"0.2 0.1\"",
-        Class::Cut => "stroke=\"black\" stroke-width=\"0.05\"",
-        Class::Below => "stroke=\"black\" stroke-width=\"0.02\"",
-        Class::Overhead => "stroke=\"black\" stroke-width=\"0.02\" stroke-dasharray=\"0.15 0.1\"",
-        Class::Beyond => "stroke=\"#999\" stroke-width=\"0.015\"",
-        Class::Symbol => "stroke=\"black\" stroke-width=\"0.02\"",
-    };
-    for it in &v.items {
-        let st = style(it.class);
-        match &it.shape {
-            Shape::Fill(poly) => {
-                let pts: Vec<String> = poly.iter().map(|p| format!("{},{}", p[0], p[1])).collect();
-                let _ = write!(s, "<polygon points=\"{}\" fill=\"#cfcfcf\" stroke=\"none\"/>", pts.join(" "));
-            }
-            Shape::Region { outer, holes } => {
-                let ring = |r: &[P]| format!("M{} Z", r.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" L"));
-                let d: Vec<String> = std::iter::once(outer.as_slice()).chain(holes.iter().map(|h| h.as_slice())).map(ring).collect();
-                let fill = if it.class == Class::Room { "#e8eefc" } else { "#bdbdbd" };
-                let _ = write!(s, "<path d=\"{}\" fill-rule=\"evenodd\" fill=\"{fill}\" stroke=\"none\"/>", d.join(" "));
-            }
-            Shape::Line(a, b) => { let _ = write!(s, "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" {st}/>", a[0], a[1], b[0], b[1]); }
-            Shape::Circle { c, r } => { let _ = write!(s, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" {st}/>", c[0], c[1], r); }
-            Shape::Arc { c, r, a0, a1 } => {
-                let sweep = (a1 - a0).rem_euclid(360.0);
-                let sweep = if sweep == 0.0 { 360.0 } else { sweep };
-                let (p, q) = (point_on(*c, *r, *a0), point_on(*c, *r, a0 + sweep));
-                let _ = write!(s, "<path d=\"M{},{} A{r},{r} 0 {} 1 {},{}\" {st}/>", p[0], p[1], u8::from(sweep > 180.0), q[0], q[1]);
-            }
-        }
-    }
-    s.push_str("</g>");
-    // tags are drawn upright, outside the mirrored group
-    for t in &v.tags {
-        let _ = write!(s, "<g font-family=\"sans-serif\" font-size=\"0.22\" text-anchor=\"middle\" fill=\"#333\"><text x=\"{}\" y=\"{}\">{}</text><text x=\"{}\" y=\"{}\" font-size=\"0.18\">{:.1} m²</text></g>", t.at[0], -t.at[1], esc(&t.name), t.at[0], -t.at[1] + 0.28, t.area);
-    }
-    s.push_str("</svg>");
-    s
-}
-
-fn point_on(c: P, r: f64, deg: f64) -> P {
-    let (s, co) = deg.to_radians().sin_cos();
-    [c[0] + r * co, c[1] + r * s]
-}
-
-fn esc(t: &str) -> String {
-    t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-}
