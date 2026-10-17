@@ -30,7 +30,7 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Linear { start, end, level }) => {
                 let datum = elements.get(level).filter(|l| l.category == Category::Level
                     && l.geometry == Some(Geometry::Level));
-                matches!(el.category, Category::Wall | Category::Duct | Category::Pipe)
+                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe)
                     && valid_axis(*start, *end) && datum.is_some()
                     && el.width_m <= 1e6 && el.height_m <= 1e6
                     && (el.category != Category::Pipe || (el.width_m - el.height_m).abs() <= 1e-9)
@@ -122,6 +122,28 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_beam_is_placed_on_a_level_validated_and_undone_in_one_step() {
+        let mut d = Document::spatial_sample();
+        let id = d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8).unwrap();
+        assert_eq!(id, ElementId(d.elements().map(|e| e.id.0).max().unwrap()));
+        assert_eq!(d.get(id).unwrap().category, Category::Beam);
+        let m = d.mesh(id).unwrap();
+        assert_eq!(m.vertices.len(), 8);
+        let zs: Vec<f64> = m.vertices.iter().map(|v| v[2]).collect();
+        assert!(zs.iter().all(|z| (z - 2.6).abs() < 1e-9 || (z - 3.0).abs() < 1e-9));
+        // zero length, no size, and a level that is not one are all refused and change nothing
+        let rev = d.revision();
+        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [1.0, 1.0], 0.2, 0.4, 2.8).is_err());
+        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.0, 0.4, 2.8).is_err());
+        assert!(d.place_beam(ElementId(100), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8).is_err());
+        assert_eq!(d.revision(), rev);
+        // a beam has no slope
+        assert!(d.transact(d.revision(), &[Command::SetSlope { id, slope_ratio: 0.1 }]).is_err());
+        d.undo().unwrap();
+        assert!(d.get(id).is_none(), "one undo removes it whole");
+    }
+
     use crate::Command;
 
     #[test]

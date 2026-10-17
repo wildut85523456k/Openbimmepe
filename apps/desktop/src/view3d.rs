@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 fn kind(c: Category) -> Option<Kind> {
-    match c { Category::Wall => Some(Kind::Wall), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
+    match c { Category::Wall => Some(Kind::Wall), Category::Beam => Some(Kind::Beam), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
 }
 
 /// The element of the view that stands for a document element.

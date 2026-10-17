@@ -22,7 +22,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall }
+enum Tool { Select, Duct, Pipe, Wall, Beam }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -68,12 +68,13 @@ impl Desktop {
     }
 
     fn sample() -> Self {
-        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall"])
+        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
             ("Duct", &["D D"]),
             ("Pipe", &["P I"]),
             ("Wall", &["W A"]),
+            ("Beam", &["B M"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
@@ -100,6 +101,7 @@ impl Desktop {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),
             Tool::Duct => "Duct command preview only; routing engine is not connected yet.".into(),
             Tool::Pipe => "Pipe command preview only; routing engine is not connected yet.".into(),
+            Tool::Beam => "Beam: set width, depth, height and the two ends in the options bar, then Place Beam.".into(),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -151,6 +153,7 @@ impl Desktop {
             "duct" => self.choose_tool(Tool::Duct),
             "pipe" => self.choose_tool(Tool::Pipe),
             "wall" => self.choose_tool(Tool::Wall),
+            "beam" => self.choose_tool(Tool::Beam),
             "select" => self.choose_tool(Tool::Select),
             "undo" => self.undo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
@@ -188,7 +191,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam", Tool::Beam));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

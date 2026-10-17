@@ -74,6 +74,7 @@ fn dimensions(category: openbim_document::Category) -> &'static [Field] {
     use openbim_document::Category as C;
     match category {
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
+        C::Beam => &[Field::Width, Field::Height, Field::Elevation],
         C::Duct => &[Field::Width, Field::Height, Field::Elevation, Field::Slope],
         C::Pipe => &[Field::Width, Field::Elevation, Field::Slope],
         C::Level => &[Field::Elevation], _ => &[],
@@ -85,6 +86,8 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
     match field {
         Field::Width if category == C::Wall => "Thickness (mm)",
         Field::Width if category == C::Pipe => "Diameter (mm)",
+        Field::Height if category == C::Beam => "Depth (mm)",
+        Field::Elevation if category == C::Beam => "Centre Elevation (mm)",
         Field::Width => "Width (mm)", Field::Height => "Height (mm)",
         Field::Elevation if category == C::Level => "Elevation (mm)",
         Field::Elevation if category == C::Wall => "Base Offset (mm)",
@@ -127,6 +130,7 @@ fn edit_group(app: &mut Desktop, ui: &mut egui::Ui, name: &str, query: &str,
 fn category_info(category: openbim_document::Category) -> (&'static str, &'static str, &'static str) {
     use openbim_document::Category as C;
     match category {
+        C::Beam => ("Structural Framing (1)", "Rectangular Beam", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
@@ -134,6 +138,19 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
 }
 
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Beam {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Structural Framing");
+            ui.separator();
+            let cat = openbim_document::Category::Beam;
+            for field in [Field::Width, Field::Height, Field::Elevation, Field::X1, Field::Y1, Field::X2, Field::Y2] {
+                ui.label(field_name(field, cat));
+                editor(app, ui, field);
+            }
+            if ui.button("Place Beam").clicked() { app.place_beam_from_controls(); }
+        });
+        return;
+    }
     let element = app.selected_id().and_then(|id| app.document.get(id)).cloned();
     ui.horizontal_wrapped(|ui| {
         let Some(el) = element else { ui.strong("Modify | Select"); return; };

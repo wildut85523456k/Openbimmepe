@@ -30,7 +30,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Duct | Category::Pipe)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (el.category != Category::Pipe && differs(el.height_m * 1000.0, self.height_mm)));
         let elevation = el.category != Category::Grid && differs(el.elevation_m * 1000.0, self.elevation_mm);
@@ -42,6 +42,25 @@ impl Desktop {
             _ => false,
         };
         size || elevation || slope || axis
+    }
+
+    /// Places a beam from the options bar on the lowest level, selects it and goes back to Select.
+    pub(crate) fn place_beam_from_controls(&mut self) {
+        let level = self.document.elements()
+            .filter(|e| matches!(e.geometry, Some(Geometry::Level)))
+            .min_by(|a, b| a.elevation_m.total_cmp(&b.elevation_m)).map(|e| e.id);
+        let Some(level) = level else { self.message = "Add a level before placing a beam".into(); return; };
+        let m = |v: f64| v / 1000.0;
+        let (start, end) = ([m(self.axis_mm[0]), m(self.axis_mm[1])], [m(self.axis_mm[2]), m(self.axis_mm[3])]);
+        match self.document.place_beam(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm)) {
+            Ok(id) => {
+                self.tool = crate::Tool::Select;
+                self.selected = Some(SampleElement::Model(id));
+                self.sync_duct_controls();
+                self.message = format!("Beam {} placed; undo removes it", id.0);
+            }
+            Err(error) => self.message = format!("Beam rejected: {error:?}"),
+        }
     }
 
     pub(crate) fn apply_duct_edit(&mut self) {
@@ -57,7 +76,7 @@ impl Desktop {
         if !self.has_pending_edit() { return; }
         let id = el.id;
         let mut commands = Vec::new();
-        if matches!(el.category, Category::Wall | Category::Duct | Category::Pipe) {
+        if matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe) {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
                 height_m: if el.category == Category::Pipe { self.width_mm } else { self.height_mm } / 1000.0 });
         }
@@ -83,6 +102,36 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_beam_is_placed_from_the_options_bar_shown_in_3d_and_undone() {
+        let mut app = Desktop::sample();
+        app.choose_tool(crate::Tool::Beam);
+        (app.width_mm, app.height_mm, app.elevation_mm) = (200.0, 400.0, 2800.0);
+        app.axis_mm = [1000.0, 1000.0, 5000.0, 1000.0];
+        let before = crate::view3d::batch(&app.document).elements.len();
+        app.place_beam_from_controls();
+        let id = app.selected_id().expect("the new beam is selected");
+        assert!(app.tool == crate::Tool::Select);
+        let el = app.document.get(id).unwrap();
+        assert_eq!(el.category, Category::Beam);
+        assert!(!app.has_pending_edit(), "the controls show the beam");
+        let batch = crate::view3d::batch(&app.document);
+        assert_eq!(batch.elements.len(), before + 1);
+        assert!(batch.elements.iter().any(|e| e.kind == openbim_view::Kind::Beam && e.id == id.0));
+        // 4 m long, 0.2 x 0.4: the mesh is that box centred at 2.8 m
+        let v = app.document.mesh(id).unwrap().vertices;
+        let (lo, hi) = (v.iter().map(|p| p[2]).fold(f64::MAX, f64::min), v.iter().map(|p| p[2]).fold(f64::MIN, f64::max));
+        assert!((lo - 2.6).abs() < 1e-9 && (hi - 3.0).abs() < 1e-9, "{lo} {hi}");
+        // a zero-length beam is refused and nothing is added
+        app.choose_tool(crate::Tool::Beam);
+        app.axis_mm = [1000.0, 1000.0, 1000.0, 1000.0];
+        let n = app.document.elements().count();
+        app.place_beam_from_controls();
+        assert_eq!(app.document.elements().count(), n);
+        assert!(app.message.contains("rejected"));
+        app.undo_document();
+        assert!(app.document.get(id).is_none(), "undo removes the beam");
+    }
     #[test]
     fn category_controls_update_the_selected_geometry_and_undo() {
         let mut app = Desktop::sample();

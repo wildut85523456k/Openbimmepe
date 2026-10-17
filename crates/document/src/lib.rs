@@ -17,6 +17,9 @@ pub struct ElementId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
     Wall,
+    /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
+    /// `height_m` deep, `elevation_m` the height of its centre line above the level.
+    Beam,
     Duct,
     Pipe,
     Equipment,
@@ -141,6 +144,18 @@ impl Document {
     pub fn revision(&self) -> u64 { self.revision }
     /// Where the project is, if it has been set.
     pub fn site(&self) -> Option<Site> { self.site }
+    /// The next element number that no element has.
+    pub fn next_id(&self) -> ElementId { ElementId(self.elements.keys().next_back().map_or(1, |k| k.0 + 1)) }
+    /// Places a beam on `level` from `start` to `end` in one undoable transaction.
+    pub fn place_beam(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Beam).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Beam, name: format!("Beam {n}"), width_m, height_m: depth_m, elevation_m },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } },
+        ])?;
+        Ok(id)
+    }
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }

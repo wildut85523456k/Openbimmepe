@@ -127,6 +127,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     for (id, category, mesh) in meshes {
         let color = match category {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
+            Category::Beam => Color32::from_rgb(176, 140, 104),
             Category::Duct => Color32::from_rgb(70, 157, 194),
             Category::Pipe => Color32::from_rgb(136, 153, 166),
             _ => Color32::GRAY,
