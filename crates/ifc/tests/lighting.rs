@@ -39,6 +39,11 @@ fn luminaires_of_different_types_carry_their_own_lighting_in_the_schedule_and_th
     let mut f = Family { name: "Panel".into(), category: Category::LightFixture, ..Default::default() };
     let r = types_from_imports(&mut f, &imports).unwrap();
     assert_eq!(r.added.len(), 2);
+    for t in &mut f.types {
+        let l = t.lighting.as_mut().unwrap();
+        l.picture = Some(format!("{}.png", t.name));
+        l.datasheet = Some(format!("{}.pdf", t.name));
+    }
     let c = f.compile().unwrap();
     let inst = |t: &str| c.solve(&Request { type_name: Some(t), ..Default::default() }).unwrap();
     let item = |id: u64, t: &str, x: f64| FamilyItem { id, name: format!("L{id}"), family: 0, type_name: Some(t.into()), frame: Frame { origin: [x, 0.0, 2.5], x: [1.0, 0.0] }, instance: inst(t), host: None };
@@ -52,10 +57,13 @@ fn luminaires_of_different_types_carry_their_own_lighting_in_the_schedule_and_th
     let col = |name: &str| HEADER.trim_end().split(',').position(|h| h == name).unwrap();
     assert_eq!(rows.iter().map(|r| r[col("photometry")]).collect::<Vec<_>>(), vec!["Lo.ies", "Hi.ies", "Hi.ies"]);
     assert_eq!(rows.iter().map(|r| r[col("power_w")]).collect::<Vec<_>>(), vec!["20", "40", "40"]);
+    assert_eq!(rows.iter().map(|r| r[col("picture")]).collect::<Vec<_>>(), vec!["Lo.png", "Hi.png", "Hi.png"]);
+    assert_eq!(rows.iter().map(|r| r[col("datasheet")]).collect::<Vec<_>>(), vec!["Lo.pdf", "Hi.pdf", "Hi.pdf"]);
     assert!(warns.iter().all(|w| !w.contains("power")), "{warns:?}");
     // the file: two light fixture types, each with its own photometric file
     let out = export(&scene).unwrap();
     assert_eq!(out.report.types, 2);
     assert!(out.text.contains("'PhotometryFile',$,IFCLABEL('Lo.ies')") && out.text.contains("'PhotometryFile',$,IFCLABEL('Hi.ies')"));
+    assert!(out.text.contains("'PictureFile',$,IFCLABEL('Lo.png')") && out.text.contains("'DatasheetFile',$,IFCLABEL('Hi.pdf')"));
     assert!(out.text.contains("'TotalWattage',$,IFCREAL(20.0)") && out.text.contains("'TotalWattage',$,IFCREAL(40.0)"));
 }

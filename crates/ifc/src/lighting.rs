@@ -125,7 +125,7 @@ pub fn room_schedule(scene: &Scene) -> (String, Vec<String>) {
     (out, warnings)
 }
 
-pub const HEADER: &str = "id,name,level,room,room_usage,x_m,y_m,z_m,rotation_deg,mount_height_m,mounting,photometry,manufacturer,article,flux_lm,power_w,cct_k,cri,dimming,ip,missing_for_calculation\n";
+pub const HEADER: &str = "id,name,level,room,room_usage,x_m,y_m,z_m,rotation_deg,mount_height_m,mounting,photometry,manufacturer,article,flux_lm,power_w,cct_k,cri,dimming,ip,picture,datasheet,missing_for_calculation\n";
 
 /// The schedule as comma separated text, plus a warning for each luminaire whose family lacks data a calculation needs.
 pub fn luminaire_schedule(scene: &Scene) -> (String, Vec<String>) {
@@ -152,9 +152,9 @@ pub fn luminaire_schedule(scene: &Scene) -> (String, Vec<String>) {
         let text = |v: &Option<String>| v.as_deref().map(csv_safe).unwrap_or_default();
         let rot = it.frame.x[1].atan2(it.frame.x[0]).to_degrees();
         out.push_str(&format!(
-            "{},{},{},{},{},{:.4},{:.4},{:.4},{:.2},{:.4},{},{},{},{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{:.4},{:.4},{:.4},{:.2},{:.4},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             it.id, csv_safe(&it.name), level, rname, usage, p[0], p[1], z, rot, z - base, l.mounting.name(),
-            text(&l.photometry), text(&l.manufacturer), text(&l.article), num(l.flux_lm), num(l.power_w), num(l.cct_k), num(l.cri), num(l.dimming), text(&l.ip),
+            text(&l.photometry), text(&l.manufacturer), text(&l.article), num(l.flux_lm), num(l.power_w), num(l.cct_k), num(l.cri), num(l.dimming), text(&l.ip), text(&l.picture), text(&l.datasheet),
             missing.join(" | ")
         ));
     }

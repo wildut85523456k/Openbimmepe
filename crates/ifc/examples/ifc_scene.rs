@@ -92,7 +92,7 @@ pub fn build_scene(edit: bool) -> Scene {
         ],
         solids: vec![SolidDef::new("body", ("x0", "x1"), ("y0", "y1"), ("z0", "z1"))],
         category: Category::LightFixture,
-        lighting: Some(LightingDef { photometry: Some("test.ldt".into()), manufacturer: Some("Maker".into()), article: Some("A-1".into()), flux_lm: Some(3000.0), power_w: Some(28.0), cct_k: Some(4000.0), cri: Some(80.0), ip: Some("IP20".into()), dimming: Some(0.8), mounting: Mounting::Recessed }),
+        lighting: Some(LightingDef { photometry: Some("test.ldt".into()), manufacturer: Some("Maker".into()), article: Some("A-1".into()), flux_lm: Some(3000.0), power_w: Some(28.0), cct_k: Some(4000.0), cri: Some(80.0), ip: Some("IP20".into()), dimming: Some(0.8), mounting: Mounting::Recessed, picture: Some("lum.png".into()), datasheet: Some("lum.pdf".into()) }),
         ..Default::default()
     };
     let lum_family = fams.len() + 2;

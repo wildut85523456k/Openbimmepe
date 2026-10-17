@@ -128,3 +128,100 @@ fn variant_names_that_are_taken_get_a_number_and_a_bad_family_is_left_alone() {
     let r = types_from_imports(&mut g, &junk).unwrap();
     assert!(r.added.is_empty() && r.warnings.len() == 1 && g.types.is_empty());
 }
+
+fn png() -> Vec<u8> {
+    let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    v.extend([0u8; 8]);
+    v
+}
+fn jpg() -> Vec<u8> {
+    vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 0]
+}
+
+#[test]
+fn pictures_and_data_sheets_are_judged_by_their_content_and_their_names() {
+    assert_eq!(attachment_kind(&png()), Some(AttachmentKind::Png));
+    assert_eq!(attachment_kind(&jpg()), Some(AttachmentKind::Jpeg));
+    assert_eq!(attachment_kind(b"%PDF-1.7\n"), Some(AttachmentKind::Pdf));
+    assert_eq!(attachment_kind(b"%PDF"), None);
+    assert_eq!(attachment_kind(&[0xFF, 0xD8]), None);
+    assert_eq!(attachment_kind(b""), None);
+    assert!(check_attachment("picture", "p.png", &png()).is_ok());
+    assert!(check_attachment("picture", "P.JPG", &jpg()).is_ok());
+    assert!(check_attachment("picture", "p.jpeg", &jpg()).is_ok());
+    assert!(check_attachment("datasheet", "d.pdf", b"%PDF-1.4").is_ok());
+    // a picture that is really a PDF, or named for the wrong kind
+    assert!(check_attachment("picture", "p.png", b"%PDF-1.4")
+        .unwrap_err()
+        .contains("PNG or JPEG"));
+    assert!(check_attachment("picture", "p.png", &jpg())
+        .unwrap_err()
+        .contains("does not match"));
+    assert!(check_attachment("picture", "p.jpg", &png())
+        .unwrap_err()
+        .contains("does not match"));
+    assert!(check_attachment("datasheet", "d.pdf", &png())
+        .unwrap_err()
+        .contains("PDF"));
+    assert!(check_attachment("datasheet", "d.png", b"%PDF-1.4")
+        .unwrap_err()
+        .contains(".pdf"));
+    assert!(check_attachment("picture", "a/p.png", &png())
+        .unwrap_err()
+        .contains("folder"));
+    assert!(check_attachment("picture", " ", &png())
+        .unwrap_err()
+        .contains("empty"));
+    assert!(check_attachment("photometry", "p.png", &png())
+        .unwrap_err()
+        .contains("role"));
+    // the names in the lighting data
+    let f = full();
+    let ok = LightingDef {
+        picture: Some("p.PNG".into()),
+        datasheet: Some("d.Pdf".into()),
+        ..f.clone()
+    };
+    assert!(lum(ok).compile().is_ok());
+    assert!(why(LightingDef {
+        picture: Some("p.gif".into()),
+        ..f.clone()
+    })
+    .contains("picture"));
+    assert!(why(LightingDef {
+        picture: Some("a/p.png".into()),
+        ..f.clone()
+    })
+    .contains("folder"));
+    assert!(why(LightingDef {
+        datasheet: Some("d.png".into()),
+        ..f.clone()
+    })
+    .contains("data sheet"));
+    assert!(why(LightingDef {
+        datasheet: Some("a\\d.pdf".into()),
+        ..f.clone()
+    })
+    .contains("folder"));
+    assert!(why(LightingDef {
+        picture: Some(" ".into()),
+        ..f.clone()
+    })
+    .contains("empty"));
+    // the photometry import keeps a picture and a data sheet that were already set
+    let base = LightingDef {
+        picture: Some("p.png".into()),
+        datasheet: Some("d.pdf".into()),
+        ..Default::default()
+    };
+    let p = openbim_photo::parse(
+        b"IESNA:LM-63-2002\nTILT=NONE\n1 -1 1 3 1 1 2 0.6 0.6 0\n1 1 10\n0 45 90\n0\n5 5 5\n",
+        "a.ies",
+    )
+    .unwrap();
+    let l = LightingDef::from_photometry(&p, "a.ies", base);
+    assert_eq!(
+        (l.picture.as_deref(), l.datasheet.as_deref()),
+        (Some("p.png"), Some("d.pdf"))
+    );
+}

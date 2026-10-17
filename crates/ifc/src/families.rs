@@ -234,6 +234,11 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                     if let Some(f) = &l.photometry {
                         own.push(("PhotometryFile", Val::Label(f.clone())));
                     }
+                    for (n, f) in [("PictureFile", &l.picture), ("DatasheetFile", &l.datasheet)] {
+                        if let Some(f) = f {
+                            own.push((n, Val::Label(f.clone())));
+                        }
+                    }
                     for (n, v) in [("LuminousFlux", l.flux_lm), ("ColourTemperature", l.cct_k), ("ColourRenderingIndex", l.cri), ("DimmingLevel", l.dimming)] {
                         if let Some(v) = v {
                             own.push((n, Val::Real(v)));

@@ -61,6 +61,51 @@ pub struct LightingDef {
     /// share of the flux used, 0 to 1 (1 = full output)
     pub dimming: Option<f64>,
     pub mounting: Mounting,
+    /// a picture of the luminaire (`.png`, `.jpg` or `.jpeg`) kept with the project under the role "picture";
+    /// shown where the luminaire is chosen and printed in reports
+    pub picture: Option<String>,
+    /// the manufacturer's data sheet (`.pdf`) kept with the project under the role "datasheet"
+    pub datasheet: Option<String>,
+}
+
+/// The file kinds a luminaire picture or data sheet may have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachmentKind {
+    Png,
+    Jpeg,
+    Pdf,
+}
+
+/// What a file really is, judged by its first bytes and not by its name; None when it is none of the kinds above.
+pub fn attachment_kind(data: &[u8]) -> Option<AttachmentKind> {
+    if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some(AttachmentKind::Png)
+    } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(AttachmentKind::Jpeg)
+    } else if data.starts_with(b"%PDF-") {
+        Some(AttachmentKind::Pdf)
+    } else {
+        None
+    }
+}
+
+/// Check a file about to be kept as a luminaire picture (role "picture", PNG or JPEG) or data sheet (role "datasheet",
+/// PDF): the content must be of that kind, whatever the name says, and the name must fit the kind.
+pub fn check_attachment(role: &str, name: &str, data: &[u8]) -> Result<(), &'static str> {
+    let l = name.to_ascii_lowercase();
+    if name.contains(['/', '\\']) || name.trim().is_empty() {
+        return Err("the file name must not be empty or contain a folder");
+    }
+    match (role, attachment_kind(data)) {
+        ("picture", Some(AttachmentKind::Png)) if l.ends_with(".png") => Ok(()),
+        ("picture", Some(AttachmentKind::Jpeg)) if l.ends_with(".jpg") || l.ends_with(".jpeg") => Ok(()),
+        ("picture", Some(AttachmentKind::Png | AttachmentKind::Jpeg)) => Err("the picture's name does not match its content (.png or .jpg)"),
+        ("picture", _) => Err("a picture must be a PNG or JPEG file"),
+        ("datasheet", Some(AttachmentKind::Pdf)) if l.ends_with(".pdf") => Ok(()),
+        ("datasheet", Some(AttachmentKind::Pdf)) => Err("the data sheet's name must end in .pdf"),
+        ("datasheet", _) => Err("a data sheet must be a PDF file"),
+        _ => Err("the role is \"picture\" or \"datasheet\""),
+    }
 }
 
 pub const MAX_LIGHT_FLUX: f64 = 1.0e7;
@@ -83,11 +128,13 @@ impl LightingDef {
             ip: base.ip,
             dimming: base.dimming,
             mounting: base.mounting,
+            picture: base.picture,
+            datasheet: base.datasheet,
         }
     }
     pub(crate) fn check(&self) -> Result<(), FamilyError> {
         let bad = |why: &'static str| Err(FamilyError::BadMeta(why));
-        for (what, v) in [("photometry file", &self.photometry), ("manufacturer", &self.manufacturer), ("article number", &self.article), ("IP code", &self.ip)] {
+        for (what, v) in [("photometry file", &self.photometry), ("manufacturer", &self.manufacturer), ("article number", &self.article), ("IP code", &self.ip), ("picture file", &self.picture), ("data sheet file", &self.datasheet)] {
             if let Some(s) = v {
                 if s.trim().is_empty() {
                     return bad("a lighting text is empty");
@@ -99,6 +146,17 @@ impl LightingDef {
             let l = p.to_ascii_lowercase();
             if !(l.ends_with(".ies") || l.ends_with(".ldt")) || p.contains(['/', '\\']) {
                 return bad("the photometry must be the name of an .ies or .ldt file, without a folder");
+            }
+        }
+        if let Some(p) = &self.picture {
+            let l = p.to_ascii_lowercase();
+            if !(l.ends_with(".png") || l.ends_with(".jpg") || l.ends_with(".jpeg")) || p.contains(['/', '\\']) {
+                return bad("the picture must be the name of a .png or .jpg file, without a folder");
+            }
+        }
+        if let Some(p) = &self.datasheet {
+            if !p.to_ascii_lowercase().ends_with(".pdf") || p.contains(['/', '\\']) {
+                return bad("the data sheet must be the name of a .pdf file, without a folder");
             }
         }
         let pos = |v: Option<f64>, max: f64| v.is_none_or(|x| x.is_finite() && x > 0.0 && x <= max);
