@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{BeamSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabKind, SlabSpec, Usage};
+use openbim_document::{BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -24,8 +24,9 @@ impl Desktop {
             if let (Category::Footing, Some(Geometry::Pad { thickness_m, .. })) = (el.category, el.geometry) { (self.material_pick, self.footing_thickness_mm) = (el.material, thickness_m * 1000.0); }
             if el.category == Category::WallFooting { self.material_pick = el.material; }
             if el.category == Category::Beam { self.join_pick = el.join_ends; }
+            if el.category == Category::BeamSystem { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
-            if matches!(el.category, Category::Beam | Category::Column) {
+            if matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
                 (self.section_pick, self.web_mm, self.flange_mm) = match el.section {
                     Section::Rectangle => (0, self.web_mm, self.flange_mm),
@@ -51,10 +52,10 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
-        let section = matches!(el.category, Category::Beam | Category::Column) && {
+        let section = matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && {
             let want = self.section_from_controls();
             match (el.section, want) {
                 (Section::IShape { web_m: a, flange_m: b }, Section::IShape { web_m: c, flange_m: d }) => differs(a * 1000.0, c * 1000.0) || differs(b * 1000.0, d * 1000.0),
@@ -69,7 +70,8 @@ impl Desktop {
                     .any(|(a, b)| differs(a * 1000.0, b)),
             _ => false,
         };
-        let kind = (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
+        let system = el.category == Category::BeamSystem && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(el.angle_deg, self.angle_deg) || el.usage != self.usage_pick || el.material != self.material_pick);
+        let kind = system || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
             || (el.category == Category::WallFooting && el.material != self.material_pick)
             || (el.category == Category::Beam && el.join_ends != self.join_pick)
@@ -182,6 +184,16 @@ impl Desktop {
     /// Lays the slab drawn so far on `level` with the thickness, top offset, kind and material of the options bar.
     pub(crate) fn finish_slab(&mut self, level: ElementId) {
         let m = |v: f64| v / 1000.0;
+        if self.tool == crate::Tool::BeamSystem {
+            let spec = BeamSystemSpec { outline: self.slab_points.clone(), spacing_m: m(self.spacing_mm), angle_deg: self.angle_deg, width_m: m(self.width_mm),
+                depth_m: if self.section_pick == 1 { m(self.width_mm) } else { m(self.height_mm) }, elevation_m: m(self.elevation_mm), section: self.section_from_controls(),
+                usage: self.usage_pick, material: self.material_pick };
+            match self.document.place_beam_system(level, &spec) {
+                Ok(id) => { let n = self.document.system_beams(id).len(); self.slab_points.clear(); self.message = format!("Beam system {} placed with {n} beams; undo removes it", id.0); }
+                Err(error) => self.message = format!("Beam system rejected ({error:?}); Backspace takes a corner back"),
+            }
+            return;
+        }
         let spec = SlabSpec { outline: self.slab_points.clone(), thickness_m: m(self.slab_thickness_mm), top_offset_m: m(self.slab_offset_mm),
             kind: self.slab_kind_pick, material: self.material_pick };
         match self.document.place_slab(level, &spec) {
@@ -215,6 +227,19 @@ impl Desktop {
         if matches!(el.category, Category::Footing | Category::WallFooting) {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 });
             commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
+        if el.category == Category::BeamSystem {
+            let Some(Geometry::Area { level }) = el.geometry else { return; };
+            let _ = level;
+            let m = |v: f64| v / 1000.0;
+            let spec = BeamSystemSpec { outline: el.outline.clone(), spacing_m: m(self.spacing_mm), angle_deg: self.angle_deg, width_m: m(self.width_mm),
+                depth_m: if self.section_pick == 1 { m(self.width_mm) } else { m(self.height_mm) }, elevation_m: m(self.elevation_mm), section: self.section_from_controls(),
+                usage: self.usage_pick, material: self.material_pick };
+            match self.document.edit_beam_system(id, &spec) {
+                Ok(()) => { self.sync_duct_controls(); self.message = format!("Beam system {} updated; its beams were made again", id.0); }
+                Err(error) => self.message = format!("Edit rejected: {error:?}"),
+            }
+            return;
         }
         if el.category == Category::Slab {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.width_mm / 1000.0 });
@@ -619,5 +644,30 @@ mod tests {
         assert!(!app.document.get(beam).unwrap().join_ends[0]);
         app.undo_document();
         assert!(app.document.get(beam).unwrap().join_ends[0]);
+    }
+
+    #[test]
+    fn a_beam_system_is_drawn_as_an_area_edited_by_spacing_and_exported_as_beams() {
+        let mut app = Desktop::sample();
+        app.run_command("beam_system", "Beam System");
+        assert!(app.tool == Tool::BeamSystem && app.usage_pick == Usage::Joist);
+        (app.spacing_mm, app.angle_deg, app.width_mm, app.height_mm, app.elevation_mm) = (1000.0, 0.0, 100.0, 200.0, 2800.0);
+        app.material_pick = openbim_document::Material::Timber;
+        for p in [[0.0, 0.0], [6.0, 0.0], [6.0, 4.0], [0.0, 4.0]] { app.slab_click(ElementId(10), p, false); }
+        app.slab_click(ElementId(10), [0.0, 0.0], true);
+        let sys = app.document.elements().find(|e| e.category == Category::BeamSystem).expect("placed").id;
+        assert_eq!(app.document.system_beams(sys).len(), 4);
+        // every beam is a framing member in 3D and in the IFC file; the system itself is neither
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCBEAM(").count(), 4);
+        // changing the spacing makes the beams again
+        app.select_element(Some(sys));
+        assert!(!app.has_pending_edit());
+        app.spacing_mm = 2000.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.system_beams(sys).len(), 2);
+        app.undo_document();
+        assert_eq!(app.document.system_beams(sys).len(), 4);
     }
 }

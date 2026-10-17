@@ -23,7 +23,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing, WallFooting }
+enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing, WallFooting, BeamSystem }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -55,6 +55,9 @@ struct Desktop {
     beam_level: Option<ElementId>,
     /// the corners of the slab being drawn in a plan view
     slab_points: Vec<[f64; 2]>,
+    /// beam system: the distance between its beams and their direction
+    spacing_mm: f64,
+    angle_deg: f64,
     slab_thickness_mm: f64,
     /// how far above its level the top of a new slab is
     slab_offset_mm: f64,
@@ -91,7 +94,7 @@ impl Desktop {
     }
 
     fn sample() -> Self {
-        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing", "Wall Footing"])
+        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing", "Wall Footing", "Beam System"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
             ("Duct", &["D D"]),
@@ -102,6 +105,7 @@ impl Desktop {
             ("Slab", &["S L"]),
             ("Footing", &["F T"]),
             ("Wall Footing", &["W F"]),
+            ("Beam System", &["B S"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
@@ -112,7 +116,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
-            slab_points: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), spacing_mm: 600.0, angle_deg: 0.0, slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -136,6 +140,7 @@ impl Desktop {
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
             Tool::Footing => "Isolated footing: click its place in a plan view; it is as wide and long as the options bar says, under the level (Esc ends).".into(),
             Tool::WallFooting => "Wall footing: click a wall in a plan view; the footing runs under it and follows it (Esc ends).".into(),
+            Tool::BeamSystem => "Beam system: click the corners of the area in a plan view, then Enter, a click on the first corner or Finish lays parallel beams at the spacing and angle of the options bar (Esc cancels).".into(),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -191,6 +196,7 @@ impl Desktop {
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
             "footing" => self.choose_tool(Tool::WallFooting),
+            "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),
             "slab" => { self.slab_kind_pick = openbim_document::SlabKind::Foundation; self.choose_tool(Tool::Slab) }
             "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
@@ -232,7 +238,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

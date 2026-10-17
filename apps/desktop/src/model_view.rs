@@ -1,7 +1,7 @@
 //! Orthographic plan and orbitable 3D projection of document-derived meshes.
 //! Painter-based CPU projection is an initial small-model renderer, not a full
 //! depth-buffered GPU BIM engine (cut planes/joins/hidden-line are future work).
-use crate::{Desktop, ElementId, View};
+use crate::{Desktop, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry};
 
@@ -129,7 +129,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     for (id, category, mesh) in meshes {
         let color = match category {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
-            Category::Beam => Color32::from_rgb(176, 140, 104),
+            Category::Beam | Category::BeamSystem => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
             Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
@@ -165,7 +165,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.footing_click(level_id, to_model(p)); } }
-    } else if app.tool == crate::Tool::Slab && !three_d {
+    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem) && !three_d {
         // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;

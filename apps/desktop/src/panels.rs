@@ -68,12 +68,13 @@ fn read_only_group(ui: &mut egui::Ui, name: &str, query: &str, rows: &[(&str, &s
 }
 
 #[derive(Clone, Copy)]
-enum Field { Thickness, Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
+enum Field { Spacing, Angle, Thickness, Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
 
 fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Field] {
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
+        C::BeamSystem => &[Field::Spacing, Field::Angle, Field::Width, Field::Height, Field::Elevation],
         C::Footing => &[Field::Width, Field::Height, Field::Thickness, Field::Elevation],
         C::WallFooting => &[Field::Width, Field::Height, Field::Elevation],
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
@@ -124,6 +125,10 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
     use openbim_document::Category as C;
     match field {
         Field::Thickness => "Thickness (mm)",
+        Field::Spacing => "Spacing (mm)", Field::Angle => "Angle (deg)",
+        Field::Height if category == C::BeamSystem => "Beam Depth (mm)",
+        Field::Width if category == C::BeamSystem => "Beam Width (mm)",
+        Field::Elevation if category == C::BeamSystem => "Beam Centre Elevation (mm)",
         Field::Height if category == C::Footing => "Length (mm)",
         Field::Height if category == C::WallFooting => "Depth (mm)",
         Field::Elevation if category == C::Footing || category == C::WallFooting => "Top Offset (mm)",
@@ -146,6 +151,7 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
 
 fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
     let value = match field {
+        Field::Spacing => &mut app.spacing_mm, Field::Angle => &mut app.angle_deg,
         Field::Thickness => &mut app.footing_thickness_mm, Field::Width | Field::Diameter => &mut app.width_mm, Field::Web => &mut app.web_mm, Field::Flange => &mut app.flange_mm, Field::Height => &mut app.height_mm,
         Field::Elevation => &mut app.elevation_mm, Field::Slope => &mut app.slope_percent,
         Field::X1 => &mut app.axis_mm[0], Field::Y1 => &mut app.axis_mm[1],
@@ -182,6 +188,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Footing => ("Structural Foundations (1)", "Isolated Footing", "foundation"),
         C::WallFooting => ("Structural Foundations (1)", "Strip Footing", "footing"),
         C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
+        C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
@@ -222,6 +229,22 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                 ui.label(field_name(field, cat));
                 editor(app, ui, field);
             }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::BeamSystem {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Beam System");
+            ui.separator();
+            section_combo(app, ui);
+            usage_material_combos(app, ui, true);
+            for field in dimensions(openbim_document::Category::BeamSystem, 0).iter().copied() {
+                ui.label(field_name(field, openbim_document::Category::BeamSystem));
+                editor(app, ui, field);
+            }
+            ui.label(format!("{} corners", app.slab_points.len()));
+            if ui.add_enabled(app.slab_points.len() >= 3, egui::Button::new("Finish")).clicked() { app.finish_slab(app.plan_level()); }
+            if ui.add_enabled(!app.slab_points.is_empty(), egui::Button::new("Clear")).clicked() { app.slab_points.clear(); }
         });
         return;
     }
@@ -347,14 +370,23 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let (corners, area) = (el.outline.len().to_string(), format!("{area:.3}"));
                         read_only_group(ui, "Derived Geometry", &query, &[("Corners", &corners), ("Area (m²)", &area)]);
                     }
-                    if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column) { section_combo(app, ui); usage_material_combos(app, ui, el.category == openbim_document::Category::Beam); }
+                    if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column | openbim_document::Category::BeamSystem) { section_combo(app, ui); usage_material_combos(app, ui, el.category != openbim_document::Category::Column); }
+                    if el.category == openbim_document::Category::BeamSystem {
+                        let n = app.document.system_beams(el.id).len().to_string();
+                        read_only_group(ui, "Derived Geometry", &query, &[("Beams", &n)]);
+                    }
+                    if let (openbim_document::Category::Beam, Some(p)) = (el.category, el.parent) {
+                        let name = app.document.get(p).map_or("Missing system", |s| s.name.as_str());
+                        read_only_group(ui, "Constraints", &query, &[("Beam System", name)]);
+                        if ui.button("Select system").clicked() { app.select_element(Some(p)); }
+                    }
                     edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     if el.category == openbim_document::Category::Beam {
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut app.join_pick[0], "Join at start");
                             ui.checkbox(&mut app.join_pick[1], "Join at end");
                         });
-                        if let Some(ext) = app.document.beam_extent(&el) {
+                        if let Some(ext) = app.document.beam_extent(el) {
                             let (cut, a, b) = (format!("{:.1}", ext.cut_length() * 1000.0), format!("{:.1}", ext.cut_start * 1000.0), format!("{:.1}", ext.cut_end * 1000.0));
                             read_only_group(ui, "Joins", &query, &[("Cut Length (mm)", &cut), ("Cut at Start (mm)", &a), ("Cut at End (mm)", &b)]);
                         }

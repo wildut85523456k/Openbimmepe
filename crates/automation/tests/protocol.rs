@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 fn request() -> PreviewRequest {
     PreviewRequest { version:1,request_id:"test-run".into(),snapshot:Snapshot {
         document_id:"test-document".into(),revision:42,elements:vec![SnapshotElement {
-            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slab_kind:None,
+            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slab_kind:None,spacing_m:None,angle_deg:None,parent:None,join_ends:None,
         }],
     },graph:Graph::example(vec![1]) }
 }
@@ -78,11 +78,15 @@ fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
     d.place_footing(ElementId(10), [2.0, 2.0], &openbim_document::FootingSpec { width_m: 1.5, length_m: 2.0, thickness_m: 0.5, top_offset_m: -0.1, material: Material::Concrete }).unwrap();
     let wall = d.elements().find(|e| e.category == openbim_document::Category::Wall).unwrap().id;
     d.place_wall_footing(wall, &openbim_document::WallFootingSpec { width_m: 0.6, depth_m: 0.4, top_offset_m: -0.05, material: Material::Concrete }).unwrap();
+    d.place_beam_system(ElementId(10), &openbim_document::BeamSystemSpec { outline: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [0.0, 3.0]], spacing_m: 1.0, angle_deg: 90.0, width_m: 0.1, depth_m: 0.2, elevation_m: 2.8, section: Section::Rectangle, usage: Usage::Joist, material: Material::Timber }).unwrap();
+    let first = d.elements().find(|e| e.category == openbim_document::Category::Beam && e.parent.is_some()).unwrap().id;
+    d.transact(d.revision(), &[openbim_document::Command::SetJoins { id: first, start: false, end: true }]).unwrap();
     let json = Snapshot::capture("doc", &d).to_json().unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();
     let rebuilt = back.materialize().unwrap();
     for el in d.elements() {
         let r = rebuilt.get(el.id).unwrap_or_else(|| panic!("{:?} lost", el.id));
+        assert_eq!((r.spacing_m, r.angle_deg, r.parent, r.join_ends), (el.spacing_m, el.angle_deg, el.parent, el.join_ends), "{}", el.name);
         assert_eq!((r.category, r.width_m, r.height_m, r.elevation_m, r.slope_ratio, r.geometry, r.section, r.usage, r.material, &r.outline, r.slab_kind),
                    (el.category, el.width_m, el.height_m, el.elevation_m, el.slope_ratio, el.geometry, el.section, el.usage, el.material, &el.outline, el.slab_kind), "{}", el.name);
     }

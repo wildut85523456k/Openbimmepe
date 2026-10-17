@@ -29,6 +29,40 @@ fn valid_axis(start: [f64; 2], end: [f64; 2]) -> bool {
         && (end[0] - start[0]).hypot(end[1] - start[1]) > 1e-6
 }
 
+/// The axes of the beams of a system: lines `spacing` apart at `angle_deg` from the x axis, centred on the outline
+/// and cut to it, so that a concave outline gives several pieces on a line. Pieces shorter than 50 mm are dropped.
+pub fn system_lines(outline: &[[f64; 2]], angle_deg: f64, spacing: f64) -> Vec<([f64; 2], [f64; 2])> {
+    if outline.len() < 3 || spacing.is_nan() || spacing <= 0.0 || spacing.is_infinite() { return Vec::new(); }
+    let a = angle_deg.to_radians();
+    let (d, n) = ([a.cos(), a.sin()], [-a.sin(), a.cos()]);
+    let across = |p: [f64; 2]| p[0] * n[0] + p[1] * n[1];
+    let along = |p: [f64; 2]| p[0] * d[0] + p[1] * d[1];
+    let (lo, hi) = outline.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(across(*p)), h.max(across(*p))));
+    let count = (((hi - lo) / spacing) + 1e-9).floor().max(1.0) as usize;
+    if count > 2000 { return vec![([0.0; 2], [0.0; 2]); 2001]; }
+    let mid = (lo + hi) / 2.0;
+    let mut out = Vec::new();
+    for k in 0..count {
+        let o = mid + (k as f64 - (count as f64 - 1.0) / 2.0) * spacing;
+        let mut ts = Vec::new();
+        for i in 0..outline.len() {
+            let (p, q) = (outline[i], outline[(i + 1) % outline.len()]);
+            let (sp, sq) = (across(p) - o, across(q) - o);
+            if (sp > 0.0) != (sq > 0.0) {
+                let t = sp / (sp - sq);
+                ts.push(along([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]));
+            }
+        }
+        ts.sort_by(f64::total_cmp);
+        for pair in ts.chunks_exact(2) {
+            if pair[1] - pair[0] < 0.05 { continue; }
+            let at = |s: f64| [o * n[0] + s * d[0], o * n[1] + s * d[1]];
+            out.push((at(pair[0]), at(pair[1])));
+        }
+    }
+    out
+}
+
 /// A beam's axis after its joins.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamExtent {
@@ -101,8 +135,12 @@ fn valid_ring(r: &[[f64; 2]]) -> bool {
 
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
     for el in elements.values() {
+        if let Some(p) = el.parent {
+            // a beam made by a beam system points at it
+            if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| s.category == Category::BeamSystem)) { return Err(EditError::InvalidElement); }
+        }
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
             Some(Geometry::OnWall { host }) => {
@@ -115,7 +153,8 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Area { level }) => {
-                el.category == Category::Slab && valid_ring(&el.outline)
+                matches!(el.category, Category::Slab | Category::BeamSystem) && valid_ring(&el.outline)
+                    && (el.category != Category::BeamSystem || (0.05..=1000.0).contains(&el.spacing_m))
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
                     && el.elevation_m.abs() <= 1e6
             }
@@ -229,6 +268,7 @@ impl Document {
             for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
         }
+        if el.category == Category::BeamSystem { return None; }
         if let Some(Geometry::Area { level }) = el.geometry {
             // the slab hangs from its top, which is `elevation_m` above the level
             let ring = &el.outline;
@@ -587,5 +627,38 @@ mod tests {
         assert!((ext(&d).b[0] - 5.0).abs() < 1e-9);
         // only beams have joins
         assert!(d.transact(d.revision(), &[Command::SetJoins { id: c1, start: false, end: true }]).is_err());
+    }
+
+    #[test]
+    fn a_beam_system_makes_parallel_beams_that_follow_its_edits_and_go_with_it() {
+        use crate::{BeamSystemSpec, Command, Section, Usage};
+        let mut d = Document::spatial_sample();
+        let spec = BeamSystemSpec { outline: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 4.0], [0.0, 4.0]], spacing_m: 1.0, angle_deg: 0.0, width_m: 0.1, depth_m: 0.2, elevation_m: 2.8, section: Section::Rectangle, usage: Usage::Joist, material: Material::Timber };
+        let sys = d.place_beam_system(ElementId(10), &spec).unwrap();
+        let kids = d.system_beams(sys);
+        assert_eq!(kids.len(), 4);
+        let k = d.get(kids[0]).unwrap();
+        assert_eq!((k.parent, k.category), (Some(sys), Category::Beam));
+        let Some(Geometry::Linear { start, end, .. }) = k.geometry else { panic!() };
+        assert!((end[0] - start[0] - 6.0).abs() < 1e-9 && (start[1] - end[1]).abs() < 1e-9);
+        // a concave outline cuts a line into pieces
+        let l = vec![[0.0, 0.0], [6.0, 0.0], [6.0, 4.0], [4.0, 4.0], [4.0, 2.0], [0.0, 2.0]];
+        assert!(system_lines(&l, 0.0, 1.0).len() >= 4);
+        assert!(system_lines(&l, 90.0, 1.5).len() >= 4);
+        // editing replaces the beams in one transaction; undo brings the old ones back
+        d.edit_beam_system(sys, &BeamSystemSpec { spacing_m: 2.0, angle_deg: 90.0, ..spec.clone() }).unwrap();
+        assert_eq!(d.system_beams(sys).len(), 3);
+        d.undo().unwrap();
+        assert_eq!(d.system_beams(sys).len(), 4);
+        // a bad spacing is refused, and nothing changes
+        let n = d.elements().count();
+        assert!(d.edit_beam_system(sys, &BeamSystemSpec { spacing_m: 0.0, ..spec.clone() }).is_err());
+        assert_eq!(d.elements().count(), n);
+        // a parent must be a beam system, and only beams have one
+        assert!(d.transact(d.revision(), &[Command::SetParent { id: kids[0], parent: Some(kids[1]) }]).is_err());
+        assert!(d.transact(d.revision(), &[Command::SetParent { id: sys, parent: None }]).is_err());
+        // deleting the system takes its beams along
+        d.delete_beam_system(sys).unwrap();
+        assert!(d.get(sys).is_none() && d.get(kids[0]).is_none());
     }
 }

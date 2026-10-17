@@ -114,7 +114,7 @@ const ARCHITECTURE: &[Group] = &[
 
 const STRUCTURE: &[Group] = &[
     Group { title: "Structure", commands: &[
-        c("beam", "Beam"), c("structural_wall", "Wall"), c("structural_column", "Column"),
+        c("beam", "Beam"), c("beam_system", "Beam System"), c("structural_wall", "Wall"), c("structural_column", "Column"),
         c("structural_floor", "Floor"), c("truss", "Truss"), c("brace", "Brace"), c("brace_frame", "Brace Frame"),
         c("framing", "Framing"),
     ]},

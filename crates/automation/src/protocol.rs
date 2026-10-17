@@ -70,6 +70,17 @@ pub struct SnapshotElement {
     /// the kind of a slab when it is not a Floor: Foundation
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub slab_kind:Option<String>,
+    /// a beam system: the distance between its beams and their direction (degrees)
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub spacing_m:Option<f64>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub angle_deg:Option<f64>,
+    /// the beam system a beam belongs to
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub parent:Option<u64>,
+    /// a beam: whether its start and end are joined to the columns they end in, when not both
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub join_ends:Option<[bool;2]>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +149,10 @@ impl Snapshot {
             material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
             outline: e.outline.clone(),
             slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
+            spacing_m: (e.category == Category::BeamSystem).then_some(e.spacing_m),
+            angle_deg: (e.category == Category::BeamSystem).then_some(e.angle_deg),
+            parent: e.parent.map(|p| p.0),
+            join_ends: (e.join_ends != [true; 2]).then_some(e.join_ends),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -150,7 +165,7 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),
@@ -177,6 +192,15 @@ impl Snapshot {
             if let Some(k) = &el.slab_kind {
                 let kind = openbim_document::SlabKind::ALL.into_iter().find(|x| x.name() == k).ok_or(format!("Unsupported slab kind {k}"))?;
                 ops.push(Command::SetSlabKind { id: ElementId(el.id), kind });
+            }
+            if let (Some(spacing_m), Some(angle_deg)) = (el.spacing_m, el.angle_deg) {
+                ops.push(Command::SetBeamSystem { id: ElementId(el.id), spacing_m, angle_deg });
+            }
+            if let Some(p) = el.parent {
+                ops.push(Command::SetParent { id: ElementId(el.id), parent: Some(ElementId(p)) });
+            }
+            if let Some([start, end]) = el.join_ends {
+                ops.push(Command::SetJoins { id: ElementId(el.id), start, end });
             }
             if !el.outline.is_empty() {
                 ops.push(Command::SetOutline { id: ElementId(el.id), outline: el.outline.clone() });

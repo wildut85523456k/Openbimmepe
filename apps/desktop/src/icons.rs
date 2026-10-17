@@ -26,6 +26,7 @@ pub static ICONS: &[Icon] = &[
     icon!("area"),
     icon!("backflow_preventer"),
     icon!("beam"),
+    icon!("beam_system"), // placeholder: the beam artwork until the approved package has its own
     icon!("brace"),
     icon!("brace_frame"),
     icon!("cable"),
