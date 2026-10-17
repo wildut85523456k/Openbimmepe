@@ -109,11 +109,23 @@ impl CallbackTrait for Draw {
     }
 }
 
+/// A datum drawn over the view as a dashed line, like a level or a grid (model coordinates).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Datum {
+    pub a: [f64; 3],
+    pub b: [f64; 3],
+    pub label: String,
+    /// a bubble with the label at both ends (grids); otherwise text at `a` (levels)
+    pub bubbles: bool,
+}
+
 /// A 3D view. Keep one per view; call `ui` every frame.
 pub struct Viewport3d {
     pub camera: Camera,
     pub style: Style,
     pub labels: CubeLabels,
+    /// Levels and grids to draw over the picture.
+    pub datums: Vec<Datum>,
     /// The section box, when it is on (model coordinates).
     pub section: Option<SectionBox>,
     /// The elements that are selected. Change it with `select`, so that the view redraws it.
@@ -136,7 +148,7 @@ impl Viewport3d {
     }
 
     pub fn new() -> Viewport3d {
-        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, labels: CubeLabels::en(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0 }
+        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0 }
     }
 
     /// Show a new batch (after an edit). The camera is not moved.
@@ -206,6 +218,7 @@ impl Viewport3d {
         if self.step_animation(now) { ui.ctx().request_repaint(); }
         let draw = Draw { camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), section: self.section, selection: self.selection.clone(), selection_generation: self.selection_generation, size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, draw));
+        self.paint_datums(ui, rect);
         self.paint_cube(ui, &cells, over_cube);
         resp
     }
@@ -267,6 +280,32 @@ impl Viewport3d {
                     sec.min[k] = a.min(z);
                     sec.max[k] = z.max(a);
                 });
+            }
+        }
+    }
+
+    fn paint_datums(&self, ui: &Ui, rect: Rect) {
+        let p = ui.painter().with_clip_rect(rect);
+        let colour = ui.visuals().weak_text_color();
+        let size = [rect.width() as f64, rect.height() as f64];
+        let at = |q: [f64; 3]| self.camera.project(q, size).map(|s| rect.min + Vec2::new(s[0] as f32, s[1] as f32));
+        for d in &self.datums {
+            let (Some(a), Some(b)) = (at(d.a), at(d.b)) else { continue };
+            let len = (b - a).length();
+            if len < 1.0 { continue; }
+            let dir = (b - a) / len;
+            let mut t = 0.0;
+            while t < len {
+                p.line_segment([a + dir * t, a + dir * (t + 7.0).min(len)], Stroke::new(1.0, colour));
+                t += 12.0;
+            }
+            if d.bubbles {
+                for end in [a, b] {
+                    p.circle(end + dir * if end == b { 11.0 } else { -11.0 }, 11.0, ui.visuals().panel_fill, Stroke::new(1.0, colour));
+                    p.text(end + dir * if end == b { 11.0 } else { -11.0 }, Align2::CENTER_CENTER, &d.label, FontId::proportional(12.0), colour);
+                }
+            } else {
+                p.text(a, Align2::LEFT_BOTTOM, &d.label, FontId::proportional(12.0), colour);
             }
         }
     }

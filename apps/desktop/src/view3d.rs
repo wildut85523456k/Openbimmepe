@@ -2,9 +2,9 @@
 //! styles, section box, click selection).
 use crate::Desktop;
 use eframe::egui;
-use openbim_document::{Category, Document, ElementId};
+use openbim_document::{Category, Document, ElementId, Geometry};
 use openbim_view::{Batch, Element, FaceKind, Kind};
-use openbim_viewport_egui::Style;
+use openbim_viewport_egui::{Datum, Style};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -54,10 +54,36 @@ pub fn batch(doc: &Document) -> Batch {
     b
 }
 
+/// Grids at the lowest level and a line for each level across the extent of the grids, as in the plan views.
+pub fn datums(doc: &Document) -> Vec<Datum> {
+    let base = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level))).map(|e| e.elevation_m).fold(f64::INFINITY, f64::min);
+    let base = if base.is_finite() { base } else { 0.0 };
+    let mut out = Vec::new();
+    let mut ends: Vec<[f64; 2]> = Vec::new();
+    for el in doc.elements() {
+        if let Some(Geometry::Grid { start, end }) = el.geometry {
+            out.push(Datum { a: [start[0], start[1], base], b: [end[0], end[1], base], label: el.name.clone(), bubbles: true });
+            ends.extend([start, end]);
+        }
+    }
+    if ends.is_empty() { return out; }
+    let left = ends.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+    let right = ends.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
+    let back = ends.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
+    for el in doc.elements() {
+        if matches!(el.geometry, Some(Geometry::Level)) {
+            out.push(Datum { a: [left, back, el.elevation_m], b: [right, back, el.elevation_m], label: format!("{}  {:.3} m", el.name, el.elevation_m), bubbles: false });
+        }
+    }
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    out
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // new geometry only when the document changed
     if app.view3d_revision != Some(app.document.revision()) {
         app.view3d.set_batch(Arc::new(batch(&app.document)));
+        app.view3d.datums = datums(&app.document);
         if app.view3d_revision.is_none() { app.view3d.zoom_to_fit(ui.available_width() as f64 / ui.available_height().max(1.0) as f64); }
         app.view3d_revision = Some(app.document.revision());
     }
@@ -114,6 +140,15 @@ mod tests {
         }
         // levels and grids are not solids
         assert!(b.elements.iter().all(|e| matches!(e.kind, Kind::Wall | Kind::Segment | Kind::Family)));
+    }
+
+    #[test]
+    fn levels_and_grids_are_datums_of_the_view() {
+        let d = datums(&Document::spatial_sample());
+        assert_eq!(d.iter().filter(|x| x.bubbles).count(), 6, "six grids");
+        let levels: Vec<_> = d.iter().filter(|x| !x.bubbles).collect();
+        assert_eq!(levels.len(), 2);
+        assert!(levels.iter().any(|l| (l.a[2] - 3.0).abs() < 1e-9 && l.label.contains("Level 2")));
     }
 
     #[test]
