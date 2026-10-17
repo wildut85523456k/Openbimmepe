@@ -1,0 +1,25 @@
+[package]
+name = "openbim-viewport-egui"
+version = "0.0.1"
+edition = "2021"
+description = "The 3D view as an egui widget drawn with wgpu: Revit mouse mapping, ViewCube, Shaded / Hidden Line / Wireframe"
+publish = false
+
+[dependencies]
+openbim-view = { path = "../view" }
+openbim-viewport = { path = "../viewport" }
+egui = { version = "0.36", default-features = false }
+egui-wgpu = { version = "0.36", default-features = false, features = ["fragile-send-sync-non-atomic-wasm"] }
+bytemuck = { version = "1.25", features = ["derive"] }
+
+[dev-dependencies]
+wgpu = { version = "30", default-features = false, features = ["vulkan"] }
+naga = { version = "30", features = ["wgsl-in"] }
+pollster = "1"
+openbim-arch = { path = "../arch" }
+openbim-geom = { path = "../geom" }
+openbim-ifc = { path = "../ifc" }
+openbim-place = { path = "../place" }
+
+[lints.rust]
+unsafe_code = "forbid"

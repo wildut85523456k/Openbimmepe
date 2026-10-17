@@ -37,7 +37,7 @@ const BACKGROUND: [u8; 3] = [255, 255, 255];
 const EDGE: [u8; 3] = [20, 20, 20];
 const CREASE_COS: f64 = 0.9; // edges between faces more than about 25 degrees apart
 
-fn kind_colour(k: Kind) -> [f64; 3] {
+pub(crate) fn kind_colour(k: Kind) -> [f64; 3] {
     match k {
         Kind::Wall => [0.82, 0.80, 0.76],
         Kind::Slab => [0.62, 0.62, 0.64],
@@ -51,7 +51,7 @@ fn kind_colour(k: Kind) -> [f64; 3] {
 }
 
 /// A stable muted colour for a material name.
-fn material_colour(name: &str) -> [f64; 3] {
+pub(crate) fn material_colour(name: &str) -> [f64; 3] {
     let mut h: u32 = 2166136261;
     for b in name.bytes() { h = (h ^ b as u32).wrapping_mul(16777619); }
     let c = |s: u32| 0.55 + ((h >> s) & 0xff) as f64 / 255.0 * 0.35;
@@ -182,4 +182,14 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
         }
     }
     img
+}
+
+/// The colour of triangle `ti` of the batch in a style, before light: the colour of its material in Shaded, otherwise
+/// the colour of its kind of element.
+pub fn base_colour(b: &Batch, ti: usize, style: Style) -> [f64; 3] {
+    let el = b.elements[b.tri_element[ti] as usize];
+    match (style, b.tri_material[ti]) {
+        (Style::Shaded, m) if m != u32::MAX => material_colour(&b.materials[m as usize]),
+        _ => kind_colour(el.kind),
+    }
 }
