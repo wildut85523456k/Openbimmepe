@@ -357,3 +357,26 @@ fn the_ifc2x3_export_writes_doors_and_windows_as_plain_boxes_and_counts_what_it_
     assert_eq!(w.len(), 1);
     assert!(w[0].contains("2 placed families"), "{}", w[0]);
 }
+
+#[test]
+fn a_swept_profile_is_written_turned_a_quarter_for_the_fixed_reference_sweep() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{compile_library, Category, Family, Request};
+    // a bar 0.04 wide (u) and 0.01 high (v) swept along x: IFC wants the profile's x along "up" and y to the right,
+    // so the corner (u 0.04, v 0.01) is written at (0.01, -0.04)
+    let f = Family {
+        name: "Bar".into(),
+        forms: vec![FormDef::sweep("bar", "0", &[("0", "0"), ("1", "0")], ProfileDef::rect("0", "0", "0.04", "0.01"))],
+        category: Category::Furniture,
+        ..Default::default()
+    };
+    let c = compile_library(std::slice::from_ref(&f)).unwrap();
+    let mut s = scene(vec![wall(5)]);
+    s.families = vec![FamilyRef { id: 1, family: c[0].clone() }];
+    let inst = c[0].solve(&Request::default()).unwrap();
+    s.items = vec![FamilyItem { id: 10, name: "B".into(), family: 0, type_name: None, frame: Frame { origin: [0.0, 0.0, 0.0], x: [1.0, 0.0] }, instance: inst, host: None }];
+    let out = export(&s).unwrap();
+    assert_eq!(out.text.matches("IFCFIXEDREFERENCESWEPTAREASOLID(").count(), 1);
+    assert!(out.text.contains("IFCCARTESIANPOINT((0.01,-0.04))"), "turned corner missing");
+    assert!(!out.text.contains("IFCCARTESIANPOINT((0.04,0.01))"), "profile was written unturned");
+}
