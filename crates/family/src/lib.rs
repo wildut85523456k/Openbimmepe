@@ -1069,6 +1069,7 @@ impl Inner {
                     inst.plan.push(match *s {
                         PlanShape::Line([x1, y1, x2, y2]) => { let (a, b) = (mv(x1, y1), mv(x2, y2)); PlanShape::Line([a.0, a.1, b.0, b.1]) }
                         PlanShape::Circle { c, r } => { let p = mv(c[0], c[1]); PlanShape::Circle { c: [p.0, p.1], r } }
+                        PlanShape::Arc { c, r, a0, a1 } => { let p = mv(c[0], c[1]); let t = turn.map_or(0.0, |tf| tf.angle); PlanShape::Arc { c: [p.0, p.1], r, a0: a0 + t, a1: a1 + t } }
                     });
                 }
                 for c in &ci.connectors {

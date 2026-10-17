@@ -410,6 +410,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-view"
+version = "0.0.1"
+dependencies = [
+ "openbim-arch",
+ "openbim-family",
+ "openbim-geom",
+ "openbim-ifc",
+ "openbim-place",
+ "rayon",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
