@@ -65,7 +65,7 @@ impl SnapshotSection {
             openbim_document::Section::IShape { web_m, flange_m } => Some(Self { kind: "IShape".into(), web_m: Some(web_m), flange_m: Some(flange_m) }),
         }
     }
-    fn into_document(&self) -> Result<openbim_document::Section, String> {
+    fn to_document(&self) -> Result<openbim_document::Section, String> {
         match (self.kind.as_str(), self.web_m, self.flange_m) {
             ("Circle", None, None) => Ok(openbim_document::Section::Circle),
             ("IShape", Some(web_m), Some(flange_m)) => Ok(openbim_document::Section::IShape { web_m, flange_m }),
@@ -136,7 +136,7 @@ impl Snapshot {
                 ops.push(Command::SetSlope { id: ElementId(el.id), slope_ratio });
             }
             if let Some(section) = &el.section {
-                ops.push(Command::SetSection { id: ElementId(el.id), section: section.into_document()? });
+                ops.push(Command::SetSection { id: ElementId(el.id), section: section.to_document()? });
             }
             if let Some(geometry)=el.geometry {
                 ops.push(Command::SetGeometry { id:ElementId(el.id),geometry:geometry.into() });
