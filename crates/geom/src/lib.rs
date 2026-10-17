@@ -42,7 +42,7 @@ pub enum GeomError {
 type P = [f64; 2];
 
 /// A rectangular opening through a wall. `offset` is measured along the wall centreline from its start.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Opening {
     pub offset: f64,
     pub width: f64,
@@ -51,14 +51,14 @@ pub struct Opening {
 }
 
 /// A line that a free wall end is extended to (for T-junctions: the face of the host wall).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StopLine {
     pub point: P,
     pub dir: P,
 }
 
 /// A chain of walls along a polyline centreline, closed or open, with one thickness.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WallChain {
     pub points: Vec<P>,
     pub closed: bool,

@@ -16,7 +16,7 @@
 mod draw;
 mod mesh;
 mod section;
-pub use mesh::{scene_meshes, ElementMesh};
+pub use mesh::{scene_meshes, Batch, ElementMesh, FaceKind, MeshCache, Part, Update};
 pub use section::{elevation_view, section_svg, section_svg_with, section_view, standard_elevations, Facing, Label, Section, SectionView};
 pub use draw::{svg, svg_with, Paint, SvgStyle};
 
@@ -89,7 +89,7 @@ pub enum Class {
     Datum,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
     Wall,
     Column,
@@ -103,7 +103,7 @@ pub enum Kind {
 }
 
 /// The element a shape belongs to: its kind and its element number in the model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Element {
     pub kind: Kind,
     pub id: u64,
