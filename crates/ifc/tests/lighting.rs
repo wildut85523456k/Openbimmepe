@@ -67,3 +67,36 @@ fn luminaires_of_different_types_carry_their_own_lighting_in_the_schedule_and_th
     assert!(out.text.contains("'PictureFile',$,IFCLABEL('Lo.png')") && out.text.contains("'DatasheetFile',$,IFCLABEL('Hi.pdf')"));
     assert!(out.text.contains("'TotalWattage',$,IFCREAL(20.0)") && out.text.contains("'TotalWattage',$,IFCREAL(40.0)"));
 }
+
+#[test]
+fn the_luminaire_catalogue_page_embeds_checked_pictures_and_escapes_text() {
+    use openbim_arch::{Level, Levels};
+    use openbim_family::{light::*, Category, Family, Request};
+    use openbim_ifc::*;
+    let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4];
+    let l = |pic: &str| LightingDef { manufacturer: Some("A<b>&Co".into()), picture: Some(pic.into()), datasheet: Some("d.pdf".into()), flux_lm: Some(1000.0), power_w: Some(10.0), photometry: Some("a.ies".into()), ..Default::default() };
+    let mk = |pic: &str| {
+        let f = Family { name: "Panel".into(), category: Category::LightFixture, lighting: Some(l(pic)), ..Default::default() };
+        let c = f.compile().unwrap();
+        let inst = c.solve(&Request::default()).unwrap();
+        let item = |id: u64| FamilyItem { id, name: format!("L{id}"), family: 0, type_name: None, frame: Frame { origin: [0.0, 0.0, 2.5], x: [1.0, 0.0] }, instance: inst.clone(), host: None };
+        Scene {
+            project_name: "P&Q".into(), project_key: 1, timestamp: "t".into(), levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(), walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
+            families: vec![FamilyRef { id: 1, family: c }], items: vec![item(1), item(2)], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        }
+    };
+    let files = |role: &str, name: &str| match (role, name) { ("picture", "p.png") => Some(png.clone()), ("datasheet", "d.pdf") => Some(b"%PDF-1.4".to_vec()), ("picture", "bad.png") => Some(b"%PDF-1.4".to_vec()), _ => None };
+    let (h, w) = luminaire_catalogue_html(&mk("p.png"), &files);
+    assert!(w.is_empty(), "{w:?}");
+    assert!(h.contains("src=\"data:image/png;base64,iVBORw0KGgoBAgME\""), "{h}");
+    assert!(h.contains("A&lt;b&gt;&amp;Co") && !h.contains("A<b>") && h.contains("P&amp;Q"));
+    assert!(h.contains("<td>Placed</td><td>2</td>") && h.contains("<td>Data sheet</td><td>d.pdf</td>") && h.contains("1000 lm"));
+    // a picture that is not what it says, and one that is missing: no image, a warning each
+    let (h, w) = luminaire_catalogue_html(&mk("bad.png"), &files);
+    assert!(!h.contains("<img") && h.contains("no picture") && w.len() == 1 && w[0].contains("PNG or JPEG"), "{w:?}");
+    let (h, w) = luminaire_catalogue_html(&mk("gone.png"), &files);
+    assert!(!h.contains("<img") && w.len() == 1 && w[0].contains("not kept"), "{w:?}");
+    // padding of the encoder
+    let (h, _) = luminaire_catalogue_html(&mk("p.png"), &|r, n| if r == "picture" { Some([&png[..], &[9]].concat()) } else { files(r, n) });
+    assert!(h.contains("iVBORw0KGgoBAgMECQ=="), "{h}");
+}

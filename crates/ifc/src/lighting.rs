@@ -160,3 +160,83 @@ pub fn luminaire_schedule(scene: &Scene) -> (String, Vec<String>) {
     }
     (out, warnings)
 }
+
+fn esc(s: &str) -> String {
+    s.chars().map(|c| match c { '&' => "&amp;".into(), '<' => "&lt;".into(), '>' => "&gt;".into(), '"' => "&quot;".into(), '\'' => "&#39;".into(), c => c.to_string() }).collect()
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        for k in 0..4 {
+            if k <= c.len() { s.push(T[((n >> (18 - 6 * k)) & 63) as usize] as char) } else { s.push('=') }
+        }
+    }
+    s
+}
+
+/// The luminaire types used in the model as a printable page: one card per type with its picture, the data a lighting
+/// calculation uses, the data sheet's name and how many are placed. `asset(role, name)` gives the content of a file kept
+/// with the project. A picture that is missing or is not what its name says is left out with a warning, never embedded.
+/// The page is self-contained (pictures are inside it) and every text is escaped.
+pub fn luminaire_catalogue_html(scene: &Scene, asset: &dyn Fn(&str, &str) -> Option<Vec<u8>>) -> (String, Vec<String>) {
+    use openbim_family::light::{attachment_kind, check_attachment, AttachmentKind};
+    let mut warnings = Vec::new();
+    let mut groups: Vec<(usize, Option<String>, usize)> = Vec::new();
+    for it in &scene.items {
+        let Some(fr) = scene.families.get(it.family) else { continue };
+        if fr.family.lighting_for(it.type_name.as_deref()).is_none() { continue }
+        match groups.iter_mut().find(|g| g.0 == it.family && g.1 == it.type_name) {
+            Some(g) => g.2 += 1,
+            None => groups.push((it.family, it.type_name.clone(), 1)),
+        }
+    }
+    let mut h = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Luminaires \u{2013} {}</title><style>body{{font:14px sans-serif;margin:16px}}.card{{display:flex;gap:16px;border:1px solid #888;padding:12px;margin:0 0 12px;break-inside:avoid}}.pic{{width:180px;height:180px;object-fit:contain;border:1px solid #ccc}}.nopic{{width:180px;height:180px;border:1px dashed #aaa;display:flex;align-items:center;justify-content:center;color:#666}}table{{border-collapse:collapse}}td{{padding:2px 12px 2px 0}}td:first-child{{color:#555}}@media print{{body{{margin:0}}}}</style></head><body><h1>Luminaires \u{2013} {}</h1>\n",
+        esc(&scene.project_name), esc(&scene.project_name)
+    );
+    for (fi, tn, count) in &groups {
+        let fr = &scene.families[*fi];
+        let Some(l) = fr.family.lighting_for(tn.as_deref()) else { continue };
+        let title = match tn { Some(t) => format!("{} \u{2013} {}", fr.family.name(), t), None => fr.family.name().to_string() };
+        let mut pic = String::from("<div class=\"nopic\">no picture</div>");
+        if let Some(name) = &l.picture {
+            match asset("picture", name) {
+                None => warnings.push(format!("{title}: the picture {name} is not kept in the project")),
+                Some(d) => match check_attachment("picture", name, &d) {
+                    Err(why) => warnings.push(format!("{title}: the picture {name} is not used: {why}")),
+                    Ok(()) => {
+                        let mime = if attachment_kind(&d) == Some(AttachmentKind::Png) { "image/png" } else { "image/jpeg" };
+                        pic = format!("<img class=\"pic\" alt=\"{}\" src=\"data:{mime};base64,{}\">", esc(&title), base64(&d));
+                    }
+                },
+            }
+        }
+        let mut sheet = String::new();
+        if let Some(name) = &l.datasheet {
+            match asset("datasheet", name) {
+                None => warnings.push(format!("{title}: the data sheet {name} is not kept in the project")),
+                Some(d) => match check_attachment("datasheet", name, &d) {
+                    Err(why) => warnings.push(format!("{title}: the data sheet {name} is not used: {why}")),
+                    Ok(()) => sheet = esc(name),
+                },
+            }
+        }
+        let num = |v: Option<f64>, unit: &str| v.map(|x| format!("{x} {unit}")).unwrap_or_default();
+        let txt = |v: &Option<String>| v.as_deref().map(esc).unwrap_or_default();
+        let rows = [
+            ("Manufacturer", txt(&l.manufacturer)), ("Article", txt(&l.article)), ("Luminous flux", num(l.flux_lm, "lm")), ("Power", num(l.power_w, "W")),
+            ("Colour temperature", num(l.cct_k, "K")), ("Colour rendering index", num(l.cri, "")), ("Protection", txt(&l.ip)), ("Mounting", l.mounting.name().to_string()),
+            ("Photometry", txt(&l.photometry)), ("Data sheet", sheet), ("Placed", count.to_string()),
+        ];
+        h.push_str(&format!("<div class=\"card\">{pic}<div><h2>{}</h2><table>", esc(&title)));
+        for (k, v) in rows.iter().filter(|r| !r.1.trim().is_empty()) {
+            h.push_str(&format!("<tr><td>{k}</td><td>{v}</td></tr>"));
+        }
+        h.push_str("</table></div></div>\n");
+    }
+    h.push_str("</body></html>\n");
+    (h, warnings)
+}
