@@ -1131,13 +1131,78 @@ fn nest(o: &mut Out, parent: u32, ports: &[u32]) {
     o.s.add(format!("IFCRELNESTS({g},$,$,$,#{parent},({}))", ports.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
 }
 
+/// The flow direction of every port of the pieces of a network, from the way the medium goes through the equipment
+/// connectors it is linked to: a run or fitting port that receives the flow is a SINK, one it passes on is a SOURCE.
+/// The direction spreads from each equipment connector through the pieces it reaches (a piece receiving at one port
+/// passes on at its others, and the port linked to a SINK is a SOURCE). A port the flow never reaches, or one reached
+/// both ways (a loop, or two flows meeting), is left as SOURCEANDSINK: the file does not claim more than the network says.
+fn piece_flow(net: &openbim_route::graph::Network) -> (Vec<Vec<FlowDir>>, Vec<Vec<FlowDir>>) {
+    let mut segs: Vec<Vec<FlowDir>> = net.segments.iter().map(|_| vec![FlowDir::Both; 2]).collect();
+    let mut fits: Vec<Vec<FlowDir>> = net.fittings.iter().map(|f| vec![FlowDir::Both; f.fitting.ports.len()]).collect();
+    let mut partner: BTreeMap<PortRef, PortRef> = BTreeMap::new();
+    for (a, b) in net.links() {
+        partner.insert(*a, *b);
+        partner.insert(*b, *a);
+    }
+    let opposite = |d: FlowDir| if d == FlowDir::In { FlowDir::Out } else { FlowDir::In };
+    // every (port, direction) the flow can give a port, found from all the equipment at once: a port that gets both
+    // directions is where two flows meet, whatever the order they are followed in
+    let mut reached: std::collections::BTreeSet<(PortRef, bool)> = std::collections::BTreeSet::new();
+    let mut work: Vec<(PortRef, FlowDir)> = Vec::new();
+    for (a, b) in net.links() {
+        for (e, q) in [(a, b), (b, a)] {
+            if let NodeRef::Equipment(i) = e.node {
+                if let (Some(eq), false) = (net.equipment.get(i), matches!(q.node, NodeRef::Equipment(_))) {
+                    match eq.flow_dir {
+                        FlowDir::Out => work.push((*q, FlowDir::In)),
+                        FlowDir::In => work.push((*q, FlowDir::Out)),
+                        FlowDir::Both => {}
+                    }
+                }
+            }
+        }
+    }
+    while let Some((p, d)) = work.pop() {
+        if matches!(p.node, NodeRef::Equipment(_)) || !reached.insert((p, d == FlowDir::In)) {
+            continue;
+        }
+        let n = match p.node {
+            NodeRef::Segment(_) => 2,
+            NodeRef::Fitting(i) => fits.get(i).map_or(0, Vec::len),
+            NodeRef::Equipment(_) => 0,
+        };
+        if let Some(s) = partner.get(&p) {
+            work.push((*s, opposite(d)));
+        }
+        for k in (0..n).filter(|&k| k != p.port) {
+            work.push((PortRef { node: p.node, port: k }, opposite(d)));
+        }
+    }
+    for &(p, is_in) in &reached {
+        if reached.contains(&(p, !is_in)) {
+            continue; // reached both ways: stays SOURCEANDSINK
+        }
+        let d = if is_in { FlowDir::In } else { FlowDir::Out };
+        let slot = match p.node {
+            NodeRef::Segment(i) => segs.get_mut(i).and_then(|v| v.get_mut(p.port)),
+            NodeRef::Fitting(i) => fits.get_mut(i).and_then(|v| v.get_mut(p.port)),
+            NodeRef::Equipment(_) => None,
+        };
+        if let Some(x) = slot {
+            *x = d;
+        }
+    }
+    (segs, fits)
+}
+
 fn write_networks(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
     for (ni, net) in scene.networks.iter().enumerate() {
         let mut segs: Vec<PieceOut> = Vec::new();
         let mut fits: Vec<PieceOut> = Vec::new();
         let mut by_system: BTreeMap<u8, Vec<u32>> = BTreeMap::new();
-        for sg in &net.segments {
+        let (seg_flow, fit_flow) = piece_flow(net);
+        for (si, sg) in net.segments.iter().enumerate() {
             let r = &sg.run;
             let d = sub(r.b, r.a);
             let len = dot(d, d).sqrt();
@@ -1164,13 +1229,13 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             let mut props = size_props(r.size);
             props.push(("System", Val::Label(r.system.ifc_system().into())));
             o.pset(e, "OpenBIM_Mep", props);
-            let p0 = write_port(o, (sg.id, 0x1000), "Start", pl, [0.0; 3], [0.0, 0.0, -1.0], (r.domain, r.system, FlowDir::Both));
-            let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system, FlowDir::Both));
+            let p0 = write_port(o, (sg.id, 0x1000), "Start", pl, [0.0; 3], [0.0, 0.0, -1.0], (r.domain, r.system, seg_flow[si][0]));
+            let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system, seg_flow[si][1]));
             nest(o, e, &[p0, p1]);
             by_system.entry(r.system.code()).or_default().push(e);
             segs.push(PieceOut { ports: vec![p0, p1] });
         }
-        for nf in &net.fittings {
+        for (fi, nf) in net.fittings.iter().enumerate() {
             let f: &Fitting = &nf.fitting;
             let st = o.storey_for(f.at[2]);
             let elev = o.storeys[st].2;
@@ -1204,9 +1269,9 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             props.push(("Legs", Val::Int(f.ports.len() as i64)));
             o.pset(e, "OpenBIM_Mep", props);
             let mut ports = Vec::new();
-            for k in 0..f.ports.len() {
+            for (k, &leg_flow) in fit_flow[fi].iter().enumerate() {
                 let loc = [f.ports[k][0] * f.trim[k], f.ports[k][1] * f.trim[k], f.ports[k][2] * f.trim[k]];
-                ports.push(write_port(o, (nf.id, 0x1000 + k as u16), &format!("Leg {}", k + 1), pl, loc, unit(f.ports[k]), (nf.domain, nf.system, FlowDir::Both)));
+                ports.push(write_port(o, (nf.id, 0x1000 + k as u16), &format!("Leg {}", k + 1), pl, loc, unit(f.ports[k]), (nf.domain, nf.system, leg_flow)));
             }
             nest(o, e, &ports);
             by_system.entry(nf.system.code()).or_default().push(e);
@@ -1274,6 +1339,60 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn eq(flow: FlowDir, x: f64, dir: f64) -> openbim_route::graph::NetEquipment {
+        use openbim_family::mep::{Domain, System};
+        openbim_route::graph::NetEquipment { element: 1, connector: "c".into(), domain: Domain::Pipe, system: System::ChilledWaterSupply, flow_dir: flow, pos: [x, 0.0, 0.0], dir: [dir, 0.0, 0.0], size: openbim_place::penetrations::RunSize::Round { diameter: 0.1 } }
+    }
+    fn pipe(net: &mut Network, id: u64) {
+        use openbim_family::mep::{Domain, System};
+        net.segments.push(openbim_route::graph::NetSegment { id, run: openbim_place::penetrations::Run::round("p", Domain::Pipe, System::ChilledWaterSupply, [id as f64, 0.0, 0.0], [id as f64 + 1.0, 0.0, 0.0], 0.1) });
+    }
+    fn port(node: NodeRef, port: usize) -> PortRef { PortRef { node, port } }
+
+    #[test]
+    fn flow_goes_from_the_equipment_through_the_pieces_and_meets_where_two_flows_meet() {
+        use FlowDir::*;
+        use NodeRef::*;
+        // equipment that gives, two runs, equipment that takes: the flow runs along
+        let mut n = Network::new(100);
+        n.equipment.push(eq(Out, 1.0, 1.0));
+        n.equipment.push(eq(In, 3.0, -1.0));
+        pipe(&mut n, 1);
+        pipe(&mut n, 2);
+        n.link(port(Equipment(0), 0), port(Segment(0), 0)).unwrap();
+        n.link(port(Segment(0), 1), port(Segment(1), 0)).unwrap();
+        n.link(port(Segment(1), 1), port(Equipment(1), 0)).unwrap();
+        let (s, f) = piece_flow(&n);
+        assert_eq!(s, vec![vec![In, Out], vec![In, Out]]);
+        assert!(f.is_empty());
+        // the same chain seen only from the equipment that takes: the flow is known backwards
+        let mut m = Network::new(100);
+        m.equipment.push(eq(In, 3.0, -1.0));
+        pipe(&mut m, 1);
+        pipe(&mut m, 2);
+        m.link(port(Segment(0), 1), port(Segment(1), 0)).unwrap();
+        m.link(port(Segment(1), 1), port(Equipment(0), 0)).unwrap();
+        assert_eq!(piece_flow(&m).0, vec![vec![In, Out], vec![In, Out]]);
+        // equipment that works both ways says nothing; a run no equipment is linked to stays both ways
+        let mut b = Network::new(100);
+        b.equipment.push(eq(Both, 1.0, 1.0));
+        pipe(&mut b, 1);
+        pipe(&mut b, 2);
+        b.link(port(Equipment(0), 0), port(Segment(0), 0)).unwrap();
+        assert_eq!(piece_flow(&b).0, vec![vec![Both, Both], vec![Both, Both]]);
+        // two sources feeding one run from both ends: the flows meet, whichever is followed first
+        for flip in [false, true] {
+            let mut c = Network::new(100);
+            let (first, second) = (eq(Out, 1.0, 1.0), eq(Out, 2.0, -1.0));
+            let (a, z) = if flip { (1, 0) } else { (0, 1) };
+            if flip { c.equipment.extend([second, first]) } else { c.equipment.extend([first, second]) }
+            pipe(&mut c, 1);
+            c.link(port(Equipment(a), 0), port(Segment(0), 0)).unwrap();
+            c.link(port(Equipment(z), 0), port(Segment(0), 1)).unwrap();
+            assert_eq!(piece_flow(&c).0, vec![vec![Both, Both]], "flip {flip}");
+        }
+    }
 
     #[test]
     fn a_value_is_written_as_the_kind_it_measures() {

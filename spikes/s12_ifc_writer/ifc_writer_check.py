@@ -371,7 +371,22 @@ flows = {}
 for p in f.by_type("IfcDistributionPort"):
     flows.setdefault(p.Name, set()).add(p.FlowDirection)
 ok(flows.get("chw_in") == {"SINK"} and flows.get("chw_out") == {"SOURCE"}, f"fan coil port flow directions: {flows}")
-ok(flows.get("Start") == {"SOURCEANDSINK"} and flows.get("End") == {"SOURCEANDSINK"}, "run ports pass the medium both ways")
+# runs and fittings follow the flow from the equipment they are linked to: the port that receives it is a SINK, the one
+# that passes it on a SOURCE; two linked ports never both receive or both give; what no equipment reaches stays both ways
+links = [(r.RelatingPort, r.RelatedPort) for r in f.by_type("IfcRelConnectsPorts")]
+for a, b in links:
+    fa, fb = a.FlowDirection, b.FlowDirection
+    ok(fa == "SOURCEANDSINK" or fb == "SOURCEANDSINK" or {fa, fb} == {"SOURCE", "SINK"}, f"linked ports {a.Name}/{b.Name} go {fa}/{fb}")
+    for eq, other in ((a, b), (b, a)):
+        if eq.Name == "chw_in":
+            ok(other.FlowDirection == "SOURCE", "the run that feeds the fan coil gives its flow to it")
+        if eq.Name == "chw_out":
+            ok(other.FlowDirection == "SINK", "the run that leaves the fan coil receives its flow")
+dirs = {}
+for a, b in links:
+    for x in (a, b):
+        dirs.setdefault(x.id(), x.FlowDirection)
+ok({"SINK", "SOURCE"} <= set(dirs.values()) and "SOURCEANDSINK" in set(dirs.values()), "the network has directed ports and ports no equipment reaches")
 # an elbow's angle is a plane angle in radians, not a length
 for e in f.by_type("IfcPipeFitting") + f.by_type("IfcDuctFitting"):
     ps = ue.get_psets(e).get("OpenBIM_Mep", {})
