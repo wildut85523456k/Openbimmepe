@@ -503,3 +503,47 @@ fn walls_far_from_the_search_change_nothing() {
     assert!(with_far.cost > base.cost, "the wall that crosses is paid for");
     assert_eq!(with_far.expansions, only_near.expansions);
 }
+
+/// rooms of 3 m in a grid, every wall of every room a soft zone of its own
+fn walled_rooms(nx: usize, ny: usize) -> Vec<Zone> {
+    let mut zones = Vec::new();
+    for i in 0..nx {
+        for j in 0..ny {
+            let (x, y) = (i as f64 * 3.0, j as f64 * 3.0);
+            for (p0, p1) in [([x, y], [x + 3.0, y]), ([x + 3.0, y], [x + 3.0, y + 3.0]), ([x + 3.0, y + 3.0], [x, y + 3.0]), ([x, y + 3.0], [x, y])] {
+                let (dx, dy) = ((p1[1] - p0[1]) / 3.0 * 0.1, -(p1[0] - p0[0]) / 3.0 * 0.1);
+                zones.push(Zone::soft("wall", &[[p0[0] + dx, p0[1] + dy], [p1[0] + dx, p1[1] + dy], [p1[0] - dx, p1[1] - dy], [p0[0] - dx, p0[1] - dy]], 0.0, 3.0, 5.0).unwrap());
+            }
+        }
+    }
+    zones
+}
+
+/// The zones are looked up through a grid: the answer must be the one the plain search over every zone gave
+/// (the numbers below were taken from that search before the grid was added), and zones that cannot matter must not change it.
+#[test]
+fn the_zone_lookup_gives_the_answer_of_the_search_over_every_zone() {
+    let (a, b) = (conn([1.5, 1.5, 2.5], PY, 0.05), conn([10.5, 10.5, 2.5], NY, 0.05));
+    let o = AutoOptions::default();
+    let zones = walled_rooms(4, 4);
+    let r = go(&a, &b, &zones, &o).unwrap();
+    assert_eq!((r.waypoints.len(), r.expansions), GOLDEN_WALLS);
+    assert!(close(r.cost, GOLDEN_COST), "{}", r.cost);
+    // 500 zones low under the route (it never goes below 0.5 m) and spread over the whole area change nothing
+    let mut more = zones.clone();
+    for k in 0..500 {
+        let (x, y) = ((k * 37 % 997) as f64 / 997.0 * 12.0, (k * 91 % 991) as f64 / 991.0 * 12.0);
+        more.push(Zone::soft("decoy", &[[x, y], [x + 0.1, y], [x + 0.1, y + 0.1], [x, y + 0.1]], 0.5, 0.52, 5.0).unwrap());
+    }
+    assert_eq!(go(&a, &b, &more, &o).unwrap(), r);
+    // walls the route has to cross: the crossings and the labels come out in the order of the zones
+    let o2 = AutoOptions { allow_vertical: false, ..Default::default() };
+    let r2 = go(&a, &b, &zones, &o2).unwrap();
+    assert_eq!((r2.crossed.len(), r2.expansions), GOLDEN_CROSSED);
+    assert!(close(r2.cost, GOLDEN_COST2), "{}", r2.cost);
+    assert_eq!(go(&a, &b, &more, &o2).unwrap(), r2);
+}
+const GOLDEN_WALLS: (usize, usize) = (7, 233692);
+const GOLDEN_COST: f64 = 24.8;
+const GOLDEN_CROSSED: (usize, usize) = (2, 126114);
+const GOLDEN_COST2: f64 = 48.0999964;
