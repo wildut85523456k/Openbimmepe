@@ -11,6 +11,8 @@ pub enum Style {
     HiddenLine,
     Shaded,
     ConsistentColors,
+    /// Shaded with sun, sky light and highlights; drawn by the GPU view only (the software renderer shows Shaded).
+    Realistic,
 }
 
 /// RGBA, row by row from the top.
@@ -91,7 +93,7 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
         let Some(p2) = cam.project(w[2], size) else { continue };
         let el = b.elements[b.tri_element[ti] as usize];
         let base = match (style, b.tri_material[ti]) {
-            (Style::Shaded, m) if m != u32::MAX => material_colour(&b.materials[m as usize]),
+            (Style::Shaded | Style::Realistic, m) if m != u32::MAX => material_colour(&b.materials[m as usize]),
             _ => kind_colour(el.kind),
         };
         let top_boost = if b.tri_face[ti] == FaceKind::Top { 1.0 } else { 0.0 };
@@ -189,7 +191,7 @@ pub fn render(b: &Batch, cam: &Camera, width: usize, height: usize, style: Style
 pub fn base_colour(b: &Batch, ti: usize, style: Style) -> [f64; 3] {
     let el = b.elements[b.tri_element[ti] as usize];
     match (style, b.tri_material[ti]) {
-        (Style::Shaded, m) if m != u32::MAX => material_colour(&b.materials[m as usize]),
+        (Style::Shaded | Style::Realistic, m) if m != u32::MAX => material_colour(&b.materials[m as usize]),
         _ => kind_colour(el.kind),
     }
 }

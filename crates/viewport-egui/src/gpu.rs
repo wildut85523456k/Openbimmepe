@@ -4,8 +4,9 @@
 use bytemuck::{Pod, Zeroable};
 use egui_wgpu::wgpu;
 use egui_wgpu::wgpu::util::DeviceExt;
-use openbim_view::{Batch, FaceKind};
-use openbim_viewport::{base_colour, crease_edges, intersection_edges, Camera, Style};
+use openbim_view::{Batch, Element, FaceKind};
+use openbim_viewport::{base_colour, crease_edges, intersection_edges, Camera, SectionBox, Style};
+use std::collections::HashSet;
 
 pub const WGSL: &str = include_str!("shader.wgsl");
 pub const COLOUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -17,7 +18,7 @@ struct Vertex { pos: [f32; 3], nrm: [f32; 3], col: [f32; 4] }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Uniforms { vp: [[f32; 4]; 4], light: [f32; 4], eye: [f32; 4], line: [f32; 4] }
+struct Uniforms { vp: [[f32; 4]; 4], light: [f32; 4], eye: [f32; 4], line: [f32; 4], sec_min: [f32; 4], sec_max: [f32; 4], sun: [f32; 4] }
 
 /// A batch uploaded for one style.
 pub struct Scene {
@@ -25,6 +26,8 @@ pub struct Scene {
     fill_count: u32,
     lines: wgpu::Buffer,
     line_count: u32,
+    selected: Option<(wgpu::Buffer, u32)>,
+    /// triangles' corner data kept for building the selection
     pub style: Style,
     /// model position of the zero of the buffers
     pub origin: [f64; 3],
@@ -35,6 +38,8 @@ pub struct Scene {
 pub struct Gpu {
     uniform_layout: wgpu::BindGroupLayout,
     shaded: wgpu::RenderPipeline,
+    real: wgpu::RenderPipeline,
+    select: wgpu::RenderPipeline,
     paper: wgpu::RenderPipeline,
     lines_hidden: wgpu::RenderPipeline,
     lines_through: wgpu::RenderPipeline,
@@ -70,14 +75,14 @@ impl Gpu {
         let line_buf = wgpu::VertexBufferLayout { array_stride: 12, step_mode: wgpu::VertexStepMode::Vertex, attributes: &line_attrs };
         let colour_target = [Some(wgpu::ColorTargetState { format: COLOUR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
 
-        let fill = |label: &str, fs: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let fill = |label: &str, fs: &str, bias: i32| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(&pl),
             vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_fill"), compilation_options: Default::default(), buffers: &[Some(fill_buf.clone())] },
             fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some(fs), compilation_options: Default::default(), targets: &colour_target }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: Some(wgpu::Face::Back), front_face: wgpu::FrontFace::Ccw, ..Default::default() },
             // pushed back a little so that the lines on the faces win the depth test
-            depth_stencil: Some(wgpu::DepthStencilState { format: DEPTH_FORMAT, depth_write_enabled: Some(true), depth_compare: Some(wgpu::CompareFunction::Less), stencil: Default::default(), bias: wgpu::DepthBiasState { constant: 2, slope_scale: 1.5, clamp: 0.0 } }),
+            depth_stencil: Some(wgpu::DepthStencilState { format: DEPTH_FORMAT, depth_write_enabled: Some(bias >= 0), depth_compare: Some(if bias < 0 { wgpu::CompareFunction::LessEqual } else { wgpu::CompareFunction::Less }), stencil: Default::default(), bias: wgpu::DepthBiasState { constant: bias, slope_scale: if bias > 0 { 1.5 } else { -1.5 }, clamp: 0.0 } }),
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
@@ -116,7 +121,7 @@ impl Gpu {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
 
         Gpu {
-            uniform_layout: layout, shaded: fill("shaded", "fs_shaded"), paper: fill("paper", "fs_paper"),
+            uniform_layout: layout, shaded: fill("shaded", "fs_shaded", 2), real: fill("realistic", "fs_real", 2), select: fill("select", "fs_select", -2), paper: fill("paper", "fs_paper", 2),
             lines_hidden: lines("lines hidden", true), lines_through: lines("lines through", false), blit, blit_layout, sampler,
         }
     }
@@ -153,8 +158,26 @@ impl Gpu {
             fill_count: fills.len() as u32,
             lines: mk("lines", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
             line_count: lines.len() as u32,
+            selected: None,
             style, origin: b.origin, radius,
         }
+    }
+
+    /// Mark the elements to draw as selected (an empty set clears it).
+    pub fn select(&self, device: &wgpu::Device, scene: &mut Scene, b: &Batch, elements: &HashSet<Element>) {
+        let mut vs: Vec<Vertex> = Vec::new();
+        if !elements.is_empty() {
+            for (ti, t) in b.tris.iter().enumerate() {
+                if !elements.contains(&b.elements[b.tri_element[ti] as usize]) { continue; }
+                let p = t.map(|i| b.verts[i as usize]);
+                let (e1, e2) = ([p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]], [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]);
+                let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+                let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                if l == 0.0 { continue; }
+                for v in p { vs.push(Vertex { pos: v, nrm: n.map(|x| x / l), col: [1.0; 4] }); }
+            }
+        }
+        scene.selected = (!vs.is_empty()).then(|| (device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("selection"), contents: bytemuck::cast_slice(&vs), usage: wgpu::BufferUsages::VERTEX }), vs.len() as u32));
     }
 
     pub fn target(&self, device: &wgpu::Device, size: [u32; 2]) -> Target {
@@ -174,7 +197,7 @@ impl Gpu {
     }
 
     /// Draw the scene as seen by `cam` into the target.
-    pub fn draw(&self, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, target: &Target, scene: &Scene, cam: &Camera) {
+    pub fn draw(&self, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, target: &Target, scene: &Scene, cam: &Camera, section: Option<SectionBox>) {
         let aspect = target.size[0] as f64 / target.size[1] as f64;
         let (near, far) = cam.clip_range(scene.radius);
         let (r, u, f) = (cam.right(), cam.up(), cam.forward());
@@ -187,6 +210,10 @@ impl Gpu {
             light: [l[0] as f32, l[1] as f32, l[2] as f32, 0.0],
             eye: [(eye[0] - scene.origin[0]) as f32, (eye[1] - scene.origin[1]) as f32, (eye[2] - scene.origin[2]) as f32, 0.0],
             line: [20.0 / 255.0, 20.0 / 255.0, 20.0 / 255.0, 1.0],
+            sec_min: section.map_or([0.0; 4], |s| [(s.min[0] - scene.origin[0]) as f32, (s.min[1] - scene.origin[1]) as f32, (s.min[2] - scene.origin[2]) as f32, 1.0]),
+            sec_max: section.map_or([0.0; 4], |s| [(s.max[0] - scene.origin[0]) as f32, (s.max[1] - scene.origin[1]) as f32, (s.max[2] - scene.origin[2]) as f32, 1.0]),
+            // the sun: from the south-west, high
+            sun: [-0.45, -0.55, 0.70, 0.0],
         };
         queue.write_buffer(&target.uniforms, 0, bytemuck::bytes_of(&uni));
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -197,9 +224,14 @@ impl Gpu {
         });
         pass.set_bind_group(0, &target.bind, &[]);
         if scene.fill_count > 0 {
-            pass.set_pipeline(if scene.style == Style::HiddenLine { &self.paper } else { &self.shaded });
+            pass.set_pipeline(match scene.style { Style::HiddenLine => &self.paper, Style::Realistic => &self.real, _ => &self.shaded });
             pass.set_vertex_buffer(0, scene.fills.slice(..));
             pass.draw(0..scene.fill_count, 0..1);
+        }
+        if let Some((buf, n)) = &scene.selected {
+            pass.set_pipeline(&self.select);
+            pass.set_vertex_buffer(0, buf.slice(..));
+            pass.draw(0..*n, 0..1);
         }
         if scene.line_count > 0 {
             pass.set_pipeline(if scene.style == Style::Wireframe { &self.lines_through } else { &self.lines_hidden });
@@ -219,9 +251,14 @@ impl Gpu {
 /// Draw the scene without a window and read the picture back, RGBA row by row from the top. For tests and for
 /// machines without a display.
 pub fn render_rgba(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &Gpu, scene: &Scene, cam: &Camera, size: [u32; 2]) -> Vec<u8> {
+    render_rgba_cut(device, queue, gpu, scene, cam, size, None)
+}
+
+/// As `render_rgba`, with a section box.
+pub fn render_rgba_cut(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &Gpu, scene: &Scene, cam: &Camera, size: [u32; 2], section: Option<SectionBox>) -> Vec<u8> {
     let target = gpu.target(device, size);
     let mut enc = device.create_command_encoder(&Default::default());
-    gpu.draw(queue, &mut enc, &target, scene, cam);
+    gpu.draw(queue, &mut enc, &target, scene, cam, section);
     let row = (size[0] * 4).div_ceil(256) * 256;
     let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("readback"), size: (row * size[1]) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
     enc.copy_texture_to_buffer(

@@ -5,7 +5,9 @@
 //! Coordinates: metres, z up, as in the model. Screen: pixels, x right, y down.
 
 mod edges;
+mod pick;
 mod raster;
+pub use pick::{pick, Hit, SectionBox};
 pub use edges::{crease_edges, intersection_edges, Edge};
 pub use raster::{base_colour, render, Image, Style};
 

@@ -3,6 +3,9 @@ struct U {
     light: vec4<f32>,   // direction toward the light, model space
     eye: vec4<f32>,     // eye position relative to the batch origin
     line: vec4<f32>,    // colour of lines
+    sec_min: vec4<f32>, // section box, relative to the batch origin; w is 1 when it is on
+    sec_max: vec4<f32>,
+    sun: vec4<f32>,     // direction toward the sun, model space
 };
 @group(0) @binding(0) var<uniform> u: U;
 
@@ -28,8 +31,13 @@ fn vs_fill(v: VIn) -> VOut {
     return o;
 }
 
+fn cut(w: vec3<f32>) -> bool {
+    return u.sec_min.w > 0.5 && (any(w < u.sec_min.xyz) || any(w > u.sec_max.xyz));
+}
+
 @fragment
 fn fs_shaded(i: VOut) -> @location(0) vec4<f32> {
+    if cut(i.w) { discard; }
     let n = normalize(i.n);
     let h = max(dot(n, normalize(u.light.xyz)), 0.0);
     let k = min(0.45 + 0.55 * h + 0.05 * i.col.w, 1.0);
@@ -39,16 +47,49 @@ fn fs_shaded(i: VOut) -> @location(0) vec4<f32> {
 // Hidden Line: faces are paper white and only hide what is behind them.
 @fragment
 fn fs_paper(i: VOut) -> @location(0) vec4<f32> {
+    if cut(i.w) { discard; }
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 }
 
+// Realistic: a sun, sky light from above and ground light from below, and a highlight. No shadows yet.
+@fragment
+fn fs_real(i: VOut) -> @location(0) vec4<f32> {
+    if cut(i.w) { discard; }
+    var n = normalize(i.n);
+    let v = normalize(u.eye.xyz - i.w);
+    if dot(n, v) < 0.0 { n = -n; }
+    let sky = vec3<f32>(0.60, 0.70, 0.88);
+    let ground = vec3<f32>(0.36, 0.33, 0.30);
+    let amb = mix(ground, sky, n.z * 0.5 + 0.5) * 0.55;
+    let sd = normalize(u.sun.xyz);
+    let diff = max(dot(n, sd), 0.0);
+    let hv = normalize(sd + v);
+    let spec = pow(max(dot(n, hv), 0.0), 48.0) * 0.18 * step(0.0, diff);
+    let c = i.col.rgb * (amb + vec3<f32>(1.0, 0.95, 0.86) * diff * 0.75) + vec3<f32>(spec);
+    return vec4<f32>(min(c, vec3<f32>(1.0)), 1.0);
+}
+
+// The selected elements, drawn over their own faces.
+@fragment
+fn fs_select(i: VOut) -> @location(0) vec4<f32> {
+    if cut(i.w) { discard; }
+    let n = normalize(i.n);
+    let h = max(dot(n, normalize(u.light.xyz)), 0.0);
+    return vec4<f32>(vec3<f32>(1.0, 0.52, 0.10) * (0.65 + 0.35 * h), 1.0);
+}
+
+struct LOut { @builtin(position) p: vec4<f32>, @location(0) w: vec3<f32> };
 @vertex
-fn vs_line(@location(0) pos: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return u.vp * vec4<f32>(pos, 1.0);
+fn vs_line(@location(0) pos: vec3<f32>) -> LOut {
+    var o: LOut;
+    o.p = u.vp * vec4<f32>(pos, 1.0);
+    o.w = pos;
+    return o;
 }
 
 @fragment
-fn fs_line() -> @location(0) vec4<f32> {
+fn fs_line(i: LOut) -> @location(0) vec4<f32> {
+    if cut(i.w) { discard; }
     return u.line;
 }
 

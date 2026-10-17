@@ -4,8 +4,9 @@
 use crate::gpu::{Gpu, Scene, Target};
 use egui::{Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use egui_wgpu::{wgpu, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
-use openbim_view::Batch;
-use openbim_viewport::{Buttons, Camera, CubeDir, Mods, Style};
+use openbim_view::{Batch, Element};
+use openbim_viewport::{pick, Buttons, Camera, CubeDir, Hit, Mods, SectionBox, Style};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Names of the faces of the ViewCube.
@@ -77,21 +78,27 @@ fn face_name(l: &CubeLabels, d: CubeDir) -> &str {
 }
 
 /// What the callback needs to keep between frames: the pipelines and the uploaded scene.
-struct Resources { gpu: Gpu, scene: Option<(u64, Style, Scene)>, target: Option<Target> }
+struct Resources { gpu: Gpu, scene: Option<(u64, Style, u64, Scene)>, target: Option<Target> }
 
-struct Draw { camera: Camera, style: Style, generation: u64, batch: Option<Arc<Batch>>, size_px: [u32; 2] }
+struct Draw { camera: Camera, style: Style, generation: u64, batch: Option<Arc<Batch>>, size_px: [u32; 2], section: Option<SectionBox>, selection: Arc<HashSet<Element>>, selection_generation: u64 }
 
 impl CallbackTrait for Draw {
     fn prepare(&self, device: &wgpu::Device, queue: &wgpu::Queue, _screen: &ScreenDescriptor, encoder: &mut wgpu::CommandEncoder, res: &mut CallbackResources) -> Vec<wgpu::CommandBuffer> {
         let Some(r) = res.get_mut::<Resources>() else { return Vec::new() };
         let Some(batch) = &self.batch else { r.scene = None; return Vec::new() };
-        if !matches!(&r.scene, Some((g, s, _)) if *g == self.generation && *s == self.style) {
-            r.scene = Some((self.generation, self.style, r.gpu.upload(device, batch, self.style)));
+        if !matches!(&r.scene, Some((g, s, _, _)) if *g == self.generation && *s == self.style) {
+            r.scene = Some((self.generation, self.style, u64::MAX, r.gpu.upload(device, batch, self.style)));
+        }
+        if let Some((_, _, sg, scene)) = &mut r.scene {
+            if *sg != self.selection_generation {
+                r.gpu.select(device, scene, batch, &self.selection);
+                *sg = self.selection_generation;
+            }
         }
         if !matches!(&r.target, Some(t) if t.size == [self.size_px[0].max(1), self.size_px[1].max(1)]) {
             r.target = Some(r.gpu.target(device, self.size_px));
         }
-        if let (Some((_, _, scene)), Some(target)) = (&r.scene, &r.target) { r.gpu.draw(queue, encoder, target, scene, &self.camera); }
+        if let (Some((_, _, _, scene)), Some(target)) = (&r.scene, &r.target) { r.gpu.draw(queue, encoder, target, scene, &self.camera, self.section); }
         Vec::new()
     }
 
@@ -107,6 +114,16 @@ pub struct Viewport3d {
     pub camera: Camera,
     pub style: Style,
     pub labels: CubeLabels,
+    /// The section box, when it is on (model coordinates).
+    pub section: Option<SectionBox>,
+    /// The elements that are selected. Change it with `select`, so that the view redraws it.
+    selection: Arc<HashSet<Element>>,
+    selection_generation: u64,
+    /// What the last click found, if anything.
+    pub last_hit: Option<Hit>,
+    /// Seconds a ViewCube click takes to turn the camera; 0 for no animation.
+    pub snap_seconds: f64,
+    anim: Option<(Camera, Camera, f64)>,
     batch: Option<Arc<Batch>>,
     generation: u64,
 }
@@ -119,11 +136,44 @@ impl Viewport3d {
     }
 
     pub fn new() -> Viewport3d {
-        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, labels: CubeLabels::en(), batch: None, generation: 0 }
+        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, labels: CubeLabels::en(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0 }
     }
 
     /// Show a new batch (after an edit). The camera is not moved.
     pub fn set_batch(&mut self, b: Arc<Batch>) { self.batch = Some(b); self.generation += 1; }
+
+    pub fn selection(&self) -> &HashSet<Element> { &self.selection }
+
+    /// Replace the selection.
+    pub fn select(&mut self, elements: HashSet<Element>) {
+        if *self.selection != elements { self.selection = Arc::new(elements); self.selection_generation += 1; }
+    }
+
+    /// The box around the model in model coordinates.
+    pub fn model_bounds(&self) -> Option<SectionBox> {
+        let b = self.batch.as_ref()?;
+        if b.verts.is_empty() { return None; }
+        let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+        for v in &b.verts { for k in 0..3 { let x = v[k] as f64 + b.origin[k]; lo[k] = lo[k].min(x); hi[k] = hi[k].max(x); } }
+        Some(SectionBox { min: lo, max: hi })
+    }
+
+    /// Turn the camera to look from a ViewCube place, with animation.
+    pub fn snap_to(&mut self, d: CubeDir, now: f64) {
+        let mut to = self.camera;
+        to.snap_to(d);
+        if self.snap_seconds <= 0.0 { self.camera = to; self.anim = None; } else { self.anim = Some((self.camera, to, now)); }
+    }
+
+    /// Where the animation puts the camera at time `now`; ends it when it is over. True while it runs.
+    pub fn step_animation(&mut self, now: f64) -> bool {
+        let Some((from, to, t0)) = self.anim else { return false };
+        let t = ((now - t0) / self.snap_seconds).clamp(0.0, 1.0);
+        let e = t * t * (3.0 - 2.0 * t);
+        self.camera = Camera::blend(&from, &to, e);
+        if t >= 1.0 { self.anim = None; }
+        t < 1.0
+    }
 
     /// Zoom to fit the whole model.
     pub fn zoom_to_fit(&mut self, aspect: f64) {
@@ -147,12 +197,14 @@ impl Viewport3d {
         let hover = resp.hover_pos();
         let over_cube = hover.and_then(|p| pick_cell(&cells, p));
         if over_cube.is_some() && resp.clicked_by(PointerButton::Primary) {
-            if let Some(d) = over_cube { self.camera.snap_to(d); }
+            if let Some(d) = over_cube { let now = ui.input(|i| i.time); self.snap_to(d, now); }
         } else {
             self.mouse(ui, &resp, rect);
         }
 
-        let draw = Draw { camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
+        let now = ui.input(|i| i.time);
+        if self.step_animation(now) { ui.ctx().request_repaint(); }
+        let draw = Draw { camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), section: self.section, selection: self.selection.clone(), selection_generation: self.selection_generation, size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, draw));
         self.paint_cube(ui, &cells, over_cube);
         resp
@@ -166,6 +218,16 @@ impl Viewport3d {
             i.smooth_scroll_delta.y,
             i.pointer.hover_pos(),
         ));
+        if resp.dragged() || (resp.hovered() && scroll != 0.0) { self.anim = None; }
+        if resp.clicked_by(PointerButton::Primary) {
+            if let (Some(p), Some(b)) = (pos, self.batch.clone()) {
+                self.last_hit = pick(&b, &self.camera, [(p.x - rect.left()) as f64, (p.y - rect.top()) as f64], size, self.section);
+                let add = ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+                let mut sel: HashSet<Element> = if add { (*self.selection).clone() } else { HashSet::new() };
+                if let Some(h) = &self.last_hit { if !sel.remove(&h.element) || !add { sel.insert(h.element); } }
+                self.select(sel);
+            }
+        }
         if resp.dragged() {
             let d = resp.drag_delta();
             self.camera.drag(buttons, mods, d.x as f64, d.y as f64, size[1]);
@@ -179,6 +241,34 @@ impl Viewport3d {
         }
         // a double click of the middle button fits the model, as in Revit
         if resp.double_clicked_by(PointerButton::Middle) { self.zoom_to_fit(size[0] / size[1]); }
+    }
+
+    /// A small panel: the visual style and the section box with sliders for its six sides.
+    pub fn controls_ui(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            for (st, name) in [(Style::Wireframe, "Wireframe"), (Style::HiddenLine, "Hidden Line"), (Style::Shaded, "Shaded"), (Style::ConsistentColors, "Consistent Colors"), (Style::Realistic, "Realistic")] {
+                ui.selectable_value(&mut self.style, st, name);
+            }
+        });
+        let bounds = self.model_bounds();
+        let mut on = self.section.is_some();
+        if ui.checkbox(&mut on, "Section Box").changed() {
+            self.section = if on { bounds } else { None };
+        }
+        if let (Some(sec), Some(b)) = (&mut self.section, bounds) {
+            for (k, axis) in ["X", "Y", "Z"].iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(*axis);
+                    let (lo, hi) = (b.min[k], b.max[k]);
+                    let mut a = sec.min[k];
+                    let mut z = sec.max[k];
+                    ui.add(egui::Slider::new(&mut a, lo..=hi).show_value(false));
+                    ui.add(egui::Slider::new(&mut z, lo..=hi).show_value(false));
+                    sec.min[k] = a.min(z);
+                    sec.max[k] = z.max(a);
+                });
+            }
+        }
     }
 
     fn paint_cube(&self, ui: &Ui, cells: &[Cell], hover: Option<CubeDir>) {

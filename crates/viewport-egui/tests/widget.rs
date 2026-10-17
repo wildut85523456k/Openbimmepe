@@ -72,3 +72,54 @@ fn middle_drag_pans_shift_middle_orbits_wheel_zooms() {
     frame(&ctx, &mut vp, vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, 50.0), phase: egui::TouchPhase::Move, modifiers: Modifiers::NONE }], Modifiers::NONE);
     assert!(vp.camera.distance < d0, "zoomed in: {} -> {}", d0, vp.camera.distance);
 }
+
+#[test]
+fn view_cube_snap_is_animated_and_ends_at_the_target() {
+    let mut vp = Viewport3d::new();
+    let start = vp.camera;
+    vp.snap_to(CubeDir::TOP, 10.0);
+    assert_eq!(vp.camera, start, "nothing moves at once");
+    assert!(vp.step_animation(10.1));
+    let mid = vp.camera;
+    assert!(mid.pitch > start.pitch && mid.pitch < 1.55, "part of the way: {}", mid.pitch);
+    assert!(!vp.step_animation(11.0), "over");
+    assert!(vp.camera.pitch > 1.5);
+    vp.snap_seconds = 0.0;
+    vp.snap_to(CubeDir::FRONT, 20.0);
+    assert!(vp.camera.pitch.abs() < 1e-9, "no animation: there at once");
+}
+
+#[test]
+fn clicking_selects_the_element_under_the_cursor() {
+    use openbim_view::Batch;
+    let ctx = egui::Context::default();
+    let mut vp = Viewport3d::new();
+    let batch = {
+        use openbim_arch::{Level, Levels};
+        use openbim_geom::WallChain;
+        use openbim_ifc::{Scene, WallItem};
+        let s = Scene {
+            project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+            levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
+            walls: vec![WallItem { id: 1, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [6.0, 0.0]], false, 0.3, 3.0), wall_type: None, room_bounding: true }],
+            wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
+            families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        };
+        Batch::new(&openbim_view::MeshCache::new().update(&s).unwrap().meshes)
+    };
+    vp.set_batch(std::sync::Arc::new(batch));
+    vp.zoom_to_fit(800.0 / 600.0);
+    frame(&ctx, &mut vp, vec![], Modifiers::NONE);
+    // the wall is in the middle of the picture
+    let p = Pos2::new(400.0, 300.0);
+    frame(&ctx, &mut vp, vec![Event::PointerMoved(p)], Modifiers::NONE);
+    frame(&ctx, &mut vp, vec![Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }], Modifiers::NONE);
+    frame(&ctx, &mut vp, vec![Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }], Modifiers::NONE);
+    assert_eq!(vp.selection().len(), 1, "wall selected; hit {:?}", vp.last_hit);
+    // clicking on empty paper clears it
+    let q = Pos2::new(20.0, 580.0);
+    frame(&ctx, &mut vp, vec![Event::PointerMoved(q)], Modifiers::NONE);
+    frame(&ctx, &mut vp, vec![Event::PointerButton { pos: q, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }], Modifiers::NONE);
+    frame(&ctx, &mut vp, vec![Event::PointerButton { pos: q, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }], Modifiers::NONE);
+    assert!(vp.selection().is_empty());
+}

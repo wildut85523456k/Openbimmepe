@@ -4,3 +4,4 @@ pub mod gpu;
 pub mod widget;
 
 pub use widget::{CubeLabels, Viewport3d};
+pub use openbim_viewport::{SectionBox, Style};

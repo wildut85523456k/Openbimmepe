@@ -93,3 +93,42 @@ fn edge_extraction_finds_creases() {
     assert!(creases.len() > 50, "{}", creases.len());
     assert!(creases.iter().flatten().flatten().all(|x| x.is_finite()));
 }
+
+fn ink(px: &[u8]) -> usize { px.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count() }
+
+#[test]
+fn section_box_cuts_the_picture() {
+    let Some((device, queue)) = device() else { return };
+    let b = building();
+    let gpu = Gpu::new(&device, wgpu::TextureFormat::Bgra8Unorm);
+    let c = cam(&b);
+    let scene = gpu.upload(&device, &b, Style::Shaded);
+    let all = render_rgba_cut(&device, &queue, &gpu, &scene, &c, [400, 300], None);
+    // keep only the west half of the building
+    let half = openbim_viewport::SectionBox { min: [-1.0, -1.0, -1.0], max: [5.0, 8.0, 4.0] };
+    let cut = render_rgba_cut(&device, &queue, &gpu, &scene, &c, [400, 300], Some(half));
+    let (a, k) = (ink(&all), ink(&cut));
+    assert!(k > 500 && (k as f64) < a as f64 * 0.8, "cut {k} of {a}");
+    // a box around everything changes nothing
+    let whole = openbim_viewport::SectionBox { min: [-5.0; 3], max: [50.0; 3] };
+    assert_eq!(render_rgba_cut(&device, &queue, &gpu, &scene, &c, [400, 300], Some(whole)), all);
+}
+
+#[test]
+fn realistic_differs_from_shaded_and_selection_is_orange() {
+    let Some((device, queue)) = device() else { return };
+    let b = building();
+    let gpu = Gpu::new(&device, wgpu::TextureFormat::Bgra8Unorm);
+    let c = cam(&b);
+    let shaded = render_rgba(&device, &queue, &gpu, &gpu.upload(&device, &b, Style::Shaded), &c, [400, 300]);
+    let real = render_rgba(&device, &queue, &gpu, &gpu.upload(&device, &b, Style::Realistic), &c, [400, 300]);
+    assert_ne!(shaded, real);
+    assert!((ink(&shaded) as i64 - ink(&real) as i64).abs() < 200, "same silhouette");
+    let orange = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 200 && p[1] > 90 && p[1] < 190 && p[2] < 80).count();
+    assert_eq!(orange(&shaded), 0);
+    let mut scene = gpu.upload(&device, &b, Style::Shaded);
+    let one: std::collections::HashSet<_> = [b.elements[0]].into_iter().collect();
+    gpu.select(&device, &mut scene, &b, &one);
+    let sel = render_rgba(&device, &queue, &gpu, &scene, &c, [400, 300]);
+    assert!(orange(&sel) > 300, "selected element is drawn orange: {}", orange(&sel));
+}

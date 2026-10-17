@@ -190,3 +190,34 @@ fn hidden_line_draws_the_line_where_two_walls_meet() {
     let q = c.project([2.0, -0.1, 1.0], [800.0, 600.0]).unwrap();
     assert_eq!(img.pixel(q[0] as usize, q[1] as usize), [255, 255, 255]);
 }
+
+#[test]
+fn picking_finds_the_front_element_and_respects_the_section_box() {
+    use openbim_viewport::{pick, SectionBox};
+    let b = model();
+    let mut cam = Camera::default_3d([0.0, 1.8, 2.0], 20.0);
+    cam.fit([-1.0, 0.0, 0.0], [1.0, 3.6, 4.0], 4.0 / 3.0);
+    let size = [400.0, 300.0];
+    // scan the picture: something is hit, and the pixel of the hit point finds the same element again
+    let mut hit = None;
+    'scan: for y in (0..300).step_by(10) { for x in (0..400).step_by(10) {
+        if let Some(h) = pick(&b, &cam, [x as f64, y as f64], size, None) { hit = Some((h, [x as f64, y as f64])); break 'scan; }
+    } }
+    let (hit, px) = hit.expect("the building is somewhere in the picture");
+    assert!(hit.distance > 0.0);
+    assert_eq!(pick(&b, &cam, px, size, None).unwrap().element, hit.element);
+    assert!(pick(&b, &cam, [0.0, 0.0], size, None).is_none(), "nothing in the corner");
+    let away = SectionBox { min: [100.0; 3], max: [101.0; 3] };
+    assert!(pick(&b, &cam, px, size, Some(away)).is_none());
+}
+
+#[test]
+fn blending_cameras_turns_the_short_way() {
+    let a = Camera { target: [0.0; 3], distance: 10.0, yaw: 3.0, pitch: 0.2 };
+    let b = Camera { target: [2.0, 0.0, 0.0], distance: 40.0, yaw: -3.0, pitch: 0.6 };
+    let m = Camera::blend(&a, &b, 0.5);
+    assert!((m.distance - 20.0).abs() < 1e-9, "geometric mean");
+    assert!(m.yaw.abs() > 3.0 || (m.yaw.abs() - std::f64::consts::PI).abs() < 0.2, "through the back, not through zero: {}", m.yaw);
+    assert_eq!(Camera::blend(&a, &b, 0.0), a);
+    assert!((Camera::blend(&a, &b, 1.0).pitch - 0.6).abs() < 1e-12);
+}
