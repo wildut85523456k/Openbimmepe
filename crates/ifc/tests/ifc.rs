@@ -446,7 +446,7 @@ fn beams_and_columns_take_round_and_i_sections() {
         BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 }, usage: openbim_ifc::FramingUsage::Brace },
     ];
     let t = export(&s).unwrap().text;
-    assert_eq!(t.matches("IFCBEAM(").count(), 2);
+    assert_eq!((t.matches("IFCBEAM(").count(), t.matches("IFCMEMBER(").count()), (1, 1), "the round one is a brace, so a member");
     assert!(t.contains("IFCISHAPEPROFILEDEF(.AREA.,$,#") && t.contains(",0.2,0.4,0.01,0.02,$,$,$)"), "{t}");
     assert!(t.contains("IFCCIRCLEPROFILEDEF(.AREA.,$,#") && t.contains(",0.15)"));
     // a column on a round or an I section
