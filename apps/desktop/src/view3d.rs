@@ -99,6 +99,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let mut on = app.view3d.section.is_some();
         if ui.checkbox(&mut on, "Section Box").changed() { app.view3d.section = if on { bounds } else { None }; }
     });
+    if app.view3d.style == Style::Realistic { app.view3d.sun_ui(ui); }
     let model = app.view3d.model_bounds();
     if let (Some(sec), Some(b)) = (&mut app.view3d.section, model) {
         ui.horizontal_wrapped(|ui| {
