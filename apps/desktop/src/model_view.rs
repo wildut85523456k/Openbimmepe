@@ -42,6 +42,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
+    if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
     let level_id = ElementId(if app.view == View::UpperPlan { 11 } else { 10 });
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);
     let three_d = app.view == View::ThreeD;

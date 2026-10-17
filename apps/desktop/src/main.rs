@@ -6,6 +6,7 @@ mod icons;
 mod ribbon;
 mod panels;
 mod model_view;
+mod view3d;
 mod model_edit;
 mod automation;
 mod automation_canvas;
@@ -41,6 +42,8 @@ struct Desktop {
     axis_mm: [f64; 4],
     camera_yaw: f32,
     camera_pitch: f32,
+    view3d: openbim_viewport_egui::Viewport3d,
+    view3d_revision: Option<u64>,
     property_query: String,
     browser_query: String,
     browser_selected: String,
@@ -58,6 +61,7 @@ impl Desktop {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+        if let Some(rs) = cc.wgpu_render_state.as_ref() { openbim_viewport_egui::Viewport3d::init(rs); }
         Self::sample()
     }
 
@@ -79,6 +83,7 @@ impl Desktop {
             slope_percent: 0.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0],
             camera_yaw: 0.7, camera_pitch: 0.6,
+            view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None,
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),

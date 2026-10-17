@@ -191,7 +191,7 @@ impl Viewport3d {
         let ppp = ui.ctx().pixels_per_point();
 
         // ViewCube first, so that a click on it does not also start a drag in the view
-        let cube_half = 38.0;
+        let cube_half = 48.0;
         let cube_centre = Pos2::new(rect.right() - cube_half - 18.0, rect.top() + cube_half + 18.0);
         let cells = cube_cells(&self.camera, cube_centre, cube_half * 0.7);
         let hover = resp.hover_pos();
@@ -279,9 +279,10 @@ impl Viewport3d {
             let hot = hover == Some(c.dir);
             let colour = if hot { Color32::from_rgb(120, 170, 235) } else if c.is_face { fill } else { fill.gamma_multiply(0.82) };
             p.add(Shape::convex_polygon(c.quad.to_vec(), colour, Stroke::new(0.75, line)));
-            if c.is_face {
+            let area = c.quad.iter().zip(c.quad.iter().cycle().skip(1)).map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f32>().abs() / 2.0;
+            if c.is_face && area > 120.0 {
                 let centre = Pos2::new(c.quad.iter().map(|q| q.x).sum::<f32>() / 4.0, c.quad.iter().map(|q| q.y).sum::<f32>() / 4.0);
-                p.text(centre, Align2::CENTER_CENTER, face_name(&self.labels, c.dir), FontId::proportional(9.0), text);
+                p.text(centre, Align2::CENTER_CENTER, face_name(&self.labels, c.dir), FontId::proportional(8.0), text);
             }
         }
     }

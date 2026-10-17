@@ -2393,6 +2393,8 @@ dependencies = [
  "openbim-automation",
  "openbim-document",
  "openbim-keymap",
+ "openbim-view",
+ "openbim-viewport-egui",
 ]
 
 [[package]]
