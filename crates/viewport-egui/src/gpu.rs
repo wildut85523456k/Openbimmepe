@@ -137,7 +137,7 @@ impl Gpu {
 
         let fill = |label: &str, fs: &str, bias: i32, pl: &wgpu::PipelineLayout| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
-            layout: Some(&pl),
+            layout: Some(pl),
             vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_fill"), compilation_options: Default::default(), buffers: &[Some(fill_buf.clone())] },
             fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some(fs), compilation_options: Default::default(), targets: &colour_target }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: Some(wgpu::Face::Back), front_face: wgpu::FrontFace::Ccw, ..Default::default() },
