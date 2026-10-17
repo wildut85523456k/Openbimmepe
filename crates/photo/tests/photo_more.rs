@@ -475,3 +475,12 @@ fn eulumdat_table_size_axial_c_and_zero_intensity() {
     m.mc = 0.0;
     assert!(read(&m).is_ok());
 }
+
+#[test]
+fn an_entry_with_an_unsafe_name_is_never_read_as_a_path() {
+    let good = ies_c(&[0.0, 90.0], &[0.0], &[vec![1.0, 1.0]]).into_bytes();
+    let z = zip_of(&[("../evil.ies".into(), good.clone()), ("ok.ies".into(), good)]);
+    let r = import(&z, "z.zip");
+    // the name is kept for display only (files are read in memory, never unpacked to disk; a project file name drops the folder)
+    assert_eq!(r.iter().map(|x| (x.name.as_str(), x.result.is_ok())).collect::<Vec<_>>(), vec![("../evil.ies", true), ("ok.ies", true)]);
+}

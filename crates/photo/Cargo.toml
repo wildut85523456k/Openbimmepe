@@ -6,7 +6,7 @@ description = "Photometric files of luminaires: IES (LM-63) and Eulumdat (LDT) r
 publish = false
 
 [dependencies]
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 proptest = "1"

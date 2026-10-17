@@ -497,7 +497,14 @@ pub fn import(bytes: &[u8], name: &str) -> Vec<Imported> {
     let mut total = 0u64;
     for i in 0..zip.len() {
         let Ok(mut f) = zip.by_index(i) else { continue };
-        let inner = f.name().to_string();
+        // an entry whose name is not valid (an unsafe path, bad encoding) is listed with an error, not read
+        let inner = match f.name() {
+            Ok(n) => n.to_string(),
+            Err(e) => {
+                out.push(Imported { name: format!("entry {}", i + 1), data: Vec::new(), result: Err(PhotoError::Bad(format!("the entry name is not usable: {e}"))) });
+                continue;
+            }
+        };
         let lower = inner.to_ascii_lowercase();
         if f.is_dir() || !(lower.ends_with(".ies") || lower.ends_with(".ldt")) { continue; }
         total = total.saturating_add(f.size());
