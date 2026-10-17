@@ -10,6 +10,8 @@ pub enum Geometry {
     Linear { start: [f64; 2], end: [f64; 2], level: ElementId },
     /// a point on `level` with something standing from there up to the level `top` (a column)
     Point { at: [f64; 2], level: ElementId, top: ElementId },
+    /// reinforcement placed in a beam
+    OnMember { host: ElementId },
     /// a slab lies on `level`; its outline is the element's
     Area { level: ElementId },
     /// a pad footing centred on `at`, `thickness_m` thick
@@ -140,12 +142,19 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss))) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
             Some(Geometry::OnWall { host }) => {
                 el.category == Category::WallFooting
                     && elements.get(host).is_some_and(|w| w.category == Category::Wall && matches!(w.geometry, Some(Geometry::Linear { .. })))
+            }
+            Some(Geometry::OnMember { host }) => {
+                let (dm, ds) = (el.width_m, el.height_m);
+                el.category == Category::Rebar
+                    && elements.get(host).is_some_and(|b| b.category == Category::Beam && b.section == crate::Section::Rectangle)
+                    && (0.004..=0.05).contains(&dm) && (0.004..=0.05).contains(&ds) && (0.01..=0.1).contains(&el.elevation_m)
+                    && (0.05..=1.0).contains(&el.spacing_m) && (2..=20).contains(&el.count)
             }
             Some(Geometry::Pad { at, level, thickness_m }) => {
                 el.category == Category::Footing && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
@@ -270,6 +279,7 @@ impl Document {
             return Some(Mesh { vertices, faces });
         }
         if matches!(el.category, Category::BeamSystem | Category::Truss) { return None; }
+        if el.category == Category::Rebar { return self.rebar_mesh(el); }
         if let Some(Geometry::Area { level }) = el.geometry {
             // the slab hangs from its top, which is `elevation_m` above the level
             let ring = &el.outline;

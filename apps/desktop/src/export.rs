@@ -23,7 +23,11 @@ pub fn beam_item(doc: &Document, el: &openbim_document::Element) -> Option<BeamI
         Usage::Brace => FramingUsage::Brace,
         Usage::Other => FramingUsage::Other,
     };
-    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: ext.a, b: ext.b, profile: el.profile(), usage })
+    let bars = doc.rebars_of(el.id).into_iter().filter_map(|r| doc.get(r)).flat_map(|r| {
+        let paths = doc.rebar_bars(r).unwrap_or_default();
+        paths.into_iter().enumerate().map(|(i, p)| openbim_ifc::BarItem { id: r.id.0, name: format!("{} {}", r.name, i + 1), path: p.path, diameter: p.diameter, shear: p.shear }).collect::<Vec<_>>()
+    }).collect();
+    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: ext.a, b: ext.b, profile: el.profile(), usage, bars })
 }
 
 /// The column of a document element: its section stood on its point from the foot to the top level.
@@ -85,7 +89,8 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 slabs.push(SlabItem { id: el.id.0, slab, role: SlabRole::StripFooting, room_bounding: false });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
-            (Category::Level | Category::Grid, _) => {}
+            // the beams, members or bars they make are exported in their place
+            (Category::Level | Category::Grid | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
             (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,
             (Category::Equipment, _) => *skipped.entry("equipment").or_default() += 1,

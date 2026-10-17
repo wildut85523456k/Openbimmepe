@@ -15,6 +15,7 @@ pub enum SnapshotGeometry {
     Area { level:u64 },
     Pad { at:[f64;2],level:u64,thickness_m:f64 },
     OnWall { host:u64 },
+    OnMember { host:u64 },
 }
 impl From<Geometry> for SnapshotGeometry {
     fn from(value:Geometry)->Self {
@@ -26,6 +27,7 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::Area { level }=>Self::Area { level:level.0 },
             Geometry::Pad { at,level,thickness_m }=>Self::Pad { at,level:level.0,thickness_m },
             Geometry::OnWall { host }=>Self::OnWall { host:host.0 },
+            Geometry::OnMember { host }=>Self::OnMember { host:host.0 },
         }
     }
 }
@@ -39,6 +41,7 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::Area { level }=>Self::Area { level:ElementId(level) },
             SnapshotGeometry::Pad { at,level,thickness_m }=>Self::Pad { at,level:ElementId(level),thickness_m },
             SnapshotGeometry::OnWall { host }=>Self::OnWall { host:ElementId(host) },
+            SnapshotGeometry::OnMember { host }=>Self::OnMember { host:ElementId(host) },
         }
     }
 }
@@ -81,6 +84,9 @@ pub struct SnapshotElement {
     /// a beam: whether its start and end are joined to the columns they end in, when not both
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub join_ends:Option<[bool;2]>,
+    /// a rebar: the number of bars along the bottom of its beam
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub count:Option<u32>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -149,10 +155,11 @@ impl Snapshot {
             material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
             outline: e.outline.clone(),
             slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
-            spacing_m: matches!(e.category, Category::BeamSystem | Category::Truss).then_some(e.spacing_m),
-            angle_deg: matches!(e.category, Category::BeamSystem | Category::Truss).then_some(e.angle_deg),
+            spacing_m: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.spacing_m),
+            angle_deg: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.angle_deg),
             parent: e.parent.map(|p| p.0),
             join_ends: (e.join_ends != [true; 2]).then_some(e.join_ends),
+            count: (e.category == Category::Rebar).then_some(e.count),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -165,7 +172,7 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),
@@ -195,6 +202,9 @@ impl Snapshot {
             }
             if let (Some(spacing_m), Some(angle_deg)) = (el.spacing_m, el.angle_deg) {
                 ops.push(Command::SetBeamSystem { id: ElementId(el.id), spacing_m, angle_deg });
+            }
+            if let Some(count) = el.count {
+                ops.push(Command::SetCount { id: ElementId(el.id), count });
             }
             if let Some(p) = el.parent {
                 ops.push(Command::SetParent { id: ElementId(el.id), parent: Some(ElementId(p)) });

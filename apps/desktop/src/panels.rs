@@ -68,12 +68,13 @@ fn read_only_group(ui: &mut egui::Ui, name: &str, query: &str, rows: &[(&str, &s
 }
 
 #[derive(Clone, Copy)]
-enum Field { Spacing, Angle, Thickness, Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
+enum Field { Count, Spacing, Angle, Thickness, Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
 
 fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Field] {
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
+        C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
         C::BeamSystem => &[Field::Spacing, Field::Angle, Field::Width, Field::Height, Field::Elevation],
         C::Footing => &[Field::Width, Field::Height, Field::Thickness, Field::Elevation],
@@ -126,6 +127,11 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
     use openbim_document::Category as C;
     match field {
         Field::Thickness => "Thickness (mm)",
+        Field::Count => "Bottom Bars",
+        Field::Width if category == C::Rebar => "Bar Diameter (mm)",
+        Field::Height if category == C::Rebar => "Stirrup Diameter (mm)",
+        Field::Elevation if category == C::Rebar => "Cover (mm)",
+        Field::Spacing if category == C::Rebar => "Stirrup Spacing (mm)",
         Field::Spacing if category == C::Truss => "Panel Length (mm)",
         Field::Width if category == C::Truss => "Member Size (mm)",
         Field::Height if category == C::Truss => "Truss Depth (mm)",
@@ -156,7 +162,7 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
 
 fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
     let value = match field {
-        Field::Spacing => &mut app.spacing_mm, Field::Angle => &mut app.angle_deg,
+        Field::Count => &mut app.bar_count, Field::Spacing => &mut app.spacing_mm, Field::Angle => &mut app.angle_deg,
         Field::Thickness => &mut app.footing_thickness_mm, Field::Width | Field::Diameter => &mut app.width_mm, Field::Web => &mut app.web_mm, Field::Flange => &mut app.flange_mm, Field::Height => &mut app.height_mm,
         Field::Elevation => &mut app.elevation_mm, Field::Slope => &mut app.slope_percent,
         Field::X1 => &mut app.axis_mm[0], Field::Y1 => &mut app.axis_mm[1],
@@ -193,6 +199,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Footing => ("Structural Foundations (1)", "Isolated Footing", "foundation"),
         C::WallFooting => ("Structural Foundations (1)", "Strip Footing", "footing"),
         C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
+        C::Rebar => ("Structural Rebar (1)", "Beam Rebar", "rebar"),
         C::Truss => ("Structural Trusses (1)", "Warren Truss", "truss"),
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
@@ -233,6 +240,17 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             for field in dimensions(cat, 0).iter().copied() {
                 if matches!(field, Field::Elevation) { ui.label(field_name(field, cat)); ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0)); continue; }
                 ui.label(field_name(field, cat));
+                editor(app, ui, field);
+            }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::Rebar {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Rebar");
+            ui.separator();
+            for field in dimensions(openbim_document::Category::Rebar, 0).iter().copied() {
+                ui.label(field_name(field, openbim_document::Category::Rebar));
                 editor(app, ui, field);
             }
         });
@@ -369,6 +387,18 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
                     }
                     if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
+                    if let Some(Geometry::OnMember { host }) = el.geometry {
+                        let name = app.document.get(host).map_or("Missing beam", |w| w.name.as_str());
+                        read_only_group(ui, "Constraints", &query, &[("Host Beam", name)]);
+                        let bars = app.document.rebar_bars(el).map_or(0, |b| b.len()).to_string();
+                        read_only_group(ui, "Derived Geometry", &query, &[("Bars and Stirrups", &bars)]);
+                    }
+                    if el.category == openbim_document::Category::Beam {
+                        for r in app.document.rebars_of(el.id) {
+                            let label = format!("Select {}", app.document.get(r).map_or("rebar", |e| e.name.as_str()));
+                            if ui.button(label).clicked() { app.select_element(Some(r)); }
+                        }
+                    }
                     if let Some(Geometry::OnWall { host }) = el.geometry {
                         let name = app.document.get(host).map_or("Missing wall", |w| w.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Host Wall", name)]);

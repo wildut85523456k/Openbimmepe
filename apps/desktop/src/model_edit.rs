@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
+use openbim_document::{RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -26,6 +26,7 @@ impl Desktop {
             if el.category == Category::Beam { self.join_pick = el.join_ends; }
             if matches!(el.category, Category::BeamSystem | Category::Truss) { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
             if el.category == Category::Truss { self.material_pick = el.material; }
+            if el.category == Category::Rebar { (self.spacing_mm, self.bar_count) = (el.spacing_m * 1000.0, f64::from(el.count)); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
@@ -53,7 +54,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && {
@@ -73,7 +74,8 @@ impl Desktop {
         };
         let system = el.category == Category::BeamSystem && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(el.angle_deg, self.angle_deg) || el.usage != self.usage_pick || el.material != self.material_pick);
         let truss = el.category == Category::Truss && (differs(el.spacing_m * 1000.0, self.spacing_mm) || el.material != self.material_pick);
-        let kind = system || truss || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
+        let rebar = el.category == Category::Rebar && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(f64::from(el.count), self.bar_count));
+        let kind = system || truss || rebar || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
             || (el.category == Category::WallFooting && el.material != self.material_pick)
             || (el.category == Category::Beam && el.join_ends != self.join_pick)
@@ -204,6 +206,17 @@ impl Desktop {
         }
     }
 
+    /// A click of the Rebar tool on a beam: reinforcement from the options bar goes into it.
+    pub(crate) fn rebar_click(&mut self, beam: ElementId) {
+        if self.document.get(beam).is_none_or(|b| b.category != Category::Beam) { self.message = "Rebar: click a beam".into(); return; }
+        let m = |v: f64| v / 1000.0;
+        let spec = RebarSpec { count: self.bar_count.max(0.0) as u32, bar_m: m(self.width_mm), stirrup_m: m(self.height_mm), cover_m: m(self.elevation_mm), stirrup_spacing_m: m(self.spacing_mm) };
+        self.message = match self.document.place_rebar(beam, &spec) {
+            Ok(id) => format!("Rebar {} placed in beam {}; undo removes it", id.0, beam.0),
+            Err(error) => format!("Rebar rejected ({error:?}): the bars must fit inside the beam, past the cover"),
+        };
+    }
+
     /// A click of the Truss tool in the plan of `level`: the first sets the start, the second builds the truss.
     pub(crate) fn truss_click(&mut self, level: ElementId, point: [f64; 2]) {
         let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Truss: click the end".into(); return; };
@@ -240,6 +253,16 @@ impl Desktop {
         if matches!(el.category, Category::Footing | Category::WallFooting) {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 });
             commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
+        if el.category == Category::Rebar {
+            let (count, spacing) = (self.bar_count.max(0.0) as u32, self.spacing_mm / 1000.0);
+            commands.extend([Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 }, Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 },
+                Command::SetBeamSystem { id, spacing_m: spacing, angle_deg: 0.0 }, Command::SetCount { id, count }]);
+            match self.document.transact(self.document.revision(), &commands) {
+                Ok(_) => { self.sync_duct_controls(); self.message = format!("Rebar {} updated", id.0); }
+                Err(error) => self.message = format!("Edit rejected: {error:?}"),
+            }
+            return;
         }
         if el.category == Category::Truss {
             let Some(Geometry::Linear { .. }) = el.geometry else { return; };
@@ -716,5 +739,35 @@ mod tests {
         assert_eq!(app.document.system_beams(t).len(), 6);
         app.undo_document();
         assert_eq!(app.document.system_beams(t).len(), 10);
+    }
+
+    #[test]
+    fn rebar_goes_into_a_clicked_beam_is_edited_in_place_and_exported_as_bars() {
+        let mut app = Desktop::sample();
+        let beam = app.document.place_beam(ElementId(10), &BeamSpec::level([1.0, 3.0], [7.0, 3.0], 0.3, 0.5, 2.8)).unwrap();
+        app.run_command("rebar", "Rebar");
+        assert!(app.tool == Tool::Rebar);
+        app.rebar_click(ElementId(10));
+        assert!(app.message.contains("click a beam"), "{}", app.message);
+        app.rebar_click(beam);
+        let r = app.document.elements().find(|e| e.category == Category::Rebar).expect("placed").id;
+        let bars = app.document.rebar_bars(app.document.get(r).unwrap()).unwrap().len();
+        assert_eq!(bars, 35);
+        let batch = crate::view3d::batch(&app.document);
+        assert!(batch.elements.iter().any(|e| e.id == r.0), "in 3D");
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCREINFORCINGBAR(").count(), bars);
+        assert!(out.text.contains("IFCSWEPTDISKSOLID(") && out.text.contains(".SHEAR.") && out.text.contains(".MAIN."));
+        assert!(out.warnings.iter().all(|w| !w.contains("without geometry")), "{:?}", out.warnings);
+        // bars and stirrups edited in the properties
+        app.select_element(Some(r));
+        assert!(!app.has_pending_edit());
+        (app.bar_count, app.spacing_mm) = (4.0, 400.0);
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.get(r).unwrap().count, 4);
+        assert!(app.document.rebar_bars(app.document.get(r).unwrap()).unwrap().len() < bars);
+        app.undo_document();
+        assert_eq!(app.document.get(r).unwrap().count, 3);
     }
 }

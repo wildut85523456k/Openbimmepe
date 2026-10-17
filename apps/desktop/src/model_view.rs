@@ -152,7 +152,15 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if app.tool == crate::Tool::WallFooting && !three_d {
+    if app.tool == crate::Tool::Rebar && !three_d {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id);
+                match hit { Some(id) => app.rebar_click(id), None => app.message = "Rebar: click a beam".into() }
+            }
+        }
+    } else if app.tool == crate::Tool::WallFooting && !three_d {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if response.clicked() {
             if let Some(p) = response.interact_pointer_pos() {

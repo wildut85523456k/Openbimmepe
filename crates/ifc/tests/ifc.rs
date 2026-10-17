@@ -442,8 +442,8 @@ fn beams_and_columns_take_round_and_i_sections() {
     let mut s = scene(vec![wall(5)]);
     let i = Profile::I { width: 0.2, depth: 0.4, web: 0.01, flange: 0.02 };
     s.beams = vec![
-        BeamItem { id: 9, name: "I".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], profile: i, usage: openbim_ifc::FramingUsage::Girder },
-        BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 }, usage: openbim_ifc::FramingUsage::Brace },
+        BeamItem { id: 9, name: "I".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], profile: i, usage: openbim_ifc::FramingUsage::Girder, bars: vec![] },
+        BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 }, usage: openbim_ifc::FramingUsage::Brace, bars: vec![] },
     ];
     let t = export(&s).unwrap().text;
     assert_eq!((t.matches("IFCBEAM(").count(), t.matches("IFCMEMBER(").count()), (1, 1), "the round one is a brace, so a member");

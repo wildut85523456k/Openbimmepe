@@ -119,12 +119,24 @@ pub struct BeamItem {
     pub b: [f64; 3],
     pub profile: Profile,
     pub usage: FramingUsage,
+    /// reinforcing bars inside the beam
+    pub bars: Vec<BarItem>,
+}
+
+/// A reinforcing bar: a round bar of `diameter` along a polyline of the model, a stirrup when `shear` is set.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarItem {
+    pub id: u64,
+    pub name: String,
+    pub path: Vec<[f64; 3]>,
+    pub diameter: f64,
+    pub shear: bool,
 }
 
 impl BeamItem {
     /// A beam of rectangular section.
     pub fn rect(id: u64, name: &str, a: [f64; 3], b: [f64; 3], width: f64, depth: f64) -> BeamItem {
-        BeamItem { id, name: name.into(), a, b, profile: Profile::Rect { width, depth }, usage: FramingUsage::Girder }
+        BeamItem { id, name: name.into(), a, b, profile: Profile::Rect { width, depth }, usage: FramingUsage::Girder, bars: Vec::new() }
     }
 
     /// The unit vectors along the beam, across it (horizontal) and up out of it; None for a member that is vertical
@@ -305,6 +317,7 @@ pub struct Report {
     pub walls: usize,
     pub openings: usize,
     pub slabs: usize,
+    pub bars: usize,
     pub segments: usize,
     pub fittings: usize,
     pub ports: usize,
@@ -1046,6 +1059,21 @@ fn write_beams(o: &mut Out) -> Result<(), ExportError> {
         let e = o.s.add(format!("{class}({g},$,{},$,$,#{pl},#{shape},{})", string(&b.name), o.tail4(predefined)));
         o.contain(st, e);
         o.member_entities.push((b.id, e));
+        for (k, bar) in b.bars.iter().enumerate() {
+            if bar.path.len() < 2 || bar.diameter.is_nan() || bar.diameter <= 0.0 { return Err(ExportError::Unsupported(format!("bar {}: needs two points and a positive diameter", bar.name))); }
+            let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+            let pts: Vec<String> = bar.path.iter().map(|p| { let id = o.p3([p[0], p[1], p[2] - elev]); format!("#{id}") }).collect();
+            let curve = o.s.add(format!("IFCPOLYLINE(({}))", pts.join(",")));
+            let r = o.r(bar.diameter / 2.0, "size");
+            let solid = o.s.add(format!("IFCSWEPTDISKSOLID(#{curve},{r},$,$,$)"));
+            let shape = o.shape(&[solid]);
+            let g = o.gid(bar.id, k as u16);
+            let d = o.r(bar.diameter, "size");
+            let kind = if bar.shear { ".SHEAR." } else { ".MAIN." };
+            let rb = o.s.add(format!("IFCREINFORCINGBAR({g},$,{},$,$,#{pl},#{shape},$,$,{d},$,$,{kind},$)", string(&bar.name)));
+            o.contain(st, rb);
+            o.report.bars += 1;
+        }
     }
     Ok(())
 }
