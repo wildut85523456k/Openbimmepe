@@ -1,4 +1,4 @@
-use crate::{Desktop, ElementId, SampleElement};
+use crate::{Desktop, ElementId, SampleElement, Tool};
 use openbim_document::{Category, Command, Geometry};
 
 impl Desktop {
@@ -44,22 +44,56 @@ impl Desktop {
         size || elevation || slope || axis
     }
 
-    /// Places a beam from the options bar on the lowest level, selects it and goes back to Select.
+    /// Writes the document as `openbim-export.ifc` in the working directory and says what was and was not written.
+    pub(crate) fn export_ifc_file(&mut self) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        match crate::export::export_ifc(&self.document, "Project1", 1, &crate::export::iso_time(secs)) {
+            Ok(out) => match std::fs::write("openbim-export.ifc", &out.text) {
+                Ok(()) => self.message = format!("Exported openbim-export.ifc: {} walls, {} beams. {}", out.walls, out.beams, out.warnings.join("; ")),
+                Err(e) => self.message = format!("Could not write openbim-export.ifc: {e}"),
+            },
+            Err(e) => self.message = format!("IFC export failed: {e}"),
+        }
+    }
+
+    /// The levels of the document, lowest first: (id, name, elevation).
+    pub(crate) fn levels(&self) -> Vec<(ElementId, String, f64)> {
+        let mut l: Vec<_> = self.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
+            .map(|e| (e.id, e.name.clone(), e.elevation_m)).collect();
+        l.sort_by(|a, b| a.2.total_cmp(&b.2));
+        l
+    }
+
+    /// Places a beam with the sizes of the options bar on `level`.
+    fn place_beam_on(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2]) -> Option<ElementId> {
+        let m = |v: f64| v / 1000.0;
+        match self.document.place_beam(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm)) {
+            Ok(id) => { self.message = format!("Beam {} placed; undo removes it", id.0); Some(id) }
+            Err(error) => { self.message = format!("Beam rejected: {error:?}"); None }
+        }
+    }
+
+    /// Places a beam from the options bar on its level, selects it and goes back to Select.
     pub(crate) fn place_beam_from_controls(&mut self) {
-        let level = self.document.elements()
-            .filter(|e| matches!(e.geometry, Some(Geometry::Level)))
-            .min_by(|a, b| a.elevation_m.total_cmp(&b.elevation_m)).map(|e| e.id);
+        let levels = self.levels();
+        let level = self.beam_level.filter(|l| levels.iter().any(|x| x.0 == *l)).or(levels.first().map(|l| l.0));
         let Some(level) = level else { self.message = "Add a level before placing a beam".into(); return; };
         let m = |v: f64| v / 1000.0;
         let (start, end) = ([m(self.axis_mm[0]), m(self.axis_mm[1])], [m(self.axis_mm[2]), m(self.axis_mm[3])]);
-        match self.document.place_beam(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm)) {
-            Ok(id) => {
-                self.tool = crate::Tool::Select;
-                self.selected = Some(SampleElement::Model(id));
-                self.sync_duct_controls();
-                self.message = format!("Beam {} placed; undo removes it", id.0);
-            }
-            Err(error) => self.message = format!("Beam rejected: {error:?}"),
+        if let Some(id) = self.place_beam_on(level, start, end) {
+            self.tool = Tool::Select;
+            self.beam_start = None;
+            self.selected = Some(SampleElement::Model(id));
+            self.sync_duct_controls();
+        }
+    }
+
+    /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
+    /// tool stays on for the next one.
+    pub(crate) fn beam_click(&mut self, level: ElementId, point: [f64; 2]) {
+        match self.beam_start {
+            None => { self.beam_start = Some(point); self.message = "Beam: click the end".into(); }
+            Some(start) => if self.place_beam_on(level, start, point).is_some() { self.beam_start = None; },
         }
     }
 
@@ -103,15 +137,47 @@ impl Desktop {
 mod tests {
     use super::*;
     #[test]
+    fn two_clicks_in_a_plan_place_a_beam_on_that_level_and_the_tool_stays_on() {
+        let mut app = Desktop::sample();
+        app.choose_tool(Tool::Beam);
+        (app.width_mm, app.height_mm, app.elevation_mm) = (300.0, 500.0, 2500.0);
+        let n = app.document.elements().count();
+        app.beam_click(ElementId(11), [1.0, 1.0]);
+        assert_eq!(app.document.elements().count(), n, "one click places nothing");
+        app.beam_click(ElementId(11), [1.0, 1.0]);
+        assert_eq!(app.document.elements().count(), n, "a zero-length beam is refused");
+        assert_eq!(app.beam_start, Some([1.0, 1.0]), "and the start is kept");
+        app.beam_click(ElementId(11), [4.0, 1.0]);
+        assert_eq!(app.document.elements().count(), n + 1);
+        assert!(app.tool == Tool::Beam && app.beam_start.is_none());
+        let beam = app.document.elements().find(|e| e.category == Category::Beam).unwrap();
+        assert!(matches!(beam.geometry, Some(Geometry::Linear { level, start: [1.0, 1.0], end: [4.0, 1.0] }) if level == ElementId(11)));
+        // its centre is 2.5 m above Level 2 (3 m)
+        let z = app.document.mesh(beam.id).unwrap().vertices.iter().map(|v| v[2]).fold(0.0, f64::max);
+        assert!((z - (3.0 + 2.5 + 0.25)).abs() < 1e-9, "{z}");
+        // the options bar places on the level it was given, not the lowest
+        app.beam_level = Some(ElementId(11));
+        app.axis_mm = [0.0, 2000.0, 3000.0, 2000.0];
+        app.place_beam_from_controls();
+        let last = app.selected_id().unwrap();
+        assert!(matches!(app.document.get(last).unwrap().geometry, Some(Geometry::Linear { level, .. }) if level == ElementId(11)));
+        // choosing the tool again forgets a half-placed beam
+        app.choose_tool(Tool::Beam);
+        app.beam_click(ElementId(10), [0.0, 0.0]);
+        app.choose_tool(Tool::Beam);
+        assert!(app.beam_start.is_none());
+    }
+
+    #[test]
     fn a_beam_is_placed_from_the_options_bar_shown_in_3d_and_undone() {
         let mut app = Desktop::sample();
-        app.choose_tool(crate::Tool::Beam);
+        app.choose_tool(Tool::Beam);
         (app.width_mm, app.height_mm, app.elevation_mm) = (200.0, 400.0, 2800.0);
         app.axis_mm = [1000.0, 1000.0, 5000.0, 1000.0];
         let before = crate::view3d::batch(&app.document).elements.len();
         app.place_beam_from_controls();
         let id = app.selected_id().expect("the new beam is selected");
-        assert!(app.tool == crate::Tool::Select);
+        assert!(app.tool == Tool::Select);
         let el = app.document.get(id).unwrap();
         assert_eq!(el.category, Category::Beam);
         assert!(!app.has_pending_edit(), "the controls show the beam");
@@ -123,7 +189,7 @@ mod tests {
         let (lo, hi) = (v.iter().map(|p| p[2]).fold(f64::MAX, f64::min), v.iter().map(|p| p[2]).fold(f64::MIN, f64::max));
         assert!((lo - 2.6).abs() < 1e-9 && (hi - 3.0).abs() < 1e-9, "{lo} {hi}");
         // a zero-length beam is refused and nothing is added
-        app.choose_tool(crate::Tool::Beam);
+        app.choose_tool(Tool::Beam);
         app.axis_mm = [1000.0, 1000.0, 1000.0, 1000.0];
         let n = app.document.elements().count();
         app.place_beam_from_controls();

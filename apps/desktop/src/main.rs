@@ -8,6 +8,7 @@ mod panels;
 mod model_view;
 mod view3d;
 mod model_edit;
+mod export;
 mod automation;
 mod automation_canvas;
 mod automation_groups;
@@ -40,6 +41,10 @@ struct Desktop {
     elevation_mm: f64,
     slope_percent: f64,
     axis_mm: [f64; 4],
+    /// the first point of a beam being placed in a plan view
+    beam_start: Option<[f64; 2]>,
+    /// the level the options bar places beams on; the lowest when None
+    beam_level: Option<ElementId>,
     camera_yaw: f32,
     camera_pitch: f32,
     view3d: openbim_viewport_egui::Viewport3d,
@@ -84,7 +89,7 @@ impl Desktop {
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0,
-            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0],
+            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -97,11 +102,12 @@ impl Desktop {
 
     fn choose_tool(&mut self, tool: Tool) {
         self.tool = tool;
+        self.beam_start = None;
         self.message = match tool {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),
             Tool::Duct => "Duct command preview only; routing engine is not connected yet.".into(),
             Tool::Pipe => "Pipe command preview only; routing engine is not connected yet.".into(),
-            Tool::Beam => "Beam: set width, depth, height and the two ends in the options bar, then Place Beam.".into(),
+            Tool::Beam => "Beam: click the start and the end in a plan view (Esc ends), or type the ends in the options bar and press Place Beam.".into(),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -155,6 +161,7 @@ impl Desktop {
             "wall" => self.choose_tool(Tool::Wall),
             "beam" => self.choose_tool(Tool::Beam),
             "select" => self.choose_tool(Tool::Select),
+            "ifc_export" => self.export_ifc_file(),
             "undo" => self.undo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
             "zoom_out" => self.zoom = (self.zoom / 1.25).max(0.3),

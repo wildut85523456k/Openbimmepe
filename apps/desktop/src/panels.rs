@@ -143,6 +143,12 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.strong("Place Structural Framing");
             ui.separator();
             let cat = openbim_document::Category::Beam;
+            let levels = app.levels();
+            let current = app.beam_level.and_then(|l| levels.iter().find(|x| x.0 == l)).or(levels.first()).cloned();
+            ui.label("Level");
+            egui::ComboBox::from_id_salt("beam_level").selected_text(current.map_or("-".into(), |l| l.1)).show_ui(ui, |ui| {
+                for (id, name, _) in &levels { ui.selectable_value(&mut app.beam_level, Some(*id), name); }
+            });
             for field in [Field::Width, Field::Height, Field::Elevation, Field::X1, Field::Y1, Field::X2, Field::Y2] {
                 ui.label(field_name(field, cat));
                 editor(app, ui, field);

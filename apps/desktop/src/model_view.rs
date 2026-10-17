@@ -147,7 +147,19 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if response.clicked() {
+    if app.tool == crate::Tool::Beam && !three_d {
+        // two clicks place a beam, snapped to 50 mm; Esc ends the tool
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); } else {
+            if let (Some(a), Some(h)) = (app.beam_start, response.hover_pos()) {
+                let (a, b) = (screen([a[0], a[1], level_z]), screen([to_model(h)[0], to_model(h)[1], level_z]));
+                painter.line_segment([a, b], Stroke::new((app.width_mm as f32 / 1000.0 * scale).max(2.0), Color32::from_rgba_unmultiplied(176, 140, 104, 140)));
+            }
+            if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.beam_click(level_id, to_model(p)); } }
+        }
+    } else if response.clicked() {
         if let Some(p) = response.interact_pointer_pos() {
             let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id)
                 .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0
@@ -207,5 +219,30 @@ mod tests {
             }
         }
         assert_eq!(app.document, before, "rendering must not mutate geometry");
+    }
+
+    #[test]
+    fn the_beam_tool_draws_a_rubber_band_and_a_click_in_the_plan_places_the_beam() {
+        let ctx = egui::Context::default();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Beam);
+        app.beam_start = Some([1.0, 1.0]);
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 700.0));
+        let frame = |app: &mut Desktop, events: Vec<egui::Event>| {
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() },
+                |ui| { egui::CentralPanel::default().show(ui, |ui| show(app, ui)); });
+            out.textures_delta.clear();
+        };
+        let at = Pos2::new(500.0, 350.0);
+        let btn = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut app, vec![btn(true)]);
+        let n = app.document.elements().filter(|e| e.category == Category::Beam).count();
+        frame(&mut app, vec![btn(false)]);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Beam).count(), n + 1, "{}", app.message);
+        assert!(app.tool == crate::Tool::Beam, "the tool stays on");
+        frame(&mut app, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+        assert!(app.tool == crate::Tool::Select);
     }
 }
