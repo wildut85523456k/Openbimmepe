@@ -60,7 +60,11 @@ impl Document {
         let up = [-dx / length * slope / norm, -dy / length * slope / norm, 1.0 / norm];
         let center_z = z + if el.category == Category::Wall { el.height_m / 2.0 } else { 0.0 };
         let centers = [[start[0], start[1], center_z], [end[0], end[1], center_z + length * slope]];
-        let section: Vec<[f64; 2]> = if el.category == Category::Pipe {
+        let section: Vec<[f64; 2]> = if el.category == Category::Beam {
+            // the outline of an I-section is not convex: its end faces are polygons that are fine for a plan, but
+            // the 3D view meshes beams itself (`openbim_view::beam_mesh`)
+            el.profile().outline()
+        } else if el.category == Category::Pipe {
             (0..16).map(|i| {
                 let angle = i as f64 * std::f64::consts::TAU / 16.0;
                 [el.width_m / 2.0 * angle.cos(), el.width_m / 2.0 * angle.sin()]
@@ -123,9 +127,36 @@ impl Document {
 mod tests {
     use super::*;
     #[test]
+    fn a_beam_takes_a_round_or_an_i_section_changes_with_its_size_and_the_sections_are_validated() {
+        use crate::Section;
+        let mut d = Document::spatial_sample();
+        let place = |d: &mut Document, w, h, s| d.place_beam(ElementId(10), [0.0, 1.0], [4.0, 1.0], w, h, 2.8, s);
+        // a round beam is as deep as it is wide, and its mesh is a 32-gon prism
+        let round = place(&mut d, 0.3, 0.3, Section::Circle).unwrap();
+        assert_eq!(d.mesh(round).unwrap().vertices.len(), 64);
+        let other = place(&mut d, 0.3, 0.4, Section::Circle).unwrap();
+        assert_eq!(d.get(other).unwrap().height_m, 0.3, "a circle takes its width as its diameter");
+        // an I-section needs a web thinner than its flanges are wide and room between its flanges
+        let i = place(&mut d, 0.2, 0.4, Section::IShape { web_m: 0.01, flange_m: 0.02 }).unwrap();
+        assert_eq!(d.mesh(i).unwrap().vertices.len(), 24);
+        assert!(place(&mut d, 0.2, 0.4, Section::IShape { web_m: 0.3, flange_m: 0.02 }).is_err());
+        assert!(place(&mut d, 0.2, 0.04, Section::IShape { web_m: 0.01, flange_m: 0.02 }).is_err());
+        // a section and its size change in one transaction: I to circle
+        d.transact(d.revision(), &[
+            Command::Resize { id: i, width_m: 0.25, height_m: 0.5 },
+            Command::SetSection { id: i, section: Section::Circle },
+        ]).unwrap();
+        assert_eq!((d.get(i).unwrap().width_m, d.get(i).unwrap().height_m), (0.25, 0.25), "the circle takes the width");
+        d.undo().unwrap();
+        assert_eq!(d.get(i).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
+        // only beams have a section
+        assert!(d.transact(d.revision(), &[Command::SetSection { id: ElementId(20), section: Section::Circle }]).is_err());
+    }
+
+    #[test]
     fn a_beam_is_placed_on_a_level_validated_and_undone_in_one_step() {
         let mut d = Document::spatial_sample();
-        let id = d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8).unwrap();
+        let id = d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8, crate::Section::Rectangle).unwrap();
         assert_eq!(id, ElementId(d.elements().map(|e| e.id.0).max().unwrap()));
         assert_eq!(d.get(id).unwrap().category, Category::Beam);
         let m = d.mesh(id).unwrap();
@@ -134,9 +165,9 @@ mod tests {
         assert!(zs.iter().all(|z| (z - 2.6).abs() < 1e-9 || (z - 3.0).abs() < 1e-9));
         // zero length, no size, and a level that is not one are all refused and change nothing
         let rev = d.revision();
-        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [1.0, 1.0], 0.2, 0.4, 2.8).is_err());
-        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.0, 0.4, 2.8).is_err());
-        assert!(d.place_beam(ElementId(100), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8).is_err());
+        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [1.0, 1.0], 0.2, 0.4, 2.8, crate::Section::Rectangle).is_err());
+        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.0, 0.4, 2.8, crate::Section::Rectangle).is_err());
+        assert!(d.place_beam(ElementId(100), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8, crate::Section::Rectangle).is_err());
         assert_eq!(d.revision(), rev);
         // a beam has no slope
         assert!(d.transact(d.revision(), &[Command::SetSlope { id, slope_ratio: 0.1 }]).is_err());

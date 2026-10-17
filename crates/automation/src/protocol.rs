@@ -43,6 +43,35 @@ pub struct SnapshotElement {
     pub slope_ratio: Option<f64>,
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub geometry:Option<SnapshotGeometry>,
+    /// the section of a beam when it is not a rectangle
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub section:Option<SnapshotSection>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotSection {
+    /// "Circle" or "IShape"
+    pub kind: String,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub web_m: Option<f64>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub flange_m: Option<f64>,
+}
+impl SnapshotSection {
+    fn from_document(s: openbim_document::Section) -> Option<Self> {
+        match s {
+            openbim_document::Section::Rectangle => None,
+            openbim_document::Section::Circle => Some(Self { kind: "Circle".into(), web_m: None, flange_m: None }),
+            openbim_document::Section::IShape { web_m, flange_m } => Some(Self { kind: "IShape".into(), web_m: Some(web_m), flange_m: Some(flange_m) }),
+        }
+    }
+    fn into_document(&self) -> Result<openbim_document::Section, String> {
+        match (self.kind.as_str(), self.web_m, self.flange_m) {
+            ("Circle", None, None) => Ok(openbim_document::Section::Circle),
+            ("IShape", Some(web_m), Some(flange_m)) => Ok(openbim_document::Section::IShape { web_m, flange_m }),
+            _ => Err(format!("Unsupported section {}", self.kind)),
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,7 +109,7 @@ impl Snapshot {
         Self { document_id: document_id.into(), revision: document.revision(), elements: document.elements().map(|e| SnapshotElement {
             id: e.id.0, category: format!("{:?}",e.category), name: e.name.clone(),
             width_m: e.width_m, height_m: e.height_m, elevation_m: e.elevation_m, slope_ratio: e.slope_ratio,
-            geometry:e.geometry.map(Into::into),
+            geometry:e.geometry.map(Into::into), section: SnapshotSection::from_document(e.section),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -105,6 +134,9 @@ impl Snapshot {
                 width_m: el.width_m, height_m: el.height_m, elevation_m: el.elevation_m });
             if let Some(slope_ratio) = el.slope_ratio {
                 ops.push(Command::SetSlope { id: ElementId(el.id), slope_ratio });
+            }
+            if let Some(section) = &el.section {
+                ops.push(Command::SetSection { id: ElementId(el.id), section: section.into_document()? });
             }
             if let Some(geometry)=el.geometry {
                 ops.push(Command::SetGeometry { id:ElementId(el.id),geometry:geometry.into() });

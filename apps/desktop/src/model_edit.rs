@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{Category, Command, Geometry};
+use openbim_document::{Category, Command, Geometry, Section};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -21,10 +21,26 @@ impl Desktop {
             self.height_mm = el.height_m * 1000.0;
             self.elevation_mm = el.elevation_m * 1000.0;
             self.slope_percent = el.slope_ratio.unwrap_or(0.0) * 100.0;
+            if el.category == Category::Beam {
+                (self.section_pick, self.web_mm, self.flange_mm) = match el.section {
+                    Section::Rectangle => (0, self.web_mm, self.flange_mm),
+                    Section::Circle => (1, self.web_mm, self.flange_mm),
+                    Section::IShape { web_m, flange_m } => (2, web_m * 1000.0, flange_m * 1000.0),
+                };
+            }
             if let Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end }) = el.geometry {
                 self.axis_mm = [start[0], start[1], end[0], end[1]].map(|n| n * 1000.0);
             }
         } else { self.selected = None; }
+    }
+
+    /// The section the options bar or the properties stand for.
+    pub(crate) fn section_from_controls(&self) -> Section {
+        match self.section_pick {
+            1 => Section::Circle,
+            2 => Section::IShape { web_m: self.web_mm / 1000.0, flange_m: self.flange_mm / 1000.0 },
+            _ => Section::Rectangle,
+        }
     }
 
     pub(crate) fn has_pending_edit(&self) -> bool {
@@ -32,7 +48,14 @@ impl Desktop {
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
         let size = matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe)
             && (differs(el.width_m * 1000.0, self.width_mm)
-                || (el.category != Category::Pipe && differs(el.height_m * 1000.0, self.height_mm)));
+                || (!el.is_round() && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
+        let section = el.category == Category::Beam && {
+            let want = self.section_from_controls();
+            match (el.section, want) {
+                (Section::IShape { web_m: a, flange_m: b }, Section::IShape { web_m: c, flange_m: d }) => differs(a * 1000.0, c * 1000.0) || differs(b * 1000.0, d * 1000.0),
+                (a, b) => a != b,
+            }
+        };
         let elevation = el.category != Category::Grid && differs(el.elevation_m * 1000.0, self.elevation_mm);
         let slope = el.slope_ratio.is_some_and(|s| differs(s * 100.0, self.slope_percent));
         let axis = match el.geometry {
@@ -41,7 +64,7 @@ impl Desktop {
                     .any(|(a, b)| differs(a * 1000.0, b)),
             _ => false,
         };
-        size || elevation || slope || axis
+        size || section || elevation || slope || axis
     }
 
     /// Writes the document as `openbim-export.ifc` in the working directory and says what was and was not written.
@@ -67,7 +90,8 @@ impl Desktop {
     /// Places a beam with the sizes of the options bar on `level`.
     fn place_beam_on(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2]) -> Option<ElementId> {
         let m = |v: f64| v / 1000.0;
-        match self.document.place_beam(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm)) {
+        let depth = if self.section_pick == 1 { self.width_mm } else { self.height_mm };
+        match self.document.place_beam(level, start, end, m(self.width_mm), m(depth), m(self.elevation_mm), self.section_from_controls()) {
             Ok(id) => { self.message = format!("Beam {} placed; undo removes it", id.0); Some(id) }
             Err(error) => { self.message = format!("Beam rejected: {error:?}"); None }
         }
@@ -111,9 +135,11 @@ impl Desktop {
         let id = el.id;
         let mut commands = Vec::new();
         if matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe) {
+            let round = el.category == Category::Pipe || (el.category == Category::Beam && self.section_pick == 1);
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
-                height_m: if el.category == Category::Pipe { self.width_mm } else { self.height_mm } / 1000.0 });
+                height_m: if round { self.width_mm } else { self.height_mm } / 1000.0 });
         }
+        if el.category == Category::Beam { commands.push(Command::SetSection { id, section: self.section_from_controls() }); }
         if el.category != Category::Grid { commands.push(Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }); }
         if el.category.supports_slope() { commands.push(Command::SetSlope { id, slope_ratio: self.slope_percent / 100.0 }); }
         let start = [self.axis_mm[0] / 1000.0, self.axis_mm[1] / 1000.0];
@@ -136,6 +162,49 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn round_and_i_beams_are_placed_edited_drawn_closed_in_3d_and_undone() {
+        let mut app = Desktop::sample();
+        app.choose_tool(Tool::Beam);
+        (app.width_mm, app.height_mm, app.elevation_mm) = (200.0, 400.0, 2800.0);
+        app.axis_mm = [1000.0, 1000.0, 5000.0, 1000.0];
+        app.section_pick = 2;
+        (app.web_mm, app.flange_mm) = (10.0, 20.0);
+        app.place_beam_from_controls();
+        let id = app.selected_id().unwrap();
+        assert_eq!(app.document.get(id).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
+        assert_eq!(app.section_pick, 2);
+        assert!(!app.has_pending_edit());
+        // its 3D mesh is closed: each edge is used twice, with opposite directions, and the volume is area x length
+        let batch = crate::view3d::batch(&app.document);
+        let ei = batch.elements.iter().position(|e| e.id == id.0).unwrap() as u32;
+        let tris: Vec<[u32; 3]> = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| *t).collect();
+        let mut edges = std::collections::HashMap::<(u32, u32), i32>::new();
+        for t in &tris { for k in 0..3 { *edges.entry((t[k], t[(k + 1) % 3])).or_default() += 1; } }
+        assert!(edges.iter().all(|(&(a, b), &n)| n == 1 && edges.get(&(b, a)) == Some(&1)), "closed and consistently wound");
+        let vol: f64 = tris.iter().map(|t| {
+            let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+            (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+        }).sum();
+        assert!((vol - 0.0116 * 4.0).abs() < 1e-3, "{vol}");
+        // the properties turn it into a round beam of 300 mm: one transaction
+        app.section_pick = 1;
+        app.width_mm = 300.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        let el = app.document.get(id).unwrap();
+        assert_eq!((el.section, el.width_m, el.height_m), (Section::Circle, 0.3, 0.3));
+        assert!(!app.has_pending_edit());
+        app.undo_document();
+        assert_eq!(app.document.get(id).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
+        // an I-section whose web is wider than its flanges is rejected and nothing changes
+        app.sync_duct_controls();
+        app.web_mm = 250.0;
+        app.apply_selected_edit();
+        assert!(app.message.contains("rejected"), "{}", app.message);
+        assert_eq!(app.document.get(id).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
+    }
+
     #[test]
     fn two_clicks_in_a_plan_place_a_beam_on_that_level_and_the_tool_stays_on() {
         let mut app = Desktop::sample();

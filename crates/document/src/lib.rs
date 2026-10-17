@@ -31,6 +31,17 @@ impl Category {
     pub fn supports_slope(self) -> bool { matches!(self, Self::Duct | Self::Pipe) }
 }
 
+/// The section of a beam, with the sizes the element itself does not carry. The element's `width_m` and `height_m`
+/// are the section's width across and depth; a circle is as wide as it is deep (its diameter).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Section {
+    #[default]
+    Rectangle,
+    Circle,
+    /// a symmetric I or H: the web and the flanges are this thick
+    IShape { web_m: f64, flange_m: f64 },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Element {
     pub id: ElementId,
@@ -46,13 +57,29 @@ pub struct Element {
     pub slope_ratio: Option<f64>,
     /// Optional spatial definition; parameter-only elements remain supported.
     pub geometry: Option<Geometry>,
+    /// The section of a beam; every other element is a rectangle.
+    pub section: Section,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
 
 impl Element {
+    /// The section as a shape, for a beam.
+    pub fn profile(&self) -> openbim_geom::profile::Profile {
+        use openbim_geom::profile::Profile;
+        match self.section {
+            Section::Rectangle => Profile::Rect { width: self.width_m, depth: self.height_m },
+            Section::Circle => Profile::Circle { diameter: self.width_m },
+            Section::IShape { web_m, flange_m } => Profile::I { width: self.width_m, depth: self.height_m, web: web_m, flange: flange_m },
+        }
+    }
+    /// A section that is as wide as it is deep: a pipe, or a round beam.
+    pub fn is_round(&self) -> bool { self.category == Category::Pipe || (self.category == Category::Beam && self.section == Section::Circle) }
+
     fn valid(&self) -> bool {
-        !self.name.trim().is_empty()
+        (self.category == Category::Beam || self.section == Section::Rectangle)
+            && (self.category != Category::Beam || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
+            && !self.name.trim().is_empty()
             && self.name.len() <= 512
             && self.width_m.is_finite()
             && self.height_m.is_finite()
@@ -113,6 +140,8 @@ pub enum Command {
         elevation_m: f64,
     },
     SetSlope { id: ElementId, slope_ratio: f64 },
+    /// Change the section of a beam. A round section takes the width as its diameter and the depth with it.
+    SetSection { id: ElementId, section: Section },
     SetGeometry { id: ElementId, geometry: Geometry },
     Delete { id: ElementId },
 }
@@ -147,11 +176,12 @@ impl Document {
     /// The next element number that no element has.
     pub fn next_id(&self) -> ElementId { ElementId(self.elements.keys().next_back().map_or(1, |k| k.0 + 1)) }
     /// Places a beam on `level` from `start` to `end` in one undoable transaction.
-    pub fn place_beam(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64) -> Result<ElementId, EditError> {
+    pub fn place_beam(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64, section: Section) -> Result<ElementId, EditError> {
         let id = self.next_id();
         let n = self.elements.values().filter(|e| e.category == Category::Beam).count() + 1;
         self.transact(self.revision, &[
             Command::Create { id, category: Category::Beam, name: format!("Beam {n}"), width_m, height_m: depth_m, elevation_m },
+            Command::SetSection { id, section },
             Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } },
         ])?;
         Ok(id)
@@ -182,7 +212,7 @@ impl Document {
                         width_m: *width_m, height_m: *height_m,
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
-                        geometry: None,
+                        geometry: None, section: Section::Rectangle,
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -194,7 +224,8 @@ impl Document {
                     }
                     el.width_m = *width_m;
                     el.height_m = *height_m;
-                    if !el.valid() { return Err(EditError::InvalidElement); }
+                    // a beam is checked whole at the end, so that a size and a section can change together
+                    if el.category != Category::Beam && !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
                 Command::MoveElevation { id, elevation_m } => {
@@ -211,6 +242,13 @@ impl Document {
                     if !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
+                Command::SetSection { id, section } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.section = *section;
+                    if *section == Section::Circle { el.height_m = el.width_m; }
+                    el.revision = revision;
+                }
                 Command::SetGeometry { id, geometry } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     el.geometry = Some(*geometry);
@@ -225,6 +263,7 @@ impl Document {
                 }
             }
         }
+        if trial.values().any(|e| !e.valid()) { return Err(EditError::InvalidElement); }
         spatial::validate(&trial)?;
         self.history.push((std::mem::replace(&mut self.elements, trial), std::mem::replace(&mut self.site, trial_site)));
         self.revision = revision;

@@ -11,6 +11,13 @@ pub struct Exported {
     pub warnings: Vec<String>,
 }
 
+/// The beam of a document element: its line at the height of its centre on its level, and its section.
+pub fn beam_item(doc: &Document, el: &openbim_document::Element) -> Option<BeamItem> {
+    let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
+    let z = doc.get(level)?.elevation_m + el.elevation_m;
+    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: [start[0], start[1], z], b: [end[0], end[1], z], profile: el.profile() })
+}
+
 /// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
 pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<Exported, String> {
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
@@ -25,9 +32,8 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 chain.base_z = level_of(level).ok_or("a wall stands on a level that is gone")? + el.elevation_m;
                 walls.push(WallItem { id: el.id.0, name: el.name.clone(), chain, wall_type: None, room_bounding: true });
             }
-            (Category::Beam, Some(Geometry::Linear { start, end, level })) => {
-                let z = level_of(level).ok_or("a beam lies on a level that is gone")? + el.elevation_m;
-                beams.push(BeamItem { id: el.id.0, name: el.name.clone(), a: [start[0], start[1], z], b: [end[0], end[1], z], width: el.width_m, depth: el.height_m });
+            (Category::Beam, Some(Geometry::Linear { .. })) => {
+                beams.push(beam_item(doc, el).ok_or("a beam lies on a level that is gone")?);
             }
             (Category::Level | Category::Grid, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
@@ -70,16 +76,19 @@ pub fn iso_time(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openbim_document::ElementId;
+    use openbim_document::{ElementId, Section};
 
     #[test]
     fn the_document_exports_its_walls_and_beams_and_names_what_it_leaves_out() {
         let mut d = Document::spatial_sample();
-        d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8).unwrap();
+        d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8, Section::Rectangle).unwrap();
+        d.place_beam(ElementId(11), [1.0, 4.0], [5.0, 4.0], 0.3, 0.3, 0.2, Section::Circle).unwrap();
+        d.place_beam(ElementId(11), [1.0, 5.0], [5.0, 5.0], 0.2, 0.4, 0.2, Section::IShape { web_m: 0.01, flange_m: 0.02 }).unwrap();
         let out = export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap();
-        assert_eq!((out.walls, out.beams), (6, 1));
+        assert_eq!((out.walls, out.beams), (6, 3));
         assert_eq!(out.text.matches("IFCWALL(").count(), 6);
-        assert_eq!(out.text.matches("IFCBEAM(").count(), 1);
+        assert_eq!(out.text.matches("IFCBEAM(").count(), 3);
+        assert!(out.text.contains("IFCCIRCLEPROFILEDEF") && out.text.contains("IFCISHAPEPROFILEDEF"));
         assert_eq!(out.text.matches("IFCBUILDINGSTOREY(").count(), 2);
         assert!(out.warnings.iter().any(|w| w.contains("1 ducts")) && out.warnings.iter().any(|w| w.contains("1 pipes")), "{:?}", out.warnings);
         // the upper wall stands on Level 2 (3 m): the export is stable and the same twice

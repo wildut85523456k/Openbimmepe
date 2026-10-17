@@ -1088,7 +1088,7 @@ fn a_beam_is_a_closed_box_and_a_free_void_cuts_a_hole_through_it() {
 }
 
 #[test]
-fn circle_and_i_beams_have_the_volume_of_their_section_and_open_up_with_their_voids() {
+fn circle_and_i_beams_have_the_volume_of_their_section() {
     use openbim_geom::profile::{polygon_area, Profile};
     use openbim_ifc::BeamItem;
     let mut s = scene();

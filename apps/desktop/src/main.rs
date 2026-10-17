@@ -40,6 +40,10 @@ struct Desktop {
     height_mm: f64,
     elevation_mm: f64,
     slope_percent: f64,
+    /// the section chosen for a beam: 0 rectangle, 1 circle, 2 I-shape; with the web and flange thickness of an I
+    section_pick: u8,
+    web_mm: f64,
+    flange_mm: f64,
     axis_mm: [f64; 4],
     /// the first point of a beam being placed in a plan view
     beam_start: Option<[f64; 2]>,
@@ -88,7 +92,7 @@ impl Desktop {
             workspace: Workspace::Design, view: View::Mechanical, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
-            slope_percent: 0.0,
+            slope_percent: 0.0, section_pick: 0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,

@@ -21,14 +21,23 @@ fn element(doc: &Document, id: ElementId) -> Option<Element> {
 pub fn batch(doc: &Document) -> Batch {
     let mut meshes = Vec::new();
     for el in doc.elements() {
-        let (Some(k), Some(mesh)) = (kind(el.category), doc.mesh(el.id)) else { continue };
-        meshes.push((Element { kind: k, id: el.id.0 }, mesh));
+        let Some(k) = kind(el.category) else { continue };
+        if el.category == Category::Beam {
+            // a beam is meshed by the scene mesher: its section may be an I, which is not convex, and its faces
+            // come out wound outward, so they are taken as they are
+            let Some(m) = crate::export::beam_item(doc, el).and_then(|b| openbim_view::beam_mesh(&b)) else { continue };
+            let faces = m.tris.iter().map(|t| t.iter().map(|&i| i as usize).collect()).collect();
+            meshes.push((Element { kind: k, id: el.id.0 }, openbim_document::Mesh { vertices: m.verts, faces }, true));
+            continue;
+        }
+        let Some(mesh) = doc.mesh(el.id) else { continue };
+        meshes.push((Element { kind: k, id: el.id.0 }, mesh, false));
     }
     let mut origin = [f64::MAX; 3];
-    for (_, m) in &meshes { for v in &m.vertices { for k in 0..3 { origin[k] = origin[k].min(v[k]); } } }
+    for (_, m, _) in &meshes { for v in &m.vertices { for k in 0..3 { origin[k] = origin[k].min(v[k]); } } }
     if origin[0] == f64::MAX { origin = [0.0; 3]; }
     let mut b = Batch { origin, ..Batch::default() };
-    for (ei, (e, m)) in meshes.iter().enumerate() {
+    for (ei, (e, m, trusted)) in meshes.iter().enumerate() {
         let base = b.verts.len() as u32;
         b.verts.extend(m.vertices.iter().map(|v| [(v[0] - origin[0]) as f32, (v[1] - origin[1]) as f32, (v[2] - origin[2]) as f32]));
         b.elements.push(*e);
@@ -40,7 +49,7 @@ pub fn batch(doc: &Document) -> Batch {
                 let p = t.map(|i| m.vertices[i]);
                 let (e1, e2) = (std::array::from_fn::<f64, 3, _>(|i| p[1][i] - p[0][i]), std::array::from_fn::<f64, 3, _>(|i| p[2][i] - p[0][i]));
                 let nrm = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-                let out = (0..3).map(|i| nrm[i] * (p[0][i] - c[i])).sum::<f64>() >= 0.0;
+                let out = *trusted || (0..3).map(|i| nrm[i] * (p[0][i] - c[i])).sum::<f64>() >= 0.0;
                 let len = nrm.iter().map(|x| x * x).sum::<f64>().sqrt();
                 if len < 1e-12 { continue; }
                 let tri = if out { [t[0], t[1], t[2]] } else { [t[0], t[2], t[1]] };

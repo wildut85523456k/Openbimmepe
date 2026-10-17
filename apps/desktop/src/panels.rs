@@ -68,17 +68,32 @@ fn read_only_group(ui: &mut egui::Ui, name: &str, query: &str, rows: &[(&str, &s
 }
 
 #[derive(Clone, Copy)]
-enum Field { Width, Height, Elevation, Slope, X1, Y1, X2, Y2 }
+enum Field { Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
 
-fn dimensions(category: openbim_document::Category) -> &'static [Field] {
+fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Field] {
     use openbim_document::Category as C;
     match category {
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
-        C::Beam => &[Field::Width, Field::Height, Field::Elevation],
+        C::Beam => match section {
+            1 => &[Field::Diameter, Field::Elevation],
+            2 => &[Field::Width, Field::Height, Field::Web, Field::Flange, Field::Elevation],
+            _ => &[Field::Width, Field::Height, Field::Elevation],
+        },
         C::Duct => &[Field::Width, Field::Height, Field::Elevation, Field::Slope],
         C::Pipe => &[Field::Width, Field::Elevation, Field::Slope],
         C::Level => &[Field::Elevation], _ => &[],
     }
+}
+
+/// The section of a beam: rectangle, circle or I-shape.
+fn section_combo(app: &mut Desktop, ui: &mut egui::Ui) {
+    let names = ["Rectangle", "Circle", "I-shape"];
+    ui.horizontal(|ui| {
+        ui.label("Section");
+        egui::ComboBox::from_id_salt("beam_section").selected_text(names[usize::from(app.section_pick.min(2))]).show_ui(ui, |ui| {
+            for (i, n) in names.iter().enumerate() { ui.selectable_value(&mut app.section_pick, i as u8, *n); }
+        });
+    });
 }
 
 fn field_name(field: Field, category: openbim_document::Category) -> &'static str {
@@ -87,6 +102,8 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Width if category == C::Wall => "Thickness (mm)",
         Field::Width if category == C::Pipe => "Diameter (mm)",
         Field::Height if category == C::Beam => "Depth (mm)",
+        Field::Width if category == C::Beam => "Width (mm)",
+        Field::Diameter => "Diameter (mm)", Field::Web => "Web Thickness (mm)", Field::Flange => "Flange Thickness (mm)",
         Field::Elevation if category == C::Beam => "Centre Elevation (mm)",
         Field::Width => "Width (mm)", Field::Height => "Height (mm)",
         Field::Elevation if category == C::Level => "Elevation (mm)",
@@ -99,13 +116,13 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
 
 fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
     let value = match field {
-        Field::Width => &mut app.width_mm, Field::Height => &mut app.height_mm,
+        Field::Width | Field::Diameter => &mut app.width_mm, Field::Web => &mut app.web_mm, Field::Flange => &mut app.flange_mm, Field::Height => &mut app.height_mm,
         Field::Elevation => &mut app.elevation_mm, Field::Slope => &mut app.slope_percent,
         Field::X1 => &mut app.axis_mm[0], Field::Y1 => &mut app.axis_mm[1],
         Field::X2 => &mut app.axis_mm[2], Field::Y2 => &mut app.axis_mm[3],
     };
     let editor = egui::DragValue::new(value).speed(if matches!(field, Field::Slope) { 0.1 } else { 1.0 });
-    ui.add(if matches!(field, Field::Width | Field::Height) { editor.range(1.0..=100_000.0) } else { editor });
+    ui.add(if matches!(field, Field::Width | Field::Height | Field::Diameter | Field::Web | Field::Flange) { editor.range(1.0..=100_000.0) } else { editor });
 }
 
 fn edit_group(app: &mut Desktop, ui: &mut egui::Ui, name: &str, query: &str,
@@ -149,7 +166,10 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             egui::ComboBox::from_id_salt("beam_level").selected_text(current.map_or("-".into(), |l| l.1)).show_ui(ui, |ui| {
                 for (id, name, _) in &levels { ui.selectable_value(&mut app.beam_level, Some(*id), name); }
             });
-            for field in [Field::Width, Field::Height, Field::Elevation, Field::X1, Field::Y1, Field::X2, Field::Y2] {
+            section_combo(app, ui);
+            let mut fields = dimensions(cat, app.section_pick).to_vec();
+            fields.extend([Field::X1, Field::Y1, Field::X2, Field::Y2]);
+            for field in fields {
                 ui.label(field_name(field, cat));
                 editor(app, ui, field);
             }
@@ -164,7 +184,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         ui.separator();
         let fields = if el.category == openbim_document::Category::Grid {
             &[Field::X1, Field::Y1, Field::X2, Field::Y2][..]
-        } else { dimensions(el.category) };
+        } else { dimensions(el.category, app.section_pick) };
         for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
         let pending = app.has_pending_edit();
         if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() {
@@ -202,7 +222,8 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
                     }
-                    edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category));
+                    if el.category == openbim_document::Category::Beam { section_combo(app, ui); }
+                    edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     if let Some(Geometry::Linear { start, end, level }) = el.geometry {
                         let length = (end[0] - start[0]).hypot(end[1] - start[1]);
                         let start_z = app.document.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;
