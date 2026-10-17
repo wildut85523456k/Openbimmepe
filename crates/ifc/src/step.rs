@@ -113,7 +113,9 @@ impl Step {
 fn with_owner(line: &str, oh: u32) -> String {
     let Some(open) = line.find("('") else { return line.to_string() };
     let head = &line[..open];
-    if oh == 0 || !head.starts_with("IFC") || !head.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+    // entities whose first attribute is a name, not a GlobalId (a name of 22 characters must stay as it is)
+    const NOT_ROOTED: [&str; 7] = ["IFCPROPERTYSINGLEVALUE", "IFCQUANTITY", "IFCMATERIAL", "IFCPERSON", "IFCORGANIZATION", "IFCAPPLICATION", "IFCLABEL"];
+    if oh == 0 || !head.starts_with("IFC") || !head.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) || NOT_ROOTED.iter().any(|n| head.starts_with(n)) {
         return line.to_string();
     }
     let rest = &line[open + 2..];
@@ -124,5 +126,27 @@ fn with_owner(line: &str, oh: u32) -> String {
     match after.strip_prefix("',$,") {
         Some(tail) => format!("{head}('{id}',#{oh},{tail}"),
         None => line.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_owner;
+
+    #[test]
+    fn only_rooted_entities_get_the_owner_history() {
+        let gid = "018qLdYQi0000000400003";
+        assert_eq!(gid.len(), 22);
+        assert_eq!(with_owner(&format!("IFCWALL('{gid}',$,'W',$)"), 7), format!("IFCWALL('{gid}',#7,'W',$)"));
+        assert_eq!(with_owner(&format!("IFCPROPERTYSET('{gid}',$,'P',$,(#1))"), 7), format!("IFCPROPERTYSET('{gid}',#7,'P',$,(#1))"));
+        // a name that is 22 characters long is not a GlobalId
+        let name = "ABCDEFGHIJKLMNOPQRSTUV";
+        for line in [format!("IFCPROPERTYSINGLEVALUE('{name}',$,IFCLABEL('x'),$)"), format!("IFCQUANTITYLENGTH('{name}',$,$,1.)"), format!("IFCMATERIAL('{name}')")] {
+            assert_eq!(with_owner(&line, 7), line);
+        }
+        // not an entity, no owner history asked for, a short name, a quote inside the first 22 characters, an owner already there
+        for (line, oh) in [("#1".to_string(), 7), (format!("IFCWALL('{gid}',$,'W',$)"), 0), ("IFCWALL('short',$,'W',$)".to_string(), 7), ("IFCWALL('ab''cdefghijklmnopqrstuvwx',$)".to_string(), 7), (format!("IFCWALL('{gid}',#3,'W',$)"), 7), ("ifcwall('x')".to_string(), 7), ("NOTIFC('x')".to_string(), 7)] {
+            assert_eq!(with_owner(&line, oh), line, "{line}");
+        }
     }
 }
