@@ -138,18 +138,21 @@ pub struct WorldBox {
 }
 
 impl Model {
-    fn check_refs(&self) -> Result<(), PlaceError> {
+    /// Checks every reference; returns which chains are valid (each is validated once).
+    fn check_refs(&self) -> Result<Vec<bool>, PlaceError> {
         if self.placements.len() > MAX_PLACEMENTS { return Err(PlaceError::TooMany); }
         // each chain is validated once, not once per placement on it (that made a long chain cost n squared)
         let valid: Vec<bool> = self.chains.par_iter().map(|c| c.validate().is_ok()).collect();
-        for (k, p) in self.placements.iter().enumerate() {
-            if p.family >= self.families.len() { return Err(PlaceError::BadReference { placement: k, what: "no such family" }); }
-            let Some(c) = self.chains.get(p.chain) else { return Err(PlaceError::BadReference { placement: k, what: "no such wall chain" }) };
-            if !valid[p.chain] { continue; } // reported with the chain below
-            if p.segment >= c.segment_count() { return Err(PlaceError::BadReference { placement: k, what: "no such wall segment" }); }
-            if !p.centre.is_finite() { return Err(PlaceError::NotFinite { placement: k }); }
-        }
-        Ok(())
+        // the placements are checked on all threads; the one with the lowest number that is wrong is reported
+        let bad = self.placements.par_iter().enumerate().find_map_first(|(k, p)| {
+            if p.family >= self.families.len() { return Some(PlaceError::BadReference { placement: k, what: "no such family" }); }
+            let Some(c) = self.chains.get(p.chain) else { return Some(PlaceError::BadReference { placement: k, what: "no such wall chain" }) };
+            if !valid[p.chain] { return None; } // reported with the chain below
+            if p.segment >= c.segment_count() { return Some(PlaceError::BadReference { placement: k, what: "no such wall segment" }); }
+            if !p.centre.is_finite() { return Some(PlaceError::NotFinite { placement: k }); }
+            None
+        });
+        match bad { Some(e) => Err(e), None => Ok(valid) }
     }
 
     /// Solve placement `k` (its references must be good). `inject`: the family takes `wall_t` per instance.
@@ -162,26 +165,29 @@ impl Model {
 
     /// Solve every placement and cut the wall openings. Does not change the model.
     pub fn build(&self) -> Result<Built, PlaceError> {
-        self.check_refs()?;
-        for (i, c) in self.chains.iter().enumerate() { c.validate().map_err(|err| PlaceError::Chain { chain: i, err })?; }
+        let valid = self.check_refs()?;
+        if let Some(i) = valid.iter().position(|v| !v) { self.chains[i].validate().map_err(|err| PlaceError::Chain { chain: i, err })?; }
         if self.runs.len() > penetrations::MAX_RUNS { return Err(PlaceError::TooMany); }
         let (pens, issues) = penetrations::find(&self.chains, &self.runs, self.merge_gap);
         if let Some(i) = issues.first() { return Err(PlaceError::Run { run: i.run, problem: i.problem }); }
         let mut pens_by_chain: Vec<Vec<&Penetration>> = vec![Vec::new(); self.chains.len()];
         for p in &pens { pens_by_chain[p.id.chain].push(p); }
-        // 1. solve the families, one parallel batch per family
-        let mut instances: Vec<Option<Instance>> = vec![None; self.placements.len()];
-        for (fi, fam) in self.families.iter().enumerate() {
-            let idx: Vec<usize> = (0..self.placements.len()).filter(|&k| self.placements[k].family == fi).collect();
-            if idx.is_empty() { continue; }
-            let inject = fam.input_scope("wall_t") == Some(Scope::Instance);
-            // the request is made on the thread that solves it, so the work of building it is shared too
-            let solved: Vec<Result<Instance, openbim_family::FamilyError>> = idx.par_iter().map(|&k| self.solve_placement(k, inject)).collect();
-            for (&k, r) in idx.iter().zip(solved) {
-                instances[k] = Some(r.map_err(|err| PlaceError::Family { placement: k, err })?);
+        // 1. solve every placement on all threads; the request is made on the thread that solves it, so the work of
+        // building it is shared too
+        let inject: Vec<bool> = self.families.iter().map(|f| f.input_scope("wall_t") == Some(Scope::Instance)).collect();
+        let solved: Result<Vec<Instance>, openbim_family::FamilyError> = (0..self.placements.len()).into_par_iter().map(|k| self.solve_placement(k, inject[self.placements[k].family])).collect();
+        let instances = match solved {
+            Ok(v) => v,
+            Err(_) => {
+                // the error to report is the first in family order, then placement order; replay to find it
+                for (fi, &inj) in inject.iter().enumerate() {
+                    for k in (0..self.placements.len()).filter(|&k| self.placements[k].family == fi) {
+                        if let Err(err) = self.solve_placement(k, inj) { return Err(PlaceError::Family { placement: k, err }); }
+                    }
+                }
+                unreachable!("a placement failed in parallel but not in the replay")
             }
-        }
-        let instances: Vec<Instance> = instances.into_iter().map(|i| i.expect("every placement solved")).collect();
+        };
         // 2. cut the openings, one chain per task; placements keep their order inside a chain
         let mut by_chain: Vec<Vec<usize>> = vec![Vec::new(); self.chains.len()];
         for (k, p) in self.placements.iter().enumerate() { by_chain[p.chain].push(k); }
