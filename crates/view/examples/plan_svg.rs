@@ -2,9 +2,15 @@
 use openbim_arch::{Level, Levels};
 use openbim_family::library;
 use openbim_geom::WallChain;
-use openbim_ifc::{FamilyItem, FamilyRef, Frame, Scene, WallItem};
+use openbim_arch::Room;
+use openbim_ifc::{FamilyItem, FamilyRef, Frame, RoomItem, Scene, SlabItem, SlabRole, WallItem};
+use openbim_place::floors::{ShaftVoid, Slab};
 use openbim_place::{Model, Placement};
 use openbim_view::*;
+
+fn room(id: u64, name: &str, usage: &str, o: &[[f64; 2]]) -> RoomItem {
+    RoomItem { id, room: Room { name: name.into(), usage: usage.into(), occupancy: 0.0, level: 0, outline: o.to_vec(), holes: vec![], height: 2.7 } }
+}
 
 fn main() {
     let out = std::env::args().nth(1).expect("output file");
@@ -38,9 +44,14 @@ fn main() {
         project_name: "Test".into(), project_key: 1, timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "Level 1".into(), elevation: 0.0 }]).unwrap(),
         walls: b.chains.iter().enumerate().map(|(i, c)| WallItem { id: 1 + i as u64, name: format!("W{i}"), chain: c.clone(), wall_type: None, room_bounding: true }).collect(),
-        wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
+        wall_penetrations: vec![], firestops: Default::default(), slabs: vec![SlabItem { id: 60, slab: Slab { name: "Floor".into(), top: 0.0, thickness: 0.25, outline: vec![[-0.1, -0.1], [8.1, -0.1], [8.1, 6.1], [-0.1, 6.1]], fire_rating_min: None }, role: SlabRole::Structure, room_bounding: true }], columns: vec![], shafts: vec![ShaftVoid { name: "Shaft".into(), outline: vec![[6.5, 4.5], [7.5, 4.5], [7.5, 5.5], [6.5, 5.5]], z_bottom: -3.0, z_top: 3.0 }], floor_penetrations: vec![], networks: vec![],
         families: fams.into_iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f }).collect(), items,
-        rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        rooms: vec![
+            room(1, "Office", "office", &[[0.1, 0.1], [3.9, 0.1], [3.9, 2.9], [0.1, 2.9]]),
+            room(2, "Store", "storage", &[[0.1, 3.1], [3.9, 3.1], [3.9, 5.9], [0.1, 5.9]]),
+            room(3, "Hall", "circulation", &[[4.1, 0.1], [7.9, 0.1], [7.9, 5.9], [4.1, 5.9]]),
+        ],
+        wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
     };
     let v = plan_view(&scene, 0, ViewRange::new(2.3, cut, 0.0, -1.0).unwrap()).unwrap();
     std::fs::write(&out, svg(&v)).unwrap();

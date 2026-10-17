@@ -183,3 +183,107 @@ fn the_view_does_not_depend_on_the_number_of_threads_and_draws_as_svg() {
     assert!(svg1.starts_with("<svg ") && svg1.ends_with("</svg>") && svg1.contains("<polygon"));
     assert_eq!(plan_view(&scene(vec![], vec![], vec![]), 0, range()).unwrap().bounds(), None);
 }
+
+// ------------------------------------------------------------------ slabs and rooms
+
+use openbim_arch::Room;
+use openbim_ifc::boundaries::SeparationLine;
+use openbim_ifc::{RoomItem, SlabItem, SlabRole};
+use openbim_place::floors::{FloorOpeningKind, FloorPenId, FloorPenetration, ShaftVoid, Slab};
+
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<[f64; 2]> { vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]] }
+
+fn slab_at(top: f64, thickness: f64) -> SlabItem {
+    SlabItem { id: 50, slab: Slab { name: "S".into(), top, thickness, outline: rect(0.0, 0.0, 6.0, 4.0), fire_rating_min: None }, role: SlabRole::Structure, room_bounding: true }
+}
+
+fn pen(slab: usize, kind: FloorOpeningKind, fits: bool) -> FloorPenetration {
+    FloorPenetration { id: FloorPenId { slab, seq: 0 }, runs: vec![], systems: vec![], domains: vec![], x0: 1.0, x1: 1.5, y0: 1.0, y1: 1.5, centre: [1.25, 1.25, 0.0], fire_rating_min: None, kind, fits }
+}
+
+type Ring = Vec<[f64; 2]>;
+
+fn regions(v: &PlanView, kind: Kind) -> Vec<(Ring, Vec<Ring>)> {
+    v.items.iter().filter(|i| i.element.kind == kind).filter_map(|i| if let Shape::Region { outer, holes } = &i.shape { Some((outer.clone(), holes.clone())) } else { None }).collect()
+}
+
+#[test]
+fn a_slab_follows_the_view_range_and_its_voids_are_holes() {
+    // the floor at the level itself is below the view bottom (0): beyond, outline only
+    let mut s = scene(vec![], vec![], vec![]);
+    s.slabs = vec![slab_at(0.0, 0.2)];
+    let v = plan_view(&s, 0, range()).unwrap();
+    assert!(v.items.iter().all(|i| i.class == Class::Beyond && i.element == Element { kind: Kind::Slab, id: 50 }));
+    assert_eq!((v.items.len(), regions(&v, Kind::Slab).len()), (4, 0));
+    // a slab the cut plane passes through (1.1 to 1.3 m): filled, outline too
+    s.slabs = vec![slab_at(1.3, 0.2)];
+    let v = plan_view(&s, 0, range()).unwrap();
+    let r = regions(&v, Kind::Slab);
+    assert_eq!((r.len(), r[0].1.len(), lines(&v, Class::Cut)), (1, 0, 4));
+    // a shaft through it, and an opening of its own: two holes, in the fill and as lines
+    s.shafts = vec![ShaftVoid { name: "Sh".into(), outline: rect(4.0, 1.0, 5.0, 2.0), z_bottom: 0.0, z_top: 3.0 }];
+    s.floor_penetrations = vec![pen(0, FloorOpeningKind::Cut, true)];
+    let v = plan_view(&s, 0, range()).unwrap();
+    let r = regions(&v, Kind::Slab);
+    assert_eq!((r[0].1.len(), lines(&v, Class::Cut)), (2, 12));
+    // an opening that is only inside a shaft, one that does not fit, a shaft that ends below the slab, and an
+    // opening in another slab make no holes
+    s.floor_penetrations = vec![pen(0, FloorOpeningKind::InShaft(0), true), pen(0, FloorOpeningKind::Cut, false), pen(1, FloorOpeningKind::Cut, true)];
+    s.shafts[0].z_top = 1.3;
+    let v = plan_view(&s, 0, range()).unwrap();
+    assert_eq!(regions(&v, Kind::Slab)[0].1.len(), 0);
+}
+
+#[test]
+fn rooms_of_the_level_are_regions_with_a_tag_inside_them_and_the_area_without_holes() {
+    let room = |level: usize, outline: Vec<[f64; 2]>, holes: Vec<Vec<[f64; 2]>>| RoomItem { id: 9, room: Room { name: "Office <1>".into(), usage: "office".into(), occupancy: 4.0, level, outline, holes, height: 2.7 } };
+    let mut s = scene(vec![], vec![], vec![]);
+    s.rooms = vec![room(0, rect(0.0, 0.0, 6.0, 4.0), vec![])];
+    let v = plan_view(&s, 0, range()).unwrap();
+    assert_eq!(v.tags.len(), 1);
+    let t = &v.tags[0];
+    assert!(close(t.at[0], 3.0) && close(t.at[1], 2.0) && close(t.area, 24.0) && t.name == "Office <1>" && t.usage == "office" && t.id == 9);
+    assert!(v.items.iter().all(|i| i.class == Class::Room && i.element.kind == Kind::Room));
+    // a core in the middle takes its area off and moves the tag out of it
+    s.rooms = vec![room(0, rect(0.0, 0.0, 6.0, 4.0), vec![rect(2.5, 1.5, 3.5, 2.5)])];
+    let v = plan_view(&s, 0, range()).unwrap();
+    let t = &v.tags[0];
+    assert!(close(t.area, 23.0));
+    assert!(!(t.at[0] > 2.5 && t.at[0] < 3.5 && t.at[1] > 1.5 && t.at[1] < 2.5), "{:?}", t.at);
+    assert!(t.at[0] > 0.0 && t.at[0] < 6.0 && t.at[1] > 0.0 && t.at[1] < 4.0);
+    assert_eq!(regions(&v, Kind::Room)[0].1.len(), 1);
+    // a U shape: the centre of mass is in the notch, the tag is not
+    let u = vec![[0.0, 0.0], [9.0, 0.0], [9.0, 6.0], [6.0, 6.0], [6.0, 2.0], [3.0, 2.0], [3.0, 6.0], [0.0, 6.0]];
+    s.rooms = vec![room(0, u.clone(), vec![])];
+    let t = plan_view(&s, 0, range()).unwrap().tags[0].clone();
+    assert!(close(t.area, 54.0 - 12.0));
+    let in_notch = t.at[0] > 3.0 && t.at[0] < 6.0 && t.at[1] > 2.0;
+    assert!(!in_notch && t.at[0] > 0.0 && t.at[0] < 9.0 && t.at[1] > 0.0 && t.at[1] < 6.0, "{:?}", t.at);
+    // a room of another level is not on this plan
+    s.rooms = vec![room(1, rect(0.0, 0.0, 6.0, 4.0), vec![])];
+    let v = plan_view(&s, 0, range()).unwrap();
+    assert!(v.items.is_empty() && v.tags.is_empty());
+    assert_eq!(plan_view(&s, 1, range()).unwrap().tags.len(), 1);
+}
+
+#[test]
+fn separation_lines_of_the_level_are_drawn_and_rooms_and_slabs_go_under_the_walls() {
+    let mut s = scene(vec![straight()], vec![], vec![]);
+    s.separation_lines = vec![SeparationLine { id: 70, level: 0, a: [0.0, 1.0], b: [4.0, 1.0] }, SeparationLine { id: 71, level: 1, a: [0.0, 2.0], b: [4.0, 2.0] }];
+    s.slabs = vec![slab_at(0.0, 0.2)];
+    s.rooms = vec![RoomItem { id: 9, room: Room { name: "R".into(), usage: "".into(), occupancy: 0.0, level: 0, outline: rect(0.0, 1.0, 4.0, 3.0), holes: vec![], height: 2.7 } }];
+    let v = plan_view(&s, 0, range()).unwrap();
+    let kinds: Vec<Kind> = v.items.iter().map(|i| i.element.kind).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == Kind::SeparationLine).count(), 1);
+    let last_under = kinds.iter().rposition(|k| matches!(k, Kind::Room | Kind::SeparationLine | Kind::Slab)).unwrap();
+    let first_wall = kinds.iter().position(|k| *k == Kind::Wall).unwrap();
+    assert!(last_under < first_wall, "{kinds:?}");
+    // the drawing: the region has evenodd fill, the tag text is escaped and upright, the separation line is a line
+    let d = svg(&v);
+    assert!(d.contains("fill-rule=\"evenodd\"") && d.contains(">R</text>") && d.contains("8.0 m²"));
+    let mut s2 = scene(vec![], vec![], vec![]);
+    s2.rooms = vec![RoomItem { id: 9, room: Room { name: "A & B <c>".into(), usage: "".into(), occupancy: 0.0, level: 0, outline: rect(0.0, 0.0, 2.0, 2.0), holes: vec![], height: 2.7 } }];
+    assert!(svg(&plan_view(&s2, 0, range()).unwrap()).contains("A &amp; B &lt;c&gt;"));
+    // bounds include a region
+    assert_eq!(plan_view(&s2, 0, range()).unwrap().bounds(), Some([0.0, 0.0, 2.0, 2.0]));
+}

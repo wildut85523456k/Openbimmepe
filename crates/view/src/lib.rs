@@ -2,7 +2,9 @@
 //! walls and columns the cut passes through are *cut* (filled, heavy outline, with gaps where doors and windows
 //! are at the cut height), things below the cut are seen from above, things above it up to the view top are
 //! drawn as *overhead*, and things below the view bottom down to the view depth are *beyond*. Family plan
-//! symbols (door swings, fixtures) are drawn where the family is placed.
+//! symbols (door swings, fixtures) are drawn where the family is placed. Slabs follow the same rules (with their
+//! shaft voids and floor openings as holes); rooms of the level are drawn as tinted regions with a tag (name, use,
+//! area) for the interface to format, and room separation lines as lines.
 //!
 //! The result is plain geometry in metres (x, y; y up), classified so the interface chooses line weights and
 //! colours; `svg` is one way to draw it. The same range rules as Revit's View Range are used; no values are
@@ -69,6 +71,8 @@ pub enum Class {
     Beyond,
     /// a family's plan symbol
     Symbol,
+    /// the tinted floor of a room, and the room separation lines of the level (these ignore the view range)
+    Room,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +81,10 @@ pub enum Kind {
     Column,
     /// a placed family (door, window, fixture, equipment)
     Family,
+    Slab,
+    Room,
+    /// a line that bounds rooms where there is no wall
+    SeparationLine,
 }
 
 /// The element a shape belongs to: its kind and its element number in the model.
@@ -94,6 +102,20 @@ pub enum Shape {
     /// counter-clockwise from `a0` to `a1`, degrees; the sweep is `a1 - a0` taken into (0, 360]
     Arc { c: P, r: f64, a0: f64, a1: f64 },
     Circle { c: P, r: f64 },
+    /// a closed region with holes (a slab with its voids, a room with its cores)
+    Region { outer: Vec<P>, holes: Vec<Vec<P>> },
+}
+
+/// What the interface needs to write a room's tag: it formats the text in the user's language and units.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoomTag {
+    pub id: u64,
+    /// a point inside the room (and outside its holes) where the tag goes
+    pub at: P,
+    pub name: String,
+    pub usage: String,
+    /// floor area in square metres, holes taken off
+    pub area: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +133,7 @@ pub struct PlanView {
     pub elevation: f64,
     pub range: ViewRange,
     pub items: Vec<Item>,
+    pub tags: Vec<RoomTag>,
 }
 
 impl PlanView {
@@ -123,6 +146,7 @@ impl PlanView {
         for it in &self.items {
             match &it.shape {
                 Shape::Fill(poly) => poly.iter().for_each(|&p| add(p)),
+                Shape::Region { outer, .. } => outer.iter().for_each(|&p| add(p)),
                 Shape::Line(a, c) => { add(*a); add(*c); }
                 Shape::Arc { c, r, .. } | Shape::Circle { c, r } => { add([c[0] - r, c[1] - r]); add([c[0] + r, c[1] + r]); }
             }
@@ -136,14 +160,28 @@ pub fn plan_view(scene: &Scene, level: usize, range: ViewRange) -> Result<PlanVi
     let lv = scene.levels.all().get(level).ok_or(ViewError::NoSuchLevel(level))?;
     let r = ViewRange::new(range.top, range.cut, range.bottom, range.depth)?;
     let abs = Abs { top: lv.elevation + r.top, cut: lv.elevation + r.cut, bottom: lv.elevation + r.bottom, depth: lv.elevation + r.depth };
-    let walls: Vec<Result<Vec<Item>, ViewError>> = scene.walls.par_iter().map(|w| wall_items(w.id, &w.chain, &abs)).collect();
     let mut items = Vec::new();
+    // rooms and slabs first, so that a drawing that paints in order has the walls on top of them
+    let mut tags = Vec::new();
+    for rm in scene.rooms.iter().filter(|rm| rm.room.level == level) {
+        let el = Element { kind: Kind::Room, id: rm.id };
+        let o = &rm.room;
+        items.push(Item { element: el, class: Class::Room, shape: Shape::Region { outer: o.outline.clone(), holes: o.holes.clone() } });
+        let area = openbim_arch::ring_area(&o.outline).abs() - o.holes.iter().map(|h| openbim_arch::ring_area(h).abs()).sum::<f64>();
+        if let Some(at) = label_point(&o.outline, &o.holes) { tags.push(RoomTag { id: rm.id, at, name: o.name.clone(), usage: o.usage.clone(), area }); }
+    }
+    for sl in scene.separation_lines.iter().filter(|l| l.level == level) {
+        items.push(Item { element: Element { kind: Kind::SeparationLine, id: sl.id }, class: Class::Room, shape: Shape::Line(sl.a, sl.b) });
+    }
+    let slabs: Vec<Vec<Item>> = scene.slabs.iter().enumerate().map(|(k, sl)| slab_items(scene, k, sl.id, &sl.slab, &abs)).collect();
+    items.extend(slabs.into_iter().flatten());
+    let walls: Vec<Result<Vec<Item>, ViewError>> = scene.walls.par_iter().map(|w| wall_items(w.id, &w.chain, &abs)).collect();
     for w in walls { items.extend(w?); }
     let cols: Vec<Vec<Item>> = scene.columns.par_iter().map(|c| column_items(c.id, &c.footprint, c.base_z, c.base_z + c.height, &abs)).collect();
     items.extend(cols.into_iter().flatten());
     let fams: Vec<Vec<Item>> = scene.items.par_iter().map(|it| family_items(it, &abs)).collect();
     items.extend(fams.into_iter().flatten());
-    Ok(PlanView { level, level_name: lv.name.clone(), elevation: lv.elevation, range: r, items })
+    Ok(PlanView { level, level_name: lv.name.clone(), elevation: lv.elevation, range: r, items, tags })
 }
 
 /// The range in absolute heights.
@@ -271,6 +309,77 @@ fn outline(out: &mut Vec<Item>, el: Element, class: Class, p: &SegmentPlan, clos
     if closed || i + 1 < n { } else { out.push(Item { element: el, class, shape: Shape::Line(p.l1, p.r1) }); }
 }
 
+// ------------------------------------------------------------------ slabs
+
+/// A slab is seen like any other element over `top - thickness .. top`. Its shaft voids and the openings cut in it
+/// are holes: drawn as lines in the slab's class, and left out of the fill when the slab is cut.
+fn slab_items(scene: &Scene, index: usize, id: u64, slab: &openbim_place::floors::Slab, r: &Abs) -> Vec<Item> {
+    let Some(class) = classify(slab.top - slab.thickness, slab.top, r) else { return Vec::new() };
+    let el = Element { kind: Kind::Slab, id };
+    let mut holes: Vec<Vec<P>> = scene.shafts.iter().filter(|sh| slab.top > sh.z_bottom + 1e-6 && slab.top < sh.z_top - 1e-6).map(|sh| sh.outline.clone()).collect();
+    for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == index && p.fits && p.kind == openbim_place::floors::FloorOpeningKind::Cut) {
+        holes.push(vec![[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]]);
+    }
+    let mut out = Vec::new();
+    if class == Class::Cut { out.push(Item { element: el, class, shape: Shape::Region { outer: slab.outline.clone(), holes: holes.clone() } }); }
+    for ring in std::iter::once(&slab.outline).chain(holes.iter()) {
+        for k in 0..ring.len() { out.push(Item { element: el, class, shape: Shape::Line(ring[k], ring[(k + 1) % ring.len()]) }); }
+    }
+    out
+}
+
+// ------------------------------------------------------------------ room tags
+
+/// Is `q` inside the ring (even-odd)?
+fn inside(ring: &[P], q: P) -> bool {
+    let mut yes = false;
+    for k in 0..ring.len() {
+        let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+        if (a[1] > q[1]) != (b[1] > q[1]) && q[0] < a[0] + (q[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) { yes = !yes; }
+    }
+    yes
+}
+
+fn in_room(outline: &[P], holes: &[Vec<P>], q: P) -> bool { inside(outline, q) && !holes.iter().any(|h| inside(h, q)) }
+
+/// Where a room's tag goes: the centre of mass when that is in the room, otherwise the middle of the longest
+/// horizontal chord found on a handful of lines through the room.
+fn label_point(outline: &[P], holes: &[Vec<P>]) -> Option<P> {
+    if outline.len() < 3 { return None; }
+    let n = outline.len();
+    let a2: f64 = (0..n).map(|k| outline[k][0] * outline[(k + 1) % n][1] - outline[(k + 1) % n][0] * outline[k][1]).sum();
+    if a2.abs() > EPS {
+        let (mut cx, mut cy) = (0.0, 0.0);
+        for k in 0..n {
+            let (p, q) = (outline[k], outline[(k + 1) % n]);
+            let w = p[0] * q[1] - q[0] * p[1];
+            cx += (p[0] + q[0]) * w;
+            cy += (p[1] + q[1]) * w;
+        }
+        let c = [cx / (3.0 * a2), cy / (3.0 * a2)];
+        if c[0].is_finite() && c[1].is_finite() && in_room(outline, holes, c) { return Some(c); }
+    }
+    let (y0, y1) = outline.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p[1]), hi.max(p[1])));
+    let mut best: Option<(f64, P)> = None;
+    for k in 1..16 {
+        let y = y0 + (y1 - y0) * k as f64 / 16.0;
+        // crossings of the outline and the holes with this line, taken in pairs
+        let mut xs: Vec<f64> = Vec::new();
+        for ring in std::iter::once(outline).chain(holes.iter().map(|h| h.as_slice())) {
+            for j in 0..ring.len() {
+                let (a, b) = (ring[j], ring[(j + 1) % ring.len()]);
+                if (a[1] > y) != (b[1] > y) { xs.push(a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0])); }
+            }
+        }
+        xs.sort_by(|a, b| a.total_cmp(b));
+        for c in xs.chunks_exact(2) {
+            let mid = [(c[0] + c[1]) / 2.0, y];
+            if c[1] - c[0] > best.map_or(0.0, |b| b.0) && in_room(outline, holes, mid) { best = Some((c[1] - c[0], mid)); }
+        }
+    }
+    best.map(|b| b.1)
+}
+
 // ------------------------------------------------------------------ columns
 
 fn column_items(id: u64, footprint: &[P], z0: f64, z1: f64, r: &Abs) -> Vec<Item> {
@@ -318,6 +427,7 @@ pub fn svg(v: &PlanView) -> String {
     let _ = write!(s, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\">", x0 - m, -(y1 + m), x1 - x0 + 2.0 * m, y1 - y0 + 2.0 * m);
     let _ = write!(s, "<title>{}</title><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"white\"/><g transform=\"scale(1,-1)\" fill=\"none\" stroke=\"black\" stroke-linecap=\"round\" stroke-linejoin=\"round\">", esc(&v.level_name), x0 - m, -(y1 + m), x1 - x0 + 2.0 * m, y1 - y0 + 2.0 * m);
     let style = |c: Class| match c {
+        Class::Room => "stroke=\"#7a5aa6\" stroke-width=\"0.02\" stroke-dasharray=\"0.2 0.1\"",
         Class::Cut => "stroke=\"black\" stroke-width=\"0.05\"",
         Class::Below => "stroke=\"black\" stroke-width=\"0.02\"",
         Class::Overhead => "stroke=\"black\" stroke-width=\"0.02\" stroke-dasharray=\"0.15 0.1\"",
@@ -331,6 +441,12 @@ pub fn svg(v: &PlanView) -> String {
                 let pts: Vec<String> = poly.iter().map(|p| format!("{},{}", p[0], p[1])).collect();
                 let _ = write!(s, "<polygon points=\"{}\" fill=\"#cfcfcf\" stroke=\"none\"/>", pts.join(" "));
             }
+            Shape::Region { outer, holes } => {
+                let ring = |r: &[P]| format!("M{} Z", r.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" L"));
+                let d: Vec<String> = std::iter::once(outer.as_slice()).chain(holes.iter().map(|h| h.as_slice())).map(ring).collect();
+                let fill = if it.class == Class::Room { "#e8eefc" } else { "#bdbdbd" };
+                let _ = write!(s, "<path d=\"{}\" fill-rule=\"evenodd\" fill=\"{fill}\" stroke=\"none\"/>", d.join(" "));
+            }
             Shape::Line(a, b) => { let _ = write!(s, "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" {st}/>", a[0], a[1], b[0], b[1]); }
             Shape::Circle { c, r } => { let _ = write!(s, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" {st}/>", c[0], c[1], r); }
             Shape::Arc { c, r, a0, a1 } => {
@@ -341,7 +457,12 @@ pub fn svg(v: &PlanView) -> String {
             }
         }
     }
-    s.push_str("</g></svg>");
+    s.push_str("</g>");
+    // tags are drawn upright, outside the mirrored group
+    for t in &v.tags {
+        let _ = write!(s, "<g font-family=\"sans-serif\" font-size=\"0.22\" text-anchor=\"middle\" fill=\"#333\"><text x=\"{}\" y=\"{}\">{}</text><text x=\"{}\" y=\"{}\" font-size=\"0.18\">{:.1} m²</text></g>", t.at[0], -t.at[1], esc(&t.name), t.at[0], -t.at[1] + 0.28, t.area);
+    }
+    s.push_str("</svg>");
     s
 }
 

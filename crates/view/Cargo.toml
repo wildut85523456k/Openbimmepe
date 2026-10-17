@@ -10,10 +10,8 @@ openbim-geom = { path = "../geom" }
 openbim-arch = { path = "../arch" }
 openbim-family = { path = "../family" }
 openbim-ifc = { path = "../ifc" }
+openbim-place = { path = "../place" }
 rayon = "1.10"
 
 [lints.rust]
 unsafe_code = "forbid"
-
-[dev-dependencies]
-openbim-place = { path = "../place" }
