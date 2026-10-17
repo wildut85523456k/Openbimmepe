@@ -46,6 +46,8 @@ Relates to #13 and backlog GUI-004.
 
 ## Status of the 3D geometry (17 Oct 2026)
 
-Meshed: walls (sloped tops, openings, arched openings), slabs (shaft and floor-opening holes), columns, family solids (boxes, with their turns), family extrusions in all three work planes, service runs (round and rectangular, as straight pieces) and fittings (as the stubs the IFC export writes).
+Revit's family editor offers extrusion, blend, revolve, sweep and swept blend (solid and void), and its pipe and duct fittings are families built from them, so the 3D view has to draw them.
 
-Not meshed yet, reported in `ElementMesh::warnings` where it concerns a family: family revolves and sweeps; bent elbows and shaped tees (a fitting is drawn as straight stubs, as in the IFC export); equipment placeholders without a family; insulation (run `margin`); rooms; levels and grids. Pieces of the 3D picture that need no mesh (connectors, ports) are not drawn.
+Meshed: walls (sloped tops, openings, arched openings), slabs (shaft and floor-opening holes), columns, family solids (boxes, with their turns), family extrusions, revolves (whole or partial, with holes) and sweeps (mitred bends), service runs (round and rectangular), elbows as bends (other fittings as the straight stubs the IFC export writes).
+
+Not meshed yet: blends and swept blends (the family model does not have them either), void forms cutting solids, shaped tees, insulation (run `margin`; Revit has insulation as its own element), equipment placeholders without a family (Revit equipment is always a family), rooms, levels and grids. Connectors and ports are not drawn. `ElementMesh::warnings` reports a form that could not be meshed.

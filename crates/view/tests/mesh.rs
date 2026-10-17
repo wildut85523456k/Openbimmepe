@@ -203,7 +203,7 @@ fn every_family_of_the_library_is_meshed_from_its_solids() {
 }
 
 #[test]
-fn extrusions_in_every_work_plane_are_meshed_in_place_and_revolves_are_reported() {
+fn extrusions_in_every_work_plane_are_meshed_in_place() {
     use openbim_family::forms::{FormDef, ProfileDef};
     use openbim_family::{Axis, Family, Request};
     use openbim_ifc::{FamilyItem, FamilyRef, Frame};
@@ -213,7 +213,6 @@ fn extrusions_in_every_work_plane_are_meshed_in_place_and_revolves_are_reported(
         FormDef::extrusion("x", Axis::X, "5", "6", rect("1", "0", "2", "1")),
         FormDef::extrusion("y", Axis::Y, "7", "8", rect("0", "3", "1", "4")),
         FormDef::extrusion("c", Axis::Z, "0", "2", ProfileDef::circle("10", "0", "0.1")),
-        FormDef::revolve("r", Axis::Z, "0", true, "0", "360", rect("1", "0", "2", "1")),
     ], ..Default::default() }.compile().unwrap();
     let inst = fam.solve(&Request::default()).unwrap();
     let forms = inst.forms.clone();
@@ -222,7 +221,7 @@ fn extrusions_in_every_work_plane_are_meshed_in_place_and_revolves_are_reported(
     s.items = vec![FamilyItem { id: 7, name: "F".into(), family: 0, type_name: None, frame: Frame { origin: [0.0; 3], x: [1.0, 0.0] }, instance: inst, host: None }];
     let m = scene_meshes(&s).unwrap();
     let e = find(&m, 7);
-    assert_eq!(e.warnings, vec!["a revolve is not drawn in 3D yet".to_string()]);
+    assert!(e.warnings.is_empty());
     // the first three are boxes: their volumes add up exactly; the circle is a 32-gon, a little less than the circle
     let boxes: f64 = forms[..3].iter().map(|f| f.volume()).sum();
     let circle = forms[3].volume();
@@ -261,10 +260,69 @@ fn pipes_ducts_and_fittings_are_meshed_and_a_change_to_one_remeshes_only_it() {
     let (lo, hi) = bounds(&duct.mesh);
     assert!((hi[2] - 3.5).abs() < 1e-9 && (lo[2] - 2.5).abs() < 1e-9);
     let elbow = find_kind(&u, Kind::Fitting, 3);
-    assert!((elbow.mesh.volume() - polygon_area * 0.3).abs() < 1e-9);
+    // a bend of 90 degrees at radius 0.15: the section carried a quarter of a circle (volume = area x radius x angle)
+    let want = polygon_area * 0.15 * std::f64::consts::FRAC_PI_2;
+    assert!((elbow.mesh.volume() - want).abs() < 0.01 * want, "{} vs {want}", elbow.mesh.volume());
+    assert!(watertight(&elbow.mesh));
+    // the bend runs from the tangent point on each leg: (3.85, 0, 2.5) to (4, 0.15, 2.5)
+    let (lo, hi) = bounds(&elbow.mesh);
+    assert!((lo[0] - 3.85).abs() < 1e-9 && (hi[1] - 0.15).abs() < 1e-9 && lo[1] > -0.06 && hi[0] < 4.06, "{lo:?} {hi:?}");
     // a longer pipe: only the pipe is meshed again
     s.networks[0].segments[0].run.b = [3.0, 0.0, 2.5];
     let v = cache.update(&s).unwrap();
     assert_eq!(v.rebuilt, vec![Element { kind: Kind::Segment, id: 1 }]);
     assert!((find_kind(&v, Kind::Segment, 1).mesh.volume() - polygon_area * 3.0).abs() < 1e-9);
+}
+
+/// Every edge is used by two triangles, once in each direction: a closed surface with all faces turned the same way.
+fn watertight(m: &openbim_geom::Mesh) -> bool {
+    let mut edges = std::collections::HashMap::new();
+    for t in &m.tris { for k in 0..3 { *edges.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1; } }
+    edges.iter().all(|(&(a, b), &n)| n == 1 && edges.get(&(b, a)) == Some(&1))
+}
+
+fn family_with(forms: Vec<openbim_family::forms::FormDef>) -> (openbim_family::Instance, openbim_family::Compiled) {
+    use openbim_family::{Family, Request};
+    let fam = Family { name: "F".into(), forms, ..Default::default() }.compile().unwrap();
+    (fam.solve(&Request::default()).unwrap(), fam)
+}
+
+fn mesh_of(inst: openbim_family::Instance, fam: openbim_family::Compiled) -> ElementMesh {
+    use openbim_ifc::{FamilyItem, FamilyRef, Frame};
+    let mut s = scene();
+    s.families = vec![FamilyRef { id: 1, family: fam }];
+    s.items = vec![FamilyItem { id: 7, name: "F".into(), family: 0, type_name: None, frame: Frame { origin: [0.0; 3], x: [1.0, 0.0] }, instance: inst, host: None }];
+    find(&scene_meshes(&s).unwrap(), 7).clone()
+}
+
+#[test]
+fn revolves_are_closed_solids_of_the_right_volume_whole_or_partial() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::Axis;
+    let rect = ProfileDef::rect("1", "0", "2", "1");
+    // a ring about the vertical axis (work plane x: u = y, v = z): 360, 90 degrees, and a hole through the profile
+    for (angle, hole) in [("360", false), ("90", false), ("270", true)] {
+        let mut f = FormDef::revolve("r", Axis::X, "0", true, "0", angle, rect.clone());
+        if hole { f = f.hole(ProfileDef::rect("1.25", "0.25", "1.75", "0.75")); }
+        let (inst, fam) = family_with(vec![f]);
+        let want = inst.forms[0].volume();
+        let e = mesh_of(inst, fam);
+        assert!(e.warnings.is_empty());
+        assert!(watertight(&e.mesh), "{angle}: not closed");
+        let got = e.mesh.volume();
+        assert!(got > 0.0 && (got - want).abs() < 0.01 * want, "{angle}: mesh {got} form {want}");
+    }
+}
+
+#[test]
+fn sweeps_follow_the_path_with_mitred_bends_and_are_closed() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    let profile = ProfileDef::rect("-0.05", "0", "0.05", "0.1");
+    let (inst, fam) = family_with(vec![FormDef::sweep("s", "0.5", &[("0", "0"), ("4", "0"), ("4", "3")], profile)]);
+    let e = mesh_of(inst, fam);
+    assert!(e.warnings.is_empty() && watertight(&e.mesh));
+    // a profile centred on the path: the volume is the area times the length of the path
+    assert!((e.mesh.volume() - 0.01 * 7.0).abs() < 1e-9, "{}", e.mesh.volume());
+    let (lo, hi) = bounds(&e.mesh);
+    assert!((lo[2] - 0.5).abs() < 1e-9 && (hi[2] - 0.6).abs() < 1e-9 && (hi[0] - 4.05).abs() < 1e-9 && (hi[1] - 3.0).abs() < 1e-9, "{lo:?} {hi:?}");
 }
