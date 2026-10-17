@@ -148,7 +148,7 @@ impl Automation {
             ui.horizontal(|ui| {
                 ui.label(format!("Node {}", node.id));
                 match &mut node.kind {
-                    kind @ NodeKind::Slider {..} => {ui.push_id(node.id,|ui| {dirty|=crate::automation_slider::show(ui,kind);});}
+                    kind @ NodeKind::Slider {..} => {ui.push_id(node.id,|ui| {dirty|=crate::automation_slider::show(ui,kind,node.id);});}
                     NodeKind::Dimensions => { ui.label("Width / height / elevation"); },
                 NodeKind::Selection { ids } => {
                         ui.label(format!("Element IDs: {ids:?}"));

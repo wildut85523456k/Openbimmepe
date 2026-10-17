@@ -16,7 +16,7 @@ Deleting a block removes its group membership and deletes an empty group.
 ## Sliders
 
 Add Length slider (metres) or Number slider (dimensionless/ratio). Drag its slider
-or edit its displayed value. Expand Min / Max / Step to configure the range and
+or edit its displayed value. Use the small caret beside the slider to reveal Min / Max / Step and configure the range and
 step and switch the output quantity. Each slider has one output and no inputs.
 Connect it to a compatible value input. Sliders remain editable in Player.
 
@@ -42,3 +42,8 @@ Tests check grouping roundtrip, unchanged computation, group dragging, slider
 output, invalid ranges/steps and invalid membership. Desktop visual acceptance
 remains necessary. CI uses strict Clippy; passing local tests alone is not a claim
 that GitHub Actions passed.
+
+Slider presentation follows Dynamo's compact pattern: a short collapsed block,
+a dark rail, a distinct rectangular thumb and an adjacent editable value. The
+block grows only while the range controls are expanded. Arrow keys step the
+focused track; Home/End jump to its limits.

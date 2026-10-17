@@ -11,7 +11,7 @@ fn node_rect(origin: Pos2, node: &Node) -> Rect {
     let rows = node.kind.inputs().len().max(node.kind.outputs().len()).max(1);
     Rect::from_min_size(origin + Vec2::from(node.position), Vec2::new(WIDTH, HEADER + ROW * rows as f32 + footer_height(&node.kind)))
 }
-fn footer_height(kind:&NodeKind)->f32 {if matches!(kind,NodeKind::Slider {..}) {180.0} else {56.0}}
+fn footer_height(kind:&NodeKind)->f32 {if matches!(kind,NodeKind::Slider {..}) {34.0} else {56.0}}
 
 #[derive(Clone)]
 struct Marquee { start:Pos2, base:std::collections::BTreeSet<u64>, additive:bool }
@@ -113,6 +113,12 @@ fn socket(painter: &egui::Painter, cell: Rect, input: bool, connected: bool, col
 }
 
 pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)>, status: &mut String) -> bool {
+    let ctx=ui.ctx().clone();
+    let node_rect=|origin:Pos2,node:&Node| {
+        let mut rect=node_rect(origin,node);
+        if matches!(node.kind,NodeKind::Slider {..}) && crate::automation_slider::expanded(&ctx,node.id) {rect.max.y+=146.0;}
+        rect
+    };
     let selection_key=ui.id().with("selected-blocks");
     let mut selected=ui.ctx().data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(selection_key)).unwrap_or_default();
     selected.retain(|id|graph.nodes.iter().any(|n|n.id==*id));
@@ -294,7 +300,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
 
         let inputs = node.kind.inputs();
         let rows = inputs.len().max(node.kind.outputs().len()).max(1);
-        painter.line_segment([egui::pos2(middle, header.bottom()), egui::pos2(middle, rect.bottom())], Stroke::new(1.0, separator));
+        painter.line_segment([egui::pos2(middle, header.bottom()), egui::pos2(middle, header.bottom()+rows as f32*ROW)], Stroke::new(1.0, separator));
         for row in 0..rows {
             let top = header.bottom() + row as f32 * ROW;
             painter.line_segment([egui::pos2(rect.left(), top), egui::pos2(rect.right(), top)], Stroke::new(1.0, separator));
@@ -369,11 +375,11 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     // Edit values directly inside each block, outside the port hit regions.
     for node in &mut graph.nodes {
         let rect=node_rect(canvas.min,node);
-        let editor=Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.bottom()-footer_height(&node.kind)+4.0),rect.right_bottom()-Vec2::splat(8.0));
+        let editor=Rect::from_min_max(egui::pos2(rect.left()+8.0,rect.top()+HEADER+ROW * node.kind.inputs().len().max(node.kind.outputs().len()).max(1) as f32+4.0),rect.right_bottom()-Vec2::splat(8.0));
         ui.scope_builder(egui::UiBuilder::new().id_salt(("block-editor",node.id)).max_rect(editor),|ui| {
             ui.set_clip_rect(editor.intersect(canvas));
             match &mut node.kind {
-                kind @ NodeKind::Slider {..} => {changed|=crate::automation_slider::show(ui,kind);}
+                kind @ NodeKind::Slider {..} => {changed|=crate::automation_slider::show(ui,kind,node.id);}
                 NodeKind::Length { metres } => { changed |= ui.add(egui::DragValue::new(metres).speed(0.01).suffix(" m")).changed(); }
                 NodeKind::Ratio { value } => { changed |= ui.add(egui::DragValue::new(value).speed(0.001)).changed(); }
                 NodeKind::Python { expression,.. } => { changed |= ui.text_edit_singleline(expression).changed(); }
