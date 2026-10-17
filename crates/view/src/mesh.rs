@@ -828,24 +828,21 @@ fn slab_box(slab: &Slab) -> ([f64; 3], [f64; 3]) {
     ([r(0).0, r(1).0, slab.top - slab.thickness], [r(0).1, r(1).1, slab.top])
 }
 
-/// The box of a beam: eight corners around the centre line, twelve outward triangles.
-fn beam_corners(b: &BeamItem) -> Option<[[f64; 3]; 8]> {
-    let (_, side, up) = b.axes()?;
-    let mut c = [[0.0; 3]; 8];
-    for (i, p) in c.iter_mut().enumerate() {
-        let (e, s, h) = (i >> 2, (i >> 1) & 1, i & 1);
-        let base = if e == 0 { b.a } else { b.b };
-        let (ws, wh) = ((s as f64 - 0.5) * b.width, (h as f64 - 0.5) * b.depth);
-        *p = [base[0] + side[0] * ws + up[0] * wh, base[1] + side[1] * ws + up[1] * wh, base[2] + side[2] * ws + up[2] * wh];
-    }
-    Some(c)
+/// The mesh of a beam: its section swept along the centre line, faces outward. A circle is a polygon of
+/// `CIRCLE_SEGMENTS` corners. None when the beam has no length, is vertical or its section does not check.
+pub fn beam_mesh(b: &BeamItem) -> Option<Mesh> {
+    let (u, side, up) = b.axes()?;
+    // the section stood up as a prism along local z, then moved onto the beam; (side, up, u) is right-handed like
+    // (x, y, z), so the winding stays outward
+    let local = meshing::prism(&b.profile.outline(), &[], 0.0, b.length())?;
+    let at = |p: [f64; 3]| -> [f64; 3] { std::array::from_fn(|k| b.a[k] + side[k] * p[0] + up[k] * p[1] + u[k] * p[2]) };
+    Some(Mesh { verts: local.verts.into_iter().map(at).collect(), tris: local.tris })
 }
 
-fn beam_mesh(b: &BeamItem) -> Option<Mesh> {
-    let c = beam_corners(b)?;
-    let quads: [[u32; 4]; 6] = [[4, 6, 7, 5], [0, 1, 3, 2], [2, 3, 7, 6], [0, 4, 5, 1], [1, 5, 7, 3], [0, 2, 6, 4]];
-    let tris = quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect();
-    Some(Mesh { verts: c.to_vec(), tris })
+fn box_of(verts: &[[f64; 3]]) -> ([f64; 3], [f64; 3]) {
+    let lo = [0, 1, 2].map(|k| verts.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min));
+    let hi = [0, 1, 2].map(|k| verts.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
+    (lo, hi)
 }
 
 fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
@@ -899,10 +896,9 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
         ));
     }
     for b in &scene.beams {
-        let voids = match beam_corners(b) {
-            Some(c) => {
-                let lo = [0, 1, 2].map(|k| c.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min));
-                let hi = [0, 1, 2].map(|k| c.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
+        let voids = match beam_mesh(b) {
+            Some(m) => {
+                let (lo, hi) = box_of(&m.verts);
                 reaching(&free_voids, lo, hi)
             }
             None => Vec::new(),

@@ -17,7 +17,7 @@ mod draw;
 mod mesh;
 mod section;
 pub use draw::{svg, svg_with, Paint, SvgStyle};
-pub use mesh::{scene_meshes, Batch, ElementMesh, FaceKind, MeshCache, Part, Update};
+pub use mesh::{beam_mesh, scene_meshes, Batch, ElementMesh, FaceKind, MeshCache, Part, Update};
 pub use section::{
     elevation_view, section_svg, section_svg_with, section_view, standard_elevations, Facing,
     Label, Section, SectionView,

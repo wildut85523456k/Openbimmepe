@@ -1056,7 +1056,7 @@ fn a_beam_is_a_closed_box_and_a_free_void_cuts_a_hole_through_it() {
     use openbim_ifc::{BeamItem, FamilyItem, FamilyRef, Frame};
     let mut s = scene();
     // along x, 0.2 wide and 0.4 deep, 4 m long
-    s.beams = vec![BeamItem { id: 5, name: "B".into(), a: [1.0, 3.0, 2.5], b: [5.0, 3.0, 2.5], width: 0.2, depth: 0.4 }];
+    s.beams = vec![BeamItem::rect(5, "B", [1.0, 3.0, 2.5], [5.0, 3.0, 2.5], 0.2, 0.4)];
     let m = scene_meshes(&s).unwrap();
     let beam = find(&m, 5);
     assert_eq!(beam.element.kind, Kind::Beam);
@@ -1084,5 +1084,33 @@ fn a_beam_is_a_closed_box_and_a_free_void_cuts_a_hole_through_it() {
     assert!((find(&scene_meshes(&s).unwrap(), 5).mesh.volume() - 0.32).abs() < 1e-9);
     // a vertical or empty beam is refused rather than meshed
     s.beams[0].b = [1.0, 3.0, 4.0];
+    assert!(scene_meshes(&s).is_err());
+}
+
+#[test]
+fn circle_and_i_beams_have_the_volume_of_their_section_and_open_up_with_their_voids() {
+    use openbim_geom::profile::{polygon_area, Profile};
+    use openbim_ifc::BeamItem;
+    let mut s = scene();
+    let beam = |profile| BeamItem { id: 5, name: "B".into(), a: [1.0, 3.0, 2.5], b: [5.0, 3.0, 2.5], profile };
+    // an I-section 0.2 wide, 0.4 deep, web 0.01, flanges 0.02: exact area 2*0.2*0.02 + 0.36*0.01
+    let i = Profile::I { width: 0.2, depth: 0.4, web: 0.01, flange: 0.02 };
+    assert!((i.area() - 0.0116).abs() < 1e-12 && (polygon_area(&i.outline()) - 0.0116).abs() < 1e-12);
+    s.beams = vec![beam(i)];
+    let m = scene_meshes(&s).unwrap();
+    assert!((find(&m, 5).mesh.volume() - 0.0116 * 4.0).abs() < 1e-9, "{}", find(&m, 5).mesh.volume());
+    // a round beam is the polygon of its mesh; its exact area is a little more
+    let c = Profile::Circle { diameter: 0.3 };
+    s.beams = vec![beam(c)];
+    let v = find(&scene_meshes(&s).unwrap(), 5).mesh.volume();
+    assert!((v - polygon_area(&c.outline()) * 4.0).abs() < 1e-9);
+    assert!(v < c.area() * 4.0 && v > 0.99 * c.area() * 4.0, "{v}");
+    // a sloped I-beam is closed: the same area times its length
+    s.beams = vec![beam(i)];
+    s.beams[0].b = [4.0, 3.0, 5.5];
+    let l = (3.0f64 * 3.0 * 2.0).sqrt();
+    assert!((find(&scene_meshes(&s).unwrap(), 5).mesh.volume() - 0.0116 * l).abs() < 1e-9);
+    // a section that does not check is refused
+    s.beams[0].profile = Profile::I { width: 0.2, depth: 0.4, web: 0.3, flange: 0.02 };
     assert!(scene_meshes(&s).is_err());
 }

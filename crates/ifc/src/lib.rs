@@ -27,7 +27,7 @@ pub mod step;
 use openbim_arch::{Levels, Room};
 use openbim_family::mep::{up_for, Domain, FlowDir, System};
 use openbim_family::{Compiled, Instance};
-use openbim_geom::WallChain;
+use openbim_geom::{profile::Profile, WallChain};
 use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab};
 use openbim_place::penetrations::{Firestops, OpeningShape, Penetration, RunSize};
 use openbim_route::graph::{Network, NodeRef, PortRef};
@@ -60,8 +60,21 @@ pub struct ColumnItem {
     pub room_bounding: bool,
 }
 
-/// A beam: a straight member between two points of the model, with a rectangular section centred on that line.
-/// The width lies horizontal across the beam, the depth at right angles to both (upright for a level beam).
+impl ColumnItem {
+    /// A column standing on a section centred at `centre`, from `base_z` up `height`. An I-section has no convex
+    /// footprint, so it is refused for a column that bounds rooms.
+    pub fn from_profile(id: u64, name: &str, profile: &Profile, centre: [f64; 2], base_z: f64, height: f64, room_bounding: bool) -> Result<ColumnItem, String> {
+        profile.check().map_err(str::to_string)?;
+        if room_bounding && matches!(profile, Profile::I { .. }) {
+            return Err("an I-section column cannot bound rooms: its footprint is not convex".into());
+        }
+        let footprint = profile.outline().into_iter().map(|p| [centre[0] + p[0], centre[1] + p[1]]).collect();
+        Ok(ColumnItem { id, name: name.into(), footprint, base_z, height, room_bounding })
+    }
+}
+
+/// A beam: a straight member between two points of the model with a section centred on that line. The section's
+/// x lies horizontal across the beam, its y at right angles to both (upright for a level beam).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeamItem {
     pub id: u64,
@@ -69,18 +82,22 @@ pub struct BeamItem {
     /// the ends of the centre line (model coordinates, metres)
     pub a: [f64; 3],
     pub b: [f64; 3],
-    pub width: f64,
-    pub depth: f64,
+    pub profile: Profile,
 }
 
 impl BeamItem {
-    /// The unit vectors along the beam, across it (horizontal) and up out of it; None for a beam that is not straight
-    /// and sloped less than vertical, has no size or is not finite.
+    /// A beam of rectangular section.
+    pub fn rect(id: u64, name: &str, a: [f64; 3], b: [f64; 3], width: f64, depth: f64) -> BeamItem {
+        BeamItem { id, name: name.into(), a, b, profile: Profile::Rect { width, depth } }
+    }
+
+    /// The unit vectors along the beam, across it (horizontal) and up out of it; None for a member that is vertical
+    /// (a column), has no length, or has a section that does not check.
     pub fn axes(&self) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
         let d = [self.b[0] - self.a[0], self.b[1] - self.a[1], self.b[2] - self.a[2]];
-        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        let ok = self.a.iter().chain(&self.b).all(|v| v.is_finite()) && self.width.is_finite() && self.depth.is_finite();
-        if !ok || len < 1e-9 || self.width <= 0.0 || self.depth <= 0.0 {
+        let len = self.length();
+        let finite = self.a.iter().chain(&self.b).all(|v| v.is_finite());
+        if !finite || len < 1e-9 || self.profile.check().is_err() {
             return None;
         }
         let u = [d[0] / len, d[1] / len, d[2] / len];
@@ -88,7 +105,7 @@ impl BeamItem {
         let (sx, sy) = (-u[1], u[0]);
         let sl = (sx * sx + sy * sy).sqrt();
         if sl < 1e-9 {
-            return None; // a vertical member is a column
+            return None;
         }
         let side = [sx / sl, sy / sl, 0.0];
         let up = [u[1] * side[2] - u[2] * side[1], u[2] * side[0] - u[0] * side[2], u[0] * side[1] - u[1] * side[0]];
@@ -495,6 +512,19 @@ impl<'a> Out<'a> {
         let a = self.s.add(format!("IFCAXIS2PLACEMENT2D(#{c},$)"));
         let (w, h) = (self.r(w, "size"), self.r(h, "size"));
         self.s.add(format!("IFCRECTANGLEPROFILEDEF(.AREA.,$,#{a},{w},{h})"))
+    }
+    /// The exact profile of a section: a rectangle, a circle or an I-shape.
+    fn section_profile(&mut self, p: &Profile) -> u32 {
+        match *p {
+            Profile::Rect { width, depth } => self.rect_profile(0.0, 0.0, width, depth),
+            Profile::Circle { diameter } => self.circle_profile(diameter / 2.0),
+            Profile::I { width, depth, web, flange } => {
+                let c = self.p2(0.0, 0.0);
+                let a = self.s.add(format!("IFCAXIS2PLACEMENT2D(#{c},$)"));
+                let v = [width, depth, web, flange].map(|x| self.r(x, "size"));
+                self.s.add(format!("IFCISHAPEPROFILEDEF(.AREA.,$,#{a},{},{},{},{},$,$,$)", v[0], v[1], v[2], v[3]))
+            }
+        }
     }
     fn circle_profile(&mut self, radius: f64) -> u32 {
         let c = self.p2(0.0, 0.0);
@@ -953,14 +983,14 @@ fn write_beams(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
     for b in &scene.beams {
         let Some((u, side, _)) = b.axes() else {
-            return Err(ExportError::Unsupported(format!("beam {}: needs two different points that are not one above the other, and a positive width and depth", b.name)));
+            return Err(ExportError::Unsupported(format!("beam {}: needs two different points that are not one above the other, and a section with positive sizes", b.name)));
         };
         let st = o.storey_for(b.a[2].min(b.b[2]));
         let elev = o.storeys[st].2;
         let at = [b.a[0], b.a[1], b.a[2] - elev];
         // the beam is placed at its start, its local z along the beam and its local x across it
         let pl = o.place(Some(o.storeys[st].1), at, Some(u), Some(side));
-        let prof = o.rect_profile(0.0, 0.0, b.width, b.depth);
+        let prof = o.section_profile(&b.profile);
         let solid = o.extrusion(prof, [0.0; 3], None, None, b.length());
         let shape = o.shape(&[solid]);
         let g = o.gid(b.id, 0);

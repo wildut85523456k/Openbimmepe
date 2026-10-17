@@ -420,7 +420,7 @@ fn a_blend_is_a_faceted_brep_and_a_void_is_cut_with_a_boolean_result() {
 fn a_beam_exports_as_an_ifcbeam_along_its_own_axis_and_a_bad_one_is_refused() {
     use openbim_ifc::BeamItem;
     let mut s = scene(vec![wall(5)]);
-    s.beams = vec![BeamItem { id: 9, name: "B1".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], width: 0.2, depth: 0.4 }];
+    s.beams = vec![BeamItem::rect(9, "B1", [0.0, 1.0, 2.6], [4.0, 1.0, 2.6], 0.2, 0.4)];
     let a = export(&s).unwrap();
     assert!(a.text.contains(&format!("IFCBEAM('{}'", global_id(1, 0, 9))), "{}", a.text);
     assert!(a.text.contains("'B1'") && a.text.contains(".BEAM."));
@@ -431,6 +431,31 @@ fn a_beam_exports_as_an_ifcbeam_along_its_own_axis_and_a_bad_one_is_refused() {
     s.beams[0].b = [0.0, 1.0, 4.0];
     assert!(export(&s).is_err(), "a vertical member is a column");
     s.beams[0].b = [4.0, 1.0, 2.6];
-    s.beams[0].depth = 0.0;
+    s.beams[0].profile = openbim_geom::profile::Profile::Rect { width: 0.2, depth: 0.0 };
     assert!(export(&s).is_err());
+}
+
+#[test]
+fn beams_and_columns_take_round_and_i_sections() {
+    use openbim_geom::profile::Profile;
+    use openbim_ifc::{BeamItem, ColumnItem};
+    let mut s = scene(vec![wall(5)]);
+    let i = Profile::I { width: 0.2, depth: 0.4, web: 0.01, flange: 0.02 };
+    s.beams = vec![
+        BeamItem { id: 9, name: "I".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], profile: i },
+        BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 } },
+    ];
+    let t = export(&s).unwrap().text;
+    assert_eq!(t.matches("IFCBEAM(").count(), 2);
+    assert!(t.contains("IFCISHAPEPROFILEDEF(.AREA.,$,#") && t.contains(",0.2,0.4,0.01,0.02,$,$,$)"), "{t}");
+    assert!(t.contains("IFCCIRCLEPROFILEDEF(.AREA.,$,#") && t.contains(",0.15)"));
+    // a column on a round or an I section
+    let col = ColumnItem::from_profile(11, "C", &Profile::Circle { diameter: 0.4 }, [2.0, 2.0], 0.0, 3.0, true).unwrap();
+    assert_eq!(col.footprint.len(), 32);
+    let h = ColumnItem::from_profile(12, "H", &i, [5.0, 2.0], 0.0, 3.0, false).unwrap();
+    assert_eq!(h.footprint.len(), 12);
+    assert!(ColumnItem::from_profile(13, "H", &i, [5.0, 2.0], 0.0, 3.0, true).is_err(), "not convex, so no room boundary");
+    assert!(ColumnItem::from_profile(14, "X", &Profile::Circle { diameter: 0.0 }, [0.0, 0.0], 0.0, 3.0, false).is_err());
+    s.columns = vec![col, h];
+    assert_eq!(export(&s).unwrap().text.matches("IFCCOLUMN(").count(), 2);
 }
