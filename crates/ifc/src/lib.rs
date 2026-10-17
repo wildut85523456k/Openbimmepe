@@ -165,6 +165,8 @@ pub enum SlabRole {
     Ceiling,
     /// a structural slab on the ground: an IfcSlab BASESLAB, a floor for the rooms above it like Structure
     Foundation,
+    /// an isolated footing under a column: an IfcFooting PAD_FOOTING, which bounds no room
+    PadFooting,
 }
 
 pub struct SlabItem {
@@ -1075,6 +1077,15 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, bottom], None, None, s.thickness);
         let shape = o.shape(&[solid]);
         let g = o.gid(item.id, 0);
+        if item.role == SlabRole::PadFooting {
+            let f = o.s.add(format!("IFCFOOTING({g},$,{},$,$,#{pl},#{shape},$,.PAD_FOOTING.)", string(&s.name)));
+            o.contain(st, f);
+            // keeps the slab numbering that room boundaries use
+            o.slab_entities.push(f);
+            o.member_entities.push((item.id, f));
+            o.report.slabs += 1;
+            continue;
+        }
         if matches!(item.role, SlabRole::FloorFinish | SlabRole::Ceiling) {
             let kind = if item.role == SlabRole::FloorFinish { "FLOORING" } else { "CEILING" };
             let cov = o.s.add(format!("IFCCOVERING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));

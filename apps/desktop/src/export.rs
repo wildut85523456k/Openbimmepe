@@ -67,6 +67,14 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 slabs.push(SlabItem { id: el.id.0, slab, role, room_bounding: true });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
+            (Category::Footing, Some(Geometry::Pad { at, level, thickness_m })) => {
+                let top = level_of(level).ok_or("a footing lies on a level that is gone")? + el.elevation_m;
+                let (hx, hy) = (el.width_m / 2.0, el.height_m / 2.0);
+                let outline = vec![[at[0] - hx, at[1] - hy], [at[0] + hx, at[1] - hy], [at[0] + hx, at[1] + hy], [at[0] - hx, at[1] + hy]];
+                let slab = openbim_place::floors::Slab { name: el.name.clone(), top, thickness: thickness_m, outline, fire_rating_min: None };
+                slabs.push(SlabItem { id: el.id.0, slab, role: SlabRole::PadFooting, room_bounding: false });
+                if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
+            }
             (Category::Level | Category::Grid, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
             (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,

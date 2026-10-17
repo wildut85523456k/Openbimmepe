@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{BeamSpec, Category, ColumnSpec, Command, Geometry, Section, SlabKind, SlabSpec, Usage};
+use openbim_document::{BeamSpec, Category, ColumnSpec, Command, FootingSpec, Geometry, Section, SlabKind, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -21,6 +21,7 @@ impl Desktop {
             self.height_mm = el.height_m * 1000.0;
             self.elevation_mm = el.elevation_m * 1000.0;
             self.slope_percent = el.slope_ratio.unwrap_or(0.0) * 100.0;
+            if let (Category::Footing, Some(Geometry::Pad { thickness_m, .. })) = (el.category, el.geometry) { (self.material_pick, self.footing_thickness_mm) = (el.material, thickness_m * 1000.0); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
@@ -48,7 +49,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column) && {
@@ -67,7 +68,8 @@ impl Desktop {
             _ => false,
         };
         let kind = (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
-            || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick);
+            || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
+            || (el.category == Category::Footing && (el.material != self.material_pick || matches!(el.geometry, Some(Geometry::Pad { thickness_m, .. }) if differs(thickness_m * 1000.0, self.footing_thickness_mm))));
         size || section || kind || elevation || slope || axis
     }
 
@@ -142,6 +144,17 @@ impl Desktop {
         };
     }
 
+    /// A click of the Footing tool in the plan of `level`: a pad of the options bar's size centred there, its top at
+    /// the level plus the top offset (usually below it).
+    pub(crate) fn footing_click(&mut self, level: ElementId, at: [f64; 2]) {
+        let m = |v: f64| v / 1000.0;
+        let spec = FootingSpec { width_m: m(self.width_mm), length_m: m(self.height_mm), thickness_m: m(self.footing_thickness_mm), top_offset_m: m(self.slab_offset_mm), material: self.material_pick };
+        self.message = match self.document.place_footing(level, at, &spec) {
+            Ok(id) => format!("Footing {} placed; undo removes it", id.0),
+            Err(error) => format!("Footing rejected: {error:?}"),
+        };
+    }
+
     /// A click of the Slab tool in the plan of `level`: a corner, or the closing of the outline when it lands on the
     /// first corner of a polygon that has three or more.
     pub(crate) fn slab_click(&mut self, level: ElementId, at: [f64; 2], closing: bool) {
@@ -184,6 +197,10 @@ impl Desktop {
         if !self.has_pending_edit() { return; }
         let id = el.id;
         let mut commands = Vec::new();
+        if el.category == Category::Footing {
+            commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 });
+            commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
         if el.category == Category::Slab {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.width_mm / 1000.0 });
             commands.push(Command::SetSlabKind { id, kind: self.slab_kind_pick });
@@ -205,7 +222,9 @@ impl Desktop {
         let end = [self.axis_mm[2] / 1000.0, self.axis_mm[3] / 1000.0];
         let geometry = match el.geometry {
             Some(Geometry::Linear { level, .. }) => Some(Geometry::Linear { start, end, level }),
-            Some(Geometry::Grid { .. }) => Some(Geometry::Grid { start, end }), _ => None,
+            Some(Geometry::Grid { .. }) => Some(Geometry::Grid { start, end }),
+            Some(Geometry::Pad { at, level, .. }) => Some(Geometry::Pad { at, level, thickness_m: self.footing_thickness_mm / 1000.0 }),
+            _ => None,
         };
         if let Some(geometry) = geometry { commands.push(Command::SetGeometry { id, geometry }); }
         match self.document.transact(self.document.revision(), &commands) {
@@ -477,5 +496,39 @@ mod tests {
         assert_eq!(app.document.get(id).unwrap().slab_kind, openbim_document::SlabKind::Floor);
         app.undo_document();
         assert!(app.document.elements().all(|e| e.category != Category::Slab));
+    }
+
+    #[test]
+    fn footings_are_placed_by_a_click_below_the_level_edited_closed_in_3d_and_exported() {
+        let mut app = Desktop::sample();
+        app.run_command("foundation", "Isolated");
+        assert!(app.tool == Tool::Footing);
+        (app.width_mm, app.height_mm, app.footing_thickness_mm, app.slab_offset_mm) = (1500.0, 2000.0, 500.0, -100.0);
+        app.material_pick = openbim_document::Material::Concrete;
+        app.footing_click(ElementId(10), [2.0, 2.0]);
+        let id = app.document.elements().find(|e| e.category == Category::Footing).expect("placed").id;
+        assert!(app.tool == Tool::Footing, "the tool stays on");
+        let ei_vol = |app: &Desktop| -> f64 {
+            let batch = crate::view3d::batch(&app.document);
+            let ei = batch.elements.iter().position(|e| e.id == id.0).unwrap() as u32;
+            batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
+                let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+                (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+            }).sum()
+        };
+        assert!((ei_vol(&app) - 1.5).abs() < 1e-3, "{}", ei_vol(&app));
+        // edit the thickness in the properties: 1.5 x 2 x 0.8
+        app.select_element(Some(id));
+        assert!(!app.has_pending_edit());
+        app.footing_thickness_mm = 800.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert!((ei_vol(&app) - 2.4).abs() < 1e-3);
+        // exported as an IfcFooting PAD_FOOTING with its concrete
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-17T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCFOOTING(").count(), 1);
+        assert!(out.text.contains(".PAD_FOOTING.") && out.text.contains("IFCMATERIAL('Concrete')"));
+        app.undo_document();
+        assert!((ei_vol(&app) - 1.5).abs() < 1e-3);
     }
 }

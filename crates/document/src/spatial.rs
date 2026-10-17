@@ -12,6 +12,8 @@ pub enum Geometry {
     Point { at: [f64; 2], level: ElementId, top: ElementId },
     /// a slab lies on `level`; its outline is the element's
     Area { level: ElementId },
+    /// a pad footing centred on `at`, `thickness_m` thick
+    Pad { at: [f64; 2], level: ElementId, thickness_m: f64 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,9 +57,14 @@ fn valid_ring(r: &[[f64; 2]]) -> bool {
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
     for el in elements.values() {
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
+            Some(Geometry::Pad { at, level, thickness_m }) => {
+                el.category == Category::Footing && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
+                    && thickness_m.is_finite() && *thickness_m > 0.0 && *thickness_m <= 5.0
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
             Some(Geometry::Area { level }) => {
                 el.category == Category::Slab && valid_ring(&el.outline)
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
@@ -105,6 +112,16 @@ impl Document {
             vertices.extend(section.iter().map(|p| [p[0], p[1], z1]));
             let mut faces: Vec<Vec<usize>> = vec![(0..n).rev().collect(), (n..2 * n).collect()];
             for i in 0..n { faces.push(vec![i, (i + 1) % n, (i + 1) % n + n, i + n]); }
+            return Some(Mesh { vertices, faces });
+        }
+        if let Some(Geometry::Pad { at, level, thickness_m }) = el.geometry {
+            let top = self.get(level)?.elevation_m + el.elevation_m;
+            let (hx, hy) = (el.width_m / 2.0, el.height_m / 2.0);
+            let ring = [[at[0] - hx, at[1] - hy], [at[0] + hx, at[1] - hy], [at[0] + hx, at[1] + hy], [at[0] - hx, at[1] + hy]];
+            let mut vertices: Vec<[f64; 3]> = ring.iter().map(|p| [p[0], p[1], top - thickness_m]).collect();
+            vertices.extend(ring.iter().map(|p| [p[0], p[1], top]));
+            let mut faces = vec![vec![3, 2, 1, 0], vec![4, 5, 6, 7]];
+            for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
         }
         if let Some(Geometry::Area { level }) = el.geometry {

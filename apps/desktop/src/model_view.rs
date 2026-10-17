@@ -69,7 +69,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let mut bounds = Rect::NOTHING;
     let mut meshes = Vec::new();
     for el in app.document.elements() {
-        if let Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level }) = &el.geometry {
+        if let Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. }) = &el.geometry {
             if !three_d && *level != level_id { continue; }
             if let Some(mesh) = app.document.mesh(el.id) {
                 for vertex in &mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
@@ -129,6 +129,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
             Category::Beam => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
+            Category::Footing => Color32::from_rgb(160, 150, 135),
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
             Category::Duct => Color32::from_rgb(70, 157, 194),
             Category::Pipe => Color32::from_rgb(136, 153, 166),
@@ -149,7 +150,12 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if app.tool == crate::Tool::Slab && !three_d {
+    if app.tool == crate::Tool::Footing && !three_d {
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.footing_click(level_id, to_model(p)); } }
+    } else if app.tool == crate::Tool::Slab && !three_d {
         // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;

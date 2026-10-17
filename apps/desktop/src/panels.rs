@@ -68,12 +68,13 @@ fn read_only_group(ui: &mut egui::Ui, name: &str, query: &str, rows: &[(&str, &s
 }
 
 #[derive(Clone, Copy)]
-enum Field { Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
+enum Field { Thickness, Width, Height, Diameter, Web, Flange, Elevation, Slope, X1, Y1, X2, Y2 }
 
 fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Field] {
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
+        C::Footing => &[Field::Width, Field::Height, Field::Thickness, Field::Elevation],
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
         C::Column => match section {
             1 => &[Field::Diameter, Field::Elevation],
@@ -121,6 +122,9 @@ fn section_combo(app: &mut Desktop, ui: &mut egui::Ui) {
 fn field_name(field: Field, category: openbim_document::Category) -> &'static str {
     use openbim_document::Category as C;
     match field {
+        Field::Thickness => "Thickness (mm)",
+        Field::Height if category == C::Footing => "Length (mm)",
+        Field::Elevation if category == C::Footing => "Top Offset (mm)",
         Field::Width if category == C::Wall || category == C::Slab => "Thickness (mm)",
         Field::Elevation if category == C::Slab => "Top Offset (mm)",
         Field::Width if category == C::Pipe => "Diameter (mm)",
@@ -140,13 +144,13 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
 
 fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
     let value = match field {
-        Field::Width | Field::Diameter => &mut app.width_mm, Field::Web => &mut app.web_mm, Field::Flange => &mut app.flange_mm, Field::Height => &mut app.height_mm,
+        Field::Thickness => &mut app.footing_thickness_mm, Field::Width | Field::Diameter => &mut app.width_mm, Field::Web => &mut app.web_mm, Field::Flange => &mut app.flange_mm, Field::Height => &mut app.height_mm,
         Field::Elevation => &mut app.elevation_mm, Field::Slope => &mut app.slope_percent,
         Field::X1 => &mut app.axis_mm[0], Field::Y1 => &mut app.axis_mm[1],
         Field::X2 => &mut app.axis_mm[2], Field::Y2 => &mut app.axis_mm[3],
     };
     let editor = egui::DragValue::new(value).speed(if matches!(field, Field::Slope) { 0.1 } else { 1.0 });
-    ui.add(if matches!(field, Field::Width | Field::Height | Field::Diameter | Field::Web | Field::Flange) { editor.range(1.0..=100_000.0) } else { editor });
+    ui.add(if matches!(field, Field::Width | Field::Height | Field::Diameter | Field::Web | Field::Flange | Field::Thickness) { editor.range(1.0..=100_000.0) } else { editor });
 }
 
 fn edit_group(app: &mut Desktop, ui: &mut egui::Ui, name: &str, query: &str,
@@ -173,6 +177,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
     match category {
         C::Beam => ("Structural Framing (1)", "Rectangular Beam", "beam"),
         C::Column => ("Structural Columns (1)", "Rectangular Column", "structural_column"),
+        C::Footing => ("Structural Foundations (1)", "Isolated Footing", "foundation"),
         C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
@@ -190,6 +195,20 @@ fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Footing {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Isolated Footing");
+            ui.separator();
+            usage_material_combos(app, ui, false);
+            let cat = openbim_document::Category::Footing;
+            for field in dimensions(cat, 0).iter().copied() {
+                if matches!(field, Field::Elevation) { ui.label(field_name(field, cat)); ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0)); continue; }
+                ui.label(field_name(field, cat));
+                editor(app, ui, field);
+            }
+        });
+        return;
+    }
     if app.tool == crate::Tool::Slab {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Slab");
@@ -292,7 +311,8 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
                     }
-                    if let Some(Geometry::Area { level }) = el.geometry {
+                    if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
+                    if let Some(Geometry::Pad { level, .. } | Geometry::Area { level }) = el.geometry {
                         let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Level", level_name)]);
                     }

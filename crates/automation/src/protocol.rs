@@ -13,6 +13,7 @@ pub enum SnapshotGeometry {
     Linear { start:[f64;2],end:[f64;2],level:u64 },
     Point { at:[f64;2],level:u64,top:u64 },
     Area { level:u64 },
+    Pad { at:[f64;2],level:u64,thickness_m:f64 },
 }
 impl From<Geometry> for SnapshotGeometry {
     fn from(value:Geometry)->Self {
@@ -22,6 +23,7 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::Linear { start,end,level }=>Self::Linear { start,end,level:level.0 },
             Geometry::Point { at,level,top }=>Self::Point { at,level:level.0,top:top.0 },
             Geometry::Area { level }=>Self::Area { level:level.0 },
+            Geometry::Pad { at,level,thickness_m }=>Self::Pad { at,level:level.0,thickness_m },
         }
     }
 }
@@ -33,6 +35,7 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::Linear { start,end,level }=>Self::Linear { start,end,level:ElementId(level) },
             SnapshotGeometry::Point { at,level,top }=>Self::Point { at,level:ElementId(level),top:ElementId(top) },
             SnapshotGeometry::Area { level }=>Self::Area { level:ElementId(level) },
+            SnapshotGeometry::Pad { at,level,thickness_m }=>Self::Pad { at,level:ElementId(level),thickness_m },
         }
     }
 }
@@ -144,7 +147,7 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),
