@@ -269,3 +269,23 @@ fn project_north_turns_the_sun_with_the_georeference() {
     assert_eq!((s.latitude, s.longitude, s.project_north_deg), (51.5, -0.12, 30.0));
     assert_eq!((s.month, s.hour), (Sun::default().month, Sun::default().hour));
 }
+
+#[test]
+fn the_sun_and_the_ifc_true_north_direction_agree_on_the_sign_of_the_angle() {
+    use openbim_ifc::georef::{CoordinateBase, Crs, Georef};
+    use openbim_viewport::Sun;
+    // at the June solstice at noon the sun of Phnom Penh is due north, so its horizontal direction in the model is the
+    // direction of true north in the model's plan, which is what a file carries as TrueNorth
+    for angle in [0.0, 33.0, 90.0, -40.0, 180.0] {
+        let g = Georef { crs: Crs { name: "site".into(), geodetic_datum: None, vertical_datum: None, map_projection: None, map_zone: None },
+            project_base_point: [0.0; 3], survey_point: [0.0; 3], survey_shared: [0.0; 3], angle_to_true_north_deg: angle, scale: 1.0,
+            coordinate_base: CoordinateBase::InternalOrigin, latitude: 11.5564, longitude: 104.9282, elevation: 0.0 };
+        let sun = Sun { month: 6, day: 21, hour: 12.1, utc_offset: 7.0, ..Sun::default() }.at_site(&g);
+        let p = sun.position();
+        assert!(p.azimuth < 5.0 || p.azimuth > 355.0, "due north: {p:?}");
+        let d = sun.direction();
+        let h = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        let (tx, ty) = g.true_north();
+        assert!((d[0] / h - tx).abs() < 0.12 && (d[1] / h - ty).abs() < 0.12, "angle {angle}: sun {:?} against TrueNorth {:?}", (d[0] / h, d[1] / h), (tx, ty));
+    }
+}

@@ -2,7 +2,7 @@
 //! styles, section box, click selection).
 use crate::Desktop;
 use eframe::egui;
-use openbim_document::{Category, Document, ElementId, Geometry};
+use openbim_document::{Category, Command, Document, ElementId, Geometry, Site};
 use openbim_view::{Batch, Element, FaceKind, Kind};
 use openbim_viewport_egui::{Datum, Style};
 use std::collections::HashSet;
@@ -79,6 +79,57 @@ pub fn datums(doc: &Document) -> Vec<Datum> {
     out
 }
 
+/// The sun of a view at the project's site: place, angle to true north and clock come from the project, date and time
+/// stay the view's own.
+pub fn sun_at(site: &Site, sun: openbim_viewport_egui::Sun) -> openbim_viewport_egui::Sun {
+    openbim_viewport_egui::Sun { latitude: site.latitude, longitude: site.longitude, project_north_deg: site.angle_to_true_north_deg, utc_offset: site.utc_offset_hours, ..sun }
+}
+
+/// The site fields. Editing is a document transaction when the value is let go, so it is undoable and the other views
+/// see it; until then the view shows the edit.
+fn sun_controls(app: &mut Desktop, ui: &mut egui::Ui) {
+    let Some(site) = app.document.site() else {
+        if ui.button("Set project site").on_hover_text("Latitude, longitude, angle to true north and clock offset of the project").clicked() {
+            let s = app.view3d.sun;
+            let site = Site { latitude: s.latitude, longitude: s.longitude, angle_to_true_north_deg: s.project_north_deg, utc_offset_hours: s.utc_offset };
+            app.apply_site(site);
+        }
+        app.view3d.sun_time_ui(ui);
+        return;
+    };
+    let mut edit = app.site_edit.unwrap_or(site);
+    let mut committed = false;
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Site");
+        for (label, value, range, speed, suffix) in [
+            ("Lat", &mut edit.latitude, -90.0..=90.0, 0.05, "°"), ("Lon", &mut edit.longitude, -180.0..=180.0, 0.05, "°"),
+            ("Angle to true north", &mut edit.angle_to_true_north_deg, -360.0..=360.0, 0.5, "°"), ("UTC+", &mut edit.utc_offset_hours, -12.0..=14.0, 0.1, ""),
+        ] {
+            ui.label(label);
+            let r = ui.add(egui::DragValue::new(value).range(range).speed(speed).suffix(suffix));
+            changed |= r.changed();
+            committed |= r.drag_stopped() || r.lost_focus();
+        }
+    });
+    if changed { app.site_edit = Some(edit); }
+    if committed && edit != site { app.apply_site(edit); app.site_edit = None; }
+    else if committed { app.site_edit = None; }
+    let shown = app.site_edit.unwrap_or_else(|| app.document.site().unwrap_or(site));
+    app.view3d.sun = sun_at(&shown, app.view3d.sun);
+    app.view3d.sun_time_ui(ui);
+}
+
+impl Desktop {
+    /// Set the project's site in one transaction.
+    pub(crate) fn apply_site(&mut self, site: Site) {
+        match self.document.transact(self.document.revision(), &[Command::SetSite(site)]) {
+            Ok(_) => self.message = "Project site changed (undo restores it)".into(),
+            Err(e) => self.message = format!("Site not changed: {e:?}"),
+        }
+    }
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // new geometry only when the document changed
     if app.view3d_revision != Some(app.document.revision()) {
@@ -99,7 +150,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let mut on = app.view3d.section.is_some();
         if ui.checkbox(&mut on, "Section Box").changed() { app.view3d.section = if on { bounds } else { None }; }
     });
-    if app.view3d.style == Style::Realistic { app.view3d.sun_ui(ui); }
+    if app.view3d.style == Style::Realistic { sun_controls(app, ui); }
     let model = app.view3d.model_bounds();
     if let (Some(sec), Some(b)) = (&mut app.view3d.section, model) {
         ui.horizontal_wrapped(|ui| {
@@ -150,6 +201,32 @@ mod tests {
         let levels: Vec<_> = d.iter().filter(|x| !x.bubbles).collect();
         assert_eq!(levels.len(), 2);
         assert!(levels.iter().any(|l| (l.a[2] - 3.0).abs() < 1e-9 && l.label.contains("Level 2")));
+    }
+
+    #[test]
+    fn the_project_site_drives_the_sun_and_is_undoable() {
+        let ctx = egui::Context::default();
+        let mut app = Desktop::sample();
+        app.view = crate::View::ThreeD;
+        app.view3d.style = Style::Realistic;
+        let run = |app: &mut Desktop| {
+            let out = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1400.0, 700.0))), ..Default::default() },
+                |ui| { egui::CentralPanel::default().show(ui, |ui| show(app, ui)); });
+            out.drop_without_applying_deltas();
+        };
+        // the sample has a site and the view takes its place, angle and clock from it
+        let site = app.document.site().expect("the sample has a site");
+        run(&mut app);
+        assert_eq!((app.view3d.sun.latitude, app.view3d.sun.utc_offset), (site.latitude, site.utc_offset_hours));
+        // changing the site is one undoable transaction and the sun follows
+        let turned = Site { angle_to_true_north_deg: 40.0, latitude: 51.5, utc_offset_hours: 0.0, ..site };
+        app.apply_site(turned);
+        run(&mut app);
+        assert_eq!((app.view3d.sun.project_north_deg, app.view3d.sun.latitude), (40.0, 51.5));
+        assert_eq!(app.document.undo(), Ok(true));
+        run(&mut app);
+        assert_eq!(app.view3d.sun.project_north_deg, 0.0);
+        assert_eq!(app.document.site(), Some(site));
     }
 
     #[test]

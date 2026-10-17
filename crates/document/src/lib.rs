@@ -63,8 +63,35 @@ impl Element {
     }
 }
 
+/// Where the project is on the earth, and the clock its times are read on. It is a property of the project, not of
+/// a view. The angle has the sign of `openbim_ifc::georef::Georef`: positive when project north (the Y axis) is turned
+/// counter-clockwise from true north. Files carry the direction of true north in the project's plan, which has no sign
+/// to get wrong.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Site {
+    /// degrees, north positive
+    pub latitude: f64,
+    /// degrees, east positive
+    pub longitude: f64,
+    /// degrees, project north turned counter-clockwise from true north
+    pub angle_to_true_north_deg: f64,
+    /// hours ahead of UTC of the project's clock
+    pub utc_offset_hours: f64,
+}
+
+impl Site {
+    fn valid(&self) -> bool {
+        self.latitude.is_finite() && (-90.0..=90.0).contains(&self.latitude)
+            && self.longitude.is_finite() && (-180.0..=180.0).contains(&self.longitude)
+            && self.angle_to_true_north_deg.is_finite() && (-360.0..=360.0).contains(&self.angle_to_true_north_deg)
+            && self.utc_offset_hours.is_finite() && (-12.0..=14.0).contains(&self.utc_offset_hours)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    /// Set where the project is (latitude, longitude, angle to true north, clock offset).
+    SetSite(Site),
     Create {
         id: ElementId,
         category: Category,
@@ -97,19 +124,23 @@ pub enum EditError {
     RevisionOverflow,
     UnsupportedProperty(ElementId),
     InvalidGeometry(ElementId),
+    InvalidSite,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
     elements: BTreeMap<ElementId, Element>,
+    site: Option<Site>,
     revision: u64,
     /// Undo checkpoints are local, bounded by the hosting application's policy.
-    history: Vec<BTreeMap<ElementId, Element>>,
+    history: Vec<(BTreeMap<ElementId, Element>, Option<Site>)>,
 }
 
 impl Document {
     pub fn new() -> Self { Self::default() }
     pub fn revision(&self) -> u64 { self.revision }
+    /// Where the project is, if it has been set.
+    pub fn site(&self) -> Option<Site> { self.site }
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
@@ -126,6 +157,7 @@ impl Document {
         }
         let revision = self.revision.checked_add(1).ok_or(EditError::RevisionOverflow)?;
         let mut trial = self.elements.clone();
+        let mut trial_site = self.site;
         for op in ops {
             match op {
                 Command::Create { id, category, name, width_m, height_m, elevation_m } => {
@@ -169,13 +201,17 @@ impl Document {
                     el.geometry = Some(*geometry);
                     el.revision = revision;
                 }
+                Command::SetSite(site) => {
+                    if !site.valid() { return Err(EditError::InvalidSite); }
+                    trial_site = Some(*site);
+                }
                 Command::Delete { id } => {
                     if trial.remove(id).is_none() { return Err(EditError::NotFound(*id)); }
                 }
             }
         }
         spatial::validate(&trial)?;
-        self.history.push(std::mem::replace(&mut self.elements, trial));
+        self.history.push((std::mem::replace(&mut self.elements, trial), std::mem::replace(&mut self.site, trial_site)));
         self.revision = revision;
         Ok(revision)
     }
@@ -185,7 +221,7 @@ impl Document {
     pub fn undo(&mut self) -> Result<bool, EditError> {
         if self.history.is_empty() { return Ok(false); }
         let revision = self.revision.checked_add(1).ok_or(EditError::RevisionOverflow)?;
-        self.elements = self.history.pop().expect("checked history");
+        (self.elements, self.site) = self.history.pop().expect("checked history");
         self.revision = revision;
         // Elements restored by undo are changed at the new document revision.
         for el in self.elements.values_mut() { el.revision = revision; }
@@ -202,6 +238,26 @@ mod tests {
             id: ElementId(id), category: Category::Duct, name: "Supply Air".into(),
             width_m: 0.2, height_m: 0.3, elevation_m: 2.7,
         }
+    }
+
+    #[test]
+    fn the_site_is_validated_set_and_undone_with_the_elements() {
+        let site = Site { latitude: 51.5, longitude: -0.12, angle_to_true_north_deg: 30.0, utc_offset_hours: 0.0 };
+        let mut d = Document::new();
+        assert_eq!(d.site(), None);
+        assert_eq!(d.transact(0, &[Command::SetSite(site)]), Ok(1));
+        assert_eq!(d.site(), Some(site));
+        for bad in [Site { latitude: 91.0, ..site }, Site { longitude: -181.0, ..site }, Site { angle_to_true_north_deg: f64::NAN, ..site }, Site { utc_offset_hours: 20.0, ..site }] {
+            assert_eq!(d.transact(1, &[Command::SetSite(bad)]), Err(EditError::InvalidSite));
+        }
+        assert_eq!((d.revision(), d.site()), (1, Some(site)), "a refused edit changes nothing");
+        // one transaction: the site and an element together, and one undo takes both back
+        let moved = Site { angle_to_true_north_deg: -45.0, ..site };
+        assert_eq!(d.transact(1, &[create(7), Command::SetSite(moved)]), Ok(2));
+        assert_eq!(d.undo(), Ok(true));
+        assert_eq!((d.site(), d.get(ElementId(7)).is_none()), (Some(site), true));
+        assert_eq!(d.undo(), Ok(true));
+        assert_eq!(d.site(), None);
     }
 
     #[test]

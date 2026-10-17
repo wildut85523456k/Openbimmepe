@@ -44,6 +44,8 @@ struct Desktop {
     camera_pitch: f32,
     view3d: openbim_viewport_egui::Viewport3d,
     view3d_revision: Option<u64>,
+    /// a site edit in progress in the sun controls, committed when the value is let go
+    site_edit: Option<openbim_document::Site>,
     property_query: String,
     browser_query: String,
     browser_selected: String,
@@ -83,7 +85,7 @@ impl Desktop {
             slope_percent: 0.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0],
             camera_yaw: 0.7, camera_pitch: 0.6,
-            view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None,
+            view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),

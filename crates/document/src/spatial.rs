@@ -110,6 +110,8 @@ impl Document {
             Geometry::Linear { start: [1.0, 2.0], end: [7.0, 2.0], level: ElementId(10) });
         add(2, Category::Pipe, "Drainage Pipe", 0.1, 0.1, 0.6,
             Geometry::Linear { start: [1.0, 4.0], end: [7.0, 4.0], level: ElementId(10) });
+        // the sample's site: an illustration, like the rest of the sample, and editable
+        ops.push(super::Command::SetSite(crate::Site { latitude: 11.5564, longitude: 104.9282, angle_to_true_north_deg: 0.0, utc_offset_hours: 7.0 }));
         let mut document = Self::new();
         document.transact(0, &ops).expect("valid spatial sample");
         document.clear_undo_history();
