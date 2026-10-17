@@ -287,7 +287,8 @@ impl Viewport3d {
         }
     }
 
-    /// Place and time of the sun: latitude, longitude, clock offset, date and time of day, and where that puts it.
+    /// Place and time of the sun: latitude, longitude, north angle, clock offset, date and time of day, and where that
+    /// puts it. Use `sun_time_ui` alone when the place comes from the project.
     pub fn sun_ui(&mut self, ui: &mut Ui) {
         let s = &mut self.sun;
         ui.horizontal_wrapped(|ui| {
@@ -299,6 +300,14 @@ impl Viewport3d {
             ui.add(egui::DragValue::new(&mut s.project_north_deg).range(-180.0..=180.0).speed(0.5).suffix("°"));
             ui.label("UTC+");
             ui.add(egui::DragValue::new(&mut s.utc_offset).range(-12.0..=14.0).speed(0.1));
+        });
+        self.sun_time_ui(ui);
+    }
+
+    /// Date and time of day, and where the sun is then.
+    pub fn sun_time_ui(&mut self, ui: &mut Ui) {
+        let s = &mut self.sun;
+        ui.horizontal_wrapped(|ui| {
             ui.label("Date");
             ui.add(egui::DragValue::new(&mut s.day).range(1..=31));
             ui.add(egui::DragValue::new(&mut s.month).range(1..=12));
