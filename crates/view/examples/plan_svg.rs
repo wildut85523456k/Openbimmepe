@@ -61,6 +61,11 @@ fn main() {
     let sv = section_view(&scene, Section { a: [3.0, -1.0], b: [3.0, 7.0], bottom: -1.0, top: 3.6, depth: 10.0 }).unwrap();
     let sec_out = out.replace(".svg", ".section.svg");
     std::fs::write(&sec_out, section_svg_with(&sv, &look)).unwrap();
+    for (facing, sec) in standard_elevations(&scene, 1.0).unwrap() {
+        let ev = elevation_view(&scene, sec).unwrap();
+        let name = out.replace(".svg", &format!(".elevation-{}.svg", format!("{facing:?}").to_lowercase()));
+        std::fs::write(&name, section_svg_with(&ev, &look)).unwrap();
+    }
     println!("section: {} shapes, {:?} -> {sec_out}", sv.items.len(), sv.warnings);
     println!("{} shapes -> {out}", v.items.len());
 }

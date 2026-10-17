@@ -15,7 +15,7 @@
 
 mod draw;
 mod section;
-pub use section::{section_view, section_svg, section_svg_with, Label, Section, SectionView};
+pub use section::{elevation_view, section_svg, section_svg_with, section_view, standard_elevations, Facing, Label, Section, SectionView};
 pub use draw::{svg, svg_with, Paint, SvgStyle};
 
 use openbim_family::PlanShape;

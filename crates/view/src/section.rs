@@ -6,6 +6,13 @@
 //! outlines, doors and windows in them as rectangles. There is no hidden-line removal yet: outlines of walls that
 //! hide each other all show. Levels in range are dashed datum lines with their names.
 //!
+//! `elevation_view` is the same cut (nothing is cut when the line stands outside the building) drawn the way an
+//! exterior view is: everything in front of the plane within the depth is a filled face with an outline, drawn far to
+//! near so that nearer things hide farther ones (hidden lines are removed by painting white faces in order), walls with
+//! their openings as holes, doors and windows with the boxes of their families, slabs and columns as faces.
+//! `standard_elevations` gives the four views around a building, North, East, South and West, as Revit's default
+//! elevation markers do.
+//!
 //! Known limit, reported in `warnings`: a wall with a sloped top is drawn with its flat height, and an arched
 //! opening in a wall that is only seen beyond the plane is left out.
 use crate::draw::{page, SvgStyle};
@@ -68,7 +75,13 @@ impl Fr {
     }
 }
 
-pub fn section_view(scene: &Scene, sec: Section) -> Result<SectionView, ViewError> {
+pub fn section_view(scene: &Scene, sec: Section) -> Result<SectionView, ViewError> { build(scene, sec, false) }
+
+/// The same cut seen as an exterior view: put the line outside the building, looking at it. Everything in front of the
+/// plane within the depth is a filled face with an outline, painted far to near, so nearer things hide farther ones.
+pub fn elevation_view(scene: &Scene, sec: Section) -> Result<SectionView, ViewError> { build(scene, sec, true) }
+
+fn build(scene: &Scene, sec: Section, faces: bool) -> Result<SectionView, ViewError> {
     if !sec.a.iter().chain(sec.b.iter()).chain([sec.bottom, sec.top, sec.depth].iter()).all(|v| v.is_finite()) { return Err(ViewError::BadSection("a number is not finite")); }
     let len = (sec.b[0] - sec.a[0]).hypot(sec.b[1] - sec.a[1]);
     if len < 1e-6 { return Err(ViewError::BadSection("the line has no length")); }
@@ -77,6 +90,7 @@ pub fn section_view(scene: &Scene, sec: Section) -> Result<SectionView, ViewErro
     let d = [(sec.b[0] - sec.a[0]) / len, (sec.b[1] - sec.a[1]) / len];
     let fr = Fr { a: sec.a, d, n: [-d[1], d[0]], len };
     let mut items = Vec::new();
+    let mut far: Vec<Face> = Vec::new();
     let mut warnings = Vec::new();
     // slabs first, then walls and columns, so that a painter has the walls on top
     for (k, sl) in scene.slabs.iter().enumerate() {
@@ -90,27 +104,66 @@ pub fn section_view(scene: &Scene, sec: Section) -> Result<SectionView, ViewErro
         }
         for v in &voids { for (a, b) in ring_spans(v, &fr) { spans = subtract(spans, a, b); } }
         for (a, b) in spans { rect_item(&mut items, Element { kind: Kind::Slab, id: sl.id }, a, b, z0, z1, len); }
+        if faces { if let Some(f) = ring_face(Element { kind: Kind::Slab, id: sl.id }, &sl.slab.outline, &fr, sec.depth, 0, z0, z1) { far.push(f); } }
     }
-    let walls: Vec<Result<WallDraw, ViewError>> = scene.walls.par_iter().map(|w| wall_items(w.id, &w.chain, &fr, &sec)).collect();
+    let walls: Vec<Result<WallDraw, ViewError>> = scene.walls.par_iter().map(|w| wall_items(w.id, &w.chain, &fr, &sec, faces)).collect();
     for (w, r) in scene.walls.iter().zip(walls) {
-        let (its, sloped, skipped) = r?;
-        if sloped && !its.is_empty() { warnings.push(format!("wall {}: the sloped top is drawn flat at the wall height", w.id)); }
-        if skipped { warnings.push(format!("wall {}: an arched opening seen beyond the plane is not drawn", w.id)); }
-        items.extend(its);
+        let wd = r?;
+        if wd.sloped && !(wd.items.is_empty() && wd.far.is_empty()) { warnings.push(format!("wall {}: the sloped top is drawn flat at the wall height", w.id)); }
+        if wd.skipped { warnings.push(format!("wall {}: an arched opening seen beyond the plane is not drawn", w.id)); }
+        items.extend(wd.items);
+        far.extend(wd.far);
     }
     for c in &scene.columns {
         let z0 = c.base_z.max(sec.bottom);
         let z1 = (c.base_z + c.height).min(sec.top);
         if z1 - z0 <= EPS { continue; }
         for (a, b) in ring_spans(&c.footprint, &fr) { rect_item(&mut items, Element { kind: Kind::Column, id: c.id }, a, b, z0, z1, len); }
+        if faces { if let Some(f) = ring_face(Element { kind: Kind::Column, id: c.id }, &c.footprint, &fr, sec.depth, 0, z0, z1) { far.push(f); } }
     }
+    if faces {
+        // what sits in the walls: the boxes of each family, each one a face
+        for it in &scene.items {
+            for (k, (_, bx)) in it.instance.solids.iter().enumerate() {
+                let xf = it.instance.xf.get(k).copied().flatten();
+                let corners: Vec<(f64, f64)> = [[bx.min[0], bx.min[1]], [bx.max[0], bx.min[1]], [bx.max[0], bx.max[1]], [bx.min[0], bx.max[1]]].iter().map(|&q| {
+                    let q = match xf { Some(t) => t.apply(q), None => q };
+                    let w = it.frame.point([q[0], q[1], 0.0]);
+                    fr.uw([w[0], w[1]])
+                }).collect();
+                let (wlo, whi) = corners.iter().fold((f64::MAX, f64::MIN), |(l, h), c| (l.min(c.1), h.max(c.1)));
+                let (ulo, uhi) = corners.iter().fold((f64::MAX, f64::MIN), |(l, h), c| (l.min(c.0), h.max(c.0)));
+                let (ua, ub) = (ulo.max(0.0), uhi.min(len));
+                let (z0, z1) = ((it.frame.origin[2] + bx.min[2]).max(sec.bottom), (it.frame.origin[2] + bx.max[2]).min(sec.top));
+                if whi <= 0.0 || wlo > sec.depth || ub - ua <= EPS || z1 - z0 <= EPS { continue; }
+                far.push(face(Element { kind: Kind::Family, id: it.id }, wlo.max(0.0), 1, rect_ring(ua, ub, z0, z1), vec![]));
+            }
+        }
+    }
+    // far to near; equal depths keep walls before what sits in them, then the order of the model
+    far.sort_by(|a, b| b.depth.total_cmp(&a.depth).then(a.order.cmp(&b.order)));
+    let mut all: Vec<Item> = far.into_iter().flat_map(|f| f.items).collect();
+    all.extend(items);
+    let items = all;
     let mut labels = Vec::new();
+    let mut items = items;
     for (i, lv) in scene.levels.all().iter().enumerate() {
         if lv.elevation < sec.bottom || lv.elevation > sec.top { continue; }
         items.push(Item { element: Element { kind: Kind::Level, id: i as u64 }, class: Class::Datum, shape: Shape::Line([0.0, lv.elevation], [len, lv.elevation]) });
         labels.push(Label { at: [len, lv.elevation], text: lv.name.clone() });
     }
     Ok(SectionView { section: sec, length: len, items, labels, warnings })
+}
+
+/// A ring (slab outline, column footprint) lying in front of the plane, seen from the side as a face over `z0..z1`.
+fn ring_face(el: Element, ring: &[P], fr: &Fr, depth: f64, order: u8, z0: f64, z1: f64) -> Option<Face> {
+    let uw: Vec<(f64, f64)> = ring.iter().map(|&q| fr.uw(q)).collect();
+    let (wmin, _) = uw.iter().fold((f64::MAX, f64::MIN), |(l, h), x| (l.min(x.1), h.max(x.1)));
+    if !(wmin >= 0.0 && wmin <= depth) { return None; }
+    let (umin, umax) = uw.iter().fold((f64::MAX, f64::MIN), |(l, h), x| (l.min(x.0), h.max(x.0)));
+    let (ua, ub) = (umin.max(0.0), umax.min(fr.len));
+    if ub - ua <= EPS { return None; }
+    Some(face(el, wmin, order, rect_ring(ua, ub, z0, z1), vec![]))
 }
 
 /// Pairs of `u` between which the line is inside the ring (even-odd), clipped to the line.
@@ -122,6 +175,14 @@ fn ring_spans(ring: &[P], fr: &Fr) -> Spans {
     }
     us.sort_by(|a, b| a.total_cmp(b));
     us.as_chunks::<2>().0.iter().filter_map(|c| { let (a, b) = (c[0].max(0.0), c[1].min(fr.len)); if b - a > EPS { Some((a, b)) } else { None } }).collect()
+}
+
+/// A filled face with an outline (class Below: an ordinary projected line).
+fn face(el: Element, depth: f64, order: u8, outer: Vec<P>, holes: Vec<Vec<P>>) -> Face {
+    let mut items = vec![Item { element: el, class: Class::Below, shape: Shape::Region { outer: outer.clone(), holes: holes.clone() } }];
+    ring_lines(&mut items, el, Class::Below, &outer);
+    for h in &holes { ring_lines(&mut items, el, Class::Below, h); }
+    Face { depth, order, items }
 }
 
 fn rect_ring(u0: f64, u1: f64, z0: f64, z1: f64) -> Vec<P> { vec![[u0, z0], [u1, z0], [u1, z1], [u0, z1]] }
@@ -160,16 +221,30 @@ fn clip_box(poly: &[P], u0: f64, u1: f64, z0: f64, z1: f64) -> Vec<P> {
     p
 }
 
-/// What one wall gives: its items, whether it has a sloped top, whether an arched opening was left out.
-type WallDraw = (Vec<Item>, bool, bool);
+/// A thing in front of the plane drawn as a filled face; faces are painted from the farthest to the nearest.
+struct Face {
+    depth: f64,
+    /// breaks ties at equal depth: walls first, then what sits in them
+    order: u8,
+    items: Vec<Item>,
+}
+
+/// What one wall gives: items cut by the plane, faces in front of it, whether it has a sloped top, whether an arched opening was left out.
+struct WallDraw {
+    items: Vec<Item>,
+    far: Vec<Face>,
+    sloped: bool,
+    skipped: bool,
+}
 
 /// Items of a wall, whether it has a sloped top, and whether an arched opening was left out.
-fn wall_items(id: u64, c: &WallChain, fr: &Fr, sec: &Section) -> Result<WallDraw, ViewError> {
+fn wall_items(id: u64, c: &WallChain, fr: &Fr, sec: &Section, faces: bool) -> Result<WallDraw, ViewError> {
     let top = c.base_z + c.height;
     let (z0, z1) = (c.base_z.max(sec.bottom), top.min(sec.top));
     let sloped = c.tops.iter().any(|t| t.is_some());
-    if z1 - z0 <= EPS { return Ok((Vec::new(), false, false)); }
+    if z1 - z0 <= EPS { return Ok(WallDraw { items: Vec::new(), far: Vec::new(), sloped: false, skipped: false }); }
     let mut skipped = false;
+    let mut far: Vec<Face> = Vec::new();
     let plans = c.plans().map_err(|err| ViewError::Wall { id, err })?;
     let el = Element { kind: Kind::Wall, id };
     let mut out = Vec::new();
@@ -231,6 +306,24 @@ fn wall_items(id: u64, c: &WallChain, fr: &Fr, sec: &Section) -> Result<WallDraw
             // beyond: the wall seen from the side
             let (ua, ub) = (umin.max(0.0), umax.min(fr.len));
             if ub - ua <= EPS { continue; }
+            if faces {
+                // a filled face with its openings as holes; the arched ones too when the wall is not seen end on
+                let mut holes: Vec<Vec<P>> = Vec::new();
+                if k.abs() > 1e-9 {
+                    for o in c.openings.get(i).into_iter().flatten() {
+                        let (zl, zh) = ((c.base_z + o.sill).max(z0), (c.base_z + o.sill + o.height).min(z1));
+                        if zh - zl <= EPS { continue; }
+                        if let Some((a, b)) = u_range(o.offset, o.offset + o.width, ua, ub) { holes.push(rect_ring(a, b, zl, zh)); }
+                    }
+                    for poly in c.poly_openings.get(i).into_iter().flatten() {
+                        let ring: Vec<P> = poly.iter().map(|q| [(q[0] - s0) / k, c.base_z + q[1]]).collect();
+                        let r = clip_box(&ring, ua, ub, z0, z1);
+                        if r.len() >= 3 { holes.push(r); }
+                    }
+                }
+                far.push(face(el, wmin, 0, rect_ring(ua, ub, z0, z1), holes));
+                continue;
+            }
             ring_lines(&mut out, el, Class::Beyond, &rect_ring(ua, ub, z0, z1));
             if c.poly_openings.get(i).is_some_and(|v| !v.is_empty()) { skipped = true; }
             if k.abs() > 1e-9 {
@@ -242,13 +335,47 @@ fn wall_items(id: u64, c: &WallChain, fr: &Fr, sec: &Section) -> Result<WallDraw
             }
         }
     }
-    Ok((out, sloped, skipped))
+    Ok(WallDraw { items: out, far, sloped, skipped })
 }
 
-/// A section drawn in the Revit look.
+/// A section or elevation drawn in the Revit look.
 pub fn section_svg(v: &SectionView) -> String { section_svg_with(v, &SvgStyle::revit()) }
 
 pub fn section_svg_with(v: &SectionView, st: &SvgStyle) -> String {
     let b = v.bounds();
     page("section", [b[0], b[1], b[2] + 1.2, b[3]], &v.items, &[], &v.labels, st)
+}
+
+/// The four sides of a building.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Facing {
+    North,
+    East,
+    South,
+    West,
+}
+
+/// The four elevations around everything that has a plan (walls, slabs, columns), as Revit's default elevation
+/// markers give them: the line runs along the side `margin` metres outside the model, the view looks at the building
+/// and `u` grows to the right as a person standing there sees it (South: west to east, East: south to north, North:
+/// east to west, West: north to south). The height runs from the lowest level (or element) to the top of the model
+/// plus `margin`, and the depth reaches across the whole model plus `margin`. None when the model has no plan.
+pub fn standard_elevations(scene: &Scene, margin: f64) -> Option<Vec<(Facing, Section)>> {
+    let mut bx: Option<[f64; 4]> = None;
+    let mut z: Option<(f64, f64)> = None;
+    let mut add = |p: P| { bx = Some(match bx { None => [p[0], p[1], p[0], p[1]], Some(b) => [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])] }); };
+    let mut addz = |lo: f64, hi: f64| { z = Some(match z { None => (lo, hi), Some((a, b)) => (a.min(lo), b.max(hi)) }); };
+    for w in &scene.walls { w.chain.points.iter().for_each(|&p| add(p)); addz(w.chain.base_z, w.chain.base_z + w.chain.height); }
+    for sl in &scene.slabs { sl.slab.outline.iter().for_each(|&p| add(p)); addz(sl.slab.top - sl.slab.thickness, sl.slab.top); }
+    for c in &scene.columns { c.footprint.iter().for_each(|&p| add(p)); addz(c.base_z, c.base_z + c.height); }
+    let ([x0, y0, x1, y1], (zlo, zhi)) = (bx?, z?);
+    let (m, bottom, top) = (margin.max(0.0), zlo.min(scene.levels.all().first().map_or(zlo, |l| l.elevation)), zhi + margin.max(0.0));
+    let depth = (x1 - x0).max(y1 - y0) + 2.0 * m;
+    let s = |a: P, b: P| Section { a, b, bottom, top, depth };
+    Some(vec![
+        (Facing::South, s([x0 - m, y0 - m], [x1 + m, y0 - m])),
+        (Facing::East, s([x1 + m, y0 - m], [x1 + m, y1 + m])),
+        (Facing::North, s([x1 + m, y1 + m], [x0 - m, y1 + m])),
+        (Facing::West, s([x0 - m, y1 + m], [x0 - m, y0 - m])),
+    ])
 }

@@ -22,6 +22,8 @@ pub struct SvgStyle {
     pub column: Paint,
     pub slab: Paint,
     pub room: Paint,
+    /// faces seen in an elevation or beyond a section: they hide what is behind them
+    pub projected: Paint,
     pub cut_width: f64,
     pub projection_width: f64,
     pub beyond_width: f64,
@@ -40,6 +42,7 @@ impl SvgStyle {
             column: Paint::Hatch { line: "black".into(), spacing: 0.06 },
             slab: Paint::Hatch { line: "#444".into(), spacing: 0.08 },
             room: Paint::None,
+            projected: Paint::Color("white".into()),
             cut_width: 0.035,
             projection_width: 0.012,
             beyond_width: 0.009,
@@ -59,6 +62,7 @@ impl SvgStyle {
             column: Paint::Color("#bdbdbd".into()),
             slab: Paint::Color("#bdbdbd".into()),
             room: Paint::Color("#e8eefc".into()),
+            projected: Paint::Color("#f1f1f1".into()),
             cut_width: 0.05,
             projection_width: 0.02,
             beyond_width: 0.015,
@@ -84,7 +88,7 @@ pub(crate) fn page(title: &str, bounds: [f64; 4], items: &[Item], tags: &[RoomTa
     let _ = write!(s, "<title>{}</title>", esc(title));
     // one hatch pattern per distinct hatch in the style
     let mut hatches: Vec<(String, f64)> = Vec::new();
-    for p in [&st.wall, &st.column, &st.slab, &st.room] {
+    for p in [&st.wall, &st.column, &st.slab, &st.room, &st.projected] {
         if let Paint::Hatch { line, spacing } = p {
             if !hatches.iter().any(|h| h.0 == *line && h.1 == *spacing) { hatches.push((line.clone(), *spacing)); }
         }
@@ -127,7 +131,8 @@ pub(crate) fn page(title: &str, bounds: [f64; 4], items: &[Item], tags: &[RoomTa
                 }
             }
             Shape::Region { outer, holes } => {
-                if let Some(f) = fill_attr(paint_of(it.element.kind)) {
+                let paint = if matches!(it.class, Class::Cut | Class::Room) { paint_of(it.element.kind) } else { &st.projected };
+                if let Some(f) = fill_attr(paint) {
                     let ring = |r: &[P]| format!("M{} Z", r.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" L"));
                     let d: Vec<String> = std::iter::once(outer.as_slice()).chain(holes.iter().map(|h| h.as_slice())).map(ring).collect();
                     let _ = write!(s, "<path d=\"{}\" fill-rule=\"evenodd\" fill=\"{f}\" stroke=\"none\"/>", d.join(" "));
