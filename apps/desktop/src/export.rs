@@ -2,12 +2,13 @@
 use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_geom::WallChain;
-use openbim_ifc::{BeamItem, FramingUsage, Scene, WallItem};
+use openbim_ifc::{BeamItem, ColumnItem, FramingUsage, Scene, WallItem};
 
 pub struct Exported {
     pub text: String,
     pub walls: usize,
     pub beams: usize,
+    pub columns: usize,
     pub warnings: Vec<String>,
 }
 
@@ -26,12 +27,21 @@ pub fn beam_item(doc: &Document, el: &openbim_document::Element) -> Option<BeamI
     Some(BeamItem { id: el.id.0, name: el.name.clone(), a: [start[0], start[1], z], b: [end[0], end[1], z + run * el.slope_ratio.unwrap_or(0.0)], profile: el.profile(), usage })
 }
 
+/// The column of a document element: its section stood on its point from the foot to the top level.
+pub fn column_item(doc: &Document, el: &openbim_document::Element) -> Option<ColumnItem> {
+    let Some(Geometry::Point { at, level, top }) = el.geometry else { return None };
+    let base = doc.get(level)?.elevation_m + el.elevation_m;
+    let height = doc.get(top)?.elevation_m - base;
+    // an I-shaped footprint is not convex, so such a column cannot bound rooms
+    ColumnItem::from_profile(el.id.0, &el.name, &el.profile(), at, base, height, !matches!(el.section, openbim_document::Section::IShape { .. })).ok()
+}
+
 /// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
 pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<Exported, String> {
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
-    let (mut walls, mut beams) = (Vec::new(), Vec::new());
+    let (mut walls, mut beams, mut columns) = (Vec::new(), Vec::new(), Vec::new());
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&str, usize>::new();
     for el in doc.elements() {
@@ -45,6 +55,10 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 beams.push(beam_item(doc, el).ok_or("a beam lies on a level that is gone")?);
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
+            (Category::Column, Some(Geometry::Point { .. })) => {
+                columns.push(column_item(doc, el).ok_or_else(|| format!("column {} has no height or a section that does not check", el.name))?);
+                if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
+            }
             (Category::Level | Category::Grid, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
             (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,
@@ -55,7 +69,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
-        walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![],
+        walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: columns.clone(), shafts: vec![],
         floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(),
@@ -64,7 +78,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
     if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
-    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: beams.len(), warnings })
+    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: beams.len(), columns: columns.len(), warnings })
 }
 
 /// `2026-10-17T19:34:56` for a number of seconds since 1970 (UTC).

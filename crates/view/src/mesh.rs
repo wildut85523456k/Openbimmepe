@@ -839,6 +839,12 @@ pub fn beam_mesh(b: &BeamItem) -> Option<Mesh> {
     Some(Mesh { verts: local.verts.into_iter().map(at).collect(), tris: local.tris })
 }
 
+/// The mesh of a column: its footprint stood from its base up its height, faces outward. None when the footprint
+/// cannot be triangulated or the height is not positive.
+pub fn column_mesh(c: &openbim_ifc::ColumnItem) -> Option<Mesh> {
+    prism(&c.footprint, &[], c.base_z, c.base_z + c.height)
+}
+
 fn box_of(verts: &[[f64; 3]]) -> ([f64; 3], [f64; 3]) {
     let lo = [0, 1, 2].map(|k| verts.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min));
     let hi = [0, 1, 2].map(|k| verts.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));

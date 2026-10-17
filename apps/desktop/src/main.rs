@@ -23,7 +23,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall, Beam }
+enum Tool { Select, Duct, Pipe, Wall, Beam, Column }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -81,13 +81,14 @@ impl Desktop {
     }
 
     fn sample() -> Self {
-        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam"])
+        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
             ("Duct", &["D D"]),
             ("Pipe", &["P I"]),
             ("Wall", &["W A"]),
             ("Beam", &["B M"]),
+            ("Column", &["C L"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
@@ -116,6 +117,7 @@ impl Desktop {
             Tool::Duct => "Duct command preview only; routing engine is not connected yet.".into(),
             Tool::Pipe => "Pipe command preview only; routing engine is not connected yet.".into(),
             Tool::Beam => "Beam: click the start and the end in a plan view (Esc ends), or type the ends in the options bar and press Place Beam.".into(),
+            Tool::Column => "Column: click its place in a plan view; it stands from that level to the next one up (Esc ends).".into(),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -168,6 +170,7 @@ impl Desktop {
             "pipe" => self.choose_tool(Tool::Pipe),
             "wall" => self.choose_tool(Tool::Wall),
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
+            "structural_column" | "column" => self.choose_tool(Tool::Column),
             "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
@@ -207,7 +210,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

@@ -8,6 +8,8 @@ pub enum Geometry {
     Level,
     Grid { start: [f64; 2], end: [f64; 2] },
     Linear { start: [f64; 2], end: [f64; 2], level: ElementId },
+    /// a point on `level` with something standing from there up to the level `top` (a column)
+    Point { at: [f64; 2], level: ElementId, top: ElementId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -24,9 +26,19 @@ fn valid_axis(start: [f64; 2], end: [f64; 2]) -> bool {
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
     for el in elements.values() {
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
+            Some(Geometry::Point { at, level, top }) => {
+                let lv = |id: &ElementId| elements.get(id).filter(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level));
+                el.category == Category::Column
+                    && at.iter().all(|n| n.is_finite() && n.abs() <= 1e6)
+                    && el.width_m <= 1e6 && el.height_m <= 1e6
+                    && match (lv(level), lv(top)) {
+                        (Some(a), Some(b)) => b.elevation_m - (a.elevation_m + el.elevation_m) > 1e-6 && el.elevation_m.abs() <= 1e6,
+                        _ => false,
+                    }
+            }
             Some(Geometry::Linear { start, end, level }) => {
                 let datum = elements.get(level).filter(|l| l.category == Category::Level
                     && l.geometry == Some(Geometry::Level));
@@ -49,6 +61,18 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
 impl Document {
     pub fn mesh(&self, id: ElementId) -> Option<Mesh> {
         let el = self.get(id)?;
+        if let Some(Geometry::Point { at, level, top }) = el.geometry {
+            // the section stood on its point from the foot to the top level; the end faces of an I-section are
+            // concave polygons, which a plan does not mind (the 3D view meshes columns itself)
+            let (z0, z1) = (self.get(level)?.elevation_m + el.elevation_m, self.get(top)?.elevation_m);
+            let section: Vec<[f64; 2]> = el.profile().outline().into_iter().map(|p| [at[0] + p[0], at[1] + p[1]]).collect();
+            let n = section.len();
+            let mut vertices: Vec<[f64; 3]> = section.iter().map(|p| [p[0], p[1], z0]).collect();
+            vertices.extend(section.iter().map(|p| [p[0], p[1], z1]));
+            let mut faces: Vec<Vec<usize>> = vec![(0..n).rev().collect(), (n..2 * n).collect()];
+            for i in 0..n { faces.push(vec![i, (i + 1) % n, (i + 1) % n + n, i + n]); }
+            return Some(Mesh { vertices, faces });
+        }
         let Geometry::Linear { start, end, level } = el.geometry.as_ref()? else { return None; };
         let z = self.get(*level)?.elevation_m + el.elevation_m;
         let dx = end[0] - start[0];
@@ -151,6 +175,43 @@ mod tests {
         assert_eq!(d.get(i).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
         // only beams have a section
         assert!(d.transact(d.revision(), &[Command::SetSection { id: ElementId(20), section: Section::Circle }]).is_err());
+    }
+
+    #[test]
+    fn a_column_stands_between_two_levels_is_validated_resized_and_undone() {
+        use crate::{ColumnSpec, Material, Section};
+        let mut d = Document::spatial_sample();
+        let spec = ColumnSpec { width_m: 0.4, depth_m: 0.4, base_offset_m: 0.0, section: Section::Rectangle, material: Material::Concrete };
+        let id = d.place_column(ElementId(10), ElementId(11), [2.0, 2.0], &spec).unwrap();
+        let el = d.get(id).unwrap();
+        assert_eq!((el.category, el.material, el.name.as_str()), (Category::Column, Material::Concrete, "Column 1"));
+        let m = d.mesh(id).unwrap();
+        let zs: Vec<f64> = m.vertices.iter().map(|v| v[2]).collect();
+        assert!(zs.iter().all(|z| *z == 0.0 || *z == 3.0), "from Level 1 (0) to Level 2 (3): {zs:?}");
+        assert_eq!(m.vertices.len(), 8);
+        // the top has to be above the foot: Level 2 to Level 1, or a foot raised to the top, are refused
+        assert!(d.place_column(ElementId(11), ElementId(10), [2.0, 2.0], &spec).is_err());
+        assert!(d.place_column(ElementId(10), ElementId(11), [2.0, 2.0], &ColumnSpec { base_offset_m: 3.0, ..spec }).is_err());
+        assert!(d.place_column(ElementId(10), ElementId(20), [2.0, 2.0], &spec).is_err(), "a wall is not a level");
+        assert!(d.place_column(ElementId(10), ElementId(11), [f64::NAN, 2.0], &spec).is_err());
+        // a round column, and the foot raised 0.5 m: one transaction
+        d.transact(d.revision(), &[
+            Command::SetSection { id, section: Section::Circle },
+            Command::MoveElevation { id, elevation_m: 0.5 },
+        ]).unwrap();
+        let el = d.get(id).unwrap();
+        assert_eq!((el.section, el.width_m, el.height_m, el.elevation_m), (Section::Circle, 0.4, 0.4, 0.5));
+        assert_eq!(d.mesh(id).unwrap().vertices.len(), 64);
+        // moving Level 2 down so the column would have no height is refused and changes nothing
+        let rev = d.revision();
+        assert!(d.transact(rev, &[Command::MoveElevation { id: ElementId(11), elevation_m: 0.4 }]).is_err());
+        assert_eq!(d.revision(), rev);
+        // a column cannot be created without its place
+        assert!(d.transact(d.revision(), &[Command::Create { id: ElementId(500), category: Category::Column, name: "C".into(), width_m: 0.3, height_m: 0.3, elevation_m: 0.0 }]).is_err());
+        d.undo().unwrap();
+        assert_eq!(d.get(id).unwrap().section, Section::Rectangle);
+        d.undo().unwrap();
+        assert!(d.get(id).is_none());
     }
 
     #[test]

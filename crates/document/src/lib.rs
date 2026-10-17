@@ -20,6 +20,9 @@ pub enum Category {
     /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
     /// `height_m` deep, `elevation_m` the height of its centre line above the level.
     Beam,
+    /// A vertical structural member at a point, from its base level (plus `elevation_m`) up to its top level:
+    /// `width_m` across and `height_m` deep (its section), with a `section` and a `material`.
+    Column,
     Duct,
     Pipe,
     Equipment,
@@ -52,6 +55,17 @@ impl BeamSpec {
     pub fn level(start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64) -> BeamSpec {
         BeamSpec { start, end, width_m, depth_m, elevation_m, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified, slope_ratio: 0.0 }
     }
+}
+
+/// The size, section and material of a column to place.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColumnSpec {
+    pub width_m: f64,
+    pub depth_m: f64,
+    /// how far above its base level the foot of the column is
+    pub base_offset_m: f64,
+    pub section: Section,
+    pub material: Material,
 }
 
 /// What a framing member is for (Revit's Structural Usage). A brace is a sloped member.
@@ -136,11 +150,13 @@ impl Element {
         }
     }
     /// A section that is as wide as it is deep: a pipe, or a round beam.
-    pub fn is_round(&self) -> bool { self.category == Category::Pipe || (self.category == Category::Beam && self.section == Section::Circle) }
+    pub fn is_round(&self) -> bool { self.category == Category::Pipe || (matches!(self.category, Category::Beam | Category::Column) && self.section == Section::Circle) }
 
     fn valid(&self) -> bool {
-        (self.category == Category::Beam || (self.section == Section::Rectangle && self.usage == Usage::Girder && self.material == Material::Unspecified))
-            && (self.category != Category::Beam || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
+        (matches!(self.category, Category::Beam | Category::Column) || self.section == Section::Rectangle)
+            && (self.category == Category::Beam || self.usage == Usage::Girder)
+            && (matches!(self.category, Category::Beam | Category::Column) || self.material == Material::Unspecified)
+            && (!matches!(self.category, Category::Beam | Category::Column) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
             && self.width_m.is_finite()
@@ -202,7 +218,7 @@ pub enum Command {
         elevation_m: f64,
     },
     SetSlope { id: ElementId, slope_ratio: f64 },
-    /// Change the section of a beam. A round section takes the width as its diameter and the depth with it.
+    /// Change the section of a beam or a column. A round section takes the width as its diameter and the depth with it.
     SetSection { id: ElementId, section: Section },
     /// What a beam is for.
     SetUsage { id: ElementId, usage: Usage },
@@ -255,6 +271,18 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// Stands a column at `at` from `level` (raised by `base_offset_m`) up to the level `top`.
+    pub fn place_column(&mut self, level: ElementId, top: ElementId, at: [f64; 2], col: &ColumnSpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Column).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Column, name: format!("Column {n}"), width_m: col.width_m, height_m: col.depth_m, elevation_m: col.base_offset_m },
+            Command::SetSection { id, section: col.section },
+            Command::SetMaterial { id, material: col.material },
+            Command::SetGeometry { id, geometry: Geometry::Point { at, level, top } },
+        ])?;
+        Ok(id)
+    }
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
@@ -294,7 +322,7 @@ impl Document {
                     el.width_m = *width_m;
                     el.height_m = *height_m;
                     // a beam is checked whole at the end, so that a size and a section can change together
-                    if el.category != Category::Beam && !el.valid() { return Err(EditError::InvalidElement); }
+                    if !matches!(el.category, Category::Beam | Category::Column) && !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
                 Command::MoveElevation { id, elevation_m } => {
@@ -319,13 +347,13 @@ impl Document {
                 }
                 Command::SetMaterial { id, material } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Column) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.material = *material;
                     el.revision = revision;
                 }
                 Command::SetSection { id, section } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Column) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.section = *section;
                     if *section == Section::Circle { el.height_m = el.width_m; }
                     el.revision = revision;

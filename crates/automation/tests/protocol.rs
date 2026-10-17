@@ -65,3 +65,23 @@ fn spatial_snapshot_preserves_meshes_levels_and_host_constraints() {
     assert!(service.build_property_graph("spatial-test",vec![2],Property::Width,0.2).is_err(),"Pipe geometry must remain circular");
     assert!(service.build_property_graph("spatial-test",vec![100],Property::Elevation,1.0).is_err(),"Grid elevation is unsupported");
 }
+
+#[test]
+fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
+    use openbim_automation::protocol::Snapshot;
+    use openbim_document::{BeamSpec, ColumnSpec, Document, ElementId, Material, Section, Usage};
+    let mut d = Document::spatial_sample();
+    d.place_beam(ElementId(10), &BeamSpec { section: Section::IShape { web_m: 0.01, flange_m: 0.02 }, usage: Usage::Joist, material: Material::Steel, ..BeamSpec::level([0.0, 1.0], [4.0, 1.0], 0.2, 0.4, 2.8) }).unwrap();
+    d.place_beam(ElementId(10), &BeamSpec { usage: Usage::Brace, slope_ratio: 0.75, section: Section::Circle, ..BeamSpec::level([5.0, 1.0], [5.0, 5.0], 0.1, 0.1, 0.2) }).unwrap();
+    d.place_column(ElementId(10), ElementId(11), [2.0, 2.0], &ColumnSpec { width_m: 0.4, depth_m: 0.4, base_offset_m: 0.1, section: Section::Circle, material: Material::Concrete }).unwrap();
+    let json = Snapshot::capture("doc", &d).to_json().unwrap();
+    let back: Snapshot = serde_json::from_str(&json).unwrap();
+    let rebuilt = back.materialize().unwrap();
+    for el in d.elements() {
+        let r = rebuilt.get(el.id).unwrap_or_else(|| panic!("{:?} lost", el.id));
+        assert_eq!((r.category, r.width_m, r.height_m, r.elevation_m, r.slope_ratio, r.geometry, r.section, r.usage, r.material),
+                   (el.category, el.width_m, el.height_m, el.elevation_m, el.slope_ratio, el.geometry, el.section, el.usage, el.material), "{}", el.name);
+    }
+    assert_eq!(d.elements().count(), rebuilt.elements().count());
+    assert!(json.contains("IShape") && json.contains("\"Brace\"") && json.contains("Point"));
+}

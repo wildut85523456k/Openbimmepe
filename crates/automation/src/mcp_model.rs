@@ -20,7 +20,7 @@ impl SnapshotService {
     pub fn query(&self,id:&str,category:Option<&str>,name:Option<&str>,offset:usize,limit:usize)->Result<ElementPage<'_>,String> {
         self.check_document(id)?; check_page(offset,limit)?;
         if let Some(category)=category {
-            if !["Wall","Beam","Duct","Pipe","Equipment","Level","Grid"].contains(&category) { return Err("Category must be Wall, Beam, Duct, Pipe, Equipment, Level or Grid".into()); }
+            if !["Wall","Beam","Column","Duct","Pipe","Equipment","Level","Grid"].contains(&category) { return Err("Category must be Wall, Beam, Column, Duct, Pipe, Equipment, Level or Grid".into()); }
         }
         if name.is_some_and(|s|s.len()>256) { return Err("Name filter exceeds 256 bytes".into()); }
         let name=name.map(str::to_lowercase);

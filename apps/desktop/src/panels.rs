@@ -74,6 +74,11 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     use openbim_document::Category as C;
     match category {
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
+        C::Column => match section {
+            1 => &[Field::Diameter, Field::Elevation],
+            2 => &[Field::Width, Field::Height, Field::Web, Field::Flange, Field::Elevation],
+            _ => &[Field::Width, Field::Height, Field::Elevation],
+        },
         C::Beam => match section {
             1 => &[Field::Diameter, Field::Elevation, Field::Slope],
             2 => &[Field::Width, Field::Height, Field::Web, Field::Flange, Field::Elevation, Field::Slope],
@@ -86,12 +91,14 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
 }
 
 /// The usage and the material of a beam.
-fn usage_material_combos(app: &mut Desktop, ui: &mut egui::Ui) {
+fn usage_material_combos(app: &mut Desktop, ui: &mut egui::Ui, usage: bool) {
     ui.horizontal(|ui| {
-        ui.label("Usage");
-        egui::ComboBox::from_id_salt("beam_usage").selected_text(app.usage_pick.name()).show_ui(ui, |ui| {
-            for u in openbim_document::Usage::ALL { ui.selectable_value(&mut app.usage_pick, u, u.name()); }
-        });
+        if usage {
+            ui.label("Usage");
+            egui::ComboBox::from_id_salt("beam_usage").selected_text(app.usage_pick.name()).show_ui(ui, |ui| {
+                for u in openbim_document::Usage::ALL { ui.selectable_value(&mut app.usage_pick, u, u.name()); }
+            });
+        }
         ui.label("Material");
         egui::ComboBox::from_id_salt("beam_material").selected_text(app.material_pick.name()).show_ui(ui, |ui| {
             for m in openbim_document::Material::ALL { ui.selectable_value(&mut app.material_pick, m, m.name()); }
@@ -119,6 +126,7 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Width if category == C::Beam => "Width (mm)",
         Field::Diameter => "Diameter (mm)", Field::Web => "Web Thickness (mm)", Field::Flange => "Flange Thickness (mm)",
         Field::Elevation if category == C::Beam => "Centre Elevation (mm)",
+        Field::Elevation if category == C::Column => "Base Offset (mm)",
         Field::Width => "Width (mm)", Field::Height => "Height (mm)",
         Field::Elevation if category == C::Level => "Elevation (mm)",
         Field::Elevation if category == C::Wall => "Base Offset (mm)",
@@ -162,6 +170,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
     use openbim_document::Category as C;
     match category {
         C::Beam => ("Structural Framing (1)", "Rectangular Beam", "beam"),
+        C::Column => ("Structural Columns (1)", "Rectangular Column", "structural_column"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
@@ -169,6 +178,20 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
 }
 
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Column {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Structural Column");
+            ui.separator();
+            section_combo(app, ui);
+            usage_material_combos(app, ui, false);
+            let cat = openbim_document::Category::Column;
+            for field in dimensions(cat, app.section_pick).iter().copied().filter(|f| !matches!(f, Field::Elevation)) {
+                ui.label(field_name(field, cat));
+                editor(app, ui, field);
+            }
+        });
+        return;
+    }
     if app.tool == crate::Tool::Beam {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Structural Framing");
@@ -181,7 +204,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                 for (id, name, _) in &levels { ui.selectable_value(&mut app.beam_level, Some(*id), name); }
             });
             section_combo(app, ui);
-            usage_material_combos(app, ui);
+            usage_material_combos(app, ui, true);
             if app.usage_pick == openbim_document::Usage::Brace {
                 ui.label("Rise (mm)");
                 ui.add(egui::DragValue::new(&mut app.brace_rise_mm).speed(10.0));
@@ -238,11 +261,15 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
         .max_height((ui.available_height() - 50.0).max(20.0)).auto_shrink([false, false]).show(ui, |ui| {
             if let Some(el) = &element {
                 ui.push_id(el.id.0, |ui| {
+                    if let Some(Geometry::Point { level, top, .. }) = el.geometry {
+                        let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
+                        read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
+                    }
                     if let Some(Geometry::Linear { level, .. }) = el.geometry {
                         let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
                     }
-                    if el.category == openbim_document::Category::Beam { section_combo(app, ui); usage_material_combos(app, ui); }
+                    if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column) { section_combo(app, ui); usage_material_combos(app, ui, el.category == openbim_document::Category::Beam); }
                     edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     if let Some(Geometry::Linear { start, end, level }) = el.geometry {
                         let length = (end[0] - start[0]).hypot(end[1] - start[1]);

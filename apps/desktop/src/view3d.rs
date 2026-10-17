@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 fn kind(c: Category) -> Option<Kind> {
-    match c { Category::Wall => Some(Kind::Wall), Category::Beam => Some(Kind::Beam), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
+    match c { Category::Wall => Some(Kind::Wall), Category::Beam => Some(Kind::Beam), Category::Column => Some(Kind::Column), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
 }
 
 /// The element of the view that stands for a document element.
@@ -26,6 +26,13 @@ pub fn batch(doc: &Document) -> Batch {
             // a beam is meshed by the scene mesher: its section may be an I, which is not convex, and its faces
             // come out wound outward, so they are taken as they are
             let Some(m) = crate::export::beam_item(doc, el).and_then(|b| openbim_view::beam_mesh(&b)) else { continue };
+            let faces = m.tris.iter().map(|t| t.iter().map(|&i| i as usize).collect()).collect();
+            meshes.push((Element { kind: k, id: el.id.0 }, openbim_document::Mesh { vertices: m.verts, faces }, true));
+            continue;
+        }
+        if el.category == Category::Column {
+            // like a beam, a column is meshed by the scene mesher, outward wound, whatever its section
+            let Some(m) = crate::export::column_item(doc, el).and_then(|c| openbim_view::column_mesh(&c)) else { continue };
             let faces = m.tris.iter().map(|t| t.iter().map(|&i| i as usize).collect()).collect();
             meshes.push((Element { kind: k, id: el.id.0 }, openbim_document::Mesh { vertices: m.verts, faces }, true));
             continue;

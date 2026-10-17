@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{BeamSpec, Category, Command, Geometry, Section, Usage};
+use openbim_document::{BeamSpec, Category, ColumnSpec, Command, Geometry, Section, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -21,7 +21,7 @@ impl Desktop {
             self.height_mm = el.height_m * 1000.0;
             self.elevation_mm = el.elevation_m * 1000.0;
             self.slope_percent = el.slope_ratio.unwrap_or(0.0) * 100.0;
-            if el.category == Category::Beam {
+            if matches!(el.category, Category::Beam | Category::Column) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
                 (self.section_pick, self.web_mm, self.flange_mm) = match el.section {
                     Section::Rectangle => (0, self.web_mm, self.flange_mm),
@@ -47,10 +47,10 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
-        let section = el.category == Category::Beam && {
+        let section = matches!(el.category, Category::Beam | Category::Column) && {
             let want = self.section_from_controls();
             match (el.section, want) {
                 (Section::IShape { web_m: a, flange_m: b }, Section::IShape { web_m: c, flange_m: d }) => differs(a * 1000.0, c * 1000.0) || differs(b * 1000.0, d * 1000.0),
@@ -65,7 +65,7 @@ impl Desktop {
                     .any(|(a, b)| differs(a * 1000.0, b)),
             _ => false,
         };
-        let kind = el.category == Category::Beam && (el.usage != self.usage_pick || el.material != self.material_pick);
+        let kind = (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column) && el.material != self.material_pick);
         size || section || kind || elevation || slope || axis
     }
 
@@ -74,7 +74,7 @@ impl Desktop {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         match crate::export::export_ifc(&self.document, "Project1", 1, &crate::export::iso_time(secs)) {
             Ok(out) => match std::fs::write("openbim-export.ifc", &out.text) {
-                Ok(()) => self.message = format!("Exported openbim-export.ifc: {} walls, {} beams. {}", out.walls, out.beams, out.warnings.join("; ")),
+                Ok(()) => self.message = format!("Exported openbim-export.ifc: {} walls, {} beams, {} columns. {}", out.walls, out.beams, out.columns, out.warnings.join("; ")),
                 Err(e) => self.message = format!("Could not write openbim-export.ifc: {e}"),
             },
             Err(e) => self.message = format!("IFC export failed: {e}"),
@@ -119,6 +119,24 @@ impl Desktop {
         }
     }
 
+    /// A click of the Column tool in the plan of `level`: a column with the sizes, section and material of the
+    /// options bar stands there from that level to the next one up. The tool stays on.
+    pub(crate) fn column_click(&mut self, level: ElementId, at: [f64; 2]) {
+        let levels = self.levels();
+        let Some(base) = levels.iter().find(|l| l.0 == level).map(|l| l.2) else { self.message = "This view has no level".into(); return };
+        let Some(top) = levels.iter().find(|l| l.2 > base + 1e-6).map(|l| l.0) else {
+            self.message = "There is no level above this one for the column to reach".into();
+            return;
+        };
+        let m = |v: f64| v / 1000.0;
+        let depth = if self.section_pick == 1 { self.width_mm } else { self.height_mm };
+        let spec = ColumnSpec { width_m: m(self.width_mm), depth_m: m(depth), base_offset_m: 0.0, section: self.section_from_controls(), material: self.material_pick };
+        self.message = match self.document.place_column(level, top, at, &spec) {
+            Ok(id) => format!("Column {} placed; undo removes it", id.0),
+            Err(error) => format!("Column rejected: {error:?}"),
+        };
+    }
+
     /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
     /// tool stays on for the next one.
     pub(crate) fn beam_click(&mut self, level: ElementId, point: [f64; 2]) {
@@ -141,14 +159,14 @@ impl Desktop {
         if !self.has_pending_edit() { return; }
         let id = el.id;
         let mut commands = Vec::new();
-        if matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe) {
-            let round = el.category == Category::Pipe || (el.category == Category::Beam && self.section_pick == 1);
+        if matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe) {
+            let round = el.category == Category::Pipe || (matches!(el.category, Category::Beam | Category::Column) && self.section_pick == 1);
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
                 height_m: if round { self.width_mm } else { self.height_mm } / 1000.0 });
         }
-        if el.category == Category::Beam {
+        if matches!(el.category, Category::Beam | Category::Column) {
             commands.push(Command::SetSection { id, section: self.section_from_controls() });
-            commands.push(Command::SetUsage { id, usage: self.usage_pick });
+            if el.category == Category::Beam { commands.push(Command::SetUsage { id, usage: self.usage_pick }); }
             commands.push(Command::SetMaterial { id, material: self.material_pick });
         }
         if el.category != Category::Grid { commands.push(Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }); }
@@ -214,6 +232,51 @@ mod tests {
         app.apply_selected_edit();
         assert!(app.message.contains("rejected"), "{}", app.message);
         assert_eq!(app.document.get(id).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
+    }
+
+    #[test]
+    fn columns_are_placed_by_a_click_stand_to_the_next_level_are_edited_drawn_and_exported() {
+        let mut app = Desktop::sample();
+        app.run_command("structural_column", "Column");
+        assert!(app.tool == Tool::Column);
+        (app.width_mm, app.height_mm) = (400.0, 400.0);
+        app.material_pick = openbim_document::Material::Concrete;
+        // Level 2 is the top level: nothing above it to reach
+        app.column_click(ElementId(11), [2.0, 2.0]);
+        assert!(app.message.contains("no level above"), "{}", app.message);
+        assert!(app.document.elements().all(|e| e.category != Category::Column));
+        app.column_click(ElementId(10), [2.0, 2.0]);
+        let col = app.document.elements().find(|e| e.category == Category::Column).expect("placed").id;
+        assert!(app.tool == Tool::Column, "the tool stays on");
+        // 3 m high between Level 1 and Level 2, 0.4 x 0.4: a closed solid of 0.48 m3 in the 3D view
+        let batch = crate::view3d::batch(&app.document);
+        let ei = batch.elements.iter().position(|e| e.id == col.0 && e.kind == openbim_view::Kind::Column).expect("in 3D") as u32;
+        let vol: f64 = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
+            let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+            (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+        }).sum();
+        assert!((vol - 0.48).abs() < 1e-3, "{vol}");
+        // select it and make it an I-section steel column with a base offset
+        app.select_element(Some(col));
+        assert!(!app.has_pending_edit());
+        (app.section_pick, app.width_mm, app.height_mm, app.web_mm, app.flange_mm) = (2, 300.0, 300.0, 10.0, 15.0);
+        app.material_pick = openbim_document::Material::Steel;
+        app.elevation_mm = 200.0;
+        app.apply_selected_edit();
+        let el = app.document.get(col).unwrap();
+        assert_eq!((el.material, el.elevation_m, el.section), (openbim_document::Material::Steel, 0.2, Section::IShape { web_m: 0.01, flange_m: 0.015 }));
+        // exported as an IfcColumn on an exact... I footprint, with its material
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-17T00:00:00").unwrap();
+        assert_eq!(out.columns, 1);
+        assert!(out.text.contains("IFCCOLUMN(") && out.text.contains("IFCMATERIAL('Steel')"));
+        // a circle column
+        app.select_element(Some(col));
+        (app.section_pick, app.width_mm) = (1, 350.0);
+        app.apply_selected_edit();
+        assert_eq!((app.document.get(col).unwrap().width_m, app.document.get(col).unwrap().height_m), (0.35, 0.35));
+        app.undo_document();
+        app.undo_document();
+        assert_eq!(app.document.get(col).unwrap().section, Section::Rectangle);
     }
 
     #[test]
