@@ -58,7 +58,7 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
+    Scene { project_name: "P".into(), project_key: 1, beams: vec![], timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
     WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None, room_bounding: true }
@@ -414,4 +414,23 @@ fn a_blend_is_a_faceted_brep_and_a_void_is_cut_with_a_boolean_result() {
     // the solid and the void are written once each, the void only as the operand of the difference
     assert_eq!(out.text.matches("IFCEXTRUDEDAREASOLID(").count(), walls_only + 2);
     assert_eq!(out.text.matches("IFCBOOLEANRESULT(").count(), 1);
+}
+
+#[test]
+fn a_beam_exports_as_an_ifcbeam_along_its_own_axis_and_a_bad_one_is_refused() {
+    use openbim_ifc::BeamItem;
+    let mut s = scene(vec![wall(5)]);
+    s.beams = vec![BeamItem { id: 9, name: "B1".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], width: 0.2, depth: 0.4 }];
+    let a = export(&s).unwrap();
+    assert!(a.text.contains(&format!("IFCBEAM('{}'", global_id(1, 0, 9))), "{}", a.text);
+    assert!(a.text.contains("'B1'") && a.text.contains(".BEAM."));
+    assert!(a.text.contains("IFCRECTANGLEPROFILEDEF(.AREA.,$,#"), "a rectangular section");
+    let solid = a.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).last().unwrap();
+    assert!(solid.ends_with(",4.);") || solid.ends_with(",4.0);"), "extruded over its 4 m: {solid}");
+    assert_eq!(a.text, export(&s).unwrap().text, "stable");
+    s.beams[0].b = [0.0, 1.0, 4.0];
+    assert!(export(&s).is_err(), "a vertical member is a column");
+    s.beams[0].b = [4.0, 1.0, 2.6];
+    s.beams[0].depth = 0.0;
+    assert!(export(&s).is_err());
 }

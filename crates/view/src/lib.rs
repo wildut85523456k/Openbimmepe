@@ -112,6 +112,8 @@ pub enum Class {
 pub enum Kind {
     Wall,
     Column,
+    /// a straight structural member between two points
+    Beam,
     /// a placed family (door, window, fixture, equipment)
     Family,
     Slab,

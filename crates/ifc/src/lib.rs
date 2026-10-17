@@ -60,6 +60,46 @@ pub struct ColumnItem {
     pub room_bounding: bool,
 }
 
+/// A beam: a straight member between two points of the model, with a rectangular section centred on that line.
+/// The width lies horizontal across the beam, the depth at right angles to both (upright for a level beam).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeamItem {
+    pub id: u64,
+    pub name: String,
+    /// the ends of the centre line (model coordinates, metres)
+    pub a: [f64; 3],
+    pub b: [f64; 3],
+    pub width: f64,
+    pub depth: f64,
+}
+
+impl BeamItem {
+    /// The unit vectors along the beam, across it (horizontal) and up out of it; None for a beam that is not straight
+    /// and sloped less than vertical, has no size or is not finite.
+    pub fn axes(&self) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
+        let d = [self.b[0] - self.a[0], self.b[1] - self.a[1], self.b[2] - self.a[2]];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let ok = self.a.iter().chain(&self.b).all(|v| v.is_finite()) && self.width.is_finite() && self.depth.is_finite();
+        if !ok || len < 1e-9 || self.width <= 0.0 || self.depth <= 0.0 {
+            return None;
+        }
+        let u = [d[0] / len, d[1] / len, d[2] / len];
+        // across = up x u, which is horizontal
+        let (sx, sy) = (-u[1], u[0]);
+        let sl = (sx * sx + sy * sy).sqrt();
+        if sl < 1e-9 {
+            return None; // a vertical member is a column
+        }
+        let side = [sx / sl, sy / sl, 0.0];
+        let up = [u[1] * side[2] - u[2] * side[1], u[2] * side[0] - u[0] * side[2], u[0] * side[1] - u[1] * side[0]];
+        Some((u, side, up))
+    }
+    pub fn length(&self) -> f64 {
+        let d = [self.b[0] - self.a[0], self.b[1] - self.a[1], self.b[2] - self.a[2]];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    }
+}
+
 /// What a slab item is. Rooms are slab to slab by default; a floor finish or a false ceiling takes over as the
 /// room's floor or ceiling where there is one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -155,6 +195,8 @@ pub struct Scene {
     pub slabs: Vec<SlabItem>,
     /// structural columns, each a straight prism on a convex footprint
     pub columns: Vec<ColumnItem>,
+    /// beams, each a straight member with a rectangular section
+    pub beams: Vec<BeamItem>,
     pub shafts: Vec<ShaftVoid>,
     /// register of openings in slabs, by slab index into `slabs`
     pub floor_penetrations: Vec<FloorPenetration>,
@@ -695,6 +737,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     }
     write_slabs(&mut o)?;
     write_columns(&mut o)?;
+    write_beams(&mut o)?;
     write_spaces(&mut o)?;
     if v2 {
         if !scene.networks.is_empty() {
@@ -902,6 +945,27 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},{})", string(&c.name), o.tail4(".COLUMN.")));
         o.contain(st, e);
         o.column_entities.push(e);
+    }
+    Ok(())
+}
+
+fn write_beams(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for b in &scene.beams {
+        let Some((u, side, _)) = b.axes() else {
+            return Err(ExportError::Unsupported(format!("beam {}: needs two different points that are not one above the other, and a positive width and depth", b.name)));
+        };
+        let st = o.storey_for(b.a[2].min(b.b[2]));
+        let elev = o.storeys[st].2;
+        let at = [b.a[0], b.a[1], b.a[2] - elev];
+        // the beam is placed at its start, its local z along the beam and its local x across it
+        let pl = o.place(Some(o.storeys[st].1), at, Some(u), Some(side));
+        let prof = o.rect_profile(0.0, 0.0, b.width, b.depth);
+        let solid = o.extrusion(prof, [0.0; 3], None, None, b.length());
+        let shape = o.shape(&[solid]);
+        let g = o.gid(b.id, 0);
+        let e = o.s.add(format!("IFCBEAM({g},$,{},$,$,#{pl},#{shape},{})", string(&b.name), o.tail4(".BEAM.")));
+        o.contain(st, e);
     }
     Ok(())
 }

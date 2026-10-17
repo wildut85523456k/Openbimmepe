@@ -208,6 +208,7 @@ pub fn build_scene(edit: bool) -> Scene {
             openbim_ifc::boundaries::SeparationLine { id: A | 972, level: 1, a: [2.0, 7.0], b: [2.0, 3.075] },
         ],
         project_key: 0x0123_4567_89ab,
+        beams: vec![],
         timestamp: "2026-10-15T00:00:00".into(),
         levels,
         walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0), room_bounding: true }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1), room_bounding: true }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1), room_bounding: true }],

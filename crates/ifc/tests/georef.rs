@@ -139,6 +139,7 @@ fn scene(g: Option<Georef>) -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![],
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![],

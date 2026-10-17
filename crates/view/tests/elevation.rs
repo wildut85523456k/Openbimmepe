@@ -9,6 +9,7 @@ fn scene(walls: Vec<WallChain>) -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![],
         timestamp: "t".into(),
         levels: Levels::new(vec![
             Level {

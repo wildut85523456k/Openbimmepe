@@ -9,6 +9,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![],
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None, room_bounding: true }).collect(),

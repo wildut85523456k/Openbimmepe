@@ -6,13 +6,13 @@
 //!
 //! `MeshCache` keeps the meshes between edits. It decides what to rebuild by comparing the inputs of each element
 //! with the ones it meshed last time, so it does not matter how the scene was changed: only elements whose inputs
-//! differ are meshed again, and meshing is done in parallel. Output order is walls, slabs, columns, family items,
+//! differ are meshed again, and meshing is done in parallel. Output order is walls, slabs, columns, beams, family items,
 //! each in scene order, and does not depend on the number of threads.
 
 use crate::{slab_holes, Element, Kind, ViewError};
 use openbim_family::{forms::Loop, mep::up_for, Instance, System};
 use openbim_geom::{Mesh, WallChain};
-use openbim_ifc::{Frame, Scene};
+use openbim_ifc::{BeamItem, Frame, Scene};
 use openbim_place::floors::Slab;
 use openbim_place::penetrations::{Run, RunSize};
 use openbim_route::{Fitting, FittingKind};
@@ -665,6 +665,8 @@ enum Src<'a> {
     /// a slab, its holes, and the voids of free-standing families that reach it (a shaft), in model coordinates
     Slab(&'a Slab, Vec<Vec<P>>, Vec<TriMesh>),
     Column(&'a [P], f64, f64),
+    /// a beam, and the voids of free-standing families that reach it, in model coordinates
+    Beam(&'a BeamItem, Vec<TriMesh>),
     Family(&'a Frame, &'a Instance),
     Run(&'a Run),
     Fitting(&'a Fitting, System),
@@ -678,6 +680,7 @@ enum Key {
     Wall(WallChain, WallMaterials, Vec<TriMesh>),
     Slab(Slab, Vec<Vec<P>>, Vec<TriMesh>),
     Column(Vec<P>, f64, f64),
+    Beam(BeamItem, Vec<TriMesh>),
     Family(Frame, Instance),
     Run(Run),
     Fitting(Fitting, System),
@@ -690,6 +693,7 @@ impl Src<'_> {
         match (self, k) {
             (Src::Wall(a, m, v), Key::Wall(b, n, w)) => *a == b && m == n && v == w,
             (Src::Slab(a, h, v), Key::Slab(b, g, w)) => *a == b && h == g && v == w,
+            (Src::Beam(a, v), Key::Beam(b, w)) => *a == b && v == w,
             (Src::Column(a, z, t), Key::Column(b, y, u)) => *a == b.as_slice() && z == y && t == u,
             (Src::Family(a, i), Key::Family(b, j)) => *a == b && *i == j,
             (Src::Run(a), Key::Run(b)) => *a == b,
@@ -706,6 +710,7 @@ impl Src<'_> {
             Src::Wall(c, m, v) => Key::Wall((*c).clone(), m.clone(), v.clone()),
             Src::Slab(s, h, v) => Key::Slab((*s).clone(), h.clone(), v.clone()),
             Src::Column(f, a, b) => Key::Column(f.to_vec(), *a, *b),
+            Src::Beam(b, v) => Key::Beam((*b).clone(), v.clone()),
             Src::Family(f, i) => Key::Family(**f, (*i).clone()),
             Src::Run(r) => Key::Run((*r).clone()),
             Src::Fitting(f, s) => Key::Fitting((*f).clone(), *s),
@@ -736,6 +741,17 @@ impl Src<'_> {
                         Some(t) => m = to_mesh(t),
                         None => warnings
                             .push("a void of a family could not be cut out of the slab".into()),
+                    }
+                }
+                plain(m)
+            }
+            Src::Beam(b, voids) => {
+                let mut m = beam_mesh(b).ok_or_else(bad)?;
+                if !voids.is_empty() {
+                    let whole = TriMesh { verts: m.verts.clone(), tris: m.tris.clone() };
+                    match meshing::cut(&whole, voids) {
+                        Some(t) => m = to_mesh(t),
+                        None => warnings.push("a void of a family could not be cut out of the beam".into()),
                     }
                 }
                 plain(m)
@@ -795,26 +811,41 @@ impl Src<'_> {
 
 /// Every element with its inputs. The number beside the element is the network it belongs to (0 for everything that is
 /// not a service piece): piece numbers are only unique within one network.
-/// The voids whose box meets the box of the slab; the others cannot cut it.
-fn reaching(voids: &[TriMesh], slab: &Slab) -> Vec<TriMesh> {
-    let lo = |f: fn(&P) -> f64| slab.outline.iter().map(f).fold(f64::INFINITY, f64::min);
-    let hi = |f: fn(&P) -> f64| slab.outline.iter().map(f).fold(f64::NEG_INFINITY, f64::max);
-    let (x0, x1, y0, y1) = (lo(|p| p[0]), hi(|p| p[0]), lo(|p| p[1]), hi(|p| p[1]));
-    let (z0, z1) = (slab.top - slab.thickness, slab.top);
+/// The voids whose box meets the box `lo..hi`; the others cannot cut what is inside it.
+fn reaching(voids: &[TriMesh], lo: [f64; 3], hi: [f64; 3]) -> Vec<TriMesh> {
     let meets = |m: &TriMesh| {
-        let r = |k: usize| {
-            (
-                m.verts.iter().map(|v| v[k]).fold(f64::INFINITY, f64::min),
-                m.verts
-                    .iter()
-                    .map(|v| v[k])
-                    .fold(f64::NEG_INFINITY, f64::max),
-            )
-        };
-        let (a, b, c) = (r(0), r(1), r(2));
-        a.0 < x1 && a.1 > x0 && b.0 < y1 && b.1 > y0 && c.0 < z1 && c.1 > z0
+        (0..3).all(|k| {
+            let a = m.verts.iter().map(|v| v[k]).fold(f64::INFINITY, f64::min);
+            let b = m.verts.iter().map(|v| v[k]).fold(f64::NEG_INFINITY, f64::max);
+            a < hi[k] && b > lo[k]
+        })
     };
     voids.iter().filter(|m| meets(m)).cloned().collect()
+}
+
+fn slab_box(slab: &Slab) -> ([f64; 3], [f64; 3]) {
+    let r = |k: usize| (slab.outline.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min), slab.outline.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
+    ([r(0).0, r(1).0, slab.top - slab.thickness], [r(0).1, r(1).1, slab.top])
+}
+
+/// The box of a beam: eight corners around the centre line, twelve outward triangles.
+fn beam_corners(b: &BeamItem) -> Option<[[f64; 3]; 8]> {
+    let (_, side, up) = b.axes()?;
+    let mut c = [[0.0; 3]; 8];
+    for (i, p) in c.iter_mut().enumerate() {
+        let (e, s, h) = (i >> 2, (i >> 1) & 1, i & 1);
+        let base = if e == 0 { b.a } else { b.b };
+        let (ws, wh) = ((s as f64 - 0.5) * b.width, (h as f64 - 0.5) * b.depth);
+        *p = [base[0] + side[0] * ws + up[0] * wh, base[1] + side[1] * ws + up[1] * wh, base[2] + side[2] * ws + up[2] * wh];
+    }
+    Some(c)
+}
+
+fn beam_mesh(b: &BeamItem) -> Option<Mesh> {
+    let c = beam_corners(b)?;
+    let quads: [[u32; 4]; 6] = [[4, 6, 7, 5], [0, 1, 3, 2], [2, 3, 7, 6], [0, 4, 5, 1], [1, 5, 7, 3], [0, 2, 6, 4]];
+    let tris = quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect();
+    Some(Mesh { verts: c.to_vec(), tris })
 }
 
 fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
@@ -863,9 +894,20 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
             Src::Slab(
                 &s.slab,
                 slab_holes(scene, i, &s.slab),
-                reaching(&free_voids, &s.slab),
+                { let (lo, hi) = slab_box(&s.slab); reaching(&free_voids, lo, hi) },
             ),
         ));
+    }
+    for b in &scene.beams {
+        let voids = match beam_corners(b) {
+            Some(c) => {
+                let lo = [0, 1, 2].map(|k| c.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min));
+                let hi = [0, 1, 2].map(|k| c.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
+                reaching(&free_voids, lo, hi)
+            }
+            None => Vec::new(),
+        };
+        v.push((Element { kind: Kind::Beam, id: b.id }, 0, Src::Beam(b, voids)));
     }
     for c in &scene.columns {
         v.push((

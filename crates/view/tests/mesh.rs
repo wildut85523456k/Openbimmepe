@@ -22,6 +22,7 @@ fn scene() -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![],
         timestamp: "t".into(),
         levels: Levels::new(vec![Level {
             name: "L0".into(),
@@ -1046,4 +1047,42 @@ fn a_free_standing_void_cuts_the_slab_it_passes_through() {
     // well above it: nothing
     s.items = vec![item(1.0)];
     assert!((find(&scene_meshes(&s).unwrap(), 2).mesh.volume() - plain).abs() < 1e-9);
+}
+
+#[test]
+fn a_beam_is_a_closed_box_and_a_free_void_cuts_a_hole_through_it() {
+    use openbim_family::forms::{FormDef, ProfileDef};
+    use openbim_family::{Axis, Family, Request};
+    use openbim_ifc::{BeamItem, FamilyItem, FamilyRef, Frame};
+    let mut s = scene();
+    // along x, 0.2 wide and 0.4 deep, 4 m long
+    s.beams = vec![BeamItem { id: 5, name: "B".into(), a: [1.0, 3.0, 2.5], b: [5.0, 3.0, 2.5], width: 0.2, depth: 0.4 }];
+    let m = scene_meshes(&s).unwrap();
+    let beam = find(&m, 5);
+    assert_eq!(beam.element.kind, Kind::Beam);
+    assert!((beam.mesh.volume() - 0.2 * 0.4 * 4.0).abs() < 1e-9, "{}", beam.mesh.volume());
+    // a sloped beam has the same section area times its length
+    s.beams[0].b = [1.0 + 3.0, 3.0, 2.5 + 3.0];
+    let l = (3.0f64 * 3.0 * 2.0).sqrt();
+    assert!((find(&scene_meshes(&s).unwrap(), 5).mesh.volume() - 0.2 * 0.4 * l).abs() < 1e-9);
+    s.beams[0].b = [5.0, 3.0, 2.5];
+    // a sleeve that goes across the web: 0.2 along, 1 across (the beam is 0.2 of it), 0.2 high
+    let fam = Family {
+        name: "Sleeve".into(),
+        forms: vec![FormDef::extrusion("sleeve", Axis::Z, "0", "0.2", ProfileDef::rect("0", "-0.5", "0.2", "0.5")).void()],
+        ..Default::default()
+    }.compile().unwrap();
+    let inst = fam.solve(&Request::default()).unwrap();
+    s.families = vec![FamilyRef { id: 1, family: fam }];
+    let item = |y| FamilyItem { id: 7, name: "Sl".into(), family: 0, type_name: None, frame: Frame { origin: [2.0, y, 2.4], x: [1.0, 0.0] }, instance: inst.clone(), host: None };
+    s.items = vec![item(3.0)];
+    let m = scene_meshes(&s).unwrap();
+    assert!(find(&m, 5).warnings.is_empty(), "{:?}", find(&m, 5).warnings);
+    assert!((find(&m, 5).mesh.volume() - (0.32 - 0.2 * 0.2 * 0.2)).abs() < 1e-9, "{}", find(&m, 5).mesh.volume());
+    // beside the beam it cuts nothing
+    s.items = vec![item(6.0)];
+    assert!((find(&scene_meshes(&s).unwrap(), 5).mesh.volume() - 0.32).abs() < 1e-9);
+    // a vertical or empty beam is refused rather than meshed
+    s.beams[0].b = [1.0, 3.0, 4.0];
+    assert!(scene_meshes(&s).is_err());
 }

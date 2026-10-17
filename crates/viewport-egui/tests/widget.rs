@@ -99,7 +99,7 @@ fn clicking_selects_the_element_under_the_cursor() {
         use openbim_geom::WallChain;
         use openbim_ifc::{Scene, WallItem};
         let s = Scene {
-            project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+            project_name: "P".into(), project_key: 1, beams: vec![], timestamp: "t".into(),
             levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
             walls: vec![WallItem { id: 1, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [6.0, 0.0]], false, 0.3, 3.0), wall_type: None, room_bounding: true }],
             wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
