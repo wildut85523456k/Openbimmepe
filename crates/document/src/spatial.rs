@@ -130,7 +130,7 @@ mod tests {
     fn a_beam_takes_a_round_or_an_i_section_changes_with_its_size_and_the_sections_are_validated() {
         use crate::Section;
         let mut d = Document::spatial_sample();
-        let place = |d: &mut Document, w, h, s| d.place_beam(ElementId(10), [0.0, 1.0], [4.0, 1.0], w, h, 2.8, s);
+        let place = |d: &mut Document, w, h, s| d.place_beam(ElementId(10), &crate::BeamSpec { section: s, ..crate::BeamSpec::level([0.0, 1.0], [4.0, 1.0], w, h, 2.8) });
         // a round beam is as deep as it is wide, and its mesh is a 32-gon prism
         let round = place(&mut d, 0.3, 0.3, Section::Circle).unwrap();
         assert_eq!(d.mesh(round).unwrap().vertices.len(), 64);
@@ -154,9 +154,30 @@ mod tests {
     }
 
     #[test]
+    fn a_brace_is_a_sloped_beam_with_a_usage_and_a_material_and_only_beams_have_them() {
+        use crate::{BeamSpec, Material, Usage};
+        let mut d = Document::spatial_sample();
+        // 3 m of run rising 3 m: a diagonal from 0.5 m at the start to 3.5 m at the end
+        let spec = BeamSpec { usage: Usage::Brace, material: Material::Steel, slope_ratio: 1.0, ..BeamSpec::level([0.0, 1.0], [3.0, 1.0], 0.1, 0.1, 0.5) };
+        let id = d.place_beam(ElementId(10), &spec).unwrap();
+        let el = d.get(id).unwrap();
+        assert_eq!((el.usage, el.material, el.slope_ratio, el.name.as_str()), (Usage::Brace, Material::Steel, Some(1.0), "Brace 1"));
+        let zs: Vec<f64> = d.mesh(id).unwrap().vertices.iter().map(|v| v[2]).collect();
+        let (lo, hi) = (zs.iter().cloned().fold(f64::MAX, f64::min), zs.iter().cloned().fold(f64::MIN, f64::max));
+        // the centre line runs 0.5 to 3.5; the 0.1 square section is turned with the member
+        assert!(lo > 0.4 - 0.1 && lo < 0.5 && hi > 3.5 && hi < 3.6, "{lo} {hi}");
+        d.transact(d.revision(), &[Command::SetUsage { id, usage: Usage::Joist }, Command::SetMaterial { id, material: Material::Timber }]).unwrap();
+        assert_eq!((d.get(id).unwrap().usage, d.get(id).unwrap().material), (Usage::Joist, Material::Timber));
+        d.undo().unwrap();
+        assert_eq!((d.get(id).unwrap().usage, d.get(id).unwrap().material), (Usage::Brace, Material::Steel));
+        assert!(d.transact(d.revision(), &[Command::SetUsage { id: ElementId(20), usage: Usage::Brace }]).is_err());
+        assert!(d.transact(d.revision(), &[Command::SetMaterial { id: ElementId(20), material: Material::Steel }]).is_err());
+    }
+
+    #[test]
     fn a_beam_is_placed_on_a_level_validated_and_undone_in_one_step() {
         let mut d = Document::spatial_sample();
-        let id = d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8, crate::Section::Rectangle).unwrap();
+        let id = d.place_beam(ElementId(10), &crate::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8)).unwrap();
         assert_eq!(id, ElementId(d.elements().map(|e| e.id.0).max().unwrap()));
         assert_eq!(d.get(id).unwrap().category, Category::Beam);
         let m = d.mesh(id).unwrap();
@@ -165,12 +186,10 @@ mod tests {
         assert!(zs.iter().all(|z| (z - 2.6).abs() < 1e-9 || (z - 3.0).abs() < 1e-9));
         // zero length, no size, and a level that is not one are all refused and change nothing
         let rev = d.revision();
-        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [1.0, 1.0], 0.2, 0.4, 2.8, crate::Section::Rectangle).is_err());
-        assert!(d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.0, 0.4, 2.8, crate::Section::Rectangle).is_err());
-        assert!(d.place_beam(ElementId(100), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8, crate::Section::Rectangle).is_err());
+        assert!(d.place_beam(ElementId(10), &crate::BeamSpec::level([1.0, 1.0], [1.0, 1.0], 0.2, 0.4, 2.8)).is_err());
+        assert!(d.place_beam(ElementId(10), &crate::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.0, 0.4, 2.8)).is_err());
+        assert!(d.place_beam(ElementId(100), &crate::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8)).is_err());
         assert_eq!(d.revision(), rev);
-        // a beam has no slope
-        assert!(d.transact(d.revision(), &[Command::SetSlope { id, slope_ratio: 0.1 }]).is_err());
         d.undo().unwrap();
         assert!(d.get(id).is_none(), "one undo removes it whole");
     }

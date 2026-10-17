@@ -28,7 +28,65 @@ pub enum Category {
 }
 
 impl Category {
-    pub fn supports_slope(self) -> bool { matches!(self, Self::Duct | Self::Pipe) }
+    pub fn supports_slope(self) -> bool { matches!(self, Self::Beam | Self::Duct | Self::Pipe) }
+}
+
+/// Everything that places a beam: where, how big, what for and of what.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeamSpec {
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    pub width_m: f64,
+    pub depth_m: f64,
+    /// height of the centre line at the start above the level
+    pub elevation_m: f64,
+    pub section: Section,
+    pub usage: Usage,
+    pub material: Material,
+    /// rise over run from start to end; a brace has one
+    pub slope_ratio: f64,
+}
+
+impl BeamSpec {
+    /// A level girder of rectangular section, material unspecified.
+    pub fn level(start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64) -> BeamSpec {
+        BeamSpec { start, end, width_m, depth_m, elevation_m, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified, slope_ratio: 0.0 }
+    }
+}
+
+/// What a framing member is for (Revit's Structural Usage). A brace is a sloped member.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Usage {
+    #[default]
+    Girder,
+    Joist,
+    Purlin,
+    Brace,
+    Other,
+}
+
+impl Usage {
+    pub const ALL: [Usage; 5] = [Usage::Girder, Usage::Joist, Usage::Purlin, Usage::Brace, Usage::Other];
+    pub fn name(self) -> &'static str {
+        match self { Usage::Girder => "Girder", Usage::Joist => "Joist", Usage::Purlin => "Purlin", Usage::Brace => "Brace", Usage::Other => "Other" }
+    }
+}
+
+/// The structural material class of a member. Which material, with what strengths, is for the project to say.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Material {
+    #[default]
+    Unspecified,
+    Concrete,
+    Steel,
+    Timber,
+}
+
+impl Material {
+    pub const ALL: [Material; 4] = [Material::Unspecified, Material::Concrete, Material::Steel, Material::Timber];
+    pub fn name(self) -> &'static str {
+        match self { Material::Unspecified => "Unspecified", Material::Concrete => "Concrete", Material::Steel => "Steel", Material::Timber => "Timber" }
+    }
 }
 
 /// The section of a beam, with the sizes the element itself does not carry. The element's `width_m` and `height_m`
@@ -59,6 +117,10 @@ pub struct Element {
     pub geometry: Option<Geometry>,
     /// The section of a beam; every other element is a rectangle.
     pub section: Section,
+    /// What a beam is for; every other element is a Girder.
+    pub usage: Usage,
+    /// The structural material of a beam.
+    pub material: Material,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -77,7 +139,7 @@ impl Element {
     pub fn is_round(&self) -> bool { self.category == Category::Pipe || (self.category == Category::Beam && self.section == Section::Circle) }
 
     fn valid(&self) -> bool {
-        (self.category == Category::Beam || self.section == Section::Rectangle)
+        (self.category == Category::Beam || (self.section == Section::Rectangle && self.usage == Usage::Girder && self.material == Material::Unspecified))
             && (self.category != Category::Beam || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
@@ -142,6 +204,10 @@ pub enum Command {
     SetSlope { id: ElementId, slope_ratio: f64 },
     /// Change the section of a beam. A round section takes the width as its diameter and the depth with it.
     SetSection { id: ElementId, section: Section },
+    /// What a beam is for.
+    SetUsage { id: ElementId, usage: Usage },
+    /// The structural material of a beam.
+    SetMaterial { id: ElementId, material: Material },
     SetGeometry { id: ElementId, geometry: Geometry },
     Delete { id: ElementId },
 }
@@ -175,15 +241,17 @@ impl Document {
     pub fn site(&self) -> Option<Site> { self.site }
     /// The next element number that no element has.
     pub fn next_id(&self) -> ElementId { ElementId(self.elements.keys().next_back().map_or(1, |k| k.0 + 1)) }
-    /// Places a beam on `level` from `start` to `end` in one undoable transaction.
-    #[allow(clippy::too_many_arguments)] // a beam is a level, two points, three sizes and a section
-    pub fn place_beam(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], width_m: f64, depth_m: f64, elevation_m: f64, section: Section) -> Result<ElementId, EditError> {
+    /// Places a beam on `level` in one undoable transaction.
+    pub fn place_beam(&mut self, level: ElementId, beam: &BeamSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();
         let n = self.elements.values().filter(|e| e.category == Category::Beam).count() + 1;
         self.transact(self.revision, &[
-            Command::Create { id, category: Category::Beam, name: format!("Beam {n}"), width_m, height_m: depth_m, elevation_m },
-            Command::SetSection { id, section },
-            Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } },
+            Command::Create { id, category: Category::Beam, name: format!("{} {n}", if beam.usage == Usage::Brace { "Brace" } else { "Beam" }), width_m: beam.width_m, height_m: beam.depth_m, elevation_m: beam.elevation_m },
+            Command::SetSection { id, section: beam.section },
+            Command::SetUsage { id, usage: beam.usage },
+            Command::SetMaterial { id, material: beam.material },
+            Command::SetSlope { id, slope_ratio: beam.slope_ratio },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start: beam.start, end: beam.end, level } },
         ])?;
         Ok(id)
     }
@@ -213,7 +281,7 @@ impl Document {
                         width_m: *width_m, height_m: *height_m,
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
-                        geometry: None, section: Section::Rectangle,
+                        geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -241,6 +309,18 @@ impl Document {
                     if !el.category.supports_slope() { return Err(EditError::UnsupportedProperty(*id)); }
                     el.slope_ratio = Some(*slope_ratio);
                     if !el.valid() { return Err(EditError::InvalidElement); }
+                    el.revision = revision;
+                }
+                Command::SetUsage { id, usage } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.usage = *usage;
+                    el.revision = revision;
+                }
+                Command::SetMaterial { id, material } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.material = *material;
                     el.revision = revision;
                 }
                 Command::SetSection { id, section } => {

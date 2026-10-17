@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{Category, Command, Geometry, Section};
+use openbim_document::{BeamSpec, Category, Command, Geometry, Section, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -22,6 +22,7 @@ impl Desktop {
             self.elevation_mm = el.elevation_m * 1000.0;
             self.slope_percent = el.slope_ratio.unwrap_or(0.0) * 100.0;
             if el.category == Category::Beam {
+                (self.usage_pick, self.material_pick) = (el.usage, el.material);
                 (self.section_pick, self.web_mm, self.flange_mm) = match el.section {
                     Section::Rectangle => (0, self.web_mm, self.flange_mm),
                     Section::Circle => (1, self.web_mm, self.flange_mm),
@@ -64,7 +65,8 @@ impl Desktop {
                     .any(|(a, b)| differs(a * 1000.0, b)),
             _ => false,
         };
-        size || section || elevation || slope || axis
+        let kind = el.category == Category::Beam && (el.usage != self.usage_pick || el.material != self.material_pick);
+        size || section || kind || elevation || slope || axis
     }
 
     /// Writes the document as `openbim-export.ifc` in the working directory and says what was and was not written.
@@ -91,7 +93,12 @@ impl Desktop {
     fn place_beam_on(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2]) -> Option<ElementId> {
         let m = |v: f64| v / 1000.0;
         let depth = if self.section_pick == 1 { self.width_mm } else { self.height_mm };
-        match self.document.place_beam(level, start, end, m(self.width_mm), m(depth), m(self.elevation_mm), self.section_from_controls()) {
+        let run = (end[0] - start[0]).hypot(end[1] - start[1]);
+        // a brace is given its rise, any other member its slope
+        let slope_ratio = if self.usage_pick == Usage::Brace && run > 1e-9 { m(self.brace_rise_mm) / run } else { self.slope_percent / 100.0 };
+        let spec = BeamSpec { start, end, width_m: m(self.width_mm), depth_m: m(depth), elevation_m: m(self.elevation_mm),
+            section: self.section_from_controls(), usage: self.usage_pick, material: self.material_pick, slope_ratio };
+        match self.document.place_beam(level, &spec) {
             Ok(id) => { self.message = format!("Beam {} placed; undo removes it", id.0); Some(id) }
             Err(error) => { self.message = format!("Beam rejected: {error:?}"); None }
         }
@@ -139,7 +146,11 @@ impl Desktop {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
                 height_m: if round { self.width_mm } else { self.height_mm } / 1000.0 });
         }
-        if el.category == Category::Beam { commands.push(Command::SetSection { id, section: self.section_from_controls() }); }
+        if el.category == Category::Beam {
+            commands.push(Command::SetSection { id, section: self.section_from_controls() });
+            commands.push(Command::SetUsage { id, usage: self.usage_pick });
+            commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
         if el.category != Category::Grid { commands.push(Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }); }
         if el.category.supports_slope() { commands.push(Command::SetSlope { id, slope_ratio: self.slope_percent / 100.0 }); }
         let start = [self.axis_mm[0] / 1000.0, self.axis_mm[1] / 1000.0];
@@ -203,6 +214,34 @@ mod tests {
         app.apply_selected_edit();
         assert!(app.message.contains("rejected"), "{}", app.message);
         assert_eq!(app.document.get(id).unwrap().section, Section::IShape { web_m: 0.01, flange_m: 0.02 });
+    }
+
+    #[test]
+    fn the_brace_command_places_a_sloped_steel_member_that_is_edited_and_exported() {
+        let mut app = Desktop::sample();
+        app.run_command("brace", "Brace");
+        assert!(app.tool == Tool::Beam && app.usage_pick == Usage::Brace);
+        (app.width_mm, app.height_mm, app.elevation_mm, app.brace_rise_mm) = (100.0, 100.0, 100.0, 3000.0);
+        app.material_pick = openbim_document::Material::Steel;
+        app.beam_click(ElementId(10), [6.0, 1.0]);
+        app.beam_click(ElementId(10), [6.0, 4.0]);
+        let brace = app.document.elements().find(|e| e.usage == Usage::Brace).expect("placed");
+        assert_eq!((brace.slope_ratio, brace.material), (Some(1.0), openbim_document::Material::Steel));
+        // select it, make it a joist with a gentler slope
+        let id = brace.id;
+        app.select_element(Some(id));
+        assert!(!app.has_pending_edit());
+        app.usage_pick = Usage::Joist;
+        app.slope_percent = 10.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        let el = app.document.get(id).unwrap();
+        assert_eq!((el.usage, el.slope_ratio), (Usage::Joist, Some(0.1)));
+        // the beam command goes back to girders
+        app.run_command("beam", "Beam");
+        assert!(app.usage_pick == Usage::Girder);
+        app.undo_document();
+        assert_eq!(app.document.get(id).unwrap().usage, Usage::Brace);
     }
 
     #[test]

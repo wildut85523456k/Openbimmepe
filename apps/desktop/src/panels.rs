@@ -75,14 +75,28 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     match category {
         C::Wall => &[Field::Width, Field::Height, Field::Elevation],
         C::Beam => match section {
-            1 => &[Field::Diameter, Field::Elevation],
-            2 => &[Field::Width, Field::Height, Field::Web, Field::Flange, Field::Elevation],
-            _ => &[Field::Width, Field::Height, Field::Elevation],
+            1 => &[Field::Diameter, Field::Elevation, Field::Slope],
+            2 => &[Field::Width, Field::Height, Field::Web, Field::Flange, Field::Elevation, Field::Slope],
+            _ => &[Field::Width, Field::Height, Field::Elevation, Field::Slope],
         },
         C::Duct => &[Field::Width, Field::Height, Field::Elevation, Field::Slope],
         C::Pipe => &[Field::Width, Field::Elevation, Field::Slope],
         C::Level => &[Field::Elevation], _ => &[],
     }
+}
+
+/// The usage and the material of a beam.
+fn usage_material_combos(app: &mut Desktop, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.label("Usage");
+        egui::ComboBox::from_id_salt("beam_usage").selected_text(app.usage_pick.name()).show_ui(ui, |ui| {
+            for u in openbim_document::Usage::ALL { ui.selectable_value(&mut app.usage_pick, u, u.name()); }
+        });
+        ui.label("Material");
+        egui::ComboBox::from_id_salt("beam_material").selected_text(app.material_pick.name()).show_ui(ui, |ui| {
+            for m in openbim_document::Material::ALL { ui.selectable_value(&mut app.material_pick, m, m.name()); }
+        });
+    });
 }
 
 /// The section of a beam: rectangle, circle or I-shape.
@@ -167,7 +181,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                 for (id, name, _) in &levels { ui.selectable_value(&mut app.beam_level, Some(*id), name); }
             });
             section_combo(app, ui);
+            usage_material_combos(app, ui);
+            if app.usage_pick == openbim_document::Usage::Brace {
+                ui.label("Rise (mm)");
+                ui.add(egui::DragValue::new(&mut app.brace_rise_mm).speed(10.0));
+            }
             let mut fields = dimensions(cat, app.section_pick).to_vec();
+            if app.usage_pick == openbim_document::Usage::Brace { fields.retain(|f| !matches!(f, Field::Slope)); }
             fields.extend([Field::X1, Field::Y1, Field::X2, Field::Y2]);
             for field in fields {
                 ui.label(field_name(field, cat));
@@ -222,7 +242,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
                     }
-                    if el.category == openbim_document::Category::Beam { section_combo(app, ui); }
+                    if el.category == openbim_document::Category::Beam { section_combo(app, ui); usage_material_combos(app, ui); }
                     edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     if let Some(Geometry::Linear { start, end, level }) = el.geometry {
                         let length = (end[0] - start[0]).hypot(end[1] - start[1]);

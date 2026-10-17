@@ -42,6 +42,10 @@ struct Desktop {
     slope_percent: f64,
     /// the section chosen for a beam: 0 rectangle, 1 circle, 2 I-shape; with the web and flange thickness of an I
     section_pick: u8,
+    usage_pick: openbim_document::Usage,
+    material_pick: openbim_document::Material,
+    /// how far a brace rises over its run when it is placed by clicking
+    brace_rise_mm: f64,
     web_mm: f64,
     flange_mm: f64,
     axis_mm: [f64; 4],
@@ -92,7 +96,7 @@ impl Desktop {
             workspace: Workspace::Design, view: View::Mechanical, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
-            slope_percent: 0.0, section_pick: 0, web_mm: 10.0, flange_mm: 20.0,
+            slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
@@ -163,7 +167,8 @@ impl Desktop {
             "duct" => self.choose_tool(Tool::Duct),
             "pipe" => self.choose_tool(Tool::Pipe),
             "wall" => self.choose_tool(Tool::Wall),
-            "beam" => self.choose_tool(Tool::Beam),
+            "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
+            "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
             "undo" => self.undo_document(),
@@ -202,7 +207,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam", Tool::Beam));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

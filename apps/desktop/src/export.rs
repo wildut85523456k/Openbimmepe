@@ -1,8 +1,8 @@
 //! The document as an IFC4 file: levels, walls and beams. The document's other elements are named in the warnings.
 use openbim_arch::{Level, Levels};
-use openbim_document::{Category, Document, Geometry};
+use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_geom::WallChain;
-use openbim_ifc::{BeamItem, Scene, WallItem};
+use openbim_ifc::{BeamItem, FramingUsage, Scene, WallItem};
 
 pub struct Exported {
     pub text: String,
@@ -15,7 +15,15 @@ pub struct Exported {
 pub fn beam_item(doc: &Document, el: &openbim_document::Element) -> Option<BeamItem> {
     let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
     let z = doc.get(level)?.elevation_m + el.elevation_m;
-    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: [start[0], start[1], z], b: [end[0], end[1], z], profile: el.profile() })
+    let run = (end[0] - start[0]).hypot(end[1] - start[1]);
+    let usage = match el.usage {
+        Usage::Girder => FramingUsage::Girder,
+        Usage::Joist => FramingUsage::Joist,
+        Usage::Purlin => FramingUsage::Purlin,
+        Usage::Brace => FramingUsage::Brace,
+        Usage::Other => FramingUsage::Other,
+    };
+    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: [start[0], start[1], z], b: [end[0], end[1], z + run * el.slope_ratio.unwrap_or(0.0)], profile: el.profile(), usage })
 }
 
 /// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
@@ -24,6 +32,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
     let (mut walls, mut beams) = (Vec::new(), Vec::new());
+    let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&str, usize>::new();
     for el in doc.elements() {
         match (el.category, el.geometry) {
@@ -34,6 +43,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
             }
             (Category::Beam, Some(Geometry::Linear { .. })) => {
                 beams.push(beam_item(doc, el).ok_or("a beam lies on a level that is gone")?);
+                if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
             (Category::Level | Category::Grid, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
@@ -43,7 +53,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
         }
     }
     let scene = Scene {
-        project_name: project_name.into(), project_key, beams: beams.clone(), timestamp: timestamp.into(),
+        project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![],
         floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![],
@@ -76,18 +86,29 @@ pub fn iso_time(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openbim_document::{ElementId, Section};
+    use openbim_document::{BeamSpec, ElementId, Section};
 
     #[test]
     fn the_document_exports_its_walls_and_beams_and_names_what_it_leaves_out() {
         let mut d = Document::spatial_sample();
-        d.place_beam(ElementId(10), [1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8, Section::Rectangle).unwrap();
-        d.place_beam(ElementId(11), [1.0, 4.0], [5.0, 4.0], 0.3, 0.3, 0.2, Section::Circle).unwrap();
-        d.place_beam(ElementId(11), [1.0, 5.0], [5.0, 5.0], 0.2, 0.4, 0.2, Section::IShape { web_m: 0.01, flange_m: 0.02 }).unwrap();
+        let level = BeamSpec::level;
+        d.place_beam(ElementId(10), &BeamSpec { material: Material::Concrete, ..level([1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.8) }).unwrap();
+        d.place_beam(ElementId(11), &BeamSpec { section: Section::Circle, material: Material::Steel, ..level([1.0, 4.0], [5.0, 4.0], 0.3, 0.3, 0.2) }).unwrap();
+        d.place_beam(ElementId(11), &BeamSpec { section: Section::IShape { web_m: 0.01, flange_m: 0.02 }, material: Material::Steel, ..level([1.0, 5.0], [5.0, 5.0], 0.2, 0.4, 0.2) }).unwrap();
+        // a diagonal brace over 3 m of run rising 3 m
+        d.place_beam(ElementId(10), &BeamSpec { usage: Usage::Brace, material: Material::Steel, slope_ratio: 1.0, ..level([6.0, 1.0], [6.0, 4.0], 0.1, 0.1, 0.1) }).unwrap();
         let out = export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap();
-        assert_eq!((out.walls, out.beams), (6, 3));
+        assert_eq!((out.walls, out.beams), (6, 4));
         assert_eq!(out.text.matches("IFCWALL(").count(), 6);
         assert_eq!(out.text.matches("IFCBEAM(").count(), 3);
+        assert_eq!(out.text.matches("IFCMEMBER(").count(), 1, "the brace is a member");
+        assert!(out.text.contains(".BRACE."));
+        // concrete on one beam, steel on a beam and the brace: one IfcMaterial of each
+        assert_eq!(out.text.matches("IFCMATERIAL('Steel')").count(), 1);
+        assert_eq!(out.text.matches("IFCMATERIAL('Concrete')").count(), 1);
+        assert!(out.text.contains("IFCRELASSOCIATESMATERIAL"));
+        // the brace rises 3 m along its 3 m run: a 4.24 m extrusion
+        assert!(out.text.contains("4.242640"), "{}", out.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).collect::<Vec<_>>().join("\n"));
         assert!(out.text.contains("IFCCIRCLEPROFILEDEF") && out.text.contains("IFCISHAPEPROFILEDEF"));
         assert_eq!(out.text.matches("IFCBUILDINGSTOREY(").count(), 2);
         assert!(out.warnings.iter().any(|w| w.contains("1 ducts")) && out.warnings.iter().any(|w| w.contains("1 pipes")), "{:?}", out.warnings);

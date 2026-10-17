@@ -13,7 +13,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
     Scene {
         project_name: "P".into(),
         project_key: 1,
-        beams: vec![],
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, (c, t))| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: t, room_bounding: true }).collect(),

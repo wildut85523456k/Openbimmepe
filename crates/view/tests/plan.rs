@@ -9,7 +9,7 @@ fn scene(walls: Vec<WallChain>, items: Vec<FamilyItem>, families: Vec<FamilyRef>
     Scene {
         project_name: "P".into(),
         project_key: 1,
-        beams: vec![],
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![
             Level {

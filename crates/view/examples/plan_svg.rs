@@ -102,7 +102,7 @@ fn main() {
     let scene = Scene {
         project_name: "Test".into(),
         project_key: 1,
-        beams: vec![],
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![Level {
             name: "Level 1".into(),

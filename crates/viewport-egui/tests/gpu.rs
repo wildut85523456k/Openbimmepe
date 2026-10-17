@@ -12,7 +12,7 @@ fn building() -> Batch {
     ring.openings = vec![vec![Opening { offset: 2.0, width: 1.2, sill: 0.9, height: 1.2 }], vec![], vec![], vec![]];
     let inner = WallChain::new(vec![[5.0, 0.0], [5.0, 7.0]], false, 0.15, 3.0);
     let s = Scene {
-        project_name: "P".into(), project_key: 1, beams: vec![], timestamp: "t".into(),
+        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![WallItem { id: 1, name: "outer".into(), chain: ring, wall_type: None, room_bounding: true }, WallItem { id: 2, name: "inner".into(), chain: inner, wall_type: None, room_bounding: true }],
         wall_penetrations: vec![], firestops: Default::default(),

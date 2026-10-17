@@ -22,7 +22,7 @@ fn scene() -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
-        beams: vec![],
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![Level {
             name: "L0".into(),
@@ -1092,7 +1092,7 @@ fn circle_and_i_beams_have_the_volume_of_their_section() {
     use openbim_geom::profile::{polygon_area, Profile};
     use openbim_ifc::BeamItem;
     let mut s = scene();
-    let beam = |profile| BeamItem { id: 5, name: "B".into(), a: [1.0, 3.0, 2.5], b: [5.0, 3.0, 2.5], profile };
+    let beam = |profile| BeamItem { id: 5, name: "B".into(), a: [1.0, 3.0, 2.5], b: [5.0, 3.0, 2.5], profile, usage: openbim_ifc::FramingUsage::Girder };
     // an I-section 0.2 wide, 0.4 deep, web 0.01, flanges 0.02: exact area 2*0.2*0.02 + 0.36*0.01
     let i = Profile::I { width: 0.2, depth: 0.4, web: 0.01, flange: 0.02 };
     assert!((i.area() - 0.0116).abs() < 1e-12 && (polygon_area(&i.outline()) - 0.0116).abs() < 1e-12);

@@ -58,7 +58,7 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, beams: vec![], timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
+    Scene { project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
     WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None, room_bounding: true }
@@ -442,8 +442,8 @@ fn beams_and_columns_take_round_and_i_sections() {
     let mut s = scene(vec![wall(5)]);
     let i = Profile::I { width: 0.2, depth: 0.4, web: 0.01, flange: 0.02 };
     s.beams = vec![
-        BeamItem { id: 9, name: "I".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], profile: i },
-        BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 } },
+        BeamItem { id: 9, name: "I".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], profile: i, usage: openbim_ifc::FramingUsage::Girder },
+        BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 }, usage: openbim_ifc::FramingUsage::Brace },
     ];
     let t = export(&s).unwrap().text;
     assert_eq!(t.matches("IFCBEAM(").count(), 2);

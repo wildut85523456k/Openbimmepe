@@ -73,6 +73,41 @@ impl ColumnItem {
     }
 }
 
+/// What a framing member is for, as Revit's Structural Usage. Bracing and purlins export as `IfcMember`, the rest as
+/// `IfcBeam`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FramingUsage {
+    #[default]
+    Girder,
+    Joist,
+    Purlin,
+    Brace,
+    Other,
+}
+
+impl FramingUsage {
+    pub const ALL: [FramingUsage; 5] = [FramingUsage::Girder, FramingUsage::Joist, FramingUsage::Purlin, FramingUsage::Brace, FramingUsage::Other];
+    pub fn name(self) -> &'static str {
+        match self {
+            FramingUsage::Girder => "Girder",
+            FramingUsage::Joist => "Joist",
+            FramingUsage::Purlin => "Purlin",
+            FramingUsage::Brace => "Brace",
+            FramingUsage::Other => "Other",
+        }
+    }
+    /// The IFC class and its predefined type.
+    fn ifc(self) -> (&'static str, &'static str) {
+        match self {
+            FramingUsage::Girder => ("IFCBEAM", ".BEAM."),
+            FramingUsage::Joist => ("IFCBEAM", ".JOIST."),
+            FramingUsage::Purlin => ("IFCMEMBER", ".PURLIN."),
+            FramingUsage::Brace => ("IFCMEMBER", ".BRACE."),
+            FramingUsage::Other => ("IFCBEAM", ".NOTDEFINED."),
+        }
+    }
+}
+
 /// A beam: a straight member between two points of the model with a section centred on that line. The section's
 /// x lies horizontal across the beam, its y at right angles to both (upright for a level beam).
 #[derive(Debug, Clone, PartialEq)]
@@ -83,12 +118,13 @@ pub struct BeamItem {
     pub a: [f64; 3],
     pub b: [f64; 3],
     pub profile: Profile,
+    pub usage: FramingUsage,
 }
 
 impl BeamItem {
     /// A beam of rectangular section.
     pub fn rect(id: u64, name: &str, a: [f64; 3], b: [f64; 3], width: f64, depth: f64) -> BeamItem {
-        BeamItem { id, name: name.into(), a, b, profile: Profile::Rect { width, depth } }
+        BeamItem { id, name: name.into(), a, b, profile: Profile::Rect { width, depth }, usage: FramingUsage::Girder }
     }
 
     /// The unit vectors along the beam, across it (horizontal) and up out of it; None for a member that is vertical
@@ -214,6 +250,8 @@ pub struct Scene {
     pub columns: Vec<ColumnItem>,
     /// beams, each a straight member with a rectangular section
     pub beams: Vec<BeamItem>,
+    /// the structural material of beams and columns by element number; each name is an `IfcMaterial`
+    pub materials: BTreeMap<u64, String>,
     pub shafts: Vec<ShaftVoid>,
     /// register of openings in slabs, by slab index into `slabs`
     pub floor_penetrations: Vec<FloorPenetration>,
@@ -438,6 +476,8 @@ struct Out<'a> {
     wall_entities: Vec<u32>,
     slab_entities: Vec<u32>,
     column_entities: Vec<u32>,
+    /// every beam, brace and column written: (element number, entity)
+    member_entities: Vec<(u64, u32)>,
     /// the virtual element of each separation line that a boundary used
     virtual_entities: BTreeMap<usize, u32>,
     item_entities: Vec<u32>,
@@ -676,7 +716,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), member_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {
@@ -768,6 +808,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     write_slabs(&mut o)?;
     write_columns(&mut o)?;
     write_beams(&mut o)?;
+    write_member_materials(&mut o);
     write_spaces(&mut o)?;
     if v2 {
         if !scene.networks.is_empty() {
@@ -975,6 +1016,7 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},{})", string(&c.name), o.tail4(".COLUMN.")));
         o.contain(st, e);
         o.column_entities.push(e);
+        o.member_entities.push((c.id, e));
     }
     Ok(())
 }
@@ -994,10 +1036,28 @@ fn write_beams(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0; 3], None, None, b.length());
         let shape = o.shape(&[solid]);
         let g = o.gid(b.id, 0);
-        let e = o.s.add(format!("IFCBEAM({g},$,{},$,$,#{pl},#{shape},{})", string(&b.name), o.tail4(".BEAM.")));
+        let (class, predefined) = b.usage.ifc();
+        let e = o.s.add(format!("{class}({g},$,{},$,$,#{pl},#{shape},{})", string(&b.name), o.tail4(predefined)));
         o.contain(st, e);
+        o.member_entities.push((b.id, e));
     }
     Ok(())
+}
+
+/// One `IfcMaterial` for each name used, associated with the beams and columns that have it.
+fn write_member_materials(o: &mut Out) {
+    let scene = o.scene;
+    let mut by_name: BTreeMap<&str, Vec<u32>> = BTreeMap::new();
+    for (id, e) in o.member_entities.clone() {
+        if let Some(name) = scene.materials.get(&id) {
+            by_name.entry(name.as_str()).or_default().push(e);
+        }
+    }
+    for (name, elems) in by_name {
+        let m = o.s.add(format!("IFCMATERIAL({})", string(name)));
+        let g = o.gen_gid();
+        o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,({}),#{m})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
+    }
 }
 
 fn write_slabs(o: &mut Out) -> Result<(), ExportError> {

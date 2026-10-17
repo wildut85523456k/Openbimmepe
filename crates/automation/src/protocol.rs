@@ -46,6 +46,12 @@ pub struct SnapshotElement {
     /// the section of a beam when it is not a rectangle
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub section:Option<SnapshotSection>,
+    /// the usage of a beam when it is not a Girder: Joist, Purlin, Brace or Other
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub usage:Option<String>,
+    /// the structural material of a beam: Concrete, Steel or Timber
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub material:Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +116,8 @@ impl Snapshot {
             id: e.id.0, category: format!("{:?}",e.category), name: e.name.clone(),
             width_m: e.width_m, height_m: e.height_m, elevation_m: e.elevation_m, slope_ratio: e.slope_ratio,
             geometry:e.geometry.map(Into::into), section: SnapshotSection::from_document(e.section),
+            usage: (e.usage != openbim_document::Usage::Girder).then(|| e.usage.name().to_string()),
+            material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -134,6 +142,14 @@ impl Snapshot {
                 width_m: el.width_m, height_m: el.height_m, elevation_m: el.elevation_m });
             if let Some(slope_ratio) = el.slope_ratio {
                 ops.push(Command::SetSlope { id: ElementId(el.id), slope_ratio });
+            }
+            if let Some(u) = &el.usage {
+                let usage = openbim_document::Usage::ALL.into_iter().find(|x| x.name() == u).ok_or(format!("Unsupported usage {u}"))?;
+                ops.push(Command::SetUsage { id: ElementId(el.id), usage });
+            }
+            if let Some(m) = &el.material {
+                let material = openbim_document::Material::ALL.into_iter().find(|x| x.name() == m).ok_or(format!("Unsupported material {m}"))?;
+                ops.push(Command::SetMaterial { id: ElementId(el.id), material });
             }
             if let Some(section) = &el.section {
                 ops.push(Command::SetSection { id: ElementId(el.id), section: section.to_document()? });
