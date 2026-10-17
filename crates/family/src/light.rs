@@ -230,11 +230,67 @@ fn stem(file: &str) -> &str {
 /// named after the files; a name or file name that is already taken gets " (2)", " (3)" ... The family is changed only
 /// when every type can be added; the files that were read are listed so the caller can keep them in the project.
 pub fn types_from_imports(fam: &mut Family, imports: &[openbim_photo::Imported]) -> Result<VariantReport, FamilyError> {
+    let all: Vec<usize> = (0..imports.len()).collect();
+    add_variant_types(fam, imports, &all)
+}
+
+/// What a person sees when choosing variants from an import: one row per file, in the order of the import.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariantRow {
+    /// index into the list that was imported (what `types_from_selection` takes)
+    pub import: usize,
+    /// the file's name without any folder
+    pub file: String,
+    /// why the file cannot be used, when it cannot
+    pub unusable: Option<String>,
+    pub description: Option<String>,
+    /// flux computed from the intensity table, lm
+    pub flux_lm: Option<f64>,
+    pub power_w: Option<f64>,
+    pub cct_k: Option<f64>,
+    pub cri: Option<f64>,
+}
+
+/// The rows of a picker for the files of an import. Nothing is chosen by this: the person ticks rows, and the numbers of the
+/// ticked rows go to `types_from_selection`.
+pub fn variant_rows(imports: &[openbim_photo::Imported]) -> Vec<VariantRow> {
+    imports
+        .iter()
+        .enumerate()
+        .map(|(k, im)| {
+            let file = flat(&im.name);
+            match &im.result {
+                Ok(p) => VariantRow { import: k, file, unusable: None, description: p.description.clone(), flux_lm: p.flux_lm().filter(|f| *f > 0.0), power_w: p.watts, cct_k: p.cct_k, cri: p.cri },
+                Err(e) => VariantRow { import: k, file, unusable: Some(e.to_string()), description: None, flux_lm: None, power_w: None, cct_k: None, cri: None },
+            }
+        })
+        .collect()
+}
+
+/// Like `types_from_imports`, for the files the person ticked: `chosen` holds indexes into `imports` (the `import` of the
+/// rows). The types are added in the order of the import, whatever the order or repeats in `chosen`. Nothing chosen, or an
+/// index outside the import, is refused and the family stays as it was; a chosen file that could not be read is reported
+/// in the warnings like any other.
+pub fn types_from_selection(fam: &mut Family, imports: &[openbim_photo::Imported], chosen: &[usize]) -> Result<VariantReport, FamilyError> {
+    if chosen.is_empty() {
+        return Err(FamilyError::BadMeta("no file is chosen"));
+    }
+    if chosen.iter().any(|&k| k >= imports.len()) {
+        return Err(FamilyError::BadMeta("a chosen file is not in the import"));
+    }
+    let mut ks = chosen.to_vec();
+    ks.sort_unstable();
+    ks.dedup();
+    add_variant_types(fam, imports, &ks)
+}
+
+fn add_variant_types(fam: &mut Family, imports: &[openbim_photo::Imported], which: &[usize]) -> Result<VariantReport, FamilyError> {
     let base = fam.lighting.clone().unwrap_or_default();
     let mut report = VariantReport::default();
     let mut types: Vec<TypeDef> = Vec::new();
     let mut files: Vec<String> = Vec::new();
-    for (k, im) in imports.iter().enumerate() {
+    for &k in which {
+        let im = &imports[k];
         let p = match &im.result {
             Ok(p) => p,
             Err(e) => {

@@ -225,3 +225,46 @@ fn pictures_and_data_sheets_are_judged_by_their_content_and_their_names() {
         (Some("p.png"), Some("d.pdf"))
     );
 }
+
+fn named_ies(name: &str, cd: f64, watts: f64) -> openbim_photo::Imported {
+    let v: Vec<String> = (0..=6).map(|k| (k * 30).to_string()).collect();
+    let data = format!("IESNA:LM-63-2002\n[MANUFAC] M\nTILT=NONE\n1 -1 1 7 1 1 2 0.6 0.6 0\n1 1 {watts}\n{}\n0\n{}\n", v.join(" "), vec![cd.to_string(); 7].join(" ")).into_bytes();
+    openbim_photo::Imported { name: name.into(), result: openbim_photo::parse(&data, name), data }
+}
+
+#[test]
+fn a_picker_lists_every_file_and_only_the_ticked_ones_become_types() {
+    let imports = vec![
+        named_ies("dir/A.ies", 100.0, 20.0),
+        openbim_photo::Imported { name: "junk.ies".into(), data: b"nonsense".to_vec(), result: openbim_photo::parse(b"nonsense", "junk.ies") },
+        named_ies("B.ies", 200.0, 40.0),
+        named_ies("C.ies", 300.0, 60.0),
+    ];
+    let rows = variant_rows(&imports);
+    assert_eq!(rows.iter().map(|r| (r.import, r.file.as_str())).collect::<Vec<_>>(), vec![(0, "A.ies"), (1, "junk.ies"), (2, "B.ies"), (3, "C.ies")]);
+    assert!(rows[0].unusable.is_none() && rows[0].power_w == Some(20.0) && rows[0].flux_lm.unwrap() > 0.0);
+    assert!(rows[1].unusable.is_some() && rows[1].power_w.is_none() && rows[1].flux_lm.is_none());
+    assert!(rows[3].flux_lm.unwrap() > rows[2].flux_lm.unwrap());
+    // tick C and A (in that order, A twice): types come in import order, once each
+    let mut f = Family { name: "P".into(), category: Category::LightFixture, ..Default::default() };
+    let r = types_from_selection(&mut f, &imports, &[3, 0, 0]).unwrap();
+    assert_eq!(r.added.iter().map(|t| (t.type_name.as_str(), t.import)).collect::<Vec<_>>(), vec![("A", 0), ("C", 3)]);
+    assert_eq!(f.types.len(), 2);
+    assert_eq!(f.types[1].lighting.as_ref().unwrap().power_w, Some(60.0));
+    // a ticked file that cannot be read is reported and adds no type
+    let mut g = Family { name: "P".into(), category: Category::LightFixture, ..Default::default() };
+    let r = types_from_selection(&mut g, &imports, &[1, 2]).unwrap();
+    assert_eq!((r.added.len(), r.warnings.len(), g.types.len()), (1, 1, 1));
+    assert!(r.warnings[0].contains("junk.ies"));
+    // nothing ticked, or a row that does not exist: refused, family untouched
+    let mut h = Family { name: "P".into(), category: Category::LightFixture, ..Default::default() };
+    assert!(matches!(types_from_selection(&mut h, &imports, &[]), Err(FamilyError::BadMeta(w)) if w.contains("no file")));
+    assert!(matches!(types_from_selection(&mut h, &imports, &[0, 4]), Err(FamilyError::BadMeta(w)) if w.contains("not in the import")));
+    assert!(h.types.is_empty());
+    // the all-files call is the same as ticking every row
+    let (mut x, mut y) = (h.clone(), h.clone());
+    let a = types_from_imports(&mut x, &imports).unwrap();
+    let b = types_from_selection(&mut y, &imports, &[0, 1, 2, 3]).unwrap();
+    assert_eq!(a, b);
+    assert_eq!(x.types.len(), y.types.len());
+}
