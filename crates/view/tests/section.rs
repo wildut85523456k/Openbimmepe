@@ -24,7 +24,9 @@ fn door(offset: f64) -> Opening { Opening { offset, width: 1.0, sill: 0.0, heigh
 
 fn sec(a: [f64; 2], b: [f64; 2]) -> Section { Section { a, b, bottom: -1.0, top: 4.0, depth: 2.0 } }
 fn close(a: f64, b: f64) -> bool { (a - b).abs() < 1e-9 }
-fn regions(v: &SectionView, kind: Kind) -> Vec<(Vec<[f64; 2]>, Vec<Vec<[f64; 2]>>)> {
+type Ring = Vec<[f64; 2]>;
+
+fn regions(v: &SectionView, kind: Kind) -> Vec<(Ring, Vec<Ring>)> {
     v.items.iter().filter(|i| i.element.kind == kind).filter_map(|i| if let Shape::Region { outer, holes } = &i.shape { Some((outer.clone(), holes.clone())) } else { None }).collect()
 }
 fn extent(r: &[[f64; 2]]) -> [f64; 4] {
