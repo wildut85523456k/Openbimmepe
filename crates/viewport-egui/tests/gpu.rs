@@ -132,3 +132,23 @@ fn realistic_differs_from_shaded_and_selection_is_orange() {
     let sel = render_rgba(&device, &queue, &gpu, &scene, &c, [400, 300]);
     assert!(orange(&sel) > 300, "selected element is drawn orange: {}", orange(&sel));
 }
+
+#[test]
+fn realistic_walls_cast_shadows_on_the_floor() {
+    let Some((device, queue)) = device() else { return };
+    let b = building();
+    let gpu = Gpu::new(&device, wgpu::TextureFormat::Bgra8Unorm);
+    let mut c = cam(&b);
+    c.snap_to(openbim_viewport::CubeDir::TOP);
+    let size = [800u32, 600];
+    let px = render_rgba(&device, &queue, &gpu, &gpu.upload(&device, &b, Style::Realistic), &c, size);
+    let lum = |p: [f64; 3]| {
+        let s = c.project(p, [800.0, 600.0]).unwrap();
+        let i = (s[1] as usize * 800 + s[0] as usize) * 4;
+        px[i] as f64 + px[i + 1] as f64 + px[i + 2] as f64
+    };
+    // the sun is in the south-west: the floor behind the south wall is in shadow, the floor in the north-east is lit
+    let shadow = lum([1.0, 2.0, 0.25]);
+    let sun = lum([7.8, 5.5, 0.25]);
+    assert!(shadow < sun * 0.8, "floor in shadow {shadow} against lit floor {sun}");
+}
