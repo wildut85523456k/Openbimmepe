@@ -29,6 +29,49 @@ fn valid_axis(start: [f64; 2], end: [f64; 2]) -> bool {
         && (end[0] - start[0]).hypot(end[1] - start[1]) > 1e-6
 }
 
+/// A beam's axis after its joins.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeamExtent {
+    pub a: [f64; 3],
+    pub b: [f64; 3],
+    /// how much of the axis is cut off at the start and at the end
+    pub cut_start: f64,
+    pub cut_end: f64,
+    /// the length of the whole axis, before the cuts
+    pub full_length: f64,
+}
+
+impl BeamExtent {
+    /// the length that is left
+    pub fn cut_length(&self) -> f64 { self.full_length - self.cut_start - self.cut_end }
+}
+
+/// Whether `p` is inside the polygon or on its edge.
+fn inside(ring: &[[f64; 2]], p: [f64; 2]) -> bool {
+    let n = ring.len();
+    let mut c = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[j]);
+        let cr = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+        if cr.abs() < 1e-12 && p[0] >= a[0].min(b[0]) - 1e-12 && p[0] <= a[0].max(b[0]) + 1e-12 && p[1] >= a[1].min(b[1]) - 1e-12 && p[1] <= a[1].max(b[1]) + 1e-12 { return true; }
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] { c = !c; }
+        j = i;
+    }
+    c
+}
+
+/// Where the segment `q -> p` meets the segment `c -> d`: the fraction along `q -> p`, if they meet.
+fn segment_param(q: [f64; 2], p: [f64; 2], c: [f64; 2], d: [f64; 2]) -> Option<f64> {
+    let (r, s) = ([p[0] - q[0], p[1] - q[1]], [d[0] - c[0], d[1] - c[1]]);
+    let den = r[0] * s[1] - r[1] * s[0];
+    if den.abs() < 1e-14 { return None; }
+    let qc = [c[0] - q[0], c[1] - q[1]];
+    let t = (qc[0] * s[1] - qc[1] * s[0]) / den;
+    let u = (qc[0] * r[1] - qc[1] * r[0]) / den;
+    ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then_some(t.clamp(0.0, 1.0))
+}
+
 /// A simple polygon: 3 to 1000 finite corners, some area, and no edge crossing another.
 fn valid_ring(r: &[[f64; 2]]) -> bool {
     let n = r.len();
@@ -106,6 +149,48 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
 }
 
 impl Document {
+    /// The axis of a beam after its joins: each end that lies in a column (and has its join allowed) is cut back to
+    /// the face of that column, where the beam first meets it. None for anything but a beam on a level.
+    pub fn beam_extent(&self, el: &Element) -> Option<BeamExtent> {
+        let (Category::Beam, Some(Geometry::Linear { start, end, level })) = (el.category, el.geometry) else { return None };
+        let z = self.get(level)?.elevation_m + el.elevation_m;
+        let slope = el.slope_ratio.unwrap_or(0.0);
+        let run = (end[0] - start[0]).hypot(end[1] - start[1]);
+        let z_at = |p: [f64; 2]| z + (p[0] - start[0]).hypot(p[1] - start[1]) * slope;
+        let columns: Vec<(Vec<[f64; 2]>, f64, f64)> = self.elements().filter_map(|c| {
+            let (Category::Column, Some(Geometry::Point { at, level, top })) = (c.category, c.geometry) else { return None };
+            let ring = c.profile().outline().into_iter().map(|p| [at[0] + p[0], at[1] + p[1]]).collect();
+            Some((ring, self.get(level)?.elevation_m + c.elevation_m, self.get(top)?.elevation_m))
+        }).collect();
+        // `p` is the end to trim and `q` the other end; the new end is where q -> p first meets a column it ends in
+        let trim = |p: [f64; 2], q: [f64; 2]| -> [f64; 2] {
+            let pz = z_at(p);
+            for (ring, z0, z1) in &columns {
+                if pz < z0 - 1e-6 || pz > z1 + 1e-6 || !inside(ring, p) || inside(ring, q) { continue; }
+                let mut best: Option<f64> = None;
+                for i in 0..ring.len() {
+                    if let Some(s) = segment_param(q, p, ring[i], ring[(i + 1) % ring.len()]) {
+                        best = Some(best.map_or(s, |b: f64| b.min(s)));
+                    }
+                }
+                if let Some(s) = best { return [q[0] + (p[0] - q[0]) * s, q[1] + (p[1] - q[1]) * s]; }
+            }
+            p
+        };
+        let a2 = if el.join_ends[0] { trim(start, end) } else { start };
+        let b2 = if el.join_ends[1] { trim(end, start) } else { end };
+        // both trims are made against the original other end; they must leave a beam with a length
+        let (a2, b2) = if (b2[0] - a2[0]).hypot(b2[1] - a2[1]) > 1e-6 && (b2[0] - a2[0]) * (end[0] - start[0]) + (b2[1] - a2[1]) * (end[1] - start[1]) > 0.0 { (a2, b2) } else { (start, end) };
+        let norm = (1.0 + slope * slope).sqrt();
+        Some(BeamExtent {
+            a: [a2[0], a2[1], z_at(a2)],
+            b: [b2[0], b2[1], z_at(b2)],
+            cut_start: (a2[0] - start[0]).hypot(a2[1] - start[1]) * norm,
+            cut_end: (end[0] - b2[0]).hypot(end[1] - b2[1]) * norm,
+            full_length: run * norm,
+        })
+    }
+
     pub fn mesh(&self, id: ElementId) -> Option<Mesh> {
         let el = self.get(id)?;
         if let Some(Geometry::Point { at, level, top }) = el.geometry {
@@ -176,7 +261,8 @@ impl Document {
         let across = [-dy / length, dx / length, 0.0];
         let up = [-dx / length * slope / norm, -dy / length * slope / norm, 1.0 / norm];
         let center_z = z + if el.category == Category::Wall { el.height_m / 2.0 } else { 0.0 };
-        let centers = [[start[0], start[1], center_z], [end[0], end[1], center_z + length * slope]];
+        let mut centers = [[start[0], start[1], center_z], [end[0], end[1], center_z + length * slope]];
+        if let Some(ext) = self.beam_extent(el) { centers = [ext.a, ext.b]; }
         let section: Vec<[f64; 2]> = if el.category == Category::Beam {
             // the outline of an I-section is not convex: its end faces are polygons that are fine for a plan, but
             // the 3D view meshes beams itself (`openbim_view::beam_mesh`)
@@ -468,5 +554,38 @@ mod tests {
         // only slabs take an outline or a kind
         assert!(d.transact(d.revision(), &[Command::SetSlabKind { id: ElementId(2), kind: SlabKind::Foundation }]).is_err());
         assert!(d.transact(d.revision(), &[Command::SetOutline { id: ElementId(2), outline: vec![] }]).is_err());
+    }
+
+    #[test]
+    fn a_beam_is_cut_back_to_the_columns_it_ends_in_unless_the_join_is_disallowed() {
+        use crate::{BeamSpec, ColumnSpec, Command};
+        let mut d = Document::spatial_sample();
+        let col = |d: &mut Document, x| d.place_column(ElementId(10), ElementId(11), [x, 3.0], &ColumnSpec { width_m: 0.4, depth_m: 0.4, base_offset_m: 0.0, section: crate::Section::Rectangle, material: Material::Concrete }).unwrap();
+        let beam = d.place_beam(ElementId(10), &BeamSpec::level([1.0, 3.0], [5.0, 3.0], 0.2, 0.4, 2.8)).unwrap();
+        let ext = |d: &Document| d.beam_extent(d.get(beam).unwrap()).unwrap();
+        // no columns: the whole axis
+        assert_eq!((ext(&d).a, ext(&d).b), ([1.0, 3.0, 2.8], [5.0, 3.0, 2.8]));
+        let c1 = col(&mut d, 1.0);
+        col(&mut d, 5.0);
+        // both ends end in a 0.4 m column: 0.2 m comes off each
+        let e = ext(&d);
+        assert!((e.a[0] - 1.2).abs() < 1e-9 && (e.b[0] - 4.8).abs() < 1e-9, "{e:?}");
+        assert!((e.cut_start - 0.2).abs() < 1e-9 && (e.cut_end - 0.2).abs() < 1e-9 && (e.cut_length() - 3.6).abs() < 1e-9);
+        // the mesh and its volume follow the cut
+        let m = d.mesh(beam).unwrap();
+        let (x0, x1) = (m.vertices.iter().map(|v| v[0]).fold(f64::MAX, f64::min), m.vertices.iter().map(|v| v[0]).fold(f64::MIN, f64::max));
+        assert!((x0 - 1.2).abs() < 1e-9 && (x1 - 4.8).abs() < 1e-9);
+        // the join of the start disallowed: that end stays where it was
+        d.transact(d.revision(), &[Command::SetJoins { id: beam, start: false, end: true }]).unwrap();
+        assert!((ext(&d).a[0] - 1.0).abs() < 1e-9 && (ext(&d).b[0] - 4.8).abs() < 1e-9);
+        // a column moves away: the beam follows by itself
+        d.transact(d.revision(), &[Command::SetGeometry { id: c1, geometry: Geometry::Point { at: [0.0, 3.0], level: ElementId(10), top: ElementId(11) } }]).unwrap();
+        d.transact(d.revision(), &[Command::SetJoins { id: beam, start: true, end: true }]).unwrap();
+        assert!((ext(&d).a[0] - 1.0).abs() < 1e-9, "the column at 0 does not reach the beam any more");
+        // above the column tops nothing is joined
+        d.transact(d.revision(), &[Command::MoveElevation { id: beam, elevation_m: 3.5 }]).unwrap();
+        assert!((ext(&d).b[0] - 5.0).abs() < 1e-9);
+        // only beams have joins
+        assert!(d.transact(d.revision(), &[Command::SetJoins { id: c1, start: false, end: true }]).is_err());
     }
 }

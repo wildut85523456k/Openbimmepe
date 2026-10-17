@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 mod spatial;
-pub use spatial::{Geometry, Mesh};
+pub use spatial::{BeamExtent, Geometry, Mesh};
 
 /// Document-local, stable element identity. Future versions require
 /// a project-scoped ID allocation strategy for collaborative editing.
@@ -195,6 +195,9 @@ pub struct Element {
     /// The plan outline of a slab (counter-clockwise or clockwise); empty for everything else.
     pub outline: Vec<[f64; 2]>,
     pub slab_kind: SlabKind,
+    /// Whether each end of a beam (start, end) is joined to the column it ends in: a joined end is cut back to the
+    /// face of the column. All true for everything but a beam that has had a join disallowed.
+    pub join_ends: [bool; 2],
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -217,6 +220,7 @@ impl Element {
             && (self.category == Category::Beam || self.usage == Usage::Girder)
             && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting) || self.material == Material::Unspecified)
             && (self.category == Category::Slab || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
+            && (self.category == Category::Beam || self.join_ends == [true; 2])
             && (self.category != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
             && (!matches!(self.category, Category::Beam | Category::Column) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && !self.name.trim().is_empty()
@@ -288,6 +292,8 @@ pub enum Command {
     SetOutline { id: ElementId, outline: Vec<[f64; 2]> },
     /// Floor or foundation slab.
     SetSlabKind { id: ElementId, kind: SlabKind },
+    /// Allow or disallow the join of a beam's start and end with the columns they end in.
+    SetJoins { id: ElementId, start: bool, end: bool },
     /// The structural material of a beam.
     SetMaterial { id: ElementId, material: Material },
     SetGeometry { id: ElementId, geometry: Geometry },
@@ -411,7 +417,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2],
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -451,6 +457,12 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Slab { return Err(EditError::UnsupportedProperty(*id)); }
                     el.outline = outline.clone();
+                    el.revision = revision;
+                }
+                Command::SetJoins { id, start, end } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.join_ends = [*start, *end];
                     el.revision = revision;
                 }
                 Command::SetSlabKind { id, kind } => {

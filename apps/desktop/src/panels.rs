@@ -349,6 +349,16 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     }
                     if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column) { section_combo(app, ui); usage_material_combos(app, ui, el.category == openbim_document::Category::Beam); }
                     edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
+                    if el.category == openbim_document::Category::Beam {
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut app.join_pick[0], "Join at start");
+                            ui.checkbox(&mut app.join_pick[1], "Join at end");
+                        });
+                        if let Some(ext) = app.document.beam_extent(&el) {
+                            let (cut, a, b) = (format!("{:.1}", ext.cut_length() * 1000.0), format!("{:.1}", ext.cut_start * 1000.0), format!("{:.1}", ext.cut_end * 1000.0));
+                            read_only_group(ui, "Joins", &query, &[("Cut Length (mm)", &cut), ("Cut at Start (mm)", &a), ("Cut at End (mm)", &b)]);
+                        }
+                    }
                     if let Some(Geometry::Linear { start, end, level }) = el.geometry {
                         let length = (end[0] - start[0]).hypot(end[1] - start[1]);
                         let start_z = app.document.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;

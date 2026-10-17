@@ -23,6 +23,7 @@ impl Desktop {
             self.slope_percent = el.slope_ratio.unwrap_or(0.0) * 100.0;
             if let (Category::Footing, Some(Geometry::Pad { thickness_m, .. })) = (el.category, el.geometry) { (self.material_pick, self.footing_thickness_mm) = (el.material, thickness_m * 1000.0); }
             if el.category == Category::WallFooting { self.material_pick = el.material; }
+            if el.category == Category::Beam { self.join_pick = el.join_ends; }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column) {
                 (self.usage_pick, self.material_pick) = (el.usage, el.material);
@@ -71,6 +72,7 @@ impl Desktop {
         let kind = (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
             || (el.category == Category::WallFooting && el.material != self.material_pick)
+            || (el.category == Category::Beam && el.join_ends != self.join_pick)
             || (el.category == Category::Footing && (el.material != self.material_pick || matches!(el.geometry, Some(Geometry::Pad { thickness_m, .. }) if differs(thickness_m * 1000.0, self.footing_thickness_mm))));
         size || section || kind || elevation || slope || axis
     }
@@ -226,7 +228,10 @@ impl Desktop {
         }
         if matches!(el.category, Category::Beam | Category::Column) {
             commands.push(Command::SetSection { id, section: self.section_from_controls() });
-            if el.category == Category::Beam { commands.push(Command::SetUsage { id, usage: self.usage_pick }); }
+            if el.category == Category::Beam {
+                commands.push(Command::SetUsage { id, usage: self.usage_pick });
+                commands.push(Command::SetJoins { id, start: self.join_pick[0], end: self.join_pick[1] });
+            }
             commands.push(Command::SetMaterial { id, material: self.material_pick });
         }
         if el.category != Category::Grid { commands.push(Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }); }
@@ -583,5 +588,36 @@ mod tests {
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-17T00:00:00").unwrap();
         assert_eq!(out.text.matches("IFCFOOTING(").count(), 1);
         assert!(out.text.contains(".STRIP_FOOTING.") && out.text.contains("IFCMATERIAL('Concrete')"));
+    }
+
+    #[test]
+    fn beams_are_cut_to_their_columns_in_3d_and_ifc_and_the_join_is_a_property() {
+        let mut app = Desktop::sample();
+        let col = |app: &mut Desktop, x: f64| { app.width_mm = 400.0; app.height_mm = 400.0; app.column_click(ElementId(10), [x, 3.0]); };
+        app.document.place_beam(ElementId(10), &openbim_document::BeamSpec::level([1.0, 3.0], [5.0, 3.0], 0.2, 0.4, 2.8)).unwrap();
+        let beam = app.document.elements().find(|e| e.category == Category::Beam).unwrap().id;
+        col(&mut app, 1.0);
+        col(&mut app, 5.0);
+        let item = crate::export::beam_item(&app.document, app.document.get(beam).unwrap()).unwrap();
+        assert!((item.a[0] - 1.2).abs() < 1e-9 && (item.b[0] - 4.8).abs() < 1e-9);
+        // the 3D mesh is the cut beam: 3.6 m of 0.2 x 0.4
+        let batch = crate::view3d::batch(&app.document);
+        let ei = batch.elements.iter().position(|e| e.id == beam.0).unwrap() as u32;
+        let vol: f64 = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
+            let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+            (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+        }).sum();
+        assert!((vol - 0.2 * 0.4 * 3.6).abs() < 1e-3, "{vol}");
+        // disallow the join at the start in the properties
+        app.select_element(Some(beam));
+        assert!(!app.has_pending_edit());
+        app.join_pick[0] = false;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        let item = crate::export::beam_item(&app.document, app.document.get(beam).unwrap()).unwrap();
+        assert!((item.a[0] - 1.0).abs() < 1e-9 && (item.b[0] - 4.8).abs() < 1e-9);
+        assert!(!app.document.get(beam).unwrap().join_ends[0]);
+        app.undo_document();
+        assert!(app.document.get(beam).unwrap().join_ends[0]);
     }
 }

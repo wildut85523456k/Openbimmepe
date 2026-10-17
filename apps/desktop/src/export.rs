@@ -15,9 +15,7 @@ pub struct Exported {
 
 /// The beam of a document element: its line at the height of its centre on its level, and its section.
 pub fn beam_item(doc: &Document, el: &openbim_document::Element) -> Option<BeamItem> {
-    let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
-    let z = doc.get(level)?.elevation_m + el.elevation_m;
-    let run = (end[0] - start[0]).hypot(end[1] - start[1]);
+    let ext = doc.beam_extent(el)?;
     let usage = match el.usage {
         Usage::Girder => FramingUsage::Girder,
         Usage::Joist => FramingUsage::Joist,
@@ -25,7 +23,7 @@ pub fn beam_item(doc: &Document, el: &openbim_document::Element) -> Option<BeamI
         Usage::Brace => FramingUsage::Brace,
         Usage::Other => FramingUsage::Other,
     };
-    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: [start[0], start[1], z], b: [end[0], end[1], z + run * el.slope_ratio.unwrap_or(0.0)], profile: el.profile(), usage })
+    Some(BeamItem { id: el.id.0, name: el.name.clone(), a: ext.a, b: ext.b, profile: el.profile(), usage })
 }
 
 /// The column of a document element: its section stood on its point from the foot to the top level.
