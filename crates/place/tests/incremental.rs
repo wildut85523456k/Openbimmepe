@@ -155,6 +155,11 @@ fn a_position_that_is_not_a_number_is_refused_as_the_full_build_refuses_it() {
         assert_eq!(describe(&b), keep);
         assert_eq!(m.placements[0], pl(0, 0, 0, 2.0));
     }
+    // equipment has no opening, so only the check of the position itself can stop it
+    let mut m = model(start());
+    let mut b = m.build().unwrap();
+    assert!(!m.update_quick(&mut b, 3, pl(3, 0, 3, f64::NAN)));
+    assert_eq!(m.update_built(&mut b, 3, pl(3, 0, 3, f64::NAN)).unwrap_err(), PlaceError::NotFinite { placement: 3 });
     // a segment that does not exist, while the family and chain are good
     let mut m = model(start());
     let mut b = m.build().unwrap();
