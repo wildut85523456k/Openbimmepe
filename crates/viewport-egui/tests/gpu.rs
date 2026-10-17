@@ -141,7 +141,10 @@ fn realistic_walls_cast_shadows_on_the_floor() {
     let mut c = cam(&b);
     c.snap_to(openbim_viewport::CubeDir::TOP);
     let size = [800u32, 600];
-    let px = render_rgba(&device, &queue, &gpu, &gpu.upload(&device, &b, Style::Realistic), &c, size);
+    let mut scene = gpu.upload(&device, &b, Style::Realistic);
+    // the sun in the south-west and high, as a fixed light would be
+    scene.sun = openbim_viewport::Sun { latitude: 51.0, longitude: 0.0, utc_offset: 0.0, month: 6, day: 21, hour: 14.0 };
+    let px = render_rgba(&device, &queue, &gpu, &scene, &c, size);
     let lum = |p: [f64; 3]| {
         let s = c.project(p, [800.0, 600.0]).unwrap();
         let i = (s[1] as usize * 800 + s[0] as usize) * 4;
@@ -151,4 +154,34 @@ fn realistic_walls_cast_shadows_on_the_floor() {
     let shadow = lum([1.0, 2.0, 0.25]);
     let sun = lum([7.8, 5.5, 0.25]);
     assert!(shadow < sun * 0.8, "floor in shadow {shadow} against lit floor {sun}");
+}
+
+#[test]
+fn the_shadow_follows_the_sun_and_night_has_none() {
+    let Some((device, queue)) = device() else { return };
+    let b = building();
+    let gpu = Gpu::new(&device, wgpu::TextureFormat::Bgra8Unorm);
+    let mut c = cam(&b);
+    c.snap_to(openbim_viewport::CubeDir::TOP);
+    let lum = |px: &[u8], p: [f64; 3]| {
+        let s = c.project(p, [800.0, 600.0]).unwrap();
+        let i = (s[1] as usize * 800 + s[0] as usize) * 4;
+        px[i] as f64 + px[i + 1] as f64 + px[i + 2] as f64
+    };
+    let render_at = |hour: f64| {
+        let mut scene = gpu.upload(&device, &b, Style::Realistic);
+        scene.sun = openbim_viewport::Sun { month: 3, day: 21, hour, ..Default::default() };
+        render_rgba(&device, &queue, &gpu, &scene, &c, [800, 600])
+    };
+    // in the right room the east wall shades the east side in the morning, and the middle wall shades the west side
+    // in the afternoon
+    let (east, west) = ([9.0, 5.5, 0.25], [6.0, 5.5, 0.25]);
+    let am = render_at(9.0);
+    let pm = render_at(15.0);
+    assert!(lum(&am, east) < lum(&am, west) * 0.85, "morning: east side shaded {} vs {}", lum(&am, east), lum(&am, west));
+    assert!(lum(&pm, west) < lum(&pm, east) * 0.85, "afternoon: west side shaded {} vs {}", lum(&pm, west), lum(&pm, east));
+    // at night everything is dim and nothing is brighter than the dim ambient
+    let night = render_at(1.0);
+    let bright = |px: &[u8]| px.chunks(4).filter(|p| p[..3] != [255, 255, 255]).map(|p| p[0] as u32 + p[1] as u32 + p[2] as u32).max().unwrap_or(0);
+    assert!(bright(&night) < bright(&am), "night {} against morning {}", bright(&night), bright(&am));
 }

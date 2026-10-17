@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 use egui_wgpu::wgpu;
 use egui_wgpu::wgpu::util::DeviceExt;
 use openbim_view::{Batch, Element, FaceKind};
-use openbim_viewport::{base_colour, crease_edges, intersection_edges, Camera, SectionBox, Style};
+use openbim_viewport::{base_colour, crease_edges, intersection_edges, Camera, SectionBox, Style, Sun};
 use std::collections::HashSet;
 
 pub const WGSL: &str = include_str!("shader.wgsl");
@@ -22,15 +22,10 @@ struct Vertex { pos: [f32; 3], nrm: [f32; 3], col: [f32; 4] }
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Uniforms { vp: [[f32; 4]; 4], light: [f32; 4], eye: [f32; 4], line: [f32; 4], sec_min: [f32; 4], sec_max: [f32; 4], sun: [f32; 4], light_vp: [[f32; 4]; 4] }
 
-/// Direction toward the sun in model space: from the south-west, high.
-pub const SUN: [f64; 3] = [-0.45, -0.55, 0.70];
-
 /// The sun's orthographic view of the scene as a column-major matrix: x and y fill -1..1 over the scene's bounding
 /// sphere, depth runs 0..1 along the rays.
 pub fn sun_matrix(scene: &Scene) -> [[f32; 4]; 4] {
-    let l = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
-    let to_sun = SUN.map(|x| x / l);
-    let f = to_sun.map(|x| -x); // the way the light travels
+    let f = scene.sun.direction().map(|x| -x); // the way the light travels
     let r = { let c = [f[1], -f[0], 0.0]; let n = (c[0] * c[0] + c[1] * c[1]).sqrt(); [c[0] / n, c[1] / n, 0.0] };
     let u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
     let rad = scene.radius.max(1e-3) * 1.02;
@@ -65,6 +60,8 @@ pub struct Scene {
     pub radius: f64,
     /// middle of the box, relative to `origin`
     pub centre: [f32; 3],
+    /// where the sun is, for Realistic
+    pub sun: Sun,
 }
 
 pub struct Gpu {
@@ -219,7 +216,7 @@ impl Gpu {
             lines: mk("lines", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
             line_count: lines.len() as u32,
             selected: None,
-            style, origin: b.origin, radius, centre: if b.verts.is_empty() { [0.0; 3] } else { [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0] },
+            style, origin: b.origin, radius, sun: Sun::default(), centre: if b.verts.is_empty() { [0.0; 3] } else { [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0] },
         }
     }
 
@@ -273,11 +270,11 @@ impl Gpu {
             sec_min: section.map_or([0.0; 4], |s| [(s.min[0] - scene.origin[0]) as f32, (s.min[1] - scene.origin[1]) as f32, (s.min[2] - scene.origin[2]) as f32, 1.0]),
             sec_max: section.map_or([0.0; 4], |s| [(s.max[0] - scene.origin[0]) as f32, (s.max[1] - scene.origin[1]) as f32, (s.max[2] - scene.origin[2]) as f32, 1.0]),
             // the sun: from the south-west, high
-            sun: [SUN[0] as f32, SUN[1] as f32, SUN[2] as f32, 0.0],
+            sun: { let d = scene.sun.direction(); [d[0] as f32, d[1] as f32, d[2] as f32, scene.sun.strength() as f32] },
             light_vp: sun_matrix(scene),
         };
         queue.write_buffer(&target.uniforms, 0, bytemuck::bytes_of(&uni));
-        if scene.style == Style::Realistic && scene.fill_count > 0 {
+        if scene.style == Style::Realistic && scene.fill_count > 0 && scene.sun.strength() > 0.0 {
             let mut sp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
                 color_attachments: &[],

@@ -93,9 +93,9 @@ fn fs_real(i: VOut) -> @location(0) vec4<f32> {
     if dot(n, v) < 0.0 { n = -n; }
     let sky = vec3<f32>(0.60, 0.70, 0.88);
     let ground = vec3<f32>(0.36, 0.33, 0.30);
-    let amb = mix(ground, sky, n.z * 0.5 + 0.5) * 0.7;
+    let amb = mix(ground, sky, n.z * 0.5 + 0.5) * 0.7 * (0.45 + 0.55 * u.sun.w);
     let sd = normalize(u.sun.xyz);
-    let diff = max(dot(n, sd), 0.0) * lit(i.w, n);
+    let diff = max(dot(n, sd), 0.0) * lit(i.w, n) * u.sun.w;
     let hv = normalize(sd + v);
     let spec = pow(max(dot(n, hv), 0.0), 48.0) * 0.18 * step(0.0, diff);
     let c = i.col.rgb * (amb + vec3<f32>(1.0, 0.95, 0.86) * diff * 0.75) + vec3<f32>(spec);

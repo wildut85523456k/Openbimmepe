@@ -5,7 +5,7 @@ use crate::gpu::{Gpu, Scene, Target};
 use egui::{Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use egui_wgpu::{wgpu, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
 use openbim_view::{Batch, Element};
-use openbim_viewport::{pick, Buttons, Camera, CubeDir, Hit, Mods, SectionBox, Style};
+use openbim_viewport::{pick, Buttons, Camera, CubeDir, Hit, Mods, SectionBox, Style, Sun};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -80,7 +80,7 @@ fn face_name(l: &CubeLabels, d: CubeDir) -> &str {
 /// What the callback needs to keep between frames: the pipelines and the uploaded scene.
 struct Resources { gpu: Gpu, scene: Option<(u64, Style, u64, Scene)>, target: Option<Target> }
 
-struct Draw { camera: Camera, style: Style, generation: u64, batch: Option<Arc<Batch>>, size_px: [u32; 2], section: Option<SectionBox>, selection: Arc<HashSet<Element>>, selection_generation: u64 }
+struct Draw { sun: Sun, camera: Camera, style: Style, generation: u64, batch: Option<Arc<Batch>>, size_px: [u32; 2], section: Option<SectionBox>, selection: Arc<HashSet<Element>>, selection_generation: u64 }
 
 impl CallbackTrait for Draw {
     fn prepare(&self, device: &wgpu::Device, queue: &wgpu::Queue, _screen: &ScreenDescriptor, encoder: &mut wgpu::CommandEncoder, res: &mut CallbackResources) -> Vec<wgpu::CommandBuffer> {
@@ -90,6 +90,7 @@ impl CallbackTrait for Draw {
             r.scene = Some((self.generation, self.style, u64::MAX, r.gpu.upload(device, batch, self.style)));
         }
         if let Some((_, _, sg, scene)) = &mut r.scene {
+            scene.sun = self.sun;
             if *sg != self.selection_generation {
                 r.gpu.select(device, scene, batch, &self.selection);
                 *sg = self.selection_generation;
@@ -123,6 +124,8 @@ pub struct Datum {
 pub struct Viewport3d {
     pub camera: Camera,
     pub style: Style,
+    /// Where the sun is in the Realistic style.
+    pub sun: Sun,
     pub labels: CubeLabels,
     /// Levels and grids to draw over the picture.
     pub datums: Vec<Datum>,
@@ -148,7 +151,7 @@ impl Viewport3d {
     }
 
     pub fn new() -> Viewport3d {
-        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0 }
+        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, sun: Sun::default(), labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0 }
     }
 
     /// Show a new batch (after an edit). The camera is not moved.
@@ -216,7 +219,7 @@ impl Viewport3d {
 
         let now = ui.input(|i| i.time);
         if self.step_animation(now) { ui.ctx().request_repaint(); }
-        let draw = Draw { camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), section: self.section, selection: self.selection.clone(), selection_generation: self.selection_generation, size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
+        let draw = Draw { sun: self.sun, camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), section: self.section, selection: self.selection.clone(), selection_generation: self.selection_generation, size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, draw));
         self.paint_datums(ui, rect);
         self.paint_cube(ui, &cells, over_cube);
@@ -282,6 +285,28 @@ impl Viewport3d {
                 });
             }
         }
+    }
+
+    /// Place and time of the sun: latitude, longitude, clock offset, date and time of day, and where that puts it.
+    pub fn sun_ui(&mut self, ui: &mut Ui) {
+        let s = &mut self.sun;
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Lat");
+            ui.add(egui::DragValue::new(&mut s.latitude).range(-90.0..=90.0).speed(0.05).suffix("°"));
+            ui.label("Lon");
+            ui.add(egui::DragValue::new(&mut s.longitude).range(-180.0..=180.0).speed(0.05).suffix("°"));
+            ui.label("UTC+");
+            ui.add(egui::DragValue::new(&mut s.utc_offset).range(-12.0..=14.0).speed(0.1));
+            ui.label("Date");
+            ui.add(egui::DragValue::new(&mut s.day).range(1..=31));
+            ui.add(egui::DragValue::new(&mut s.month).range(1..=12));
+            ui.label("Time");
+            ui.add(egui::Slider::new(&mut s.hour, 0.0..=24.0).show_value(false));
+            let m = (s.hour * 60.0).round() as u32;
+            ui.label(format!("{:02}:{:02}", (m / 60) % 24, m % 60));
+            let p = s.position();
+            ui.weak(format!("sun {:.0}° up, {:.0}° from north", p.elevation, p.azimuth));
+        });
     }
 
     fn paint_datums(&self, ui: &Ui, rect: Rect) {

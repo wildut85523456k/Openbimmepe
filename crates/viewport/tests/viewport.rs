@@ -221,3 +221,28 @@ fn blending_cameras_turns_the_short_way() {
     assert_eq!(Camera::blend(&a, &b, 0.0), a);
     assert!((Camera::blend(&a, &b, 1.0).pitch - 0.6).abs() < 1e-12);
 }
+
+#[test]
+fn the_sun_is_where_astronomy_puts_it() {
+    use openbim_viewport::Sun;
+    // Phnom Penh on the equinox: noon sun almost overhead, rising in the east and setting in the west
+    let at = |hour: f64| Sun { month: 3, day: 20, hour, ..Sun::default() }.position();
+    let noon = (0..240).map(|i| at(10.0 + i as f64 / 60.0).elevation).fold(f64::MIN, f64::max);
+    assert!((noon - (90.0 - 11.5564)).abs() < 1.5, "noon elevation {noon}");
+    let (dawn, dusk) = (at(6.0), at(18.0));
+    assert!((dawn.azimuth - 90.0).abs() < 8.0 && dawn.elevation.abs() < 8.0, "{dawn:?}");
+    assert!((dusk.azimuth - 270.0).abs() < 8.0 && dusk.elevation.abs() < 8.0, "{dusk:?}");
+    assert!(at(0.0).elevation < -50.0, "night");
+    // London at the summer solstice: 62 degrees at noon, due south; at the winter solstice 15 degrees
+    let london = |m, d| Sun { latitude: 51.5, longitude: 0.0, utc_offset: 0.0, month: m, day: d, hour: 12.0 }.position();
+    let (s, w) = (london(6, 21), london(12, 21));
+    assert!((s.elevation - 62.0).abs() < 1.0 && (s.azimuth - 180.0).abs() < 4.0, "{s:?}");
+    assert!((w.elevation - 15.0).abs() < 1.0, "{w:?}");
+    // southern hemisphere: the noon sun is in the north
+    let sydney = Sun { latitude: -33.9, longitude: 151.2, utc_offset: 10.0, month: 6, day: 21, hour: 12.0 }.position();
+    assert!(sydney.azimuth < 30.0 || sydney.azimuth > 330.0, "{sydney:?}");
+    // the direction vector points the same way: east of south in the morning has positive x
+    let d = Sun { month: 3, day: 20, hour: 9.0, ..Sun::default() }.direction();
+    assert!(d[0] > 0.3 && d[2] > 0.3, "{d:?}");
+    assert!(Sun { hour: 0.0, ..Sun::default() }.strength() == 0.0);
+}

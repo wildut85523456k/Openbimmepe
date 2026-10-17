@@ -6,7 +6,9 @@
 
 mod edges;
 mod pick;
+mod sun;
 mod raster;
+pub use sun::{Position, Sun};
 pub use pick::{pick, Hit, SectionBox};
 pub use edges::{crease_edges, intersection_edges, Edge};
 pub use raster::{base_colour, render, Image, Style};
