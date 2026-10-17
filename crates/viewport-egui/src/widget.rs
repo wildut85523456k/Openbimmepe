@@ -295,6 +295,8 @@ impl Viewport3d {
             ui.add(egui::DragValue::new(&mut s.latitude).range(-90.0..=90.0).speed(0.05).suffix("°"));
             ui.label("Lon");
             ui.add(egui::DragValue::new(&mut s.longitude).range(-180.0..=180.0).speed(0.05).suffix("°"));
+            ui.label("North");
+            ui.add(egui::DragValue::new(&mut s.project_north_deg).range(-180.0..=180.0).speed(0.5).suffix("°"));
             ui.label("UTC+");
             ui.add(egui::DragValue::new(&mut s.utc_offset).range(-12.0..=14.0).speed(0.1));
             ui.label("Date");

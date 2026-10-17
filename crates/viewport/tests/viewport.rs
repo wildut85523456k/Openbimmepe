@@ -234,15 +234,38 @@ fn the_sun_is_where_astronomy_puts_it() {
     assert!((dusk.azimuth - 270.0).abs() < 8.0 && dusk.elevation.abs() < 8.0, "{dusk:?}");
     assert!(at(0.0).elevation < -50.0, "night");
     // London at the summer solstice: 62 degrees at noon, due south; at the winter solstice 15 degrees
-    let london = |m, d| Sun { latitude: 51.5, longitude: 0.0, utc_offset: 0.0, month: m, day: d, hour: 12.0 }.position();
+    let london = |m, d| Sun { latitude: 51.5, longitude: 0.0, utc_offset: 0.0, month: m, day: d, hour: 12.0, project_north_deg: 0.0 }.position();
     let (s, w) = (london(6, 21), london(12, 21));
     assert!((s.elevation - 62.0).abs() < 1.0 && (s.azimuth - 180.0).abs() < 4.0, "{s:?}");
     assert!((w.elevation - 15.0).abs() < 1.0, "{w:?}");
     // southern hemisphere: the noon sun is in the north
-    let sydney = Sun { latitude: -33.9, longitude: 151.2, utc_offset: 10.0, month: 6, day: 21, hour: 12.0 }.position();
+    let sydney = Sun { latitude: -33.9, longitude: 151.2, utc_offset: 10.0, month: 6, day: 21, hour: 12.0, project_north_deg: 0.0 }.position();
     assert!(sydney.azimuth < 30.0 || sydney.azimuth > 330.0, "{sydney:?}");
     // the direction vector points the same way: east of south in the morning has positive x
     let d = Sun { month: 3, day: 20, hour: 9.0, ..Sun::default() }.direction();
     assert!(d[0] > 0.3 && d[2] > 0.3, "{d:?}");
     assert!(Sun { hour: 0.0, ..Sun::default() }.strength() == 0.0);
+}
+
+#[test]
+fn project_north_turns_the_sun_with_the_georeference() {
+    use openbim_ifc::georef::{CoordinateBase, Crs, Georef};
+    use openbim_viewport::Sun;
+    // Phnom Penh at dawn on the equinox: the sun is in the east
+    let dawn = Sun { month: 3, day: 20, hour: 6.0, ..Sun::default() };
+    let d = dawn.direction();
+    assert!(d[0] > 0.9, "east is +x when project north is true north: {d:?}");
+    // project north turned 90 degrees counter-clockwise from true north points west, so east is project south
+    let turned = Sun { project_north_deg: 90.0, ..dawn }.direction();
+    assert!(turned[1] < -0.9 && turned[0].abs() < 0.2, "{turned:?}");
+    // a full turn changes nothing
+    let full = Sun { project_north_deg: 360.0, ..dawn }.direction();
+    assert!((0..3).all(|k| (full[k] - d[k]).abs() < 1e-9));
+    // the georeference gives the place and the angle
+    let g = Georef { crs: Crs { name: "site".into(), geodetic_datum: None, vertical_datum: None, map_projection: None, map_zone: None },
+        project_base_point: [0.0; 3], survey_point: [0.0; 3], survey_shared: [0.0; 3], angle_to_true_north_deg: 30.0, scale: 1.0,
+        coordinate_base: CoordinateBase::InternalOrigin, latitude: 51.5, longitude: -0.12, elevation: 0.0 };
+    let s = Sun::default().at_site(&g);
+    assert_eq!((s.latitude, s.longitude, s.project_north_deg), (51.5, -0.12, 30.0));
+    assert_eq!((s.month, s.hour), (Sun::default().month, Sun::default().hour));
 }

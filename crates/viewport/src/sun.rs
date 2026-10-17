@@ -1,7 +1,9 @@
 //! The position of the sun for a place, a day and a time, for the Realistic style (NOAA's general solar position
 //! equations, good to a fraction of a degree; no atmospheric refraction).
 //!
-//! Model coordinates: x east, y north, z up, which assumes project north is true north (no rotation yet).
+//! Model coordinates: x east of project north's right, y project north, z up. `project_north_deg` turns true north
+//! into project north: it is the georeference's angle, positive when project north is turned counter-clockwise from
+//! true north (the sign is this program's own; see `openbim_ifc::georef`).
 
 use std::f64::consts::PI;
 
@@ -18,11 +20,13 @@ pub struct Sun {
     pub day: u32,
     /// hours on that clock, 0..24
     pub hour: f64,
+    /// degrees; 0 when the model's Y axis points to true north
+    pub project_north_deg: f64,
 }
 
 impl Default for Sun {
     /// Phnom Penh, 21 March, 15:00 (an editable starting point, not a design value).
-    fn default() -> Sun { Sun { latitude: 11.5564, longitude: 104.9282, utc_offset: 7.0, month: 3, day: 21, hour: 15.0 } }
+    fn default() -> Sun { Sun { latitude: 11.5564, longitude: 104.9282, utc_offset: 7.0, month: 3, day: 21, hour: 15.0, project_north_deg: 0.0 } }
 }
 
 /// The sun in the sky: degrees above the horizon, and clockwise from north.
@@ -51,10 +55,17 @@ impl Sun {
         Position { elevation: elevation.to_degrees(), azimuth: azimuth.to_degrees() }
     }
 
+    /// The place and the angle to true north of a georeference; date and time stay as they are. The clock offset is not
+    /// in the georeference, so it stays what the author typed.
+    pub fn at_site(self, g: &openbim_ifc::georef::Georef) -> Sun {
+        Sun { latitude: g.latitude, longitude: g.longitude, project_north_deg: g.angle_to_true_north_deg, ..self }
+    }
+
     /// The unit vector toward the sun in model coordinates (z is negative at night).
     pub fn direction(&self) -> [f64; 3] {
         let p = self.position();
-        let (el, az) = (p.elevation.to_radians(), p.azimuth.to_radians());
+        // a compass bearing seen from project north is turned the other way round by the angle
+        let (el, az) = (p.elevation.to_radians(), (p.azimuth + self.project_north_deg).to_radians());
         [az.sin() * el.cos(), az.cos() * el.cos(), el.sin()]
     }
 

@@ -143,7 +143,7 @@ fn realistic_walls_cast_shadows_on_the_floor() {
     let size = [800u32, 600];
     let mut scene = gpu.upload(&device, &b, Style::Realistic);
     // the sun in the south-west and high, as a fixed light would be
-    scene.sun = openbim_viewport::Sun { latitude: 51.0, longitude: 0.0, utc_offset: 0.0, month: 6, day: 21, hour: 14.0 };
+    scene.sun = openbim_viewport::Sun { latitude: 51.0, longitude: 0.0, utc_offset: 0.0, month: 6, day: 21, hour: 14.0, project_north_deg: 0.0 };
     let px = render_rgba(&device, &queue, &gpu, &scene, &c, size);
     let lum = |p: [f64; 3]| {
         let s = c.project(p, [800.0, 600.0]).unwrap();
