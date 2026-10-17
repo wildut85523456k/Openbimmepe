@@ -541,6 +541,14 @@ fn fitting_mesh(f: &Fitting) -> Option<Mesh> {
     if out.tris.is_empty() { None } else { Some(out) }
 }
 
+/// A section with a layer of insulation all round.
+fn grow(size: RunSize, t: f64) -> RunSize {
+    match size {
+        RunSize::Round { diameter } => RunSize::Round { diameter: diameter + 2.0 * t },
+        RunSize::Rect { width, height, roll } => RunSize::Rect { width: width + 2.0 * t, height: height + 2.0 * t, roll },
+    }
+}
+
 /// One part, one material: the system the piece belongs to.
 fn one_part(mesh: Mesh, system: System) -> (Mesh, Vec<Part>) {
     let n = mesh.tris.len();
@@ -557,6 +565,9 @@ enum Src<'a> {
     Family(&'a Frame, &'a Instance),
     Run(&'a Run),
     Fitting(&'a Fitting, System),
+    /// a run or fitting with its size grown by the insulation: (thickness, material)
+    InsulatedRun(&'a Run, f64, &'a str),
+    InsulatedFitting(&'a Fitting, f64, &'a str),
 }
 
 /// The same inputs, kept by the cache.
@@ -567,6 +578,8 @@ enum Key {
     Family(Frame, Instance),
     Run(Run),
     Fitting(Fitting, System),
+    InsulatedRun(Run, f64, String),
+    InsulatedFitting(Fitting, f64, String),
 }
 
 impl Src<'_> {
@@ -578,6 +591,8 @@ impl Src<'_> {
             (Src::Family(a, i), Key::Family(b, j)) => *a == b && *i == j,
             (Src::Run(a), Key::Run(b)) => *a == b,
             (Src::Fitting(a, s), Key::Fitting(b, t)) => *a == b && s == t,
+            (Src::InsulatedRun(a, x, m), Key::InsulatedRun(b, y, n)) => *a == b && x == y && m == n,
+            (Src::InsulatedFitting(a, x, m), Key::InsulatedFitting(b, y, n)) => *a == b && x == y && m == n,
             _ => false,
         }
     }
@@ -589,6 +604,8 @@ impl Src<'_> {
             Src::Family(f, i) => Key::Family(**f, (*i).clone()),
             Src::Run(r) => Key::Run((*r).clone()),
             Src::Fitting(f, s) => Key::Fitting((*f).clone(), *s),
+            Src::InsulatedRun(r, t, m) => Key::InsulatedRun((*r).clone(), *t, m.to_string()),
+            Src::InsulatedFitting(f, t, m) => Key::InsulatedFitting((*f).clone(), *t, m.to_string()),
         }
     }
     fn build(&self, el: Element) -> Result<ElementMesh, ViewError> {
@@ -601,6 +618,21 @@ impl Src<'_> {
             Src::Family(f, i) => { let (m, p, w) = family_parts(f, i); warnings = w; (m, p) }
             Src::Run(r) => one_part(run_mesh(r).ok_or_else(bad)?, r.system),
             Src::Fitting(f, s) => match fitting_mesh(f) { Some(m) => one_part(m, *s), None => (Mesh::default(), Vec::new()) },
+            Src::InsulatedRun(r, t, name) => {
+                let mut g = (*r).clone();
+                g.size = grow(g.size, *t);
+                let m = run_mesh(&g).ok_or_else(bad)?;
+                let n = m.tris.len();
+                (m, vec![Part { face: FaceKind::Side, material: Some(name.to_string()), tris: 0..n }])
+            }
+            Src::InsulatedFitting(f, t, name) => {
+                let mut g = (*f).clone();
+                g.port_sizes = g.port_sizes.iter().map(|s| grow(*s, *t)).collect();
+                match fitting_mesh(&g) {
+                    Some(m) => { let n = m.tris.len(); (m, vec![Part { face: FaceKind::Side, material: Some(name.to_string()), tris: 0..n }]) }
+                    None => (Mesh::default(), Vec::new()),
+                }
+            }
         };
         Ok(ElementMesh { element: el, mesh, parts, warnings })
     }
@@ -615,8 +647,14 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
     for c in &scene.columns { v.push((Element { kind: Kind::Column, id: c.id }, 0, Src::Column(&c.footprint, c.base_z, c.base_z + c.height))); }
     for it in &scene.items { v.push((Element { kind: Kind::Family, id: it.id }, 0, Src::Family(&it.frame, &it.instance))); }
     for (ni, net) in scene.networks.iter().enumerate() {
-        for sg in &net.segments { v.push((Element { kind: Kind::Segment, id: sg.id }, ni as u32, Src::Run(&sg.run))); }
-        for nf in &net.fittings { v.push((Element { kind: Kind::Fitting, id: nf.id }, ni as u32, Src::Fitting(&nf.fitting, nf.system))); }
+        for sg in &net.segments {
+            v.push((Element { kind: Kind::Segment, id: sg.id }, ni as u32, Src::Run(&sg.run)));
+            if let Some(i) = net.insulation_of(sg.run.system) { v.push((Element { kind: Kind::Insulation, id: sg.id }, ni as u32, Src::InsulatedRun(&sg.run, i.thickness, &i.material))); }
+        }
+        for nf in &net.fittings {
+            v.push((Element { kind: Kind::Fitting, id: nf.id }, ni as u32, Src::Fitting(&nf.fitting, nf.system)));
+            if let Some(i) = net.insulation_of(nf.system) { v.push((Element { kind: Kind::Insulation, id: nf.id }, ni as u32, Src::InsulatedFitting(&nf.fitting, i.thickness, &i.material))); }
+        }
     }
     v
 }

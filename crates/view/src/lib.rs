@@ -104,6 +104,8 @@ pub enum Kind {
     Segment,
     /// an elbow, tee, tap or transition of a service network
     Fitting,
+    /// the insulation on the run or fitting of the same number
+    Insulation,
 }
 
 /// The element a shape belongs to: its kind and its element number in the model.

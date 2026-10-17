@@ -98,6 +98,8 @@ pub enum GraphError {
     /// the connector is not at that end of the run, or does not face along the run
     ConnectorMismatch,
     Corrupt(&'static str),
+    /// insulation needs a thickness above 0 and below 1 m, and a name
+    BadInsulation,
 }
 
 impl std::fmt::Display for GraphError {
@@ -114,7 +116,17 @@ pub struct Network {
     pub equipment: Vec<NetEquipment>,
     links: Vec<(PortRef, PortRef)>,
     pub taps: Vec<Tapping>,
+    /// insulation laid on every run and fitting of a system, one entry per system
+    pub insulation: Vec<(System, Insulation)>,
     next_id: u64,
+}
+
+/// Insulation on the pieces of one system: a layer of this thickness all round (Revit's pipe and duct insulation).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Insulation {
+    /// metres
+    pub thickness: f64,
+    pub material: String,
 }
 
 /// How a chain of pieces from an equipment connector ends.
@@ -181,6 +193,19 @@ impl Network {
     /// will hand these out; until then the caller chooses.)
     pub fn new(id_base: u64) -> Network {
         Network { next_id: id_base, ..Default::default() }
+    }
+    /// Insulate every piece of `system`, replacing any earlier insulation of that system.
+    pub fn insulate(&mut self, system: System, thickness: f64, material: &str) -> Result<(), GraphError> {
+        if thickness.is_nan() || thickness <= 0.0 || thickness >= 1.0 || material.trim().is_empty() { return Err(GraphError::BadInsulation); }
+        let ins = Insulation { thickness, material: material.to_string() };
+        match self.insulation.iter_mut().find(|(s, _)| *s == system) {
+            Some(e) => e.1 = ins,
+            None => self.insulation.push((system, ins)),
+        }
+        Ok(())
+    }
+    pub fn insulation_of(&self, system: System) -> Option<&Insulation> {
+        self.insulation.iter().find(|(s, _)| *s == system).map(|e| &e.1)
     }
     pub fn next_id(&self) -> u64 {
         self.next_id

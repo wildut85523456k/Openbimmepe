@@ -43,6 +43,9 @@ fn kind_colour(k: Kind) -> [f64; 3] {
         Kind::Slab => [0.62, 0.62, 0.64],
         Kind::Column => [0.70, 0.66, 0.60],
         Kind::Family => [0.45, 0.62, 0.78],
+        Kind::Segment => [0.40, 0.58, 0.72],
+        Kind::Fitting => [0.30, 0.45, 0.62],
+        Kind::Insulation => [0.90, 0.85, 0.55],
         _ => [0.8, 0.8, 0.8],
     }
 }

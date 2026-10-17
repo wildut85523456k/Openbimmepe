@@ -360,3 +360,38 @@ fn a_transition_is_a_loft_from_one_section_to_the_other() {
     let e = transition(Round { diameter: 0.2 }, Rect { width: 0.3, height: 0.2, roll: 0.0 }, 0.5);
     assert!(watertight(&e.mesh) && e.mesh.volume() > 0.5 * 0.03 && e.mesh.volume() < 0.5 * 0.06);
 }
+
+#[test]
+fn insulation_is_a_layer_round_runs_and_fittings_of_its_system_and_is_its_own_element() {
+    use openbim_family::{Domain, System};
+    use openbim_place::penetrations::{Run, RunSize};
+    use openbim_route::{graph::{NetFitting, NetSegment, Network}, Fitting, FittingKind};
+    let mut net = Network::new(1);
+    net.segments.push(NetSegment { id: 1, run: Run::round("p", Domain::Pipe, System::ChilledWaterSupply, [0.0, 0.0, 2.5], [4.0, 0.0, 2.5], 0.1) });
+    net.segments.push(NetSegment { id: 2, run: Run::round("q", Domain::Pipe, System::ChilledWaterReturn, [0.0, 1.0, 2.5], [4.0, 1.0, 2.5], 0.1) });
+    net.fittings.push(NetFitting { id: 3, domain: Domain::Pipe, system: System::ChilledWaterSupply, fitting: Fitting {
+        type_name: "Elbow".into(), part_code: String::new(), kind: FittingKind::Elbow { angle: 90.0 }, at: [4.0, 0.0, 2.5],
+        ports: vec![[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], port_sizes: vec![RunSize::Round { diameter: 0.1 }; 2], radius: 0.15, trim: vec![0.15, 0.15] } });
+    assert!(net.insulate(System::ChilledWaterSupply, 0.0, "Foam").is_err());
+    assert!(net.insulate(System::ChilledWaterSupply, 0.03, " ").is_err());
+    net.insulate(System::ChilledWaterSupply, 0.025, "Foam").unwrap();
+    let mut s = scene();
+    s.networks = vec![net];
+    let mut cache = MeshCache::new();
+    let u = cache.update(&s).unwrap();
+    let get = |u: &Update, k: Kind, id: u64| u.meshes.iter().find(|m| m.element.kind == k && m.element.id == id).map(|m| m.as_ref().clone());
+    // the supply pipe and its elbow are insulated, the return pipe is not
+    assert!(get(&u, Kind::Insulation, 1).is_some() && get(&u, Kind::Insulation, 3).is_some() && get(&u, Kind::Insulation, 2).is_none());
+    let area = |r: f64| 0.5 * 32.0 * r * r * (std::f64::consts::TAU / 32.0).sin();
+    let ins = get(&u, Kind::Insulation, 1).unwrap();
+    assert!((ins.mesh.volume() - area(0.075) * 4.0).abs() < 1e-9);
+    assert_eq!(ins.parts[0].material.as_deref(), Some("Foam"));
+    let (lo, hi) = bounds(&ins.mesh);
+    assert!(lo[1] < -0.0749 && hi[1] > 0.0749 && hi[2] > 2.5749, "{lo:?} {hi:?}");
+    assert!(watertight(&get(&u, Kind::Insulation, 3).unwrap().mesh));
+    // a thicker layer re-meshes the insulation and nothing else
+    s.networks[0].insulate(System::ChilledWaterSupply, 0.04, "Foam").unwrap();
+    let v = cache.update(&s).unwrap();
+    assert_eq!(v.rebuilt.len(), 2);
+    assert!(v.rebuilt.iter().all(|e| e.kind == Kind::Insulation));
+}
