@@ -12,6 +12,7 @@ openbim-family = { path = "../family" }
 openbim-ifc = { path = "../ifc" }
 openbim-place = { path = "../place" }
 rayon = "1.10"
+earcutr = "0.5.0"
 
 [lints.rust]
 unsafe_code = "forbid"

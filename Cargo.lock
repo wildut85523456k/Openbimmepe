@@ -413,6 +413,7 @@ dependencies = [
 name = "openbim-view"
 version = "0.0.1"
 dependencies = [
+ "earcutr",
  "openbim-arch",
  "openbim-family",
  "openbim-geom",

@@ -14,7 +14,9 @@
 #![forbid(unsafe_code)]
 
 mod draw;
+mod mesh;
 mod section;
+pub use mesh::{scene_meshes, ElementMesh};
 pub use section::{elevation_view, section_svg, section_svg_with, section_view, standard_elevations, Facing, Label, Section, SectionView};
 pub use draw::{svg, svg_with, Paint, SvgStyle};
 
@@ -51,6 +53,8 @@ pub enum ViewError {
     /// the wall element with this number cannot be drawn
     Wall { id: u64, err: GeomError },
     BadSection(&'static str),
+    /// the slab, column or family element with this number has an outline that cannot be meshed
+    Mesh { id: u64 },
 }
 
 impl std::fmt::Display for ViewError {
@@ -60,6 +64,7 @@ impl std::fmt::Display for ViewError {
             ViewError::BadRange(why) => write!(f, "view range: {why}"),
             ViewError::Wall { id, err } => write!(f, "wall {id}: {err:?}"),
             ViewError::BadSection(why) => write!(f, "section: {why}"),
+            ViewError::Mesh { id } => write!(f, "element {id}: outline cannot be meshed"),
         }
     }
 }
@@ -325,13 +330,19 @@ fn outline(out: &mut Vec<Item>, el: Element, class: Class, p: &SegmentPlan, clos
 
 /// A slab is seen like any other element over `top - thickness .. top`. Its shaft voids and the openings cut in it
 /// are holes: drawn as lines in the slab's class, and left out of the fill when the slab is cut.
-fn slab_items(scene: &Scene, index: usize, id: u64, slab: &openbim_place::floors::Slab, r: &Abs) -> Vec<Item> {
-    let Some(class) = classify(slab.top - slab.thickness, slab.top, r) else { return Vec::new() };
-    let el = Element { kind: Kind::Slab, id };
+/// The voids that cut slab `index`: shafts that pass through its top and the floor openings that are cut.
+pub(crate) fn slab_holes(scene: &Scene, index: usize, slab: &openbim_place::floors::Slab) -> Vec<Vec<P>> {
     let mut holes: Vec<Vec<P>> = scene.shafts.iter().filter(|sh| slab.top > sh.z_bottom + 1e-6 && slab.top < sh.z_top - 1e-6).map(|sh| sh.outline.clone()).collect();
     for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == index && p.fits && p.kind == openbim_place::floors::FloorOpeningKind::Cut) {
         holes.push(vec![[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]]);
     }
+    holes
+}
+
+fn slab_items(scene: &Scene, index: usize, id: u64, slab: &openbim_place::floors::Slab, r: &Abs) -> Vec<Item> {
+    let Some(class) = classify(slab.top - slab.thickness, slab.top, r) else { return Vec::new() };
+    let el = Element { kind: Kind::Slab, id };
+    let holes = slab_holes(scene, index, slab);
     let mut out = Vec::new();
     if class == Class::Cut { out.push(Item { element: el, class, shape: Shape::Region { outer: slab.outline.clone(), holes: holes.clone() } }); }
     for ring in std::iter::once(&slab.outline).chain(holes.iter()) {
