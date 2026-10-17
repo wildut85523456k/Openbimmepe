@@ -16,12 +16,19 @@ fn fam() -> Compiled {
     compile_library(&[f]).unwrap().remove(0)
 }
 fn solve(f: &Compiled, w: f64, h: f64, r: f64, s: f64) -> Result<Instance, FamilyError> {
-    f.solve(&Request { type_name: None, overrides: vec![("width", w), ("height", h), ("rise", r), ("sill", s)], texts: vec![] })
+    f.solve(&Request {
+        type_name: None,
+        overrides: vec![("width", w), ("height", h), ("rise", r), ("sill", s)],
+        texts: vec![],
+    })
 }
 /// Shoelace area, counter-clockwise positive.
 fn area(p: &[[f64; 2]]) -> f64 {
     let n = p.len();
-    (0..n).map(|i| p[i][0] * p[(i + 1) % n][1] - p[(i + 1) % n][0] * p[i][1]).sum::<f64>() / 2.0
+    (0..n)
+        .map(|i| p[i][0] * p[(i + 1) % n][1] - p[(i + 1) % n][0] * p[i][1])
+        .sum::<f64>()
+        / 2.0
 }
 /// Hand formula for the polygon: a rectangle plus a fan of N thin triangles from the arc centre, minus the centre-chord triangle.
 fn want(w: f64, h: f64, r: f64) -> f64 {
@@ -36,7 +43,10 @@ fn want(w: f64, h: f64, r: f64) -> f64 {
 fn a_flat_head_is_a_plain_rectangle() {
     let i = solve(&fam(), 0.9, 2.1, 0.0, 0.0).unwrap();
     assert_eq!(i.opening_rise, 0.0);
-    assert_eq!(i.opening_outline(1.0).unwrap(), vec![[1.0, 0.0], [1.9, 0.0], [1.9, 2.1], [1.0, 2.1]]);
+    assert_eq!(
+        i.opening_outline(1.0).unwrap(),
+        vec![[1.0, 0.0], [1.9, 0.0], [1.9, 2.1], [1.0, 2.1]]
+    );
 }
 
 #[test]
@@ -44,7 +54,12 @@ fn the_outline_of_a_segmental_arch_matches_the_hand_formula() {
     let i = solve(&fam(), 1.0, 2.4, 0.3, 0.0).unwrap();
     let p = i.opening_outline(2.0).unwrap();
     assert_eq!(p.len(), 4 + ARCH_SEGMENTS - 1);
-    assert!((area(&p) - want(1.0, 2.4, 0.3)).abs() < 1e-12, "{} vs {}", area(&p), want(1.0, 2.4, 0.3));
+    assert!(
+        (area(&p) - want(1.0, 2.4, 0.3)).abs() < 1e-12,
+        "{} vs {}",
+        area(&p),
+        want(1.0, 2.4, 0.3)
+    );
     // independent: close to the true circular segment
     let big_r: f64 = (0.25 + 0.09) / 0.6;
     let a = (0.5f64 / big_r).asin();
@@ -52,18 +67,34 @@ fn the_outline_of_a_segmental_arch_matches_the_hand_formula() {
     assert!(area(&p) < true_area && (true_area - area(&p)) / true_area < 2e-3);
     // crown exactly on the centre line at the full height; springing at 2.1; both feet on the sill
     assert!(p.contains(&[2.5, 2.4]));
-    assert!(p.contains(&[2.0, 2.1]) && p.contains(&[3.0, 2.1]) && p.contains(&[2.0, 0.0]) && p.contains(&[3.0, 0.0]));
+    assert!(
+        p.contains(&[2.0, 2.1])
+            && p.contains(&[3.0, 2.1])
+            && p.contains(&[2.0, 0.0])
+            && p.contains(&[3.0, 0.0])
+    );
     // every arc point is on the circle of radius R about (2.5, 2.4 - R)
-    for q in &p { if q[1] > 2.1 + 1e-9 { let d = ((q[0] - 2.5).powi(2) + (q[1] - (2.4 - big_r)).powi(2)).sqrt(); assert!((d - big_r).abs() < 1e-12); } }
+    for q in &p {
+        if q[1] > 2.1 + 1e-9 {
+            let d = ((q[0] - 2.5).powi(2) + (q[1] - (2.4 - big_r)).powi(2)).sqrt();
+            assert!((d - big_r).abs() < 1e-12);
+        }
+    }
 }
 
 #[test]
 fn a_semicircle_head_and_a_pure_arch_work() {
     let f = fam();
-    let p = solve(&f, 1.0, 2.0, 0.5, 0.0).unwrap().opening_outline(0.0).unwrap();
+    let p = solve(&f, 1.0, 2.0, 0.5, 0.0)
+        .unwrap()
+        .opening_outline(0.0)
+        .unwrap();
     assert!((area(&p) - want(1.0, 2.0, 0.5)).abs() < 1e-12);
     // a full circle-top with rise = height has no straight sides: the feet are the arc ends
-    let p = solve(&f, 1.0, 0.5, 0.5, 0.7).unwrap().opening_outline(0.0).unwrap();
+    let p = solve(&f, 1.0, 0.5, 0.5, 0.7)
+        .unwrap()
+        .opening_outline(0.0)
+        .unwrap();
     assert_eq!(p.len(), 2 + ARCH_SEGMENTS - 1);
     assert!((area(&p) - want(1.0, 0.5, 0.5)).abs() < 1e-12);
     assert!(p.iter().all(|q| q[1] >= 0.7 - 1e-12));
@@ -74,11 +105,14 @@ fn bad_arches_are_refused() {
     let f = fam();
     let bad = |w, h, r| matches!(solve(&f, w, h, r, 0.0), Err(FamilyError::BadArch(_)));
     assert!(bad(1.0, 2.4, 0.5001)); // more than half the width
-    assert!(bad(1.0, 0.4, 0.45));   // more than the height
+    assert!(bad(1.0, 0.4, 0.45)); // more than the height
     assert!(bad(1.0, 2.4, 0.0005)); // too flat
     assert!(bad(1.0, 0.3005, 0.3)); // sliver of straight side
-    // a negative rise says so
-    match solve(&f, 1.0, 2.4, -0.5, 0.0) { Err(FamilyError::BadArch(m)) => assert!(m.contains("negative")), e => panic!("{e:?}") }
+                                    // a negative rise says so
+    match solve(&f, 1.0, 2.4, -0.5, 0.0) {
+        Err(FamilyError::BadArch(m)) => assert!(m.contains("negative")),
+        e => panic!("{e:?}"),
+    }
     assert!(solve(&f, 1.0, 2.4, 0.5, 0.0).is_ok());
     assert!(solve(&f, 1.0, 0.5, 0.5, 0.0).is_ok());
 }

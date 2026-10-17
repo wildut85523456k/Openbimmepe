@@ -1,11 +1,25 @@
 //! Authored families used to test the solver. Dimensions are illustrative defaults, not values from any standard.
 //! Use `all()` to compile them together: the door nests the lever handle.
 
-use crate::{compile_library, Dim, NUMBER, U_VALUE, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dir, Domain, Family, FlowDir, PlanDef, ShapeDef, System, FamilyError, NestedDef, OpeningDef, Scope::*, SolidDef, TextSrc, TypeDef, ValueDef as V};
+use crate::{
+    compile_library, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dim, Dir,
+    Domain, Family, FamilyError, FlowDir, NestedDef, OpeningDef, PlanDef, Scope::*, ShapeDef,
+    SolidDef, System, TextSrc, TypeDef, ValueDef as V, NUMBER, U_VALUE,
+};
 
-fn chk(name: &str, expr: &str) -> CheckDef { CheckDef { name: name.into(), expr: expr.into() } }
+fn chk(name: &str, expr: &str) -> CheckDef {
+    CheckDef {
+        name: name.into(),
+        expr: expr.into(),
+    }
+}
 fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
-    TypeDef { name: name.into(), values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(), texts: vec![], lighting: None }
+    TypeDef {
+        name: name.into(),
+        values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(),
+        texts: vec![],
+        lighting: None,
+    }
 }
 
 /// Lever handle on both faces of a leaf. Origin: centre of the back plate on the leaf's mid plane.
@@ -38,12 +52,39 @@ pub fn handle() -> Family {
             V::plane("z_g1", Z, "grip_t / 2"),
         ],
         solids: vec![
-            SolidDef::new("plate_front", ("x_p0", "x_p1"), ("y_fp0", "y_fp1"), ("z_p0", "z_p1")).material("finish"),
-            SolidDef::new("plate_back", ("x_p0", "x_p1"), ("y_bp0", "y_bp1"), ("z_p0", "z_p1")).material("finish"),
-            SolidDef::new("grip_front", ("x_g0", "x_g1"), ("y_fg0", "y_fp0"), ("z_g0", "z_g1")).material("finish"),
-            SolidDef::new("grip_back", ("x_g0", "x_g1"), ("y_bp1", "y_bg1"), ("z_g0", "z_g1")).material("finish"),
+            SolidDef::new(
+                "plate_front",
+                ("x_p0", "x_p1"),
+                ("y_fp0", "y_fp1"),
+                ("z_p0", "z_p1"),
+            )
+            .material("finish"),
+            SolidDef::new(
+                "plate_back",
+                ("x_p0", "x_p1"),
+                ("y_bp0", "y_bp1"),
+                ("z_p0", "z_p1"),
+            )
+            .material("finish"),
+            SolidDef::new(
+                "grip_front",
+                ("x_g0", "x_g1"),
+                ("y_fg0", "y_fp0"),
+                ("z_g0", "z_g1"),
+            )
+            .material("finish"),
+            SolidDef::new(
+                "grip_back",
+                ("x_g0", "x_g1"),
+                ("y_bp1", "y_bg1"),
+                ("z_g0", "z_g1"),
+            )
+            .material("finish"),
         ],
-        checks: vec![chk("grip longer than the plate is wide", "grip_len > plate_w")],
+        checks: vec![chk(
+            "grip longer than the plate is wide",
+            "grip_len > plate_w",
+        )],
         ..Default::default()
     }
 }
@@ -144,9 +185,27 @@ pub fn arched_door() -> Family {
             V::plane("z_spring", Z, "height - rise"),
         ],
         solids: vec![
-            SolidDef::new("jamb_left", ("x_left", "x_in_left"), ("y_front", "y_back"), ("z_floor", "z_spring")).material("frame_material"),
-            SolidDef::new("jamb_right", ("x_in_right", "x_right"), ("y_front", "y_back"), ("z_floor", "z_spring")).material("frame_material"),
-            SolidDef::new("leaf", ("x_in_left", "x_in_right"), ("y_leaf_front", "y_leaf_back"), ("z_floor", "z_spring")).material("leaf_material"),
+            SolidDef::new(
+                "jamb_left",
+                ("x_left", "x_in_left"),
+                ("y_front", "y_back"),
+                ("z_floor", "z_spring"),
+            )
+            .material("frame_material"),
+            SolidDef::new(
+                "jamb_right",
+                ("x_in_right", "x_right"),
+                ("y_front", "y_back"),
+                ("z_floor", "z_spring"),
+            )
+            .material("frame_material"),
+            SolidDef::new(
+                "leaf",
+                ("x_in_left", "x_in_right"),
+                ("y_leaf_front", "y_leaf_back"),
+                ("z_floor", "z_spring"),
+            )
+            .material("leaf_material"),
         ],
         checks: vec![
             chk("rise at most half the width", "rise <= width / 2"),
@@ -163,8 +222,18 @@ pub fn arched_door() -> Family {
 /// Fixed window: frame, one glass pane and a variable number of evenly spaced mullions (on both sides of the glass).
 pub fn window() -> Family {
     let mullion = |name: &str, y: (&str, &str)| {
-        let mut s = SolidDef::new(name, ("x_in_left", "x_in_right"), y, ("z_in_sill", "z_in_top")).material("frame_material");
-        s.array = Some(ArrayDef { axis: X, count: "mullions".into(), bar: "mullion_w".into() });
+        let mut s = SolidDef::new(
+            name,
+            ("x_in_left", "x_in_right"),
+            y,
+            ("z_in_sill", "z_in_top"),
+        )
+        .material("frame_material");
+        s.array = Some(ArrayDef {
+            axis: X,
+            count: "mullions".into(),
+            bar: "mullion_w".into(),
+        });
         s
     };
     Family {
@@ -237,7 +306,9 @@ pub fn window() -> Family {
 }
 
 /// All sample families compiled together, in the order handle, door, window, arched door, fan coil unit.
-pub fn all() -> Result<Vec<Compiled>, FamilyError> { compile_library(&[handle(), door(), window(), arched_door(), fan_coil()]) }
+pub fn all() -> Result<Vec<Compiled>, FamilyError> {
+    compile_library(&[handle(), door(), window(), arched_door(), fan_coil()])
+}
 
 /// Ceiling-mounted fan coil unit, ducted. Origin: centre of the casing in plan, underside of the casing.
 /// Face +Y carries the supply air outlet, face -Y the return air inlet, face +X the water, condensate and power
@@ -270,18 +341,84 @@ pub fn fan_coil() -> Family {
             V::plane("z0", Z, "0"),
             V::plane("z1", Z, "height"),
         ],
-        solids: vec![SolidDef::new("body", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("casing")],
+        solids: vec![
+            SolidDef::new("body", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("casing"),
+        ],
         checks: vec![
-            chk("outlet fits on the casing", "duct_w < length && duct_h < height"),
-            chk("pipes fit the casing height", "water_pipe < height && condensate_pipe < height"),
+            chk(
+                "outlet fits on the casing",
+                "duct_w < length && duct_h < height",
+            ),
+            chk(
+                "pipes fit the casing height",
+                "water_pipe < height && condensate_pipe < height",
+            ),
         ],
         connectors: vec![
-            ConnectorDef::new("supply", Duct, SupplyAir, Out, ("0", "depth / 2", "height / 2"), PlusY, ShapeDef::Rect("duct_w".into(), "duct_h".into())).flow("air_flow").pressure_drop("0"),
-            ConnectorDef::new("return", Duct, ReturnAir, In, ("0", "-depth / 2", "height / 2"), MinusY, ShapeDef::Rect("duct_w".into(), "duct_h".into())).flow("air_flow").visible_if("with_return_duct"),
-            ConnectorDef::new("chw_in", Pipe, ChilledWaterSupply, In, ("length / 2", "depth / 4", "height / 3"), PlusX, ShapeDef::Round("water_pipe".into())).flow("water_flow"),
-            ConnectorDef::new("chw_out", Pipe, ChilledWaterReturn, Out, ("length / 2", "-depth / 4", "height / 3"), PlusX, ShapeDef::Round("water_pipe".into())).flow("water_flow"),
-            ConnectorDef::new("condensate", Pipe, Condensate, Out, ("length / 2", "0", "height / 6"), PlusX, ShapeDef::Round("condensate_pipe".into())),
-            ConnectorDef::new("power", Electrical, Power, In, ("length / 2", "depth / 2 - 50 mm", "2 * height / 3"), PlusX, ShapeDef::Electrical { voltage: "voltage".into(), poles: "1".into() }).flow("power"),
+            ConnectorDef::new(
+                "supply",
+                Duct,
+                SupplyAir,
+                Out,
+                ("0", "depth / 2", "height / 2"),
+                PlusY,
+                ShapeDef::Rect("duct_w".into(), "duct_h".into()),
+            )
+            .flow("air_flow")
+            .pressure_drop("0"),
+            ConnectorDef::new(
+                "return",
+                Duct,
+                ReturnAir,
+                In,
+                ("0", "-depth / 2", "height / 2"),
+                MinusY,
+                ShapeDef::Rect("duct_w".into(), "duct_h".into()),
+            )
+            .flow("air_flow")
+            .visible_if("with_return_duct"),
+            ConnectorDef::new(
+                "chw_in",
+                Pipe,
+                ChilledWaterSupply,
+                In,
+                ("length / 2", "depth / 4", "height / 3"),
+                PlusX,
+                ShapeDef::Round("water_pipe".into()),
+            )
+            .flow("water_flow"),
+            ConnectorDef::new(
+                "chw_out",
+                Pipe,
+                ChilledWaterReturn,
+                Out,
+                ("length / 2", "-depth / 4", "height / 3"),
+                PlusX,
+                ShapeDef::Round("water_pipe".into()),
+            )
+            .flow("water_flow"),
+            ConnectorDef::new(
+                "condensate",
+                Pipe,
+                Condensate,
+                Out,
+                ("length / 2", "0", "height / 6"),
+                PlusX,
+                ShapeDef::Round("condensate_pipe".into()),
+            ),
+            ConnectorDef::new(
+                "power",
+                Electrical,
+                Power,
+                In,
+                ("length / 2", "depth / 2 - 50 mm", "2 * height / 3"),
+                PlusX,
+                ShapeDef::Electrical {
+                    voltage: "voltage".into(),
+                    poles: "1".into(),
+                },
+            )
+            .flow("power"),
         ],
         plan: vec![
             PlanDef::line(("x0", "y0"), ("x1", "y0")),

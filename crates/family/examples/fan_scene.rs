@@ -11,23 +11,88 @@ fn size(s: &Size) -> String {
     }
 }
 fn line(tag: &str, c: &Connector) {
-    println!("{tag} {} {:?} {:?} {:?} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {} {:.9} {:.9}", c.name, c.domain, c.system, c.flow_dir, c.pos[0], c.pos[1], c.pos[2], c.dir[0], c.dir[1], c.dir[2], size(&c.size), c.flow, c.pressure_drop);
+    println!(
+        "{tag} {} {:?} {:?} {:?} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {} {:.9} {:.9}",
+        c.name,
+        c.domain,
+        c.system,
+        c.flow_dir,
+        c.pos[0],
+        c.pos[1],
+        c.pos[2],
+        c.dir[0],
+        c.dir[1],
+        c.dir[2],
+        size(&c.size),
+        c.flow,
+        c.pressure_drop
+    );
 }
 
 fn main() {
-    for c in Category::ALL { println!("CLASS {:?} {}", c, c.ifc_class()); }
+    for c in Category::ALL {
+        println!("CLASS {:?} {}", c, c.ifc_class());
+    }
     use System::*;
-    for s in [SupplyAir, ReturnAir, ExhaustAir, OutsideAir, ChilledWaterSupply, ChilledWaterReturn, HeatingWaterSupply, HeatingWaterReturn, CondenserWaterSupply, CondenserWaterReturn, DomesticCold, DomesticHot, Sanitary, Vent, StormWater, Condensate, FireProtection, Gas, Power, Data, Other] {
+    for s in [
+        SupplyAir,
+        ReturnAir,
+        ExhaustAir,
+        OutsideAir,
+        ChilledWaterSupply,
+        ChilledWaterReturn,
+        HeatingWaterSupply,
+        HeatingWaterReturn,
+        CondenserWaterSupply,
+        CondenserWaterReturn,
+        DomesticCold,
+        DomesticHot,
+        Sanitary,
+        Vent,
+        StormWater,
+        Condensate,
+        FireProtection,
+        Gas,
+        Power,
+        Data,
+        Other,
+    ] {
         println!("SYS {:?} {}", s, s.ifc_system());
     }
-    for f in [FlowDir::In, FlowDir::Out, FlowDir::Both] { println!("FLOW {:?} {}", f, f.ifc()); }
-    for d in [Domain::Duct, Domain::Pipe, Domain::CableTray, Domain::Conduit, Domain::Electrical] { println!("PORT {:?} {}", d, d.ifc_port_type()); }
+    for f in [FlowDir::In, FlowDir::Out, FlowDir::Both] {
+        println!("FLOW {:?} {}", f, f.ifc());
+    }
+    for d in [
+        Domain::Duct,
+        Domain::Pipe,
+        Domain::CableTray,
+        Domain::Conduit,
+        Domain::Electrical,
+    ] {
+        println!("PORT {:?} {}", d, d.ifc_port_type());
+    }
     let c = fan_coil().compile().unwrap();
     let inst = c.solve(&Request::default()).unwrap();
-    let poses = [Pose { x: 10.0, y: 5.0, z: 3.0, angle: 90.0 }, Pose { x: -3.2, y: 7.7, z: 2.6, angle: 37.0 }];
+    let poses = [
+        Pose {
+            x: 10.0,
+            y: 5.0,
+            z: 3.0,
+            angle: 90.0,
+        },
+        Pose {
+            x: -3.2,
+            y: 7.7,
+            z: 2.6,
+            angle: 37.0,
+        },
+    ];
     for (k, p) in poses.iter().enumerate() {
         println!("POSE {k} {} {} {} {}", p.x, p.y, p.z, p.angle);
-        for cn in &inst.connectors { line(&format!("LOCAL {k}"), cn); line(&format!("WORLD {k}"), &cn.world(p)); }
+        for cn in &inst.connectors {
+            line(&format!("LOCAL {k}"), cn);
+            line(&format!("WORLD {k}"), &cn.world(p));
+        }
     }
     // pairs: each world connector of pose 0 against the facing copy of pose 0 and against pose 1 connectors
     let w0: Vec<Connector> = inst.connectors.iter().map(|c| c.world(&poses[0])).collect();
@@ -39,7 +104,11 @@ fn main() {
         }
         let mut f = a.clone();
         f.dir = [-a.dir[0], -a.dir[1], -a.dir[2]];
-        f.flow_dir = match a.flow_dir { FlowDir::In => FlowDir::Out, FlowDir::Out => FlowDir::In, FlowDir::Both => FlowDir::Both };
+        f.flow_dir = match a.flow_dir {
+            FlowDir::In => FlowDir::Out,
+            FlowDir::Out => FlowDir::In,
+            FlowDir::Both => FlowDir::Both,
+        };
         println!("SELF {} {:?}", a.name, mate(a, &f, 0.001, Resize::Strict));
     }
 }
