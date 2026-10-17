@@ -11,6 +11,8 @@ use std::collections::HashSet;
 pub const WGSL: &str = include_str!("shader.wgsl");
 pub const COLOUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Side of the shadow map in texels (the shader has the same number).
+pub const SHADOW_SIZE: u32 = 2048;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -18,7 +20,35 @@ struct Vertex { pos: [f32; 3], nrm: [f32; 3], col: [f32; 4] }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Uniforms { vp: [[f32; 4]; 4], light: [f32; 4], eye: [f32; 4], line: [f32; 4], sec_min: [f32; 4], sec_max: [f32; 4], sun: [f32; 4] }
+struct Uniforms { vp: [[f32; 4]; 4], light: [f32; 4], eye: [f32; 4], line: [f32; 4], sec_min: [f32; 4], sec_max: [f32; 4], sun: [f32; 4], light_vp: [[f32; 4]; 4] }
+
+/// Direction toward the sun in model space: from the south-west, high.
+pub const SUN: [f64; 3] = [-0.45, -0.55, 0.70];
+
+/// The sun's orthographic view of the scene as a column-major matrix: x and y fill -1..1 over the scene's bounding
+/// sphere, depth runs 0..1 along the rays.
+pub fn sun_matrix(scene: &Scene) -> [[f32; 4]; 4] {
+    let l = (SUN[0] * SUN[0] + SUN[1] * SUN[1] + SUN[2] * SUN[2]).sqrt();
+    let to_sun = SUN.map(|x| x / l);
+    let f = to_sun.map(|x| -x); // the way the light travels
+    let r = { let c = [f[1], -f[0], 0.0]; let n = (c[0] * c[0] + c[1] * c[1]).sqrt(); [c[0] / n, c[1] / n, 0.0] };
+    let u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+    let rad = scene.radius.max(1e-3) * 1.02;
+    let c = scene.centre.map(f64::from);
+    let eye = [c[0] - f[0] * rad * 2.0, c[1] - f[1] * rad * 2.0, c[2] - f[2] * rad * 2.0];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let (near, far) = (0.0, rad * 4.0);
+    // rows: x' = r.(p-eye)/rad, y' = u.(p-eye)/rad, z' = (f.(p-eye)-near)/(far-near)
+    let rows = [
+        [r[0] / rad, r[1] / rad, r[2] / rad, -dot(r, eye) / rad],
+        [u[0] / rad, u[1] / rad, u[2] / rad, -dot(u, eye) / rad],
+        [f[0] / (far - near), f[1] / (far - near), f[2] / (far - near), (-dot(f, eye) - near) / (far - near)],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let mut m = [[0.0f32; 4]; 4];
+    for (rr, row) in rows.iter().enumerate() { for (cc, v) in row.iter().enumerate() { m[cc][rr] = *v as f32; } }
+    m
+}
 
 /// A batch uploaded for one style.
 pub struct Scene {
@@ -33,10 +63,15 @@ pub struct Scene {
     pub origin: [f64; 3],
     /// half the diagonal of the box around the batch
     pub radius: f64,
+    /// middle of the box, relative to `origin`
+    pub centre: [f32; 3],
 }
 
 pub struct Gpu {
     uniform_layout: wgpu::BindGroupLayout,
+    shadow_pipeline: wgpu::RenderPipeline,
+    shadow_view: wgpu::TextureView,
+    shadow_bind: wgpu::BindGroup,
     shaded: wgpu::RenderPipeline,
     real: wgpu::RenderPipeline,
     select: wgpu::RenderPipeline,
@@ -69,13 +104,38 @@ impl Gpu {
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("viewport"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
 
+        // the sun's depth map, and how the Realistic pipeline reads it
+        let shadow_tex = device.create_texture(&wgpu::TextureDescriptor { label: Some("shadow map"), size: wgpu::Extent3d { width: SHADOW_SIZE, height: SHADOW_SIZE, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: DEPTH_FORMAT, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING, view_formats: &[] });
+        let shadow_view = shadow_tex.create_view(&Default::default());
+        let shadow_samp = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, compare: Some(wgpu::CompareFunction::LessEqual), ..Default::default() });
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison), count: None },
+            ],
+        });
+        let shadow_bind = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("shadow"), layout: &shadow_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&shadow_view) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&shadow_samp) }] });
+        let real_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("viewport realistic"), bind_group_layouts: &[Some(&layout), Some(&shadow_layout)], immediate_size: 0 });
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadow caster"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_shadow"), compilation_options: Default::default(), buffers: &[Some(wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<Vertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![0 => Float32x3] })] },
+            fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some("fs_shadow"), compilation_options: Default::default(), targets: &[] }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState { format: DEPTH_FORMAT, depth_write_enabled: Some(true), depth_compare: Some(wgpu::CompareFunction::Less), stencil: Default::default(), bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 } }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         let fill_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
         let fill_buf = wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<Vertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &fill_attrs };
         let line_attrs = wgpu::vertex_attr_array![0 => Float32x3];
         let line_buf = wgpu::VertexBufferLayout { array_stride: 12, step_mode: wgpu::VertexStepMode::Vertex, attributes: &line_attrs };
         let colour_target = [Some(wgpu::ColorTargetState { format: COLOUR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
 
-        let fill = |label: &str, fs: &str, bias: i32| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let fill = |label: &str, fs: &str, bias: i32, pl: &wgpu::PipelineLayout| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(&pl),
             vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_fill"), compilation_options: Default::default(), buffers: &[Some(fill_buf.clone())] },
@@ -121,7 +181,7 @@ impl Gpu {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
 
         Gpu {
-            uniform_layout: layout, shaded: fill("shaded", "fs_shaded", 2), real: fill("realistic", "fs_real", 2), select: fill("select", "fs_select", -2), paper: fill("paper", "fs_paper", 2),
+            uniform_layout: layout, shaded: fill("shaded", "fs_shaded", 2, &pl), real: fill("realistic", "fs_real", 2, &real_pl), select: fill("select", "fs_select", -2, &pl), paper: fill("paper", "fs_paper", 2, &pl), shadow_pipeline, shadow_view, shadow_bind,
             lines_hidden: lines("lines hidden", true), lines_through: lines("lines through", false), blit, blit_layout, sampler,
         }
     }
@@ -159,7 +219,7 @@ impl Gpu {
             lines: mk("lines", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
             line_count: lines.len() as u32,
             selected: None,
-            style, origin: b.origin, radius,
+            style, origin: b.origin, radius, centre: if b.verts.is_empty() { [0.0; 3] } else { [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0] },
         }
     }
 
@@ -213,9 +273,22 @@ impl Gpu {
             sec_min: section.map_or([0.0; 4], |s| [(s.min[0] - scene.origin[0]) as f32, (s.min[1] - scene.origin[1]) as f32, (s.min[2] - scene.origin[2]) as f32, 1.0]),
             sec_max: section.map_or([0.0; 4], |s| [(s.max[0] - scene.origin[0]) as f32, (s.max[1] - scene.origin[1]) as f32, (s.max[2] - scene.origin[2]) as f32, 1.0]),
             // the sun: from the south-west, high
-            sun: [-0.45, -0.55, 0.70, 0.0],
+            sun: [SUN[0] as f32, SUN[1] as f32, SUN[2] as f32, 0.0],
+            light_vp: sun_matrix(scene),
         };
         queue.write_buffer(&target.uniforms, 0, bytemuck::bytes_of(&uni));
+        if scene.style == Style::Realistic && scene.fill_count > 0 {
+            let mut sp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &self.shadow_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
+                timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
+            });
+            sp.set_pipeline(&self.shadow_pipeline);
+            sp.set_bind_group(0, &target.bind, &[]);
+            sp.set_vertex_buffer(0, scene.fills.slice(..));
+            sp.draw(0..scene.fill_count, 0..1);
+        }
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("viewport"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &target.colour_view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store } })],
@@ -223,6 +296,7 @@ impl Gpu {
             timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
         });
         pass.set_bind_group(0, &target.bind, &[]);
+        if scene.style == Style::Realistic { pass.set_bind_group(1, &self.shadow_bind, &[]); }
         if scene.fill_count > 0 {
             pass.set_pipeline(match scene.style { Style::HiddenLine => &self.paper, Style::Realistic => &self.real, _ => &self.shaded });
             pass.set_vertex_buffer(0, scene.fills.slice(..));
