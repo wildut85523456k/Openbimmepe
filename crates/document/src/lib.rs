@@ -35,6 +35,9 @@ pub enum Category {
     /// An annotation: the label of the element it is on (`Geometry::Tag`). It is drawn in the plan of its element's level
     /// and is not part of the building, so it is not exported as a product.
     Tag,
+    /// An annotation: an aligned dimension between two points of the plan of a level (`Geometry::Dimension`). Not part
+    /// of the building, so it is not exported as a product.
+    Dimension,
     /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
     /// `height_m` deep, `elevation_m` the height of its centre line above the level.
     Beam,
@@ -614,10 +617,20 @@ impl Document {
     /// The level an element stands on: its own, or its host's.
     pub fn level_of(&self, id: ElementId) -> Option<ElementId> {
         match self.get(id)?.geometry? {
-            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } => Some(level),
+            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } | Geometry::Dimension { level, .. } => Some(level),
             Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } => self.level_of(host),
             Geometry::Level | Geometry::Grid { .. } => None,
         }
+    }
+    /// Draws an aligned dimension from `a` to `b` on `level`, its line through `at`.
+    pub fn place_dimension(&mut self, level: ElementId, a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Dimension).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Dimension, name: format!("Dimension {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Dimension { a, b, at, level } },
+        ])?;
+        Ok(id)
     }
     /// What a tag says: the type of its element when it has one (a door's type, a wall type), else its name.
     pub fn tag_text(&self, tag: ElementId) -> String {

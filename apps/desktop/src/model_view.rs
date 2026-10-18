@@ -1,7 +1,7 @@
 //! Orthographic plan and orbitable 3D projection of document-derived meshes.
 //! Painter-based CPU projection is an initial small-model renderer, not a full
 //! depth-buffered GPU BIM engine (cut planes/joins/hidden-line are future work).
-use crate::{Desktop, ElementId, View};
+use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry};
 
@@ -189,6 +189,23 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         crate::elec_ui::draw_overlay(&app.document, report, &painter, &screen, level_id, level_z, pending);
     }
     if !three_d {
+        // aligned dimensions of this level; each can be picked on its line
+        let ink = ui.visuals().text_color();
+        let dims: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Dimension).map(|e| e.id).collect();
+        for id in dims {
+            let Some(Geometry::Dimension { a, b, at, level }) = app.document.get(id).and_then(|d| d.geometry) else { continue };
+            if level != level_id { continue; }
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let l = dx.hypot(dy);
+            let off = ((at[0] - a[0]) * -dy + (at[1] - a[1]) * dx) / l;
+            let (nx, ny) = (-dy / l * off, dx / l * off);
+            let (q1, q2) = (screen([a[0] + nx, a[1] + ny, level_z]), screen([b[0] + nx, b[1] + ny, level_z]));
+            let shown = selected_all.contains(&id);
+            draw_dimension(&painter, screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]), q1, q2, &format!("{:.0}", l * 1000.0), if shown { blue } else { ink });
+            datum_hits.push((id, q1, q2));
+        }
+    }
+    if !three_d {
         // tags: the label of an element, boxed, at a constant size, on a leader to the place that was clicked
         let tag_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Tag).map(|e| e.id).collect();
         for id in tag_ids {
@@ -210,7 +227,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror);
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure);
             let pending = !app.edit_pts.is_empty() || app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
@@ -326,6 +343,59 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0).map(|(id, _, _)| *id));
                 match hit { Some(h) => app.wall_pick_line(level_id, h, to_model(p)), None => app.message = "Pick Lines: click a grid, a wall or a beam".into() }
             } else { app.wall_click(level_id, to_model(p)); }
+        }
+    } else if matches!(app.tool, crate::Tool::Dimension | crate::Tool::Measure) && !three_d {
+        // Two points (a corner of a wall, the end of a grid, else 50 mm); the Dimension tool then takes the place of its line.
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let raw = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
+            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => { let mut v = vec![start, end]; if let Some(r) = app.document.wall_plan(el.id) { v.extend(r); } v }
+            Some(Geometry::Grid { start, end }) => vec![start, end],
+            _ => vec![],
+        }).collect();
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let first = app.edit_pts.first().copied();
+        let snap_to = |p: Pos2| -> ([f64; 2], bool) {
+            if let Some(c) = corners.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
+                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return (*c, true); }
+            let r = raw(p);
+            let mut m = [(r[0] / 0.05).round() * 0.05, (r[1] / 0.05).round() * 0.05];
+            if let (true, Some(s)) = (ortho, first) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
+            (m, false)
+        };
+        let hover = response.hover_pos();
+        let ink = Color32::from_rgb(220, 140, 0);
+        if let Some(h) = hover {
+            let (m, snapped) = snap_to(h);
+            if snapped { painter.rect_stroke(Rect::from_center_size(screen([m[0], m[1], level_z]), Vec2::splat(9.0)), 0.0, Stroke::new(1.5, ink), egui::StrokeKind::Middle); }
+            match app.edit_pts.as_slice() {
+                [a] => {
+                    let (pa, pb) = (screen([a[0], a[1], level_z]), screen([m[0], m[1], level_z]));
+                    painter.line_segment([pa, pb], Stroke::new(1.0, blue));
+                    painter.text(pb + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", (m[0] - a[0]).hypot(m[1] - a[1]) * 1000.0), egui::FontId::proportional(13.0), blue);
+                }
+                [a, b] => {
+                    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                    let l = dx.hypot(dy).max(1e-9);
+                    let off = ((m[0] - a[0]) * -dy + (m[1] - a[1]) * dx) / l;
+                    let (nx, ny) = (-dy / l * off, dx / l * off);
+                    draw_dimension(&painter, screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]), screen([a[0] + nx, a[1] + ny, level_z]), screen([b[0] + nx, b[1] + ny, level_z]), &format!("{:.0}", l * 1000.0), blue);
+                }
+                _ => {}
+            }
+        }
+        if app.tool == crate::Tool::Measure {
+            if let Some((a, b)) = app.measured {
+                let (pa, pb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
+                painter.line_segment([pa, pb], Stroke::new(1.5, ink));
+                for p in [pa, pb] { painter.circle_filled(p, 3.0, ink); }
+                painter.text(pa + (pb - pa) * 0.5 + Vec2::new(8.0, -8.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", (b[0] - a[0]).hypot(b[1] - a[1]) * 1000.0), egui::FontId::proportional(13.0), ink);
+            }
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.edit_pts.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.edit_pts.clear(); } }
+        else if let Some(p) = pick {
+            let (m, _) = snap_to(p);
+            if app.tool == crate::Tool::Dimension { app.dimension_click(level_id, m); } else { app.measure_click(m); }
         }
     } else if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) && !three_d {
         // As in Revit: the element is selected first (a click selects one when none is), then the tool picks its points:
@@ -573,6 +643,49 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if let (Some((_, a, b)), None) = (wall_ends, app.drag) {
             for g in [a, b] { let c = grip_at(g); painter.rect_filled(Rect::from_center_size(c, Vec2::splat(9.0)), 1.0, ui.visuals().panel_fill); painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(9.0)), 1.0, Stroke::new(1.5, blue), egui::StrokeKind::Middle); }
         }
+        // Temporary dimensions of the selected wall, as Revit shows them: its length and its distance to the nearest line
+        // alongside on each side. Click a number and type another: the wall changes.
+        app.temp_labels.clear();
+        if let (Some((id, a, b)), None, 1) = (wall_ends, app.drag, selected_all.len()) {
+            let ink = Color32::from_rgb(70, 130, 180);
+            let (pa, pb) = (grip_at(a), grip_at(b));
+            let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+            let dir = if (pb - pa).length() > 1e-3 { (pb - pa).normalized() } else { Vec2::X };
+            let off = Vec2::new(-dir.y, dir.x) * -26.0;
+            type Shown = (Pos2, f64, TempDim, Vec<(Pos2, Pos2)>);
+            let mut shown: Vec<Shown> = Vec::new();
+            shown.push((pa + (pb - pa) * 0.5 + off, len, TempDim::Length(id), vec![(pa, pa + off * 1.15), (pb, pb + off * 1.15), (pa + off, pb + off)]));
+            let (ux, uy) = ((b[0] - a[0]) / len.max(1e-9), (b[1] - a[1]) / len.max(1e-9));
+            let mid = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            for (side, n) in app.document.wall_neighbours(id).into_iter().enumerate() {
+                let Some((other, d)) = n else { continue };
+                let sign = if side == 0 { 1.0 } else { -1.0 };
+                let tip = [mid[0] - uy * sign * d, mid[1] + ux * sign * d];
+                let (s0, s1) = (grip_at(mid), grip_at(tip));
+                shown.push((s0 + (s1 - s0) * 0.5, d, TempDim::Distance(id, other), vec![(s0, s1)]));
+            }
+            for (at, value, dim, lines) in shown {
+                for (p, q) in lines { painter.line_segment([p, q], Stroke::new(1.0, ink)); }
+                let editing = app.temp_edit == Some(dim);
+                let text = format!("{:.0}", value * 1000.0);
+                let galley = painter.layout_no_wrap(text.clone(), egui::FontId::proportional(12.0), ink);
+                let r = Rect::from_center_size(at, galley.size() + Vec2::new(10.0, 6.0));
+                if editing {
+                    let edit = ui.put(r.expand2(Vec2::new(14.0, 2.0)), egui::TextEdit::singleline(&mut app.temp_text).desired_width(r.width() + 24.0));
+                    edit.request_focus();
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) { app.apply_temp_dim(); }
+                    else if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.temp_edit = None; }
+                } else {
+                    painter.rect_filled(r, 2.0, ui.visuals().panel_fill);
+                    painter.rect_stroke(r, 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Middle);
+                    painter.galley(r.center() - galley.size() / 2.0, galley, ink);
+                    let hit = ui.interact(r, egui::Id::new(("tempdim", dim.key())), Sense::click());
+                    if hit.clicked() { app.temp_edit = Some(dim); app.temp_text = text; }
+                    if hit.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::Text); }
+                    app.temp_labels.push((r, dim, value));
+                }
+            }
+        } else if app.temp_edit.is_some() { app.temp_edit = None; }
         if response.drag_started_by(egui::PointerButton::Primary) {
             if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
                 if let Some((id, a, b)) = wall_ends.filter(|(_, a, b)| grip_at(*a).distance(p) < 10.0 || grip_at(*b).distance(p) < 10.0) {
@@ -661,6 +774,26 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     }
     painter.text(rect.left_bottom() + Vec2::new(8.0, -8.0), egui::Align2::LEFT_BOTTOM,
         "Document geometry • metres • in memory", egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
+}
+
+/// An aligned dimension: extension lines from the measured points `p1` and `p2` to the dimension line `q1`-`q2`, ticks at its
+/// ends and the text on it. Returns the middle of the text.
+fn draw_dimension(painter: &egui::Painter, p1: Pos2, p2: Pos2, q1: Pos2, q2: Pos2, text: &str, ink: Color32) -> Pos2 {
+    let stroke = Stroke::new(1.0, ink);
+    for (p, q) in [(p1, q1), (p2, q2)] {
+        let d = (q - p).normalized();
+        if (q - p).length() > 1.0 { painter.line_segment([p + d * 3.0, q + d * 4.0], stroke); }
+    }
+    painter.line_segment([q1, q2], stroke);
+    let along = if (q2 - q1).length() > 1e-3 { (q2 - q1).normalized() } else { Vec2::X };
+    for q in [q1, q2] { painter.line_segment([q - (along + Vec2::new(-along.y, along.x)) * 4.0, q + (along + Vec2::new(-along.y, along.x)) * 4.0], Stroke::new(1.5, ink)); }
+    let mid = q1 + (q2 - q1) * 0.5;
+    let normal = Vec2::new(-along.y, along.x);
+    let normal = if normal.y > 0.0 { -normal } else { normal };
+    let galley = painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(12.0), ink);
+    let centre = mid + normal * (galley.size().y * 0.5 + 3.0);
+    painter.galley(centre - galley.size() / 2.0, galley, ink);
+    centre
 }
 
 fn dashed(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
@@ -1344,5 +1477,92 @@ mod tests {
         assert!(app.document.elements().count() < n);
         app.document.undo().unwrap();
         assert_eq!(app.document.elements().count(), n);
+    }
+
+    #[test]
+    fn a_selected_wall_shows_temporary_dimensions_and_typing_a_number_changes_the_wall() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let w = app.document.place_wall(level, [1.0, -3.0], [6.0, -3.0], 0.2, 3.0, 0.0).unwrap();
+        app.select_element(Some(w));
+        frame(&ctx, screen, &mut app, vec![]);
+        let find = |app: &Desktop, want: TempDim| app.temp_labels.iter().find(|l| l.1 == want).map(|l| l.0.center());
+        let at = find(&app, TempDim::Length(w)).expect("the length is shown");
+        assert!(app.temp_labels.len() >= 2, "the length and a neighbour: {:?}", app.temp_labels);
+        // click the length, type 4000 and Enter: the end moves
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(app.temp_edit, Some(TempDim::Length(w)), "{}", app.message);
+        assert_eq!(app.temp_text, "5000");
+        app.temp_text = "4000".into();
+        frame(&ctx, screen, &mut app, vec![]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(wall_line(&app, w), ([1.0, -3.0], [5.0, -3.0]), "{}", app.message);
+        assert!(app.temp_edit.is_none());
+        // the distance to the neighbour on the other side: type a new one and the wall moves
+        frame(&ctx, screen, &mut app, vec![]);
+        let (dim, at) = app.temp_labels.iter().find_map(|l| match l.1 { d @ TempDim::Distance(..) => Some((d, l.0.center())), _ => None }).expect("a neighbour is shown");
+        let TempDim::Distance(_, other) = dim else { unreachable!() };
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(app.temp_edit, Some(dim), "{}", app.message);
+        app.temp_text = "2500".into();
+        app.apply_temp_dim();
+        let (s, _) = wall_line(&app, w);
+        let (o, _) = app.document.line_of(other).unwrap();
+        // the wall is 2.5 m from the neighbour's line (a horizontal line)
+        assert!(((s[1] - o[1]).abs() - 2.5).abs() < 1e-6, "{s:?} {o:?} {}", app.message);
+        app.document.undo().unwrap();
+        // not a number
+        app.temp_edit = Some(TempDim::Length(w));
+        app.temp_text = "abc".into();
+        app.apply_temp_dim();
+        assert!(app.message.contains("number"));
+        // Delete does not delete the wall while a number is being typed
+        app.temp_edit = Some(TempDim::Length(w));
+        app.temp_text = "1".into();
+        frame(&ctx, screen, &mut app, vec![]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Backspace)]);
+        assert!(app.document.get(w).is_some(), "the wall is still there");
+    }
+
+    #[test]
+    fn dimension_and_measure_tools_take_points_and_the_dimension_is_kept() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let dims = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Dimension).count();
+        app.run_command("dimension", "Aligned");
+        assert!(app.tool == crate::Tool::Dimension);
+        app.dimension_click(ElementId(10), [0.0, 0.0]);
+        app.dimension_click(ElementId(10), [4.0, 3.0]);
+        assert_eq!(dims(&app), 0);
+        app.dimension_click(ElementId(10), [1.0, 4.0]);
+        assert_eq!(dims(&app), 1, "{}", app.message);
+        assert!(app.message.contains("5000"), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![]);
+        app.document.undo().unwrap();
+        assert_eq!(dims(&app), 0);
+        // a dimension is selected, moved and deleted like any element
+        app.dimension_click(ElementId(10), [0.0, 0.0]);
+        app.dimension_click(ElementId(10), [2.0, 0.0]);
+        app.dimension_click(ElementId(10), [1.0, 1.0]);
+        let d = app.document.elements().find(|e| e.category == Category::Dimension).unwrap().id;
+        app.choose_tool(crate::Tool::Select);
+        app.select_element(Some(d));
+        app.delete_selected();
+        assert_eq!(dims(&app), 0);
+        // Measure shows the distance and keeps the two points
+        app.run_command("measure", "Measure");
+        app.measure_click([0.0, 0.0]);
+        app.measure_click([3.0, 4.0]);
+        assert!(app.message.contains("5000") && app.measured == Some(([0.0, 0.0], [3.0, 4.0])), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
     }
 }

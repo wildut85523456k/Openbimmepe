@@ -8,8 +8,8 @@ use super::{Category, Document, Element, ElementId, Geometry, Material, Section,
 /// Written first in every set of records.
 pub const FORMAT: &str = "obim-records-1";
 
-const CATEGORIES: [(Category, &str); 17] = [
-    (Category::Wall, "Wall"), (Category::Tag, "Tag"), (Category::Beam, "Beam"), (Category::Column, "Column"), (Category::Slab, "Slab"), (Category::Footing, "Footing"),
+const CATEGORIES: [(Category, &str); 18] = [
+    (Category::Wall, "Wall"), (Category::Tag, "Tag"), (Category::Dimension, "Dimension"), (Category::Beam, "Beam"), (Category::Column, "Column"), (Category::Slab, "Slab"), (Category::Footing, "Footing"),
     (Category::WallFooting, "WallFooting"), (Category::BeamSystem, "BeamSystem"), (Category::Truss, "Truss"), (Category::Rebar, "Rebar"),
     (Category::Family, "Family"), (Category::Type, "Type"), (Category::Duct, "Duct"), (Category::Pipe, "Pipe"), (Category::Equipment, "Equipment"),
     (Category::Level, "Level"), (Category::Grid, "Grid"),
@@ -50,6 +50,7 @@ fn geometry_text(g: Option<Geometry>) -> String {
         Some(Geometry::Area { level }) => format!("A,{}", level.0),
         Some(Geometry::Pad { at, level, thickness_m }) => format!("F,{:?},{:?},{},{:?}", at[0], at[1], level.0, thickness_m),
         Some(Geometry::OnWall { host }) => format!("O,{}", host.0),
+        Some(Geometry::Dimension { a, b, at, level }) => format!("N,{},{:?},{:?},{:?},{:?},{:?},{:?}", level.0, a[0], a[1], b[0], b[1], at[0], at[1]),
         Some(Geometry::Tag { host, at, anchor }) => format!("K,{},{:?},{:?},{:?},{:?}", host.0, at[0], at[1], anchor[0], anchor[1]),
     }
 }
@@ -73,6 +74,7 @@ fn parse_geometry(s: &str) -> Result<Option<Geometry>, String> {
         "A" => { need(2)?; Geometry::Area { level: ElementId(int(p[1])?) } }
         "F" => { need(5)?; Geometry::Pad { at: [num(p[1])?, num(p[2])?], level: ElementId(int(p[3])?), thickness_m: num(p[4])? } }
         "O" => { need(2)?; Geometry::OnWall { host: ElementId(int(p[1])?) } }
+        "N" => { need(8)?; Geometry::Dimension { level: ElementId(int(p[1])?), a: [num(p[2])?, num(p[3])?], b: [num(p[4])?, num(p[5])?], at: [num(p[6])?, num(p[7])?] } }
         "K" => { need(6)?; Geometry::Tag { host: ElementId(int(p[1])?), at: [num(p[2])?, num(p[3])?], anchor: [num(p[4])?, num(p[5])?] } }
         other => return Err(format!("unknown geometry '{other}'")),
     }))

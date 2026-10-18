@@ -208,7 +208,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
-        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"),
+        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }

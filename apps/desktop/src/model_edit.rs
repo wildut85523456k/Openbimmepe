@@ -1,4 +1,4 @@
-use crate::{Desktop, ElementId, SampleElement, Tool};
+use crate::{Desktop, ElementId, SampleElement, TempDim, Tool};
 use eframe::egui;
 use openbim_document::{Xf, FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
@@ -610,6 +610,51 @@ impl Desktop {
             }
             Err(e) => { self.message = format!("Cannot do that: {e}"); self.edit_pts.clear(); self.edit_src.clear(); }
         }
+    }
+
+    /// A pick of the Dimension tool: the two points, then the place of the dimension line.
+    pub(crate) fn dimension_click(&mut self, level: ElementId, point: [f64; 2]) {
+        match self.edit_pts.as_slice() {
+            [] => { self.edit_pts.push(point); self.message = "Dimension: pick the second point".into(); }
+            [a] => {
+                if (point[0] - a[0]).hypot(point[1] - a[1]) < 0.001 { return; }
+                self.edit_pts.push(point);
+                self.message = "Dimension: pick where the dimension line goes".into();
+            }
+            [a, b] => {
+                let (a, b) = (*a, *b);
+                match self.document.place_dimension(level, a, b, point) {
+                    Ok(_) => { self.edit_pts.clear(); self.message = format!("Dimension {:.0} mm placed; undo removes it", (b[0] - a[0]).hypot(b[1] - a[1]) * 1000.0); }
+                    Err(e) => self.message = format!("Dimension rejected: {e:?}"),
+                }
+            }
+            _ => self.edit_pts.clear(),
+        }
+    }
+
+    /// A pick of the Measure tool: the first point, then the second, whose distance is shown.
+    pub(crate) fn measure_click(&mut self, point: [f64; 2]) {
+        match self.edit_pts.first().copied() {
+            None => { self.measured = None; self.edit_pts.push(point); self.message = "Measure: pick the second point".into(); }
+            Some(a) => {
+                self.edit_pts.clear();
+                let (dx, dy) = (point[0] - a[0], point[1] - a[1]);
+                self.measured = Some((a, point));
+                self.message = format!("Measure: {:.0} mm  (x {:.0}, y {:.0}, {:.1} deg)", dx.hypot(dy) * 1000.0, dx.abs() * 1000.0, dy.abs() * 1000.0, dy.atan2(dx).to_degrees());
+            }
+        }
+    }
+
+    /// Enter on a retyped temporary dimension: the wall changes in one undoable step.
+    pub(crate) fn apply_temp_dim(&mut self) {
+        let Some(t) = self.temp_edit.take() else { return };
+        let Ok(mm) = self.temp_text.trim().parse::<f64>() else { self.message = "Type a number of millimetres".into(); return };
+        let m = mm / 1000.0;
+        let done = match t {
+            TempDim::Length(id) => self.document.set_wall_length_commands(id, m),
+            TempDim::Distance(id, other) => self.document.set_neighbour_distance_commands(id, other, m),
+        }.and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}")));
+        self.message = match done { Ok(_) => format!("Changed to {mm:.0} mm; undo takes it back"), Err(e) => format!("Cannot do that: {e}") };
     }
 
     /// A click of Align, Trim/Extend or Offset on `hit` (or on nothing), at `at`.

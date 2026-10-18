@@ -112,6 +112,7 @@ impl Document {
                 e.geometry = Some(Geometry::Area { level });
             }
             Some(Geometry::Tag { host, at, anchor }) => e.geometry = Some(Geometry::Tag { host, at: p(at), anchor: p(anchor) }),
+            Some(Geometry::Dimension { a, b, at, level }) => e.geometry = Some(Geometry::Dimension { a: p(a), b: p(b), at: p(at), level }),
             // hosted by something else: it goes where its host goes
             Some(Geometry::InWall { .. } | Geometry::OnWall { .. } | Geometry::OnMember { .. }) => {}
             Some(Geometry::Level) | None => return Err(format!("{} cannot be moved in the plan", e.name)),
@@ -226,6 +227,59 @@ impl Document {
         let side = (toward[0] - s[0]) * -dy + (toward[1] - s[1]) * dx;
         let k = if side >= 0.0 { 1.0 } else { -1.0 };
         Ok(Xf::Move([-dy / l * dist * k, dx / l * dist * k]))
+    }
+
+    /// The nearest line parallel to the wall `id` on each side, as Revit's temporary dimensions show them: a wall, a beam
+    /// or a grid alongside it. Each is `(element, distance in metres)`, first the one on the left of the wall's direction.
+    pub fn wall_neighbours(&self, id: ElementId) -> [Option<(ElementId, f64)>; 2] {
+        let Some((s, t)) = self.line_of(id).filter(|_| self.get(id).is_some_and(|e| e.category == Category::Wall)) else { return [None, None] };
+        let level = self.level_of(id);
+        let (dx, dy) = (t[0] - s[0], t[1] - s[1]);
+        let l = dx.hypot(dy);
+        let n = [-dy / l, dx / l];
+        let mut best: [Option<(ElementId, f64)>; 2] = [None, None];
+        for e in self.elements() {
+            if e.id == id { continue; }
+            let Some((a, b)) = self.line_of(e.id) else { continue };
+            let is_grid = e.category == Category::Grid;
+            if !is_grid && self.level_of(e.id) != level { continue; }
+            let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+            let el = ex.hypot(ey);
+            if (dx * ey - dy * ex).abs() / (l * el) > 1e-3 { continue; }
+            if !is_grid {
+                let p = |q: P| ((q[0] - s[0]) * dx + (q[1] - s[1]) * dy) / l;
+                let (lo, hi) = (p(a).min(p(b)), p(a).max(p(b)));
+                if hi.min(l) - lo.max(0.0) < 0.01 { continue; }
+            }
+            let d = (a[0] - s[0]) * n[0] + (a[1] - s[1]) * n[1];
+            if d.abs() < 1e-6 { continue; }
+            let side = usize::from(d < 0.0);
+            if best[side].is_none_or(|(_, b)| d.abs() < b) { best[side] = Some((e.id, d.abs())); }
+        }
+        best
+    }
+
+    /// Typing a new value into the dimension between the wall `id` and its neighbour `other`: the wall moves, with what
+    /// stands in it, so that their lines are `new_m` apart.
+    pub fn set_neighbour_distance_commands(&self, id: ElementId, other: ElementId, new_m: f64) -> Result<Vec<Command>, String> {
+        if new_m <= 0.0 { return Err("the distance must be more than zero".into()); }
+        let (s, t) = self.line_of(id).ok_or("not a wall")?;
+        let (a, _) = self.line_of(other).ok_or("not a line")?;
+        let (dx, dy) = (t[0] - s[0], t[1] - s[1]);
+        let l = dx.hypot(dy);
+        let n = [-dy / l, dx / l];
+        let d = (a[0] - s[0]) * n[0] + (a[1] - s[1]) * n[1];
+        let shift = d - d.signum() * new_m;
+        if shift.abs() < 1e-9 { return Err("nothing changes".into()); }
+        self.transform_commands(&[id], Xf::Move([n[0] * shift, n[1] * shift]))
+    }
+
+    /// Typing a new length into the temporary dimension of the wall `id`: its end moves (the walls joined there follow).
+    pub fn set_wall_length_commands(&self, id: ElementId, new_m: f64) -> Result<Vec<Command>, String> {
+        if new_m < 0.05 { return Err("a wall needs at least 50 mm".into()); }
+        let (s, t) = self.line_of(id).filter(|_| self.get(id).is_some_and(|e| e.category == Category::Wall)).ok_or("not a wall")?;
+        let l = (t[0] - s[0]).hypot(t[1] - s[1]);
+        self.wall_end_commands(id, false, [s[0] + (t[0] - s[0]) / l * new_m, s[1] + (t[1] - s[1]) / l * new_m])
     }
 
     /// Copies `ids` and what goes with them, changed by `xf`: the commands and the numbers of the copies of `ids`.
@@ -414,5 +468,41 @@ mod tests {
         assert!(near(line(&d, wall).0, [8.0, 0.0]) && near(line(&d, wall).1, [0.0, 0.0]));
         assert!(matches!((before, d.get(door).unwrap().geometry), (Some(Geometry::InWall { along_m: a, .. }), Some(Geometry::InWall { along_m: b, .. })) if (a + b - 8.0).abs() < 1e-9));
         assert!(d.flip_wall_commands(door).is_err());
+    }
+
+    #[test]
+    fn temporary_dimensions_find_the_neighbours_and_typing_moves_the_wall() {
+        let mut d = Document::spatial_sample();
+        let level = match d.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let up = d.place_wall(level, [1.0, 5.0], [6.0, 5.0], 0.2, 3.0, 0.0).unwrap();
+        let far = d.place_wall(level, [0.0, -3.0], [8.0, -3.0], 0.2, 3.0, 0.0).unwrap();
+        let _beyond = d.place_wall(level, [20.0, 2.0], [28.0, 2.0], 0.2, 3.0, 0.0).unwrap();
+        let _across = d.place_wall(level, [4.0, 1.0], [4.0, 9.0], 0.2, 3.0, 0.0).unwrap();
+        let grid = d.place_grid([0.0, 2.5], [10.0, 2.5], "").unwrap();
+        let [left, right] = d.wall_neighbours(ElementId(20));
+        // wall 20 runs along +x: its left is +y; the grid at 2.5 is nearer than the wall at 5; the wall at -3 is on the right
+        assert_eq!(left.map(|l| l.0), Some(grid), "{left:?}");
+        assert!((left.unwrap().1 - 2.5).abs() < 1e-9 && right.map(|r| r.0) == Some(far) && (right.unwrap().1 - 3.0).abs() < 1e-9);
+        // typing 4 m for the distance to the wall at -3: wall 20 moves up to y = 1
+        let ops = d.set_neighbour_distance_commands(ElementId(20), far, 4.0).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, ElementId(20)).0, [0.0, 1.0]) && near(line(&d, ElementId(20)).1, [8.0, 1.0]));
+        // the sample's own wall at y = 6 is 1 m above the wall at y = 5, and its grid at y = 3 is 2 m below it
+        assert_eq!(d.wall_neighbours(up), [Some((ElementId(22), 1.0)), Some((ElementId(104), 2.0))]);
+        assert!(d.set_neighbour_distance_commands(ElementId(20), far, 4.0).is_err());
+        assert!(d.set_neighbour_distance_commands(ElementId(20), far, 0.0).is_err());
+        // typing a length moves the end only
+        let ops = d.set_wall_length_commands(ElementId(20), 5.5).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, ElementId(20)).0, [0.0, 1.0]) && near(line(&d, ElementId(20)).1, [5.5, 1.0]));
+        assert!(d.set_wall_length_commands(ElementId(20), 0.01).is_err() && d.set_wall_length_commands(grid, 3.0).is_err());
+        // a dimension between two points is saved and moves with the move command
+        let dim = d.place_dimension(level, [0.0, 0.0], [3.0, 0.0], [1.5, 1.0]).unwrap();
+        let ops = d.transform_commands(&[dim], Xf::Move([1.0, 1.0])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(matches!(d.get(dim).unwrap().geometry, Some(Geometry::Dimension { a, b, at, .. }) if near(a, [1.0, 1.0]) && near(b, [4.0, 1.0]) && near(at, [2.5, 2.0])));
+        assert!(d.place_dimension(level, [0.0, 0.0], [0.0, 0.0], [1.0, 1.0]).is_err());
+        let (els, _) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
+        assert_eq!(els.iter().find(|e| e.id == dim).unwrap().geometry, d.get(dim).unwrap().geometry);
     }
 }

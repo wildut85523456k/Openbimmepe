@@ -24,6 +24,8 @@ pub enum Geometry {
     OnWall { host: ElementId },
     /// a tag: its label at `at` in the plan, with a leader to `anchor`, on the element `host`
     Tag { host: ElementId, at: [f64; 2], anchor: [f64; 2] },
+    /// an aligned dimension on `level`: the distance between the points `a` and `b`, its line through `at`
+    Dimension { a: [f64; 2], b: [f64; 2], at: [f64; 2], level: ElementId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -167,6 +169,10 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Tag { host, at, anchor }) => {
                 el.category == Category::Tag && at.iter().chain(anchor.iter()).all(|v| v.is_finite() && v.abs() <= 1e6)
                     && elements.get(host).is_some_and(|h| !matches!(h.category, Category::Tag | Category::Level | Category::Grid | Category::Type))
+            }
+            Some(Geometry::Dimension { a, b, at, level }) => {
+                el.category == Category::Dimension && valid_axis(*a, *b) && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Placed { at, level }) => {
                 el.category == Category::Family && !el.family.is_empty() && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6) && el.elevation_m.abs() <= 1e6
