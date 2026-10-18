@@ -31,11 +31,15 @@ pub struct ElecNode {
     pub efficiency: f64,
     /// a motor started direct: the start current over the running current, and the power factor while starting
     pub motor: Option<(f64, f64)>,
+    /// the family instance (a chiller, a fan coil, a pump) this load belongs to, and the name of its electrical connector:
+    /// the node sits at the connector and takes its power and power factor from it
+    pub element: Option<ElementId>,
+    pub connector: String,
 }
 
 impl ElecNode {
     pub fn new(id: u64, name: &str, kind: ElecKind, at: [f64; 2], level: ElementId) -> Self {
-        Self { id, name: name.into(), kind, at, level, watts: 0.0, power_factor: 0.9, efficiency: 1.0, motor: None }
+        Self { id, name: name.into(), kind, at, level, watts: 0.0, power_factor: 0.9, efficiency: 1.0, motor: None, element: None, connector: String::new() }
     }
 }
 

@@ -27,7 +27,7 @@ impl Default for EndDraft {
 }
 
 impl EndDraft {
-    pub(crate) const KINDS: [&'static str; 4] = ["Flow (l/s)", "Power (kW) and temperature difference (K)", "Loading units", "Sprinkler: K-factor and minimum flow (l/min)"];
+    pub(crate) const KINDS: [&'static str; 5] = ["Flow (l/s)", "Power (kW) and temperature difference (K)", "Loading units", "Sprinkler: K-factor and minimum flow (l/min)", "From the equipment connector it meets"];
 
     pub(crate) fn demand(&self) -> EndDemand {
         match self.kind {
@@ -136,6 +136,12 @@ impl Desktop {
                 if !removed { self.message = "End point: nothing to remove there".into(); return; }
             }
             Mark::Source => data.endpoints.push(MepEndpoint { port, role: EndRole::Source, demand: EndDemand::None, required_pressure_pa: 0.0 }),
+            Mark::Terminal if d.kind == 4 => {
+                let (domain, at) = (if self.document.get(match port.node { MepNode::Run(id) => id, _ => ElementId(0) }).is_some_and(|e| e.category == Category::Pipe) { openbim_family::mep::Domain::Pipe } else { openbim_family::mep::Domain::Duct }, port_pos(&self.document, port).unwrap_or(at));
+                let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, at, 0.6, domain) else { self.message = "End point: no equipment connector of this kind within 0.6 m of that end".into(); return };
+                if c.flow <= 0.0 { self.message = format!("The connector '{}' of {} has no flow", c.name, self.document.get(el).map_or("the equipment", |e| e.name.as_str())); return; }
+                data.endpoints.push(MepEndpoint { port, role: EndRole::Terminal, demand: EndDemand::Flow(c.flow), required_pressure_pa: c.pressure_drop });
+            }
             Mark::Terminal => data.endpoints.push(MepEndpoint { port, role: EndRole::Terminal, demand: d.demand(), required_pressure_pa: d.pressure_kpa * 1000.0 }),
         }
         match self.document.transact(self.document.revision(), &[Command::SetMep(Box::new(data))]) {
@@ -152,13 +158,15 @@ impl Desktop {
         ui.selectable_value(&mut self.end_draft.mark, Mark::Remove, "Remove");
         if self.end_draft.mark == Mark::Terminal {
             let d = &mut self.end_draft;
-            egui::ComboBox::from_id_salt("end_kind").selected_text(EndDraft::KINDS[d.kind.min(3)]).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("end_kind").selected_text(EndDraft::KINDS[d.kind.min(4)]).show_ui(ui, |ui| {
                 for (i, k) in EndDraft::KINDS.iter().enumerate() { ui.selectable_value(&mut d.kind, i, *k); }
             });
-            ui.add(egui::DragValue::new(&mut d.a).speed(0.1).range(0.0..=1.0e6));
+            if d.kind != 4 { ui.add(egui::DragValue::new(&mut d.a).speed(0.1).range(0.0..=1.0e6)); }
             if d.kind == 1 || d.kind == 3 { ui.add(egui::DragValue::new(&mut d.b).speed(0.1).range(0.0..=1.0e6)); }
-            ui.label("Pressure it needs (kPa)");
-            ui.add(egui::DragValue::new(&mut d.pressure_kpa).speed(0.5).range(0.0..=1.0e5));
+            if d.kind != 4 {
+                ui.label("Pressure it needs (kPa)");
+                ui.add(egui::DragValue::new(&mut d.pressure_kpa).speed(0.5).range(0.0..=1.0e5));
+            }
         }
         ui.weak("Click an open end of a duct or pipe. Source = where the pump or fan is; terminals take the flow.");
     }

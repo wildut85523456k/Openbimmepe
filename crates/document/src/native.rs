@@ -161,7 +161,7 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
     for n in &m.elec_nodes {
         let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
         let motor = n.motor.map_or("N".to_string(), |(m, p)| format!("{m:?}:{p:?}"));
-        out.push(format!("B|id={}|name={}|kind={kind}|at={:?},{:?}|lv={}|w={:?}|pf={:?}|eff={:?}|mot={motor}", n.id, esc(&n.name), n.at[0], n.at[1], n.level.0, n.watts, n.power_factor, n.efficiency));
+        out.push(format!("B|id={}|name={}|kind={kind}|at={:?},{:?}|lv={}|w={:?}|pf={:?}|eff={:?}|mot={motor}|el={}|cn={}", n.id, esc(&n.name), n.at[0], n.at[1], n.level.0, n.watts, n.power_factor, n.efficiency, n.element.map_or("N".to_string(), |e| e.0.to_string()), esc(&n.connector)));
     }
     for c in &m.elec_cables {
         let via: Vec<String> = c.via.iter().map(|p| format!("{:?},{:?}", p[0], p[1])).collect();
@@ -184,7 +184,7 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
         if line.starts_with("B|") {
             let kind = match get("kind")? { "S" => super::ElecKind::Source, "B" => super::ElecKind::Board, "L" => super::ElecKind::Load, _ => return Err("an unknown electrical node kind".into()) };
             let motor = match get("mot")? { "N" => None, t => { let (a, b) = t.split_once(':').ok_or("a motor without ':'")?; Some((num(a)?, num(b)?)) } };
-            m.elec_nodes.push(super::ElecNode { id: int(get("id")?)?, name: unesc(get("name")?)?, kind, at: pt(get("at")?)?, level: ElementId(int(get("lv")?)?), watts: num(get("w")?)?, power_factor: num(get("pf")?)?, efficiency: num(get("eff")?)?, motor });
+            m.elec_nodes.push(super::ElecNode { id: int(get("id")?)?, name: unesc(get("name")?)?, kind, at: pt(get("at")?)?, level: ElementId(int(get("lv")?)?), watts: num(get("w")?)?, power_factor: num(get("pf")?)?, efficiency: num(get("eff")?)?, motor, element: match f.get("el").copied() { None | Some("N") => None, Some(t) => Some(ElementId(int(t)?)) }, connector: f.get("cn").map_or(Ok(String::new()), |t| unesc(t))? });
             continue;
         }
         if line.starts_with("C|") {

@@ -117,7 +117,7 @@ impl MepData {
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
             run_systems: self.run_systems.iter().filter(|(r, _)| is_run(elements.get(r))).copied().collect(),
             endpoints: self.endpoints.iter().filter(|e| alive(&e.port.node)).copied().collect(),
-            elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().collect(),
+            elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().map(|mut n| { if n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family)) { n.element = None; n.connector.clear(); } n }).collect(),
             elec_cables: { let keep: std::collections::BTreeSet<u64> = self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).map(|n| n.id).collect(); self.elec_cables.iter().filter(|c| keep.contains(&c.from) && keep.contains(&c.to)).cloned().collect() },
         }
     }
@@ -169,6 +169,7 @@ impl MepData {
                 return Err(EditError::InvalidMep);
             }
         }
+        if self.elec_nodes.iter().any(|n| n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family))) { return Err(EditError::InvalidMep); }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }
         Ok(())

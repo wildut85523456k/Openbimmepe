@@ -4,7 +4,8 @@ use crate::Desktop;
 use eframe::egui::{self, Color32, Pos2, Stroke};
 use openbim_calc as calc;
 use openbim_document::compute_elec::{self, ElecComputeError, ElecComputeSettings, ElecReport};
-use openbim_document::{Command, ElecCable, ElecKind, ElecNode, Document, ElementId};
+use openbim_document::{Category, Command, ElecCable, ElecKind, ElecNode, Document, ElementId, Geometry};
+use openbim_family::mep::{Connector, Domain, Pose};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode { Place, Edit, Remove }
@@ -27,6 +28,8 @@ pub(crate) struct ElecDraft {
     pub ambient: Option<f64>,
     pub demand_factor: f64,
     pub rcd_ma: Option<f64>,
+    /// Load only: take the place and the power from the electrical connector of the family instance clicked
+    pub from_equipment: bool,
     /// the node (Edit mode, node tool) or the cable, named by the node it feeds (Edit mode, cable tool), being edited
     pub selected: Option<u64>,
 }
@@ -34,7 +37,7 @@ pub(crate) struct ElecDraft {
 impl Default for ElecDraft {
     fn default() -> Self {
         Self { mode: Mode::Place, kind: ElecKind::Load, name: String::new(), kw: 10.0, power_factor: 0.9, efficiency: 1.0, motor: false, start_multiple: 6.0, start_pf: 0.35,
-            three_phase: true, extra_m: 0.0, grouped: 1, ambient: None, demand_factor: 1.0, rcd_ma: None, selected: None }
+            three_phase: true, extra_m: 0.0, grouped: 1, ambient: None, demand_factor: 1.0, rcd_ma: None, from_equipment: false, selected: None }
     }
 }
 
@@ -78,6 +81,29 @@ impl Default for ElecDialog {
             report: None, error: String::new(),
         }
     }
+}
+
+/// The connectors of a family instance (a chiller, a fan coil), solved and put where the instance stands.
+pub(crate) fn instance_connectors(doc: &Document, id: ElementId) -> Vec<Connector> {
+    let Some(el) = doc.get(id).filter(|e| e.category == Category::Family) else { return Vec::new() };
+    let Some(Geometry::Placed { at, level }) = el.geometry else { return Vec::new() };
+    let Some(f) = crate::export::library().iter().find(|f| f.name() == el.family) else { return Vec::new() };
+    let req = openbim_family::Request {
+        type_name: (!el.type_name.is_empty()).then_some(el.type_name.as_str()),
+        overrides: el.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
+        texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+    };
+    let Ok(inst) = f.solve(&req) else { return Vec::new() };
+    let z = doc.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;
+    let pose = Pose { x: at[0], y: at[1], z, angle: el.angle_deg };
+    inst.connectors.iter().map(|c| c.world(&pose)).collect()
+}
+
+/// The family instance nearest a plan point (within `tol`) that has a connector of `domain`, with that connector.
+pub(crate) fn equipment_connector_near(doc: &Document, level: ElementId, at: [f64; 2], tol: f64, domain: Domain) -> Option<(ElementId, Connector)> {
+    doc.elements().filter(|e| e.category == Category::Family && matches!(e.geometry, Some(Geometry::Placed { level: l, .. }) if l == level)).flat_map(|e| {
+        instance_connectors(doc, e.id).into_iter().filter(|c| c.domain == domain).map(move |c| (e.id, c))
+    }).map(|(id, c)| ((c.pos[0] - at[0]).hypot(c.pos[1] - at[1]), id, c)).filter(|(d, _, _)| *d <= tol).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, id, c)| (id, c))
 }
 
 fn table_err(what: &str, e: calc::TableError) -> String {
@@ -137,6 +163,17 @@ impl Desktop {
         }
         if hit.is_some() { self.message = "There is a node there already".into(); return; }
         let d = self.elec_draft.clone();
+        if d.from_equipment && d.kind == ElecKind::Load {
+            let Some((el, c)) = equipment_connector_near(&self.document, level, at, 1.5, Domain::Electrical) else { self.message = "No equipment with an electrical connector within 1.5 m of the click".into(); return };
+            if data.elec_nodes.iter().any(|n| n.element == Some(el) && n.connector == c.name) { self.message = "That connector feeds a load already".into(); return; }
+            let name = self.document.get(el).map_or("Equipment".into(), |e| e.name.clone());
+            let mut node = ElecNode::new(data.next_node_id(), &name, ElecKind::Load, [c.pos[0], c.pos[1]], level);
+            (node.watts, node.power_factor, node.element, node.connector) = (c.flow, c.power_factor, Some(el), c.name.clone());
+            let (eff, motor) = (d.efficiency, d.motor.then_some((d.start_multiple, d.start_pf)));
+            (node.efficiency, node.motor) = (eff, motor);
+            data.elec_nodes.push(node);
+            return self.set_elec(data, format!("{name} connected: {:.1} kW from its connector '{}'; undo removes it", c.flow / 1000.0, c.name));
+        }
         if d.kind == ElecKind::Source && data.elec_nodes.iter().any(|n| n.kind == ElecKind::Source) { self.message = "There is a source already; compute one supply at a time".into(); return; }
         let n = data.elec_nodes.iter().filter(|n| n.kind == d.kind).count() + 1;
         let name = if d.name.trim().is_empty() { format!("{} {n}", match d.kind { ElecKind::Source => "Source", ElecKind::Board => "Board", ElecKind::Load => "Load" }) } else { d.name.trim().to_string() };
@@ -221,7 +258,8 @@ impl Desktop {
             ui.selectable_value(&mut d.kind, ElecKind::Load, "Load");
             ui.label("Name");
             ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(90.0));
-            if d.kind == ElecKind::Load {
+            if d.kind == ElecKind::Load { ui.checkbox(&mut d.from_equipment, "From equipment").on_hover_text("Click near an equipment family with an electrical connector: the load sits at the connector and takes its power"); }
+            if d.kind == ElecKind::Load && !d.from_equipment {
                 ui.label("kW");
                 ui.add(egui::DragValue::new(&mut d.kw).speed(0.1).range(0.0..=1.0e5));
                 ui.label("pf");
@@ -254,6 +292,21 @@ impl Desktop {
         if d.mode == Mode::Edit && ui.button("Apply").clicked() { self.elec_apply(); }
     }
 
+    /// Moves every load tied to equipment to where its connector is now and gives it the connector's power again. Gives
+    /// the number changed. One undoable step.
+    pub(crate) fn refresh_equipment_loads(&mut self) -> usize {
+        let mut data = self.document.mep().clone();
+        let mut changed = 0;
+        for n in data.elec_nodes.iter_mut() {
+            let Some(el) = n.element else { continue };
+            let Some(c) = instance_connectors(&self.document, el).into_iter().find(|c| c.name == n.connector && c.domain == Domain::Electrical) else { continue };
+            let (at, w, pf) = ([c.pos[0], c.pos[1]], c.flow, c.power_factor);
+            if n.at != at || n.watts != w || n.power_factor != pf { (n.at, n.watts, n.power_factor) = (at, w, pf); changed += 1; }
+        }
+        if changed > 0 { self.set_elec(data, format!("{changed} load(s) updated from their equipment; undo reverts")); }
+        changed
+    }
+
     /// Writes the options bar's values to the node or cable being edited.
     pub(crate) fn elec_apply(&mut self) {
         let Some(id) = self.elec_draft.selected else { return };
@@ -262,7 +315,11 @@ impl Desktop {
         if self.tool == crate::Tool::ElecNode {
             let Some(n) = data.elec_nodes.iter_mut().find(|n| n.id == id) else { self.message = "That node is gone".into(); return };
             if !d.name.trim().is_empty() { n.name = d.name.trim().to_string(); }
-            if n.kind == ElecKind::Load {
+            if n.kind == ElecKind::Load && n.element.is_some() {
+                // power and place come from the equipment's connector; the rest is the designer's
+                n.efficiency = d.efficiency;
+                n.motor = d.motor.then_some((d.start_multiple, d.start_pf));
+            } else if n.kind == ElecKind::Load {
                 (n.watts, n.power_factor, n.efficiency) = (d.kw * 1000.0, d.power_factor, d.efficiency);
                 n.motor = d.motor.then_some((d.start_multiple, d.start_pf));
             }
@@ -295,6 +352,7 @@ impl Desktop {
 
     pub(crate) fn run_elec_compute(&mut self) {
         self.elec.error.clear();
+        self.refresh_equipment_loads();
         let settings = match self.elec_settings() { Ok(s) => s, Err(e) => { self.elec.error = e; return } };
         match compute_elec::compute_electrical(&self.document, &settings) {
             Ok(r) => {
@@ -571,5 +629,63 @@ mod tests {
         app.undo_document();
         assert_eq!(app.document.mep().elec_nodes.iter().find(|n| n.kind == ElecKind::Load).unwrap().name, "Fan");
         assert!(app.document.mep().elec_cables[0].three_phase);
+    }
+
+    #[test]
+    fn a_load_takes_its_place_and_power_from_the_equipment_and_follows_it_and_a_duct_end_takes_the_airflow() {
+        use openbim_document::FamilySpec;
+        let mut app = Desktop::sample();
+        let lv = ElementId(10);
+        let fcu = app.document.place_family(lv, [5.0, 5.0], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 90.0, elevation_m: 2.2 }).unwrap();
+        let conns = instance_connectors(&app.document, fcu);
+        let power = conns.iter().find(|c| c.domain == Domain::Electrical).expect("electrical connector").clone();
+        let air = conns.iter().find(|c| c.domain == Domain::Duct && c.flow > 0.0).expect("an air connector").clone();
+        // a click near the unit makes a load at its connector with the connector's power
+        app.choose_tool(Tool::ElecNode);
+        app.elec_draft.kind = ElecKind::Load;
+        app.elec_draft.from_equipment = true;
+        app.elec_node_click(lv, [5.5, 5.5]);
+        let n = app.document.mep().elec_nodes.first().expect("a load").clone();
+        assert_eq!((n.element, n.connector.as_str()), (Some(fcu), power.name.as_str()), "{}", app.message);
+        assert_eq!((n.at, n.watts, n.power_factor), ([power.pos[0], power.pos[1]], power.flow, power.power_factor));
+        // the tie is saved and comes back from the file's records
+        let lines = openbim_document::native::records(&app.document);
+        assert_eq!(openbim_document::native::parse_mep(&lines).unwrap(), *app.document.mep());
+        let out = crate::export::export_ifc_as(&app.document, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4x3).unwrap();
+        let mut back = Document::new();
+        crate::import::import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(back.mep().elec_nodes, app.document.mep().elec_nodes);
+        app.elec_node_click(lv, [5.5, 5.5]);
+        assert!(app.message.contains("already"), "{}", app.message);
+        // far from any equipment: refused
+        app.elec_node_click(lv, [30.0, 30.0]);
+        assert!(app.message.contains("No equipment"), "{}", app.message);
+        // the unit moves: the load follows when refreshed (and on compute); one undoable step
+        app.document.transact(app.document.revision(), &[Command::SetGeometry { id: fcu, geometry: Geometry::Placed { at: [8.0, 5.0], level: lv } }]).unwrap();
+        assert_eq!(app.refresh_equipment_loads(), 1);
+        let moved = app.document.mep().elec_nodes[0].at;
+        assert!((moved[0] - power.pos[0] - 3.0).abs() < 1e-9 && (moved[1] - power.pos[1]).abs() < 1e-9, "{moved:?}");
+        assert_eq!(app.refresh_equipment_loads(), 0);
+        // deleting the unit lets go of the load but keeps it
+        let before = app.document.revision();
+        app.document.transact(before, &[Command::Delete { id: fcu }]).unwrap();
+        let n = &app.document.mep().elec_nodes[0];
+        assert!(n.element.is_none() && n.connector.is_empty() && n.watts == power.flow);
+        assert!(app.document.undo().unwrap());
+        assert_eq!(app.document.mep().elec_nodes[0].element, Some(fcu));
+        // the unit is back where it was moved to; a duct that ends at its air connector gives the end point the airflow
+        let air = instance_connectors(&app.document, fcu).into_iter().find(|c| c.name == air.name).unwrap();
+        app.choose_tool(Tool::Duct);
+        app.elevation_mm = 2200.0;
+        app.run_click([air.pos[0] - 3.0, air.pos[1]]);
+        app.run_click([air.pos[0], air.pos[1]]);
+        app.finish_run(lv);
+        app.choose_tool(Tool::EndPoint);
+        app.end_draft.mark = crate::compute_ui::Mark::Terminal;
+        app.end_draft.kind = 4;
+        app.end_point_click(lv, [air.pos[0], air.pos[1]]);
+        let e = app.document.mep().endpoints.first().unwrap_or_else(|| panic!("{}", app.message));
+        assert_eq!(e.demand, openbim_document::EndDemand::Flow(air.flow));
+        assert_eq!(e.required_pressure_pa, air.pressure_drop);
     }
 }
