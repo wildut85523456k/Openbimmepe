@@ -89,6 +89,8 @@ struct Desktop {
     show_browser: bool,
     /// the warnings window is open; the list is worked out again only when the document has a new revision
     show_warnings: bool,
+    /// the types window, while it is open
+    types_dialog: Option<model_edit::TypesDialog>,
     /// the export window, while it is open
     export_dialog: Option<model_edit::ExportDialog>,
     import_dialog: Option<model_edit::ImportDialog>,
@@ -142,7 +144,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),
-            show_properties: true, show_browser: true, show_warnings: false, export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, types_dialog: None, export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -231,6 +233,7 @@ impl Desktop {
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
             "ifc_import" => self.import_ifc_file(),
+            "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
             "zoom_out" => self.zoom = (self.zoom / 1.25).max(0.3),
@@ -334,6 +337,7 @@ impl eframe::App for Desktop {
         self.warnings_window(&ctx);
         self.export_window(&ctx);
         self.import_window(&ctx);
+        self.types_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));

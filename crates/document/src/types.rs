@@ -148,6 +148,28 @@ impl Document {
         Ok(())
     }
 
+    /// Gives a type another name; the name must be new among the types of its kind.
+    pub fn rename_type(&mut self, type_id: ElementId, name: &str) -> Result<(), EditError> {
+        if self.get(type_id).is_none_or(|t| t.category != Category::Type) { return Err(EditError::NotFound(type_id)); }
+        if name.trim().is_empty() { return Err(EditError::InvalidElement); }
+        self.transact(self.revision, &[Command::Rename { id: type_id, name: name.into() }])?;
+        Ok(())
+    }
+
+    /// Makes a new type with the values of `type_id`, called `name`, that no element uses yet.
+    pub fn duplicate_type(&mut self, type_id: ElementId, name: &str) -> Result<ElementId, EditError> {
+        let ty = self.get(type_id).filter(|t| t.category == Category::Type).ok_or(EditError::NotFound(type_id))?;
+        let (kind, values) = (ty.kind(), TypeValues::of(ty));
+        let id = self.next_id();
+        let mut ops = vec![
+            Command::Create { id, category: Category::Type, name: name.trim().into(), width_m: values.width_m, height_m: values.height_m, elevation_m: 0.0 },
+            Command::SetTypeFor { id, category: kind },
+        ];
+        ops.extend(values.commands(id, kind));
+        self.transact(self.revision, &ops)?;
+        Ok(id)
+    }
+
     /// Deletes a type that no element uses.
     pub fn delete_type(&mut self, type_id: ElementId) -> Result<(), EditError> {
         if self.get(type_id).is_none_or(|t| t.category != Category::Type) { return Err(EditError::NotFound(type_id)); }
@@ -186,6 +208,26 @@ mod tests {
         assert_eq!(d.revision(), revision + 1, "one transaction");
         assert!(d.undo().unwrap());
         assert_eq!((d.get(a).unwrap().width_m, d.get(b).unwrap().width_m, d.get(t).unwrap().width_m), (0.3, 0.3, 0.3));
+    }
+
+    #[test]
+    fn a_type_is_renamed_and_duplicated_and_a_taken_name_is_refused() {
+        let mut d = Document::spatial_sample();
+        let a = beam(&mut d, 1.0);
+        let t = d.create_type(a, "B1").unwrap();
+        d.rename_type(t, " B2 ").unwrap();
+        assert_eq!(d.get(t).unwrap().name, "B2");
+        let copy = d.duplicate_type(t, "B3").unwrap();
+        assert_eq!(TypeValues::of(d.get(copy).unwrap()), TypeValues::of(d.get(t).unwrap()));
+        assert!(d.instances_of(copy).is_empty());
+        let revision = d.revision();
+        assert!(d.duplicate_type(t, "b2").is_err() && d.rename_type(copy, "B2").is_err() && d.rename_type(copy, "  ").is_err());
+        assert!(d.rename_type(a, "x").is_err(), "only types are renamed");
+        assert_eq!(d.revision(), revision, "refusals change nothing");
+        d.delete_type(copy).unwrap();
+        assert_eq!(d.delete_type(t), Err(EditError::TypeInUse(t)));
+        assert!(d.undo().unwrap());
+        assert!(d.get(copy).is_some());
     }
 
     #[test]

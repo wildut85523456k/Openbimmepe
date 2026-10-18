@@ -8,7 +8,64 @@ pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Sc
 /// The state of the import window.
 pub(crate) struct ImportDialog { pub path: String }
 
+/// The state of the types window: the type being worked on and the name typed for a rename or a copy.
+#[derive(Default)]
+pub(crate) struct TypesDialog { pub picked: Option<ElementId>, pub name: String }
+
 impl Desktop {
+    /// The types window: every type with the number of elements that use it, and for the one picked: rename,
+    /// duplicate, delete (only while no element uses it) and the elements that use it, each with a Select button.
+    pub(crate) fn types_window(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.types_dialog.take() else { return };
+        let mut open = true;
+        let mut action: Option<(&str, ElementId)> = None;
+        let mut pick = None;
+        if d.picked.is_some_and(|t| self.document.get(t).is_none()) { d.picked = None; }
+        let rows: Vec<(ElementId, String, Category, usize)> = self.document.elements().filter(|e| e.category == Category::Type)
+            .map(|t| (t.id, t.name.clone(), t.kind(), self.document.instances_of(t.id).len())).collect();
+        egui::Window::new("Types").open(&mut open).default_width(380.0).show(ctx, |ui| {
+            if rows.is_empty() { ui.label("The model has no types. Select an element and use Make type in its properties."); }
+            egui::ScrollArea::vertical().max_height(200.0).id_salt("types_list").show(ui, |ui| {
+                for (id, name, kind, n) in &rows {
+                    if ui.selectable_label(d.picked == Some(*id), format!("{name}   {kind:?}   {n} element{}", if *n == 1 { "" } else { "s" })).clicked() {
+                        d.picked = Some(*id);
+                        d.name = name.clone();
+                    }
+                }
+            });
+            let Some(t) = d.picked else { return };
+            let users = self.document.instances_of(t);
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(150.0));
+                let ok = !d.name.trim().is_empty();
+                if ui.add_enabled(ok, egui::Button::new("Rename")).clicked() { action = Some(("rename", t)); }
+                if ui.add_enabled(ok, egui::Button::new("Duplicate")).clicked() { action = Some(("duplicate", t)); }
+                if ui.add_enabled(users.is_empty(), egui::Button::new("Delete")).on_disabled_hover_text("Elements still use this type").clicked() { action = Some(("delete", t)); }
+            });
+            ui.small("Rename and Duplicate take the name typed here; it must be new among the types of the same kind.");
+            egui::ScrollArea::vertical().max_height(160.0).id_salt("types_users").show(ui, |ui| {
+                for u in &users {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Select").clicked() { pick = Some(*u); }
+                        ui.label(self.document.get(*u).map_or(String::new(), |e| format!("{} (element {})", e.name, u.0)));
+                    });
+                }
+            });
+        });
+        if let Some((what, t)) = action {
+            let name = d.name.clone();
+            let result = match what {
+                "rename" => self.document.rename_type(t, &name).map(|()| format!("Type renamed to {}", name.trim())),
+                "duplicate" => self.document.duplicate_type(t, &name).map(|n| { d.picked = Some(n); format!("Type {} made as a copy", name.trim()) }),
+                _ => self.document.delete_type(t).map(|()| { d.picked = None; "Type deleted".to_string() }),
+            };
+            self.message = match result { Ok(m) => m, Err(e) => format!("Type rejected ({e:?}): the name must be new among the types of its kind") };
+        }
+        if let Some(id) = pick { self.select_element(Some(id)); }
+        if open { self.types_dialog = Some(d); }
+    }
+
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
         match self.selected { Some(SampleElement::Duct) => Some(ElementId(1)),
             Some(SampleElement::Model(id)) => Some(id), _ => None }
@@ -1145,6 +1202,23 @@ mod tests {
             assert!(app.message.contains(schema.name()));
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_types_window_opens_from_the_ribbon_and_draws_with_a_type_picked_and_drops_one_that_was_deleted() {
+        let mut app = Desktop::sample();
+        let beam = app.document.place_beam(ElementId(10), &BeamSpec::level([1.0, 3.0], [7.0, 3.0], 0.3, 0.5, 2.8)).unwrap();
+        let t = app.document.create_type(beam, "B 300 x 500").unwrap();
+        app.run_command("project_parameters", "Types");
+        assert!(app.types_dialog.is_some());
+        app.types_dialog.as_mut().unwrap().picked = Some(t);
+        let ctx = eframe::egui::Context::default();
+        for _ in 0..2 { ctx.run_ui(Default::default(), |ui| app.types_window(ui.ctx())).textures_delta.clear(); }
+        assert_eq!(app.types_dialog.as_ref().unwrap().picked, Some(t));
+        app.document.detach_type(&[beam]).unwrap();
+        app.document.delete_type(t).unwrap();
+        ctx.run_ui(Default::default(), |ui| app.types_window(ui.ctx())).textures_delta.clear();
+        assert_eq!(app.types_dialog.as_ref().unwrap().picked, None, "a type that is gone is let go");
     }
 
     #[test]

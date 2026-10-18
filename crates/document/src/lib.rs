@@ -426,6 +426,8 @@ pub enum Command {
     SetType { id: ElementId, type_id: Option<ElementId> },
     /// What a type element is a type of.
     SetTypeFor { id: ElementId, category: Category },
+    /// The name of a type.
+    Rename { id: ElementId, name: String },
     Delete { id: ElementId },
 }
 
@@ -852,6 +854,12 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
                     el.type_for = Some(*category);
+                    el.revision = revision;
+                }
+                Command::Rename { id, name } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.name = name.trim().into();
                     el.revision = revision;
                 }
                 Command::Restore(element) => {
