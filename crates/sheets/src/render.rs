@@ -2,6 +2,7 @@
 //! visibility and clipping, revision clouds and tags. Units are millimetres on the sheet.
 
 use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{Params, PrintContext, Sheet, SheetSet};
 use crate::paper::{PaperSize, Rect};
@@ -12,7 +13,8 @@ use crate::{finite, SheetError};
 pub const MAX_PRIMS: usize = 5_000_000;
 
 /// Per-export stroke colour policy. Does not modify view or model settings.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PrintMode {
     #[default]
     Colour,

@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "name": "Synthetic regression profile — not company standards",
+  "papers": [
+    {
+      "name": "A0 landscape",
+      "width_mm": 1189,
+      "height_mm": 841,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A0 portrait",
+      "width_mm": 841,
+      "height_mm": 1189,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A1 landscape",
+      "width_mm": 841,
+      "height_mm": 594,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A1 portrait",
+      "width_mm": 594,
+      "height_mm": 841,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A2 landscape",
+      "width_mm": 594,
+      "height_mm": 420,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A2 portrait",
+      "width_mm": 420,
+      "height_mm": 594,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A3 landscape",
+      "width_mm": 420,
+      "height_mm": 297,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A3 portrait",
+      "width_mm": 297,
+      "height_mm": 420,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A4 landscape",
+      "width_mm": 297,
+      "height_mm": 210,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    },
+    {
+      "name": "A4 portrait",
+      "width_mm": 210,
+      "height_mm": 297,
+      "margins_mm": {
+        "left": 10,
+        "top": 10,
+        "right": 10,
+        "bottom": 10
+      }
+    }
+  ],
+  "paper_pens_mm": [
+    0.05,
+    0.09,
+    0.13,
+    0.18,
+    0.25,
+    0.35,
+    0.5,
+    0.7,
+    1,
+    1.4,
+    2,
+    2.5,
+    3,
+    3.5,
+    4,
+    5
+  ],
+  "model_pen_tables": [
+    {
+      "scale": 100,
+      "widths_mm": [
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35,
+        0.35
+      ]
+    },
+    {
+      "scale": 200,
+      "widths_mm": [
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245,
+        0.245
+      ]
+    }
+  ],
+  "mode": "black_lines"
+}
