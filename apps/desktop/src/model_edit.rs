@@ -284,7 +284,9 @@ impl Desktop {
     }
 
     /// The level of the plan view on show.
-    pub(crate) fn plan_level(&self) -> ElementId { ElementId(if self.view == crate::View::UpperPlan { 11 } else { 10 }) }
+    pub(crate) fn plan_level(&self) -> ElementId {
+        match self.view { crate::View::Level(id) if self.document.get(ElementId(id)).is_some() => ElementId(id), crate::View::UpperPlan => ElementId(11), _ => ElementId(10) }
+    }
 
     /// The levels of the document, lowest first: (id, name, elevation).
     pub(crate) fn levels(&self) -> Vec<(ElementId, String, f64)> {
@@ -505,6 +507,31 @@ impl Desktop {
                 else { self.wall_pts.push(point); self.wall_ids.push(id); self.message = format!("Wall {} placed; pick the next point, Esc ends the chain; undo removes it", id.0); }
             }
             Err(error) => self.message = format!("Wall rejected: {error:?}"),
+        }
+    }
+
+    /// A pick of the Grid tool: the first starts a grid line, the second draws it, named after the last one.
+    pub(crate) fn grid_click(&mut self, point: [f64; 2]) {
+        let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Grid: pick the end (Shift keeps it square, Esc ends)".into(); return; };
+        if (point[0] - start[0]).hypot(point[1] - start[1]) < 0.01 { return; }
+        match self.document.place_grid(start, point, "") {
+            Ok(id) => { self.beam_start = None; let name = self.document.get(id).map(|g| g.name.clone()).unwrap_or_default(); self.message = format!("Grid {name} placed; undo removes it"); }
+            Err(error) => self.message = format!("Grid rejected: {error:?}"),
+        }
+    }
+
+    /// The Level tool: adds a level at the elevation of the options bar and opens nothing; its plan view is listed.
+    pub(crate) fn level_click(&mut self) {
+        let name = self.level_name.clone();
+        match self.document.place_level(&name, self.level_elev_mm / 1000.0) {
+            Ok(id) => {
+                let n = self.document.get(id).map(|l| l.name.clone()).unwrap_or_default();
+                self.level_elev_mm += 3000.0;
+                self.level_name.clear();
+                self.view = crate::View::Level(id.0);
+                self.message = format!("{n} added with its plan view; undo removes it");
+            }
+            Err(error) => self.message = format!("Level rejected ({error:?}): a level already stands at that elevation"),
         }
     }
 

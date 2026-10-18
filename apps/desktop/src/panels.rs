@@ -1,5 +1,5 @@
 //! Compact Revit-style palettes around the existing sample document.
-use crate::{ribbon, Desktop, View};
+use crate::{ribbon, Desktop, ElementId, View};
 use eframe::egui::{self, RichText, Vec2};
 
 fn title_bar(ui: &mut egui::Ui, title: &str, visible: &mut bool) {
@@ -271,6 +271,26 @@ fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Level {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Level");
+            ui.separator();
+            ui.label("Elevation (mm)");
+            ui.add(egui::DragValue::new(&mut app.level_elev_mm).speed(10.0));
+            ui.label("Name");
+            ui.add(egui::TextEdit::singleline(&mut app.level_name).hint_text("Level N").desired_width(110.0));
+            if ui.button("Place Level").clicked() { app.level_click(); }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::Grid {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Grid");
+            ui.separator();
+            ui.label(format!("Next name: {}", app.document.next_grid_name()));
+        });
+        return;
+    }
     if app.tool == crate::Tool::Wall {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Wall");
@@ -606,7 +626,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn view_name(view: View) -> &'static str {
-    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical" }
+    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan" }
 }
 
 struct Node {
@@ -672,6 +692,12 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().id_salt("project_tree").auto_shrink([false, false])
         .show(ui, |ui| {
             for node in TREE { tree_node(app, ui, node, "project", &query); }
+            let added: Vec<(ElementId, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (l.0, l.1)).collect();
+            for (id, name) in added {
+                if !matches(&query, &name) { continue; }
+                let active = app.view == View::Level(id.0);
+                if ui.selectable_label(active, RichText::new(format!("{name} (plan)"))).on_hover_text("Open the plan of this level").clicked() { app.view = View::Level(id.0); app.selected = None; }
+            }
             if !TREE.iter().any(|node| node_matches(node, &query)) { ui.weak("No matching items"); }
         });
 }

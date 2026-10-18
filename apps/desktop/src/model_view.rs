@@ -35,8 +35,11 @@ fn segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
-        for (label, view) in [("Level 1", View::Plan), ("Level 2", View::UpperPlan),
-            ("{3D}", View::ThreeD), ("M-101 - Mechanical", View::Mechanical)] {
+        let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
+        let tabs = [("Level 1".to_string(), View::Plan), ("Level 2".to_string(), View::UpperPlan)].into_iter()
+            .chain(added.into_iter().map(|(v, n)| (n, v)))
+            .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)]);
+        for (label, view) in tabs {
             if ui.selectable_label(app.view == view, label).clicked() { app.view = view; }
         }
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
@@ -181,10 +184,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     }
     // Revit's way of picking a point: a click, or press at the start, drag, release at the end. A drag
     // starting a tool with nothing pending picks its start point at the press and its next point at the release.
-    let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting);
+    let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable);
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable);
             let pending = app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
@@ -281,6 +284,30 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
         else if let Some(p) = pick { app.wall_click(level_id, to_model(p)); }
+    } else if app.tool == crate::Tool::Grid && !three_d {
+        // two picks (or press, drag, release) draw a grid line, snapped to 50 mm and to the ends of other grid lines
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let ends: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry { Some(Geometry::Grid { start, end }) => vec![start, end], _ => vec![] }).collect();
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let start = app.beam_start;
+        let to_model = |p: Pos2| {
+            let v = (p - centre - pan) / scale + bc;
+            let mut m = [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05];
+            if let Some(c) = ends.iter().find(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0) { m = *c; }
+            else if let (true, Some(s)) = (ortho, start) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
+            m
+        };
+        if let (Some(a), Some(h)) = (start, response.hover_pos()) {
+            let b = to_model(h);
+            let (sa, sb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
+            dashed(&painter, sa, sb, Stroke::new(1.5, blue));
+            for p in [sa, sb] { painter.circle_stroke(p, 11.0, Stroke::new(1.0, blue)); }
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.beam_start.is_some() { app.beam_start = None; } else { app.choose_tool(crate::Tool::Select); } }
+        else if let Some(p) = pick { app.grid_click(to_model(p)); }
+    } else if app.tool == crate::Tool::Level && !three_d {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() { app.level_click(); }
     } else if app.tool == crate::Tool::EndPoint && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
@@ -583,5 +610,53 @@ mod tests {
         app.wall_click(level, [63.5, 20.0]);
         let last = *app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).collect::<Vec<_>>().last().unwrap();
         assert!(near(line(&app, last).1, [63.5, 20.0]));
+    }
+
+    #[test]
+    fn grids_are_drawn_named_in_sequence_and_levels_get_their_own_plan() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let grids = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Grid).count();
+        let n = grids(&app);
+        app.run_command("grid", "Grid");
+        assert!(app.tool == crate::Tool::Grid);
+        let (a, b, c, d) = (Pos2::new(300.0, 200.0), Pos2::new(300.0, 500.0), Pos2::new(420.0, 200.0), Pos2::new(420.0, 500.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
+        // a click on each end, then a press-drag-release
+        for at in [a, b] { frame(&ctx, screen, &mut app, vec![button(at, true)]); frame(&ctx, screen, &mut app, vec![button(at, false)]); }
+        assert_eq!(grids(&app), n + 1, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(c)]);
+        frame(&ctx, screen, &mut app, vec![button(c, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(Pos2::new(420.0, 300.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(d)]);
+        frame(&ctx, screen, &mut app, vec![button(d, false)]);
+        assert_eq!(grids(&app), n + 2, "{}", app.message);
+        let names: Vec<String> = app.document.elements().filter(|e| e.category == Category::Grid).map(|e| e.name.clone()).collect();
+        assert_eq!(&names[n..], ["4", "5"], "the sample ends at 3: {names:?}");
+        assert_eq!(openbim_document::Document::spatial_sample().next_grid_name(), "4");
+        // levels: the name counts on, a level at an elevation in use is refused, and the new one has a plan to draw in
+        app.run_command("level", "Level");
+        assert_eq!(app.level_elev_mm, 6000.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
+        frame(&ctx, screen, &mut app, vec![button(a, true)]);
+        frame(&ctx, screen, &mut app, vec![button(a, false)]);
+        let level = app.document.elements().find(|e| e.name == "Level 3").expect("a third level").id;
+        assert!(matches!(app.view, View::Level(id) if id == level.0) && app.plan_level() == level, "{}", app.message);
+        app.level_elev_mm = 6000.0;
+        app.level_click();
+        assert!(app.message.contains("rejected"), "{}", app.message);
+        app.document.undo().unwrap();
+        assert!(app.document.get(level).is_none());
+        // a wall drawn in the plan of the new level stands on it
+        app.level_elev_mm = 7000.0;
+        app.level_click();
+        let level = app.document.elements().find(|e| e.name == "Level 3").unwrap().id;
+        app.run_command("wall", "Wall");
+        let w = [Pos2::new(300.0, 300.0), Pos2::new(500.0, 300.0)];
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(w[0])]);
+        for at in w { frame(&ctx, screen, &mut app, vec![button(at, true)]); frame(&ctx, screen, &mut app, vec![button(at, false)]); }
+        let wall = app.document.elements().filter(|e| e.category == Category::Wall).last().unwrap();
+        assert!(matches!(wall.geometry, Some(Geometry::Linear { level: l, .. }) if l == level), "{:?}", wall.geometry);
     }
 }

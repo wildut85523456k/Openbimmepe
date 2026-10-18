@@ -511,6 +511,55 @@ impl Document {
         self.transact(self.revision, &ops)?;
         Ok(id)
     }
+    /// The name the next grid gets, counting on from the last one drawn as Revit does: 3 gives 4, C gives D, Z gives
+    /// AA; a name already in use is passed over.
+    pub fn next_grid_name(&self) -> String {
+        let grids: Vec<&Element> = self.elements.values().filter(|e| e.category == Category::Grid).collect();
+        let used: std::collections::BTreeSet<&str> = grids.iter().map(|g| g.name.as_str()).collect();
+        let mut name = grids.last().map_or("1".to_string(), |g| Self::count_on(&g.name));
+        while used.contains(name.as_str()) { name = Self::count_on(&name); }
+        name
+    }
+    fn count_on(name: &str) -> String {
+        if let Ok(n) = name.parse::<u64>() { return (n + 1).to_string(); }
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_uppercase()) {
+            let mut chars: Vec<u8> = name.bytes().collect();
+            let mut i = chars.len();
+            loop {
+                if i == 0 { chars.insert(0, b'A'); break; }
+                i -= 1;
+                if chars[i] == b'Z' { chars[i] = b'A'; } else { chars[i] += 1; break; }
+            }
+            return String::from_utf8(chars).unwrap_or_default();
+        }
+        format!("{name}1")
+    }
+    /// Draws a grid line from `start` to `end`, named after the last one when `name` is empty.
+    pub fn place_grid(&mut self, start: [f64; 2], end: [f64; 2], name: &str) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        if (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01 { return Err(EditError::InvalidGeometry(id)); }
+        let name = if name.trim().is_empty() { self.next_grid_name() } else { name.trim().to_string() };
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Grid, name, width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Grid { start, end } },
+        ])?;
+        Ok(id)
+    }
+    /// Adds a level at `elevation_m`; two levels cannot share an elevation.
+    pub fn place_level(&mut self, name: &str, elevation_m: f64) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        if !elevation_m.is_finite() || self.elements.values().any(|e| e.geometry == Some(Geometry::Level) && (e.elevation_m - elevation_m).abs() < 1e-3) { return Err(EditError::InvalidGeometry(id)); }
+        let name = if name.trim().is_empty() {
+            let mut n = self.elements.values().filter(|e| e.geometry == Some(Geometry::Level)).count() + 1;
+            while self.elements.values().any(|e| e.geometry == Some(Geometry::Level) && e.name == format!("Level {n}")) { n += 1; }
+            format!("Level {n}")
+        } else { name.trim().to_string() };
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Level, name, width_m: 1.0, height_m: 1.0, elevation_m },
+            Command::SetGeometry { id, geometry: Geometry::Level },
+        ])?;
+        Ok(id)
+    }
     /// Stands a column at `at` from `level` (raised by `base_offset_m`) up to the level `top`.
     pub fn place_column(&mut self, level: ElementId, top: ElementId, at: [f64; 2], col: &ColumnSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();
