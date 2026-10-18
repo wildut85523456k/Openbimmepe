@@ -25,7 +25,7 @@ mod tree;
 
 pub use fluid::{flow_from_power, Fluid};
 pub use friction::{colebrook, equivalent_diameter, swamee_jain, Shape, Size};
-pub use electrical::{compute_all_electrical, compute_electrical, parse_ratings, CableRow, CableTable, EBranch, EBranchResult, EEnd, EError, ENode, EResults, ESettings, ETree, Load, Phases, TableError};
+pub use electrical::{compute_all_electrical, compute_electrical, correction_vars, parse_devices, parse_pe_rule, transformer_fault, CableRow, CableTable, Device, EBranch, EBranchResult, EEnd, EError, ENode, EResults, ESettings, ETree, Earthing, FactorTable, Fault, Load, Lookup, Motor, Phases, TableError};
 pub use sprinkler::{flow_from_density, k_factor, solve_all_sprinklers, solve_sprinklers, SprinklerResult, SprinklerResults};
 pub use plumbing::{CurveError, LoadingCurve};
 pub use tree::{compute, compute_all, Branch, Criteria, Demand, EndResult, Node, BranchResult, Settings, Results, Tree, TreeError};
