@@ -37,6 +37,25 @@ impl Desktop {
         if let Some(id) = pick { self.select_element(Some(id)); }
     }
 
+    /// Gives the selected element the type `choice`, or lets it keep its values when there is none.
+    pub(crate) fn choose_type(&mut self, choice: Option<ElementId>) {
+        let Some(id) = self.selected_id() else { return };
+        let result = match choice { Some(t) => self.document.assign_type(&[id], t), None => self.document.detach_type(&[id]) };
+        self.message = match result {
+            Ok(()) => { self.sync_duct_controls(); match choice { Some(t) => format!("Element {} is now of type {}", id.0, self.document.get(t).map_or("?", |t| t.name.as_str())), None => format!("Element {} no longer follows a type", id.0) } }
+            Err(error) => format!("Type rejected: {error:?}"),
+        };
+    }
+
+    /// Makes a type out of the selected element's values, named `type_name_input`, and gives it to the element.
+    pub(crate) fn make_type(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        match self.document.create_type(id, &self.type_name_input) {
+            Ok(t) => { self.type_name_input.clear(); self.message = format!("Type {} made from element {}", self.document.get(t).map_or("?", |t| t.name.as_str()), id.0); }
+            Err(error) => self.message = format!("Type rejected ({error:?}): the name must be new among the types of its kind"),
+        }
+    }
+
     pub(crate) fn select_element(&mut self, id: Option<ElementId>) {
         if id == self.selected_id() { return; }
         let pending = self.has_pending_edit();
@@ -350,6 +369,8 @@ impl Desktop {
             let (count, spacing) = (self.bar_count.max(0.0) as u32, self.spacing_mm / 1000.0);
             commands.extend([Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 }, Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 },
                 Command::SetBeamSystem { id, spacing_m: spacing, angle_deg: 0.0 }, Command::SetCount { id, count }]);
+            let shared = self.document.follow_type(id, &commands);
+            commands.extend(shared);
             match self.document.transact(self.document.revision(), &commands) {
                 Ok(_) => { self.sync_duct_controls(); self.message = format!("Rebar {} updated", id.0); }
                 Err(error) => self.message = format!("Edit rejected: {error:?}"),
@@ -409,10 +430,16 @@ impl Desktop {
             _ => None,
         };
         if let Some(geometry) = geometry { commands.push(Command::SetGeometry { id, geometry }); }
+        let shared = self.document.follow_type(id, &commands);
+        let sharing = el.type_id.map(|t| self.document.instances_of(t).len());
+        commands.extend(shared);
         match self.document.transact(self.document.revision(), &commands) {
             Ok(revision) => {
                 self.sync_duct_controls();
-                self.message = format!("Element {} updated — revision {revision}", id.0);
+                self.message = match sharing {
+                    Some(n) => format!("Element {} updated with its type and the {n} elements of that type — revision {revision}", id.0),
+                    None => format!("Element {} updated — revision {revision}", id.0),
+                };
             }
             Err(error) => self.message = format!("Edit rejected: {error:?}"),
         }
@@ -860,6 +887,42 @@ mod tests {
         assert_eq!(app.selected_id(), Some(first));
         app.undo_document();
         assert!(app.warnings().is_empty(), "the list follows the document");
+    }
+
+    #[test]
+    fn a_type_is_made_from_a_beam_given_to_another_and_an_edit_in_properties_changes_both() {
+        let mut app = Desktop::sample();
+        let a = app.document.place_beam(ElementId(10), &BeamSpec::level([1.0, 1.0], [7.0, 1.0], 0.3, 0.5, 2.8)).unwrap();
+        let b = app.document.place_beam(ElementId(10), &BeamSpec::level([1.0, 2.0], [7.0, 2.0], 0.2, 0.4, 2.8)).unwrap();
+        app.select_element(Some(a));
+        app.make_type();
+        assert!(app.document.get(a).unwrap().type_id.is_none(), "a type needs a name");
+        app.type_name_input = "Beam 300 x 500".into();
+        app.make_type();
+        let t = app.document.get(a).unwrap().type_id.expect("typed");
+        assert!(app.type_name_input.is_empty());
+        app.select_element(Some(b));
+        app.choose_type(Some(t));
+        assert_eq!(app.document.get(b).unwrap().width_m, 0.3);
+        assert_eq!(app.width_mm, 300.0, "the controls follow the new values");
+        // an edit of the size of one is an edit of the type, and so of the other
+        app.width_mm = 350.0;
+        app.apply_selected_edit();
+        assert!(app.message.contains("2 elements"), "{}", app.message);
+        for id in [a, b, t] { assert_eq!(app.document.get(id).unwrap().width_m, 0.35); }
+        // the panel draws a typed element
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 550.0))), ..Default::default() }, |ui| crate::panels::properties(&mut app, ui));
+        assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
+        // one undo takes the whole edit back
+        app.undo_document();
+        for id in [a, b, t] { assert_eq!(app.document.get(id).unwrap().width_m, 0.3); }
+        // letting go of the type keeps the values and frees the beam to be edited alone
+        app.choose_type(None);
+        app.width_mm = 250.0;
+        app.apply_selected_edit();
+        assert_eq!((app.document.get(b).unwrap().width_m, app.document.get(a).unwrap().width_m), (0.25, 0.3));
     }
 
     #[test]

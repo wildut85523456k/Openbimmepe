@@ -52,6 +52,9 @@ impl From<SnapshotGeometry> for Geometry {
     }
 }
 
+/// The categories a type can serve.
+const CATEGORIES: [Category; 5] = [Category::Beam, Category::Column, Category::WallFooting, Category::Slab, Category::Rebar];
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotElement {
@@ -93,6 +96,12 @@ pub struct SnapshotElement {
     /// a rebar: the number of bars along the bottom of its beam
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub count:Option<u32>,
+    /// the type an element takes its values from
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub type_id:Option<u64>,
+    /// a type element: the category it is a type of
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub type_for:Option<String>,
     /// a family instance: its family, type, instance values and turn
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub family:Option<String>,
@@ -170,11 +179,13 @@ impl Snapshot {
             material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
             outline: e.outline.clone(),
             slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
-            spacing_m: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.spacing_m),
-            angle_deg: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family).then_some(e.angle_deg),
+            spacing_m: matches!(e.kind(), Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.spacing_m),
+            angle_deg: matches!(e.kind(), Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family).then_some(e.angle_deg),
             parent: e.parent.map(|p| p.0),
             join_ends: (e.join_ends != [true; 2]).then_some(e.join_ends),
-            count: (e.category == Category::Rebar).then_some(e.count),
+            count: (e.kind() == Category::Rebar).then_some(e.count),
+            type_id: e.type_id.map(|t| t.0),
+            type_for: e.type_for.map(|c| format!("{c:?}")),
             family: (e.category == Category::Family).then(|| e.family.clone()),
             type_name: e.type_name.clone(),
             overrides: e.overrides.clone(),
@@ -191,16 +202,26 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Family" => Category::Family, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Family" => Category::Family, "Type" => Category::Type, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),
+            };
+            let type_for = match &el.type_for {
+                Some(c) => Some(CATEGORIES.iter().copied().find(|k| format!("{k:?}") == *c).ok_or(format!("Unsupported type category {c}"))?),
+                None => None,
             };
             if category.supports_slope() != el.slope_ratio.is_some() {
                 return Err(format!("Invalid slope property for element {}",el.id));
             }
             ops.push(Command::Create { id: ElementId(el.id), category, name: el.name.clone(),
                 width_m: el.width_m, height_m: el.height_m, elevation_m: el.elevation_m });
+            if let Some(category) = type_for {
+                ops.push(Command::SetTypeFor { id: ElementId(el.id), category });
+            }
+            if let Some(t) = el.type_id {
+                ops.push(Command::SetType { id: ElementId(el.id), type_id: Some(ElementId(t)) });
+            }
             if let Some(slope_ratio) = el.slope_ratio {
                 ops.push(Command::SetSlope { id: ElementId(el.id), slope_ratio });
             }

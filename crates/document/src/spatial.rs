@@ -140,7 +140,16 @@ fn valid_ring(r: &[[f64; 2]]) -> bool {
 }
 
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
+    let mut names = std::collections::BTreeSet::new();
     for el in elements.values() {
+        // a type is named once among the types of its kind
+        if el.category == Category::Type && !names.insert((el.type_for.map(|c| c as u8), el.name.trim().to_lowercase())) { return Err(EditError::InvalidElement); }
+        // an element with a type has the values of that type, and the type is of its kind
+        if let Some(t) = el.type_id {
+            let ok = elements.get(&t).is_some_and(|ty| ty.category == Category::Type && ty.type_for == Some(el.category)
+                && crate::TypeValues::of(el) == crate::TypeValues::of(ty));
+            if !ok { return Err(EditError::InvalidGeometry(el.id)); }
+        }
         if let Some(p) = el.parent {
             // a beam made by a beam system points at it
             if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss))) { return Err(EditError::InvalidElement); }

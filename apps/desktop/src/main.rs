@@ -88,6 +88,8 @@ struct Desktop {
     show_browser: bool,
     /// the warnings window is open; the list is worked out again only when the document has a new revision
     show_warnings: bool,
+    /// the name for a new type
+    type_name_input: String,
     warnings_cache: (u64, Vec<openbim_document::Warning>),
     show_help: bool,
     dark: bool,
@@ -136,7 +138,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),
-            show_properties: true, show_browser: true, show_warnings: false, warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }

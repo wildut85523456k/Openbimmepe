@@ -8,8 +8,10 @@
 use std::collections::BTreeMap;
 mod spatial;
 mod rebar;
+mod types;
 mod warnings;
 pub use rebar::BarPath;
+pub use types::TypeValues;
 pub use warnings::{Warning, WarningKind};
 pub use spatial::{system_lines, BeamExtent, Geometry, Mesh};
 
@@ -50,6 +52,9 @@ pub enum Category {
     /// An instance of a family from the library (door, window, equipment...): `family` names it, `type_name` its
     /// type, `overrides` its instance values; `angle_deg` turns it, `elevation_m` raises it above its level.
     Family,
+    /// A named type of `type_for`: the size, section, material, usage or bars that every instance pointing at it
+    /// (through its `type_id`) shares. It has no place in the model and nothing of it is drawn.
+    Type,
     Duct,
     Pipe,
     Equipment,
@@ -284,6 +289,10 @@ pub struct Element {
     pub overrides: Vec<(String, f64)>,
     /// Family instance: choices, texts and materials set on this instance, by input name.
     pub texts: Vec<(String, String)>,
+    /// The type this element takes its size, section, material, usage or bars from.
+    pub type_id: Option<ElementId>,
+    /// A type element: the category of the elements it serves.
+    pub type_for: Option<Category>,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -298,27 +307,35 @@ impl Element {
             Section::IShape { web_m, flange_m } => Profile::I { width: self.width_m, depth: self.height_m, web: web_m, flange: flange_m },
         }
     }
+    /// The category whose rules apply to the values of this element: a type is held to those of what it is a type of.
+    pub fn kind(&self) -> Category { if self.category == Category::Type { self.type_for.unwrap_or(Category::Type) } else { self.category } }
+    /// Whether elements of `category` can have a type.
+    pub fn can_have_type(category: Category) -> bool { matches!(category, Category::Beam | Category::Column | Category::WallFooting | Category::Slab | Category::Rebar) }
     /// A section that is as wide as it is deep: a pipe, or a round beam.
     pub fn is_round(&self) -> bool { self.category == Category::Pipe || (matches!(self.category, Category::Beam | Category::Column) && self.section == Section::Circle) }
 
     fn valid(&self) -> bool {
-        (matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || self.section == Section::Rectangle)
-            && (matches!(self.category, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
-            && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
-            && (matches!(self.category, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
-            && (self.category == Category::Beam || self.join_ends == [true; 2])
-            && (matches!(self.category, Category::BeamSystem | Category::Truss | Category::Rebar) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || self.category == Category::Family)))
-            && (self.category != Category::Truss || self.angle_deg == 0.0)
-            && (self.category != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
+        let k = self.kind();
+        (matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || self.section == Section::Rectangle)
+            && (matches!(k, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
+            && (matches!(k, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
+            && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
+            && (k == Category::Beam || self.join_ends == [true; 2])
+            && (matches!(k, Category::BeamSystem | Category::Truss | Category::Rebar) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || k == Category::Family)))
+            && (k != Category::Truss || self.angle_deg == 0.0)
+            && (k != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category == Category::Beam || self.parent.is_none())
-            && (self.category == Category::Rebar || self.count == 0)
+            && (k == Category::Rebar || self.count == 0)
             && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
             && self.overrides.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.is_finite())
             && (self.category != Category::Family || (self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
-            && (self.category != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
-            && (!matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
+            && (k != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
+            && (!matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
+            && (self.category != Category::Type || self.type_for.is_some_and(Self::can_have_type))
+            && (self.category == Category::Type || self.type_for.is_none())
+            && (self.type_id.is_none() || (self.category != Category::Type && Self::can_have_type(self.category)))
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
             && self.width_m.is_finite()
@@ -402,6 +419,10 @@ pub enum Command {
     /// The structural material of a beam.
     SetMaterial { id: ElementId, material: Material },
     SetGeometry { id: ElementId, geometry: Geometry },
+    /// The type an element takes its values from; None leaves it with the values it has.
+    SetType { id: ElementId, type_id: Option<ElementId> },
+    /// What a type element is a type of.
+    SetTypeFor { id: ElementId, category: Category },
     Delete { id: ElementId },
 }
 
@@ -416,6 +437,8 @@ pub enum EditError {
     UnsupportedProperty(ElementId),
     InvalidGeometry(ElementId),
     InvalidSite,
+    /// A type that elements still use cannot be deleted.
+    TypeInUse(ElementId),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -713,9 +736,10 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(),
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None,
                     };
-                    if !element.valid() { return Err(EditError::InvalidElement); }
+                    // a type is made in steps: what it is a type of is set by the next command
+                    if *category != Category::Type && !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
                 }
                 Command::Resize { id, width_m, height_m } => {
@@ -726,7 +750,7 @@ impl Document {
                     el.width_m = *width_m;
                     el.height_m = *height_m;
                     // a beam is checked whole at the end, so that a size and a section can change together
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) && !el.valid() { return Err(EditError::InvalidElement); }
+                    if !matches!(el.kind(), Category::Beam | Category::Column | Category::BeamSystem | Category::Truss | Category::Type) && !el.valid() { return Err(EditError::InvalidElement); }
                     el.revision = revision;
                 }
                 Command::MoveElevation { id, elevation_m } => {
@@ -745,7 +769,7 @@ impl Document {
                 }
                 Command::SetUsage { id, usage } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.kind(), Category::Beam | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.usage = *usage;
                     el.revision = revision;
                 }
@@ -757,7 +781,7 @@ impl Document {
                 }
                 Command::SetBeamSystem { id, spacing_m, angle_deg } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::BeamSystem | Category::Truss | Category::Rebar) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.kind(), Category::BeamSystem | Category::Truss | Category::Rebar) { return Err(EditError::UnsupportedProperty(*id)); }
                     (el.spacing_m, el.angle_deg) = (*spacing_m, *angle_deg);
                     el.revision = revision;
                 }
@@ -775,7 +799,7 @@ impl Document {
                 }
                 Command::SetCount { id, count } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Rebar { return Err(EditError::UnsupportedProperty(*id)); }
+                    if el.kind() != Category::Rebar { return Err(EditError::UnsupportedProperty(*id)); }
                     el.count = *count;
                     el.revision = revision;
                 }
@@ -799,13 +823,13 @@ impl Document {
                 }
                 Command::SetMaterial { id, material } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.kind(), Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.material = *material;
                     el.revision = revision;
                 }
                 Command::SetSection { id, section } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.kind(), Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.section = *section;
                     if *section == Section::Circle { el.height_m = el.width_m; }
                     el.revision = revision;
@@ -813,6 +837,18 @@ impl Document {
                 Command::SetGeometry { id, geometry } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     el.geometry = Some(*geometry);
+                    el.revision = revision;
+                }
+                Command::SetType { id, type_id } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if !Element::can_have_type(el.category) { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.type_id = *type_id;
+                    el.revision = revision;
+                }
+                Command::SetTypeFor { id, category } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.type_for = Some(*category);
                     el.revision = revision;
                 }
                 Command::SetSite(site) => {

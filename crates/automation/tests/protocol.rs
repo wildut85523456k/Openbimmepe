@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 fn request() -> PreviewRequest {
     PreviewRequest { version:1,request_id:"test-run".into(),snapshot:Snapshot {
         document_id:"test-document".into(),revision:42,elements:vec![SnapshotElement {
-            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slab_kind:None,spacing_m:None,angle_deg:None,parent:None,join_ends:None,count:None,family:None,type_name:String::new(),overrides:vec![],texts:vec![],
+            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slab_kind:None,spacing_m:None,angle_deg:None,parent:None,join_ends:None,count:None,family:None,type_name:String::new(),overrides:vec![],texts:vec![],type_id:None,type_for:None,
         }],
     },graph:Graph::example(vec![1]) }
 }
@@ -87,6 +87,10 @@ fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
     d.place_family(ElementId(10), [3.0, 3.0], &openbim_document::FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 90.0, elevation_m: 2.4 }).unwrap();
     let first = d.elements().find(|e| e.category == openbim_document::Category::Beam && e.parent.is_some()).unwrap().id;
     d.transact(d.revision(), &[openbim_document::Command::SetJoins { id: first, start: false, end: true }]).unwrap();
+    // types: a beam type and a rebar type, each with an instance
+    let bt = d.create_type(rb, "Beam 300 x 500").unwrap();
+    let rebar = d.elements().find(|e| e.category == openbim_document::Category::Rebar).unwrap().id;
+    let rt = d.create_type(rebar, "T16 / R8").unwrap();
     let json = Snapshot::capture("doc", &d).to_json().unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();
     let rebuilt = back.materialize().unwrap();
@@ -96,6 +100,14 @@ fn snapshots_carry_sections_usages_materials_and_columns_through_json() {
         assert_eq!((r.category, r.width_m, r.height_m, r.elevation_m, r.slope_ratio, r.geometry, r.section, r.usage, r.material, &r.outline, r.slab_kind),
                    (el.category, el.width_m, el.height_m, el.elevation_m, el.slope_ratio, el.geometry, el.section, el.usage, el.material, &el.outline, el.slab_kind), "{}", el.name);
     }
+    for el in d.elements() {
+        let r = rebuilt.get(el.id).unwrap();
+        assert_eq!((r.type_id, r.type_for), (el.type_id, el.type_for), "{}", el.name);
+    }
+    assert_eq!(rebuilt.get(rb).unwrap().type_id, Some(bt));
+    assert_eq!(rebuilt.get(rebar).unwrap().type_id, Some(rt));
+    assert_eq!(rebuilt.get(rt).unwrap().count, 3, "the rebar type keeps its bars");
+    assert_eq!(rebuilt.types_for(openbim_document::Category::Beam).len(), 1);
     assert_eq!(d.elements().count(), rebuilt.elements().count());
     assert!(json.contains("IShape") && json.contains("\"Brace\"") && json.contains("Point") && json.contains("Area") && json.contains("Foundation") && json.contains("Pad") && json.contains("OnWall"));
 }

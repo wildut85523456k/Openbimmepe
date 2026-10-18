@@ -208,8 +208,35 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
+        C::Type => ("Types", "Type", "component"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
+}
+
+/// The type of the selected element: none, or one of the types of its kind.
+fn type_combo(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
+    let types: Vec<(openbim_document::ElementId, String, usize)> = app.document.types_for(el.category).iter().map(|t| (t.id, t.name.clone(), app.document.instances_of(t.id).len())).collect();
+    let current = el.type_id.and_then(|t| types.iter().find(|x| x.0 == t)).map_or("— no type —".to_string(), |t| t.1.clone());
+    let mut choice = None;
+    egui::ComboBox::from_id_salt("property_type").width(180.0).selected_text(current).show_ui(ui, |ui| {
+        if ui.selectable_label(el.type_id.is_none(), "— no type —").clicked() { choice = Some(None); }
+        for (id, name, n) in &types {
+            if ui.selectable_label(el.type_id == Some(*id), format!("{name}  ({n})")).clicked() { choice = Some(Some(*id)); }
+        }
+    });
+    if let Some(c) = choice { if c != el.type_id { app.choose_type(c); } }
+}
+
+/// A name and a button that make a type of the selected element's values, and what editing does when it has a type.
+fn type_maker(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
+    if let Some(t) = el.type_id {
+        let n = app.document.instances_of(t).len();
+        ui.weak(format!("Edits to its size, section, material or bars change the type and its {n} element{}.", if n == 1 { "" } else { "s" }));
+    }
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut app.type_name_input).hint_text("New type name").desired_width(120.0));
+        if ui.add_enabled(!app.type_name_input.trim().is_empty(), egui::Button::new("Make type").small()).clicked() { app.make_type(); }
+    });
 }
 
 /// The family to place and its type, from the library.
@@ -406,13 +433,19 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
         ui.add(ribbon::icon_image(ui, icon, app.dark, Vec2::splat(40.0)));
         ui.vertical(|ui| {
             ui.label(RichText::new(category).strong());
-            egui::ComboBox::from_id_salt("property_type").width(180.0)
-                .selected_text(family_type).show_ui(ui, |ui| {
-                    ui.label(family_type); ui.weak("No additional types loaded");
-                });
+            match &element {
+                Some(el) if openbim_document::Element::can_have_type(el.category) => type_combo(app, ui, el),
+                _ => { egui::ComboBox::from_id_salt("property_type").width(180.0)
+                    .selected_text(family_type).show_ui(ui, |ui| {
+                        ui.label(family_type); ui.weak("No additional types loaded");
+                    }); }
+            }
         });
     });
-    if ui.small_button("Edit Type").clicked() { app.message = "Type editing is not implemented yet".into(); }
+    match &element {
+        Some(el) if openbim_document::Element::can_have_type(el.category) => type_maker(app, ui, el),
+        _ => if ui.small_button("Edit Type").clicked() { app.message = "Type editing is not implemented yet".into(); },
+    }
     ui.add(egui::TextEdit::singleline(&mut app.property_query).hint_text("Search parameters").desired_width(f32::INFINITY));
     let query = app.property_query.trim().to_lowercase();
     ui.separator();
