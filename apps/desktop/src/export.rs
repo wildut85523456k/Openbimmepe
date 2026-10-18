@@ -92,7 +92,7 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
     for el in doc.elements() {
         match (el.category, el.geometry) {
             (Category::Wall, Some(Geometry::Linear { start, end, level })) => {
-                let mut chain = WallChain::new(vec![start, end], false, el.width_m, el.height_m);
+                let mut chain = doc.wall_chain(el.id).unwrap_or_else(|| WallChain::new(vec![start, end], false, el.width_m, el.height_m));
                 chain.base_z = level_of(level).ok_or("a wall stands on a level that is gone")? + el.elevation_m;
                 walls.push(WallItem { id: el.id.0, name: el.name.clone(), chain, wall_type: None, room_bounding: true });
             }

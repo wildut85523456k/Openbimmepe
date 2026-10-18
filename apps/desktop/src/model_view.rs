@@ -185,7 +185,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
             let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable);
-            let pending = app.beam_start.is_some() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
+            let pending = app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
         else if response.drag_stopped_by(egui::PointerButton::Primary) { response.interact_pointer_pos().or(response.hover_pos()) }
@@ -198,33 +198,89 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if let Some(p) = pick { if app.tool == crate::Tool::ElecNode { app.elec_node_click(level_id, to_model(p)); } else { app.cable_click(level_id, to_model(p)); } }
         }
     } else if app.tool == crate::Tool::Wall && !three_d {
-        // click the start, then each next point (a chain); or press, drag and release for one wall. Shift keeps it
-        // square, the ends snap to the corners of walls and the ends of grids, and the length shows while it is drawn.
+        // As in Revit: pick the start, then each next point (a chain), or press, drag and release for one wall; the
+        // line drawn is the Location Line. The pointer snaps to the corners of walls, the ends and crossings of grids
+        // and to grid lines (a square marks it), else to 50 mm. Shift keeps the wall square, digits type its length in
+        // mm and Enter draws it, Backspace takes a digit back, and a pick on the first point closes the loop.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
-        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
-            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => vec![start, end],
-            Some(Geometry::Grid { start, end }) => vec![start, end],
-            _ => vec![],
-        }).collect();
-        let ortho = ui.input(|i| i.modifiers.shift);
-        let start = app.beam_start;
-        let to_model = |p: Pos2| {
-            let v = (p - centre - pan) / scale + bc;
-            let mut m = [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05];
-            if let Some(c) = corners.iter().find(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0) { m = *c; }
-            else if let (true, Some(s)) = (ortho, start) {
-                if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; }
+        let mut points: Vec<[f64; 2]> = Vec::new();
+        let mut grids: Vec<([f64; 2], [f64; 2])> = Vec::new();
+        for el in app.document.elements() {
+            match el.geometry {
+                Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => {
+                    points.extend([start, end]);
+                    if let Some(r) = app.document.wall_plan(el.id) { points.extend(r); }
+                }
+                Some(Geometry::Grid { start, end }) => { points.extend([start, end]); grids.push((start, end)); }
+                _ => {}
             }
-            m
-        };
-        if let (Some(a), Some(h)) = (start, response.hover_pos().or(pick)) {
-            let b = to_model(h);
-            let (sa, sb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
-            painter.line_segment([sa, sb], Stroke::new((app.width_mm as f32 / 1000.0 * scale).max(2.0), Color32::from_rgba_unmultiplied(120, 120, 130, 150)));
-            painter.text(sb + Vec2::new(8.0, -8.0), egui::Align2::LEFT_BOTTOM, format!("{:.3} m", (b[0] - a[0]).hypot(b[1] - a[1])), egui::FontId::proportional(12.0), blue);
         }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.beam_start.is_some() { app.beam_start = None; app.message = "Wall: chain ended; Esc again leaves the tool".into(); } else { app.choose_tool(crate::Tool::Select); } }
-        else if pick.is_some() { if let Some(p) = pick { app.wall_click(level_id, to_model(p)); } }
+        for (i, (a, b)) in grids.iter().enumerate() { for (c, d) in &grids[i + 1..] {
+            if let Some(p) = openbim_document::line_meet(*a, [b[0] - a[0], b[1] - a[1]], *c, [d[0] - c[0], d[1] - c[1]]) {
+                let on = |s: &([f64; 2], [f64; 2])| { let (dx, dy) = (s.1[0] - s.0[0], s.1[1] - s.0[1]); let t = ((p[0] - s.0[0]) * dx + (p[1] - s.0[1]) * dy) / (dx * dx + dy * dy); (-1e-9..=1.0 + 1e-9).contains(&t) };
+                if on(&(*a, *b)) && on(&(*c, *d)) { points.push(p); }
+            }
+        } }
+        if let Some(&p) = app.wall_pts.first() { points.push(p); }
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let start = app.wall_pts.last().copied();
+        let snap_to = |p: Pos2| -> ([f64; 2], bool) {
+            let v = (p - centre - pan) / scale + bc;
+            let raw = [v.x as f64, -v.y as f64];
+            if let Some(c) = points.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
+                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return (*c, true); }
+            for (a, b) in &grids {
+                let (sa, sb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
+                if segment_distance(p, sa, sb) < 8.0 {
+                    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                    let t = (((raw[0] - a[0]) * dx + (raw[1] - a[1]) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    return ([a[0] + dx * t, a[1] + dy * t], true);
+                }
+            }
+            let mut m = [(raw[0] / 0.05).round() * 0.05, (raw[1] / 0.05).round() * 0.05];
+            if let (true, Some(s)) = (ortho, start) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
+            (m, false)
+        };
+        let to_model = |p: Pos2| snap_to(p).0;
+        let hover = response.hover_pos();
+        if let (Some(a), Some(h)) = (start, hover) {
+            let (mut b, _) = snap_to(h);
+            // a typed length keeps the direction of the pointer
+            if let Ok(mm) = app.wall_len.parse::<f64>() {
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let l = dx.hypot(dy).max(1e-9);
+                b = [a[0] + dx / l * mm / 1000.0, a[1] + dy / l * mm / 1000.0];
+            }
+            let (pa, pb) = app.wall_axis(a, b);
+            let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
+            let l = dx.hypot(dy);
+            if l > 1e-6 {
+                let (nx, ny) = (-dy / l * app.width_mm / 2000.0, dx / l * app.width_mm / 2000.0);
+                let ring = [[pa[0] - nx, pa[1] - ny], [pb[0] - nx, pb[1] - ny], [pb[0] + nx, pb[1] + ny], [pa[0] + nx, pa[1] + ny]].map(|p| screen([p[0], p[1], level_z]));
+                painter.add(egui::Shape::convex_polygon(ring.to_vec(), Color32::from_rgba_unmultiplied(120, 120, 130, 110), Stroke::new(1.0, blue)));
+                dashed(&painter, screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]), Stroke::new(1.0, blue));
+                let shown = if app.wall_len.is_empty() { format!("{:.0}", (b[0] - a[0]).hypot(b[1] - a[1]) * 1000.0) } else { format!("{}_", app.wall_len) };
+                painter.text(screen([b[0], b[1], level_z]) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{shown} mm"), egui::FontId::proportional(13.0), blue);
+            }
+        }
+        if let Some(h) = hover {
+            let (m, snapped) = snap_to(h);
+            if snapped { painter.rect_stroke(Rect::from_center_size(screen([m[0], m[1], level_z]), Vec2::splat(9.0)), 0.0, Stroke::new(1.5, Color32::from_rgb(220, 140, 0)), egui::StrokeKind::Middle); }
+        }
+        let typed: String = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }).collect());
+        if app.wall_pts.last().is_some() { for c in typed.chars().filter(|c| c.is_ascii_digit() || *c == '.') { app.wall_len.push(c); } }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if !app.wall_pts.is_empty() { app.wall_pts.clear(); app.wall_ids.clear(); app.wall_len.clear(); app.message = "Wall: chain ended; Esc again leaves the tool".into(); } else { app.choose_tool(crate::Tool::Select); }
+        } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) && !app.wall_len.is_empty() { app.wall_len.pop();
+        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !app.wall_len.is_empty() {
+            if let (Some(a), Some(h), Ok(mm)) = (start, hover, app.wall_len.parse::<f64>()) {
+                let (b, _) = snap_to(h);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let l = dx.hypot(dy);
+                if l > 1e-9 && mm > 0.0 { app.wall_click(level_id, [a[0] + dx / l * mm / 1000.0, a[1] + dy / l * mm / 1000.0]); }
+            }
+        }
+        else if let Some(p) = pick { app.wall_click(level_id, to_model(p)); }
     } else if app.tool == crate::Tool::EndPoint && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
@@ -445,7 +501,7 @@ mod tests {
         assert_eq!(walls(&app), n + 2, "{}", app.message);
         // Esc ends the chain, and then a press-drag-release draws one wall
         frame(&ctx, screen, &mut app, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
-        assert!(app.tool == crate::Tool::Wall && app.beam_start.is_none());
+        assert!(app.tool == crate::Tool::Wall && app.wall_pts.is_empty());
         let (d, e) = (Pos2::new(200.0, 500.0), Pos2::new(400.0, 520.0));
         frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(d)]);
         frame(&ctx, screen, &mut app, vec![button(d, true)]);
@@ -480,5 +536,52 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(e)]);
         frame(&ctx, screen, &mut app, vec![button(e, false)]);
         assert_eq!(app.run_points.len(), 2, "{}", app.message);
+    }
+
+    #[test]
+    fn walls_follow_the_location_line_chain_at_corners_and_close_the_loop() {
+        let mut app = Desktop::sample();
+        app.run_command("wall", "Wall");
+        let level = ElementId(10);
+        let line = |app: &Desktop, id: ElementId| match app.document.get(id).unwrap().geometry { Some(Geometry::Linear { start, end, .. }) => (start, end), _ => panic!() };
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
+        // drawn clockwise along the exterior face of 200 mm walls, the axes lie 100 mm inside
+        app.wall_loc = 2;
+        let n = walls(&app);
+        for p in [[20.0, 20.0], [26.0, 20.0], [26.0, 14.0], [20.0, 14.0], [20.0, 20.0]] { app.wall_click(level, p); }
+        assert_eq!(walls(&app), n + 4, "{} / {:?}", app.message, app.wall_pts);
+        assert!(app.wall_pts.is_empty(), "the loop is closed and the chain over");
+        let ids: Vec<_> = app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).skip(n).collect();
+        assert_eq!(ids.len(), 4);
+        // axes: top (19.9) from 20.1 to 25.9 ... each wall's axis runs between the corners of the offset lines
+        let top = line(&app, ids[0]);
+        assert!(near(top.0, [20.1, 19.9]) && near(top.1, [25.9, 19.9]), "{top:?}");
+        let right = line(&app, ids[1]);
+        assert!(near(right.0, [25.9, 19.9]) && near(right.1, [25.9, 14.1]), "{right:?}");
+        let left = line(&app, ids[3]);
+        assert!(near(left.1, [20.1, 19.9]), "{left:?}");
+        // the outer face of the top wall is on the drawn line: its plan has corners at y = 20
+        let ring = app.document.wall_plan(ids[0]).unwrap();
+        assert!(ring.iter().any(|p| (p[1] - 20.0).abs() < 1e-9 && (p[0] - 20.0).abs() < 1e-9), "{ring:?}");
+        // interior face: the axis lies 100 mm to the left
+        app.wall_loc = 3;
+        app.wall_click(level, [40.0, 20.0]);
+        app.wall_click(level, [46.0, 20.0]);
+        let last = *app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).collect::<Vec<_>>().last().unwrap();
+        assert!(near(line(&app, last).0, [40.0, 20.1]), "{:?}", line(&app, last));
+        // without Chain each pick pair is a wall of its own
+        app.wall_pts.clear();
+        app.wall_ids.clear();
+        app.wall_chain_on = false;
+        app.wall_click(level, [50.0, 20.0]);
+        app.wall_click(level, [52.0, 20.0]);
+        assert!(app.wall_pts.is_empty());
+        // a typed length is exact
+        app.wall_chain_on = true;
+        app.wall_loc = 0;
+        app.wall_pts = vec![[60.0, 20.0]];
+        app.wall_click(level, [63.5, 20.0]);
+        let last = *app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).collect::<Vec<_>>().last().unwrap();
+        assert!(near(line(&app, last).1, [63.5, 20.0]));
     }
 }

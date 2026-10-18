@@ -20,7 +20,7 @@ pub use types::TypeValues;
 pub use elec::{ElecCable, ElecKind, ElecNode};
 pub use mep::{EquipLink, EndDemand, EndRole, MepData, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
-pub use spatial::{system_lines, BeamExtent, Geometry, Mesh};
+pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh};
 
 /// Document-local, stable element identity. Future versions require
 /// a project-scoped ID allocation strategy for collaborative editing.
@@ -492,13 +492,23 @@ impl Document {
     /// Draws a straight wall on `level` from `start` to `end`: `thickness_m` thick, `height_m` high, its base
     /// `base_offset_m` above the level. A wall with no length is refused.
     pub fn place_wall(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], thickness_m: f64, height_m: f64, base_offset_m: f64) -> Result<ElementId, EditError> {
+        self.place_wall_moving(level, start, end, thickness_m, height_m, base_offset_m, &[])
+    }
+    /// Like `place_wall`, and in the same undoable step moves the axes of other walls (`(wall, start, end)`): the
+    /// walls of a chain meet at the corners of their offset lines, so drawing the next wall moves the end of the last.
+    pub fn place_wall_moving(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], thickness_m: f64, height_m: f64, base_offset_m: f64, moves: &[(ElementId, [f64; 2], [f64; 2])]) -> Result<ElementId, EditError> {
         let id = self.next_id();
         if (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01 { return Err(EditError::InvalidGeometry(id)); }
         let n = self.elements.values().filter(|e| e.category == Category::Wall).count() + 1;
-        self.transact(self.revision, &[
+        let mut ops = vec![
             Command::Create { id, category: Category::Wall, name: format!("Wall {n}"), width_m: thickness_m, height_m, elevation_m: base_offset_m },
             Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } },
-        ])?;
+        ];
+        for &(w, a, b) in moves {
+            if (b[0] - a[0]).hypot(b[1] - a[1]) < 0.01 { return Err(EditError::InvalidGeometry(w)); }
+            ops.push(Command::SetGeometry { id: w, geometry: Geometry::Linear { start: a, end: b, level } });
+        }
+        self.transact(self.revision, &ops)?;
         Ok(id)
     }
     /// Stands a column at `at` from `level` (raised by `base_offset_m`) up to the level `top`.

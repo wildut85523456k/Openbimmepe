@@ -103,13 +103,13 @@ fn column_section(pts: &[[f64; 2]]) -> Option<(Section, f64, f64, [f64; 2])> {
 /// so that mitred ends give the true length.
 fn wall_axis(pts: &[[f64; 2]]) -> Option<([f64; 2], [f64; 2], f64)> {
     let n = pts.len();
-    let (mut best, mut u) = (0.0, [1.0, 0.0]);
-    for i in 0..n {
-        let (a, b) = (pts[i], pts[(i + 1) % n]);
-        let l = (b[0] - a[0]).hypot(b[1] - a[1]);
-        if l > best { best = l; u = [(b[0] - a[0]) / l, (b[1] - a[1]) / l]; }
-    }
+    let edge = |i: usize| { let (a, b) = (pts[i], pts[(i + 1) % n]); ((b[0] - a[0]).hypot(b[1] - a[1]), a, b) };
+    let best = (0..n).map(|i| edge(i).0).fold(0.0, f64::max);
     if best < 1e-6 { return None; }
+    // the file lists the left edge going forward first (as this app writes it), so among the long edges the first
+    // one gives the direction of the wall: a mitred wall has a long and a short side
+    let first = (0..n).map(edge).find(|e| e.0 >= 0.9 * best).unwrap_or_else(|| edge(0));
+    let u = [(first.2[0] - first.1[0]) / first.0, (first.2[1] - first.1[1]) / first.0];
     let v = [-u[1], u[0]];
     let proj: Vec<(f64, f64)> = pts.iter().map(|p| (p[0] * u[0] + p[1] * u[1], p[0] * v[0] + p[1] * v[1])).collect();
     let (vmin, vmax) = proj.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
@@ -392,7 +392,12 @@ fn unchanged_in_file(native: &openbim_document::Element, nd: &Document, read: &o
         _ => Some(el.elevation_m),
     };
     let geometry = match (native.geometry, read.geometry) {
-        (Some(Geometry::Linear { start: a, end: b, .. }), Some(Geometry::Linear { start: c, end: d, .. })) => close2(a, c) && close2(b, d),
+        (Some(Geometry::Linear { start: a, end: b, .. }), Some(Geometry::Linear { start: c, end: d, .. })) => {
+            // a wall is written with its joins (mitred corners, ends stopped at the face of the wall they meet), so the
+            // axis the file's outline gives is the axis of the joined wall, not the drawn one
+            let joined = if native.category == Category::Wall { nd.wall_plan(native.id).and_then(|r| wall_axis(&r)).map(|(s, e, _)| (s, e)) } else { None };
+            match joined { Some((s, e)) => close2(s, c) && close2(e, d), None => close2(a, c) && close2(b, d) }
+        }
         (Some(Geometry::Point { at: a, top: t, .. }), Some(Geometry::Point { at: b, top: u, .. })) => close2(a, b) && same_level(t, u),
         (Some(Geometry::Pad { at: a, thickness_m: t, .. }), Some(Geometry::Pad { at: b, thickness_m: u, .. })) => close2(a, b) && close(t, u),
         (Some(Geometry::Area { .. }), Some(Geometry::Area { .. })) => true,
@@ -729,7 +734,10 @@ mod tests {
         let mut back = Document::new();
         let report = import_ifc(&mut back, &out.text).unwrap();
         assert_eq!(report.restored, 0);
-        let (want, got) = (digest(&d), digest(&back));
+        // a wall that stops at the face of another has only that length in the file: without the app's own data
+        // the file's geometry is all there is
+        let want: Vec<String> = digest(&d).into_iter().map(|l| l.replace("[4.000, 0.000][4.000, 6.000]", "[4.000, 0.100][4.000, 5.900]")).collect();
+        let got = digest(&back);
         assert_eq!(want, got, "{}", report.text());
     }
 

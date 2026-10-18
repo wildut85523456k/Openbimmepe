@@ -56,6 +56,13 @@ struct Desktop {
     axis_mm: [f64; 4],
     /// the first point of a beam being placed in a plan view
     beam_start: Option<[f64; 2]>,
+    /// the Wall tool's chain: the points picked so far, the walls drawn from them, the Location Line, whether it chains,
+    /// and a length typed in mm
+    wall_pts: Vec<[f64; 2]>,
+    wall_ids: Vec<ElementId>,
+    wall_loc: usize,
+    wall_chain_on: bool,
+    wall_len: String,
     /// the level the options bar places beams on; the lowest when None
     beam_level: Option<ElementId>,
     /// the corners of the slab being drawn in a plan view
@@ -158,7 +165,7 @@ impl Desktop {
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
-            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
+            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_len: String::new(), beam_level: None,
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
@@ -173,6 +180,9 @@ impl Desktop {
     fn choose_tool(&mut self, tool: Tool) {
         self.tool = tool;
         self.beam_start = None;
+        self.wall_pts.clear();
+        self.wall_ids.clear();
+        self.wall_len.clear();
         self.slab_points.clear();
         self.run_points.clear();
         self.branch_main = None;
@@ -195,7 +205,7 @@ impl Desktop {
             Tool::Truss => "Truss: click the start and the end of the truss in a plan view; it is built with the panel length, depth and member size of the options bar (Esc ends).".into(),
             Tool::Rebar => "Rebar: click a beam in a plan view; bars and stirrups are placed inside it and follow it (Esc ends).".into(),
             Tool::Family => format!("{}: click in a plan view (a door or window: click the wall it goes in); Esc ends.", self.family_pick),
-            Tool::Wall => "Wall: click the start and then each next point in a plan view, or press, drag and release for one wall. Shift keeps it square; Esc ends the chain, Esc again the tool. Thickness, height and base are in the options bar.".into(),
+            Tool::Wall => "Wall: click the start and then each next point in a plan view, or press, drag and release for one wall. The line you draw is the Location Line of the options bar (centreline, or the exterior or interior face, exterior on the left when you draw clockwise). Shift keeps it square, a typed length (mm) and Enter sets it, clicking the first point closes the loop; Esc ends the chain, Esc again the tool.".into(),
         };
     }
 

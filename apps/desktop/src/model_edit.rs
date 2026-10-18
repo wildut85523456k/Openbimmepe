@@ -454,14 +454,56 @@ impl Desktop {
 
     /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
     /// tool stays on for the next one.
-    /// A pick of the Wall tool in the plan of `level`: the first starts a wall, each next one draws it and starts the
-    /// next (a chain, as in Revit); Esc ends the chain. A pick on the start point does nothing.
+    /// The Location Line choices of the Wall tool, as Revit lists them. A wall of one layer has its core where its
+    /// finish is, so the core choices give the same lines as the finish ones.
+    pub(crate) const WALL_LOCATIONS: [&'static str; 6] = ["Wall Centerline", "Core Centerline", "Finish Face: Exterior", "Finish Face: Interior", "Core Face: Exterior", "Core Face: Interior"];
+
+    /// The axis of a wall drawn from `a` to `b` along the Location Line: the exterior face is on the left of the
+    /// direction of drawing (draw clockwise and it faces out), so a line drawn along it has the axis half a
+    /// thickness to its right, and one drawn along the interior face has it half a thickness to its left.
+    pub(crate) fn wall_axis(&self, a: [f64; 2], b: [f64; 2]) -> ([f64; 2], [f64; 2]) {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len = dx.hypot(dy);
+        if len < 1e-9 { return (a, b); }
+        let half = self.width_mm / 2000.0;
+        let k = match self.wall_loc { 2 | 4 => -half, 3 | 5 => half, _ => 0.0 };
+        let (nx, ny) = (-dy / len * k, dx / len * k);
+        ([a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny])
+    }
+
+    /// A pick of the Wall tool in the plan of `level`: the first starts a wall, each next one draws it (along the
+    /// Location Line of the options bar) and, with Chain on, starts the next. The walls of a chain meet at the
+    /// corners of their lines, and a pick on the first point closes the loop. Esc ends the chain.
     pub(crate) fn wall_click(&mut self, level: ElementId, point: [f64; 2]) {
-        let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Wall: pick the end (Shift keeps it square, Esc ends the chain)".into(); return; };
-        if (point[0] - start[0]).hypot(point[1] - start[1]) < 0.01 { return; }
+        let Some(&last) = self.wall_pts.last() else { self.wall_pts.push(point); self.message = "Wall: pick the end (type a length in mm, Shift keeps it square, Esc ends the chain)".into(); return; };
+        if (point[0] - last[0]).hypot(point[1] - last[1]) < 0.01 { return; }
         let m = |v: f64| v / 1000.0;
-        match self.document.place_wall(level, start, point, m(self.width_mm), m(self.height_mm), m(self.elevation_mm)) {
-            Ok(id) => { self.beam_start = Some(point); self.message = format!("Wall {} placed; pick the next point, Esc ends the chain; undo removes it", id.0); }
+        let line = |w: ElementId| match self.document.get(w).and_then(|e| e.geometry) { Some(Geometry::Linear { start, end, .. }) => Some((start, end)), _ => None };
+        let (a, b) = self.wall_axis(last, point);
+        let dir = [b[0] - a[0], b[1] - a[1]];
+        let closing = self.wall_chain_on && self.wall_ids.len() >= 2 && (point[0] - self.wall_pts[0][0]).hypot(point[1] - self.wall_pts[0][1]) < 0.01;
+        let (mut start, mut end, mut moves) = (a, b, Vec::new());
+        if self.wall_chain_on {
+            if let Some((ps, pe)) = self.wall_ids.last().and_then(|w| line(*w)) {
+                // the corner of the last wall's line and this one's, when they are not parallel
+                if let Some(v) = openbim_document::line_meet(ps, [pe[0] - ps[0], pe[1] - ps[1]], a, dir) {
+                    if (v[0] - a[0]).hypot(v[1] - a[1]) < 20.0 * m(self.width_mm) + 1e-6 { start = v; moves.push((*self.wall_ids.last().unwrap(), ps, v)); }
+                }
+            }
+            if closing {
+                if let Some((fs, fe)) = line(self.wall_ids[0]) {
+                    if let Some(v) = openbim_document::line_meet(fs, [fe[0] - fs[0], fe[1] - fs[1]], a, dir) {
+                        if (v[0] - b[0]).hypot(v[1] - b[1]) < 20.0 * m(self.width_mm) + 1e-6 { end = v; moves.push((self.wall_ids[0], v, fe)); }
+                    }
+                }
+            }
+        }
+        match self.document.place_wall_moving(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), &moves) {
+            Ok(id) => {
+                self.wall_len.clear();
+                if closing || !self.wall_chain_on { self.wall_pts.clear(); self.wall_ids.clear(); self.message = format!("Wall {} placed; undo removes it", id.0); }
+                else { self.wall_pts.push(point); self.wall_ids.push(id); self.message = format!("Wall {} placed; pick the next point, Esc ends the chain; undo removes it", id.0); }
+            }
             Err(error) => self.message = format!("Wall rejected: {error:?}"),
         }
     }

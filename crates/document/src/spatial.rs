@@ -221,6 +221,115 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
     Ok(())
 }
 
+type P2 = [f64; 2];
+fn p2_sub(a: P2, b: P2) -> P2 { [a[0] - b[0], a[1] - b[1]] }
+fn p2_add(a: P2, b: P2) -> P2 { [a[0] + b[0], a[1] + b[1]] }
+fn p2_mul(a: P2, k: f64) -> P2 { [a[0] * k, a[1] * k] }
+fn p2_cross(a: P2, b: P2) -> f64 { a[0] * b[1] - a[1] * b[0] }
+fn p2_dot(a: P2, b: P2) -> f64 { a[0] * b[0] + a[1] * b[1] }
+fn p2_len(a: P2) -> f64 { a[0].hypot(a[1]) }
+fn p2_unit(a: P2) -> P2 { let l = p2_len(a); if l < 1e-12 { [0.0, 0.0] } else { [a[0] / l, a[1] / l] } }
+fn p2_left(d: P2) -> P2 { [-d[1], d[0]] }
+/// The point where the line through `p` along `d` meets the line through `q` along `e`.
+pub fn line_meet(p: P2, d: P2, q: P2, e: P2) -> Option<P2> {
+    let den = p2_cross(d, e);
+    if den.abs() < 1e-9 { return None; }
+    let t = p2_cross(p2_sub(q, p), e) / den;
+    Some(p2_add(p, p2_mul(d, t)))
+}
+
+impl Document {
+    /// The walls of a level other than `id`, as (start, end, thickness).
+    fn walls_around(&self, id: ElementId, level: ElementId) -> Vec<(P2, P2, f64)> {
+        self.elements().filter(|e| e.id != id && e.category == Category::Wall).filter_map(|e| match e.geometry {
+            Some(Geometry::Linear { start, end, level: l }) if l == level && p2_len(p2_sub(end, start)) > 1e-6 => Some((start, end, e.width_m)),
+            _ => None,
+        }).collect()
+    }
+
+    /// How one end of a wall meets the walls around it, as Revit joins them: two walls that meet at their ends
+    /// are mitred, three or more meet with the straight pair running through and the others stopping at its
+    /// face, and a wall whose end touches the body of another stops at the face of that wall. The line is where
+    /// the end of the wall stops.
+    fn wall_end_stop(&self, w: &Element, at_start: bool) -> Option<openbim_geom::StopLine> {
+        let Some(Geometry::Linear { start, end, level }) = w.geometry else { return None };
+        let (e, far) = if at_start { (start, end) } else { (end, start) };
+        let dw = p2_unit(p2_sub(far, e));
+        let tw = w.width_m;
+        let others = self.walls_around(w.id, level);
+        // the walls that end at the same point, as the direction they leave it in
+        let meeting: Vec<(P2, f64)> = others.iter().filter_map(|&(s, t, th)| {
+            if p2_len(p2_sub(s, e)) < 1e-3 { Some((p2_unit(p2_sub(t, s)), th)) }
+            else if p2_len(p2_sub(t, e)) < 1e-3 { Some((p2_unit(p2_sub(s, t)), th)) } else { None }
+        }).collect();
+        let face = |d: P2, t: f64, toward: P2| -> openbim_geom::StopLine {
+            let side = if p2_cross(d, toward) >= 0.0 { 1.0 } else { -1.0 };
+            openbim_geom::StopLine { point: p2_add(e, p2_mul(p2_left(d), side * t / 2.0)), dir: d }
+        };
+        match meeting.len() {
+            0 => {}
+            1 => {
+                let (d, t) = meeting[0];
+                if p2_cross(dw, d).abs() < 0.17 { return None; }
+                let (nw, no) = (p2_left(dw), p2_left(d));
+                let pa = line_meet(p2_add(e, p2_mul(nw, tw / 2.0)), dw, p2_sub(e, p2_mul(no, t / 2.0)), d)?;
+                let pb = line_meet(p2_sub(e, p2_mul(nw, tw / 2.0)), dw, p2_add(e, p2_mul(no, t / 2.0)), d)?;
+                let dir = p2_sub(pb, pa);
+                return if p2_len(dir) < 1e-9 { None } else { Some(openbim_geom::StopLine { point: pa, dir }) };
+            }
+            _ => {
+                let mut all = vec![(dw, tw)];
+                all.extend(meeting.iter().copied());
+                let mut best = (0, 1, f64::MAX);
+                for i in 0..all.len() { for j in i + 1..all.len() {
+                    let dot = p2_dot(all[i].0, all[j].0);
+                    if dot < best.2 { best = (i, j, dot); }
+                } }
+                if best.0 == 0 || best.1 == 0 { return None; }
+                let (d, t) = all[best.0];
+                return Some(face(d, t, dw));
+            }
+        }
+        // an end on the body of another wall
+        for (s, t, th) in others {
+            let d = p2_unit(p2_sub(t, s));
+            let len = p2_len(p2_sub(t, s));
+            let along = p2_dot(p2_sub(e, s), d);
+            let off = p2_cross(d, p2_sub(e, s));
+            if along > 1e-3 && along < len - 1e-3 && off.abs() <= th / 2.0 + 1e-3 && p2_cross(d, dw).abs() > 0.17 {
+                let side = if p2_cross(d, dw) >= 0.0 { 1.0 } else { -1.0 };
+                return Some(openbim_geom::StopLine { point: p2_add(s, p2_mul(p2_left(d), side * th / 2.0)), dir: d });
+            }
+        }
+        None
+    }
+
+    /// The wall as a chain of one segment, its ends joined to the walls around it. Ends that cannot be joined
+    /// (a join that does not make sense) stay square.
+    pub fn wall_chain(&self, id: ElementId) -> Option<openbim_geom::WallChain> {
+        let w = self.get(id)?;
+        if w.category != Category::Wall { return None; }
+        let Some(Geometry::Linear { start, end, .. }) = w.geometry else { return None };
+        let mut chain = openbim_geom::WallChain::new(vec![start, end], false, w.width_m, w.height_m);
+        chain.start_stop = self.wall_end_stop(w, true);
+        chain.end_stop = self.wall_end_stop(w, false);
+        if chain.plans().is_ok() { return Some(chain); }
+        let (a, b) = (chain.start_stop.take(), chain.end_stop.take());
+        for keep in [(a, None), (None, b)] {
+            chain.start_stop = keep.0; chain.end_stop = keep.1;
+            if chain.plans().is_ok() { return Some(chain); }
+        }
+        chain.start_stop = None; chain.end_stop = None;
+        Some(chain)
+    }
+
+    /// The plan of a wall with its joins: the corners of its right edge (start, end) and its left edge (end, start).
+    pub fn wall_plan(&self, id: ElementId) -> Option<[P2; 4]> {
+        let plan = self.wall_chain(id)?.plans().ok()?.into_iter().next()?;
+        Some([plan.r0, plan.r1, plan.l1, plan.l0])
+    }
+}
+
 impl Document {
     /// The axis of a beam after its joins: each end that lies in a column (and has its join allowed) is cut back to
     /// the face of that column, where the beam first meets it. None for anything but a beam on a level.
@@ -327,6 +436,16 @@ impl Document {
             }
             return Some(Mesh { vertices, faces });
         }
+        if el.category == Category::Wall {
+            if let (Some(Geometry::Linear { level, .. }), Some(ring)) = (el.geometry, self.wall_plan(id)) {
+                let z0 = self.get(level)?.elevation_m + el.elevation_m;
+                let mut vertices: Vec<[f64; 3]> = ring.iter().map(|p| [p[0], p[1], z0]).collect();
+                vertices.extend(ring.iter().map(|p| [p[0], p[1], z0 + el.height_m]));
+                let mut faces = vec![vec![3, 2, 1, 0], vec![4, 5, 6, 7]];
+                for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
+                return Some(Mesh { vertices, faces });
+            }
+        }
         let Geometry::Linear { start, end, level } = el.geometry.as_ref()? else { return None; };
         let z = self.get(*level)?.elevation_m + el.elevation_m;
         let dx = end[0] - start[0];
@@ -404,6 +523,34 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn walls_are_joined_as_revit_joins_them() {
+        let d = Document::spatial_sample();
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+        let has = |ring: &[[f64; 2]; 4], p: [f64; 2]| ring.iter().any(|&q| near(q, p));
+        // Wall 1 runs (0,0)-(8,0) and wall 4 (0,6)-(0,0): they meet at (0,0) and are mitred, so the outer corner is
+        // filled and the inner corner is cut
+        let (w1, w4) = (d.wall_plan(ElementId(20)).unwrap(), d.wall_plan(ElementId(23)).unwrap());
+        for ring in [&w1, &w4] { assert!(has(ring, [-0.1, -0.1]) && has(ring, [0.1, 0.1]), "{ring:?}"); }
+        // Wall 5 runs (4,0)-(4,6) from the body of wall 1 to the body of wall 3: it stops at their faces
+        let w5 = d.wall_plan(ElementId(24)).unwrap();
+        assert!(has(&w5, [3.9, 0.1]) && has(&w5, [4.1, 0.1]) && has(&w5, [3.9, 5.9]) && has(&w5, [4.1, 5.9]), "{w5:?}");
+        // the mesh of a wall is that plan, standing 3 m high, and it is closed
+        let m = d.mesh(ElementId(24)).unwrap();
+        assert!((volume(&m).abs() - 0.2 * 5.8 * 3.0).abs() < 1e-6, "{}", volume(&m));
+        // a wall on its own keeps its square ends
+        let mut alone = Document::spatial_sample();
+        let level = ElementId(10);
+        let id = alone.place_wall(level, [20.0, 20.0], [25.0, 20.0], 0.3, 3.0, 0.0).unwrap();
+        assert!(has(&alone.wall_plan(id).unwrap(), [20.0, 20.15]));
+        // two collinear walls meet flat
+        let b = alone.place_wall(level, [25.0, 20.0], [30.0, 20.0], 0.3, 3.0, 0.0).unwrap();
+        assert!(has(&alone.wall_plan(b).unwrap(), [25.0, 20.15]) && has(&alone.wall_plan(b).unwrap(), [25.0, 19.85]));
+        // walls on another level do not join
+        let c = alone.place_wall(ElementId(11), [25.0, 20.0], [25.0, 25.0], 0.3, 3.0, 0.0).unwrap();
+        assert!(has(&alone.wall_plan(c).unwrap(), [24.85, 20.0]));
+    }
     use super::*;
     use crate::{Material, SlabKind, SlabSpec};
     #[test]
@@ -525,7 +672,7 @@ mod tests {
         let changed = d.mesh(ElementId(20)).unwrap();
         assert_eq!(changed.vertices[0][1], -0.2);
         assert_eq!(changed.vertices[0][2], 1.0);
-        assert_eq!(changed.vertices[2][2], 5.0);
+        assert_eq!(changed.vertices[4][2], 5.0);
         d.undo().unwrap();
         assert_eq!(d.mesh(ElementId(20)).unwrap(), original);
     }

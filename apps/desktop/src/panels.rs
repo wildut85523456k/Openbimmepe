@@ -271,6 +271,24 @@ fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Wall {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Wall");
+            ui.separator();
+            ui.label("Location Line");
+            egui::ComboBox::from_id_salt("wall_loc").selected_text(Desktop::WALL_LOCATIONS[app.wall_loc]).show_ui(ui, |ui| {
+                for (i, name) in Desktop::WALL_LOCATIONS.iter().enumerate() { ui.selectable_value(&mut app.wall_loc, i, *name); }
+            });
+            ui.label("Thickness (mm)");
+            ui.add(egui::DragValue::new(&mut app.width_mm).speed(5.0).range(10.0..=2000.0));
+            ui.label("Height (mm)");
+            ui.add(egui::DragValue::new(&mut app.height_mm).speed(10.0).range(100.0..=30000.0));
+            ui.label("Base offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.elevation_mm).speed(10.0));
+            ui.checkbox(&mut app.wall_chain_on, "Chain");
+        });
+        return;
+    }
     if app.tool == crate::Tool::WallFooting {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Wall Footing");
