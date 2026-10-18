@@ -16,6 +16,12 @@ What exists
   DXF RGB matching uses the full fixed ACI reference palette (ezdxf 1.4.4 modelspace),
   with black exported as adaptive foreground 7 and stable lowest-index tie breaking.
   Indexed colour remains approximate; CAD background/palette settings can change appearance.
+  Neutral RGB values use only neutral ACI entries so grayscale cannot acquire a tint.
+  `PrintMode::{Colour, Grayscale, BlackLines}` is selected per render/export using
+  `render_sheet_with_mode` or `render_all_with_mode`; existing entrypoints default to colour.
+  Grayscale uses rounded BT.601 luma (299R + 587G + 114B)/1000 on encoded channels.
+  Mode conversion precedes the existing half-to-white halftone; black mode therefore
+  keeps halftones gray. Sheet graphics/text stay black. No model/view settings are changed.
 - Excel import (calamine): header names matched to intrinsic fields or title block fields; atomic; create-only or create-or-update; row numbers in errors.
 - No standard values are built in: line weights, templates and margins are data.
 
@@ -27,6 +33,8 @@ Verification
   `cargo run -p openbim-sheets --release --example colour_scene -- OUTDIR/input.csv OUTDIR`,
   then `python spikes/s13_sheets_check/check_dxf_colours.py check OUTDIR`
   (ezdxf==1.4.4 and pypdf).
+- Print modes: `cargo run -p openbim-sheets --release --example print_modes_scene -- OUTDIR`,
+  then `python spikes/s13_sheets_check/check_print_modes.py OUTDIR`.
 - `python -I spikes/s13_sheets_check/check_sheets.py`: qpdf, pdftotext, pypdf, pdfium raster, ezdxf, reportlab width tables, strokes re-derived without the Rust code.
 - Mutation checks done by hand (halftone maths, clip bounds, weight index, layer naming, mode table, revision lookup, number validation, header matching): each caught by a test.
 

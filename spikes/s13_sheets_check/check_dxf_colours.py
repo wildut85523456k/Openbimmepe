@@ -18,6 +18,8 @@ def expected(rgb):
     if rgb == (0, 0, 0):
         return 7
     candidates = (i for i in range(1, 256) if i != 7)
+    if len(set(rgb)) == 1:
+        candidates = (i for i in candidates if len(set(int2rgb(DXF_DEFAULT_COLORS[i]))) == 1)
     return min(candidates, key=lambda i: (
         sum((a - b) ** 2 for a, b in zip(rgb, int2rgb(DXF_DEFAULT_COLORS[i]))), i
     ))
@@ -26,6 +28,7 @@ def expected(rgb):
 def make_input(folder):
     rng = random.Random(4001)
     colours = set(product([0, 32, 64, 96, 128, 160, 192, 255], repeat=3))
+    colours.update((value,) * 3 for value in range(256))
     colours.update(tuple(int2rgb(c)) for c in DXF_DEFAULT_COLORS[1:])
     colours.update(tuple(rng.randrange(256) for _ in range(3)) for _ in range(256))
     colours.update([(122, 122, 0), (112, 0, 223), (183, 0, 183)])

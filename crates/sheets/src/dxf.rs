@@ -30,6 +30,7 @@ const ACI_RGB: [u32; 256] = [
 
 /// Nearest fixed ACI colour by squared RGB distance; ties prefer the lowest index.
 /// Black uses adaptive foreground 7. Other colours exclude 7 so white stays white.
+/// Neutral inputs use only neutral palette entries, keeping grayscale output achromatic.
 /// R12 indexed colour is approximate; the receiving CAD palette controls appearance.
 pub fn aci(rgb: [u8; 3]) -> u8 {
     if rgb == [0, 0, 0] {
@@ -37,11 +38,15 @@ pub fn aci(rgb: [u8; 3]) -> u8 {
     }
     let mut best_index = 1;
     let mut best_distance = u32::MAX;
+    let neutral = rgb[0] == rgb[1] && rgb[1] == rgb[2];
     for (index, &colour) in ACI_RGB.iter().enumerate().skip(1) {
         if index == 7 {
             continue;
         }
         let channels = [(colour >> 16) & 255, (colour >> 8) & 255, colour & 255];
+        if neutral && (channels[0] != channels[1] || channels[1] != channels[2]) {
+            continue;
+        }
         let distance = rgb.iter().zip(channels).map(|(&a, b)| u32::from(a).abs_diff(b).pow(2)).sum();
         if distance < best_distance {
             best_distance = distance;

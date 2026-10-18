@@ -1,7 +1,7 @@
 # PRT-004 candidate verification — 2026-10-18
 
-Status: implemented locally and verified at the sheets-crate level; not pushed or merged.
-This follows local PRT-001 commit 99d0ddb on the sheets source baseline
+Status: implemented and verified at the sheets-crate level; see the implementation PR for publication/merge status.
+This follows PRT-001 on the sheets source baseline
 18520949edece94c8db30f764378ba818d6433bf. PR #45 remains documentation-only.
 
 ## Decision
@@ -39,4 +39,5 @@ Linux x86_64; rustc 1.99.1; existing upstream dependency lockfile, no Cargo depe
 ACI quantization is lossy and palette/background dependent. True-colour DXF is deferred;
 it would require a format/consumer compatibility decision. Full workspace integration,
 desktop interaction, receiving AutoCAD visual review and independent code review have not run.
-No implementation of PRT-002/003/005/006/007 or DOC-PURGE is included.
+This report covers PRT-004 only; the later PRT-003 stage is documented separately.
+PRT-002/005/006/007 and DOC-PURGE remain outside this implementation.

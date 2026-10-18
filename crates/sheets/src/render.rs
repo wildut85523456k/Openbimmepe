@@ -11,6 +11,29 @@ use crate::{finite, SheetError};
 
 pub const MAX_PRIMS: usize = 5_000_000;
 
+/// Per-export stroke colour policy. Does not modify view or model settings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PrintMode {
+    #[default]
+    Colour,
+    Grayscale,
+    BlackLines,
+}
+
+impl PrintMode {
+    fn base_colour(self, rgb: [u8; 3]) -> [u8; 3] {
+        match self {
+            Self::Colour => rgb,
+            // Rounded BT.601 luma on the encoded RGB channels, deliberately deterministic.
+            Self::Grayscale => {
+                let grey = (299 * u32::from(rgb[0]) + 587 * u32::from(rgb[1]) + 114 * u32::from(rgb[2]) + 500) / 1000;
+                [grey as u8; 3]
+            }
+            Self::BlackLines => [0; 3],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Prim {
     Line { a: [f64; 2], b: [f64; 2], weight_mm: f64, rgb: [u8; 3], layer: String },
@@ -174,8 +197,15 @@ impl Out<'_> {
     }
 }
 
-/// Draw one sheet.
+/// Draw one sheet in colour (backwards-compatible default).
 pub fn render_sheet(set: &SheetSet, lib: &ViewLibrary, contents: &ViewContents, lw: &LineWeightTable, number: &str, ctx: &PrintContext) -> Result<RenderedSheet, SheetError> {
+    render_sheet_with_mode(set, lib, contents, lw, number, ctx, PrintMode::Colour)
+}
+
+/// Draw one sheet with an explicit output mode, before PDF/DXF encoding.
+/// Apply the mode before halftoning so black lines retain distinguishable gray halftones.
+/// Title-block, revision and annotation graphics remain black in every mode.
+pub fn render_sheet_with_mode(set: &SheetSet, lib: &ViewLibrary, contents: &ViewContents, lw: &LineWeightTable, number: &str, ctx: &PrintContext, mode: PrintMode) -> Result<RenderedSheet, SheetError> {
     let s: &Sheet = set.sheet(number).ok_or_else(|| SheetError::Unknown { what: "sheet", value: number.to_string() })?;
     let tb = set.titleblock(&s.titleblock).ok_or_else(|| SheetError::Unknown { what: "title block", value: s.titleblock.clone() })?;
     let mut o = Out { prims: Vec::new(), warnings: Vec::new(), lw };
@@ -256,7 +286,7 @@ pub fn render_sheet(set: &SheetSet, lib: &ViewLibrary, contents: &ViewContents, 
             let cat = lib.category(&mp.category).expect("display checked the category");
             let to = |p: [f64; 2]| [vp.centre[0] + (p[0] - vp.model_centre[0]) * k, vp.centre[1] + (p[1] - vp.model_centre[1]) * k];
             let Some((a, b)) = clip_segment(to(mp.a), to(mp.b), &fr) else { continue };
-            let base = colour.unwrap_or([0, 0, 0]);
+            let base = mode.base_colour(colour.unwrap_or([0, 0, 0]));
             o.prims.push(Prim::Line {
                 a,
                 b,
@@ -288,7 +318,12 @@ pub fn render_sheet(set: &SheetSet, lib: &ViewLibrary, contents: &ViewContents, 
     Ok(RenderedSheet { number: s.number.clone(), name: s.name.clone(), size: tb.size.clone(), prims: o.prims, warnings: o.warnings })
 }
 
-/// Every sheet in set order.
+/// Every sheet in set order, in colour.
 pub fn render_all(set: &SheetSet, lib: &ViewLibrary, contents: &ViewContents, lw: &LineWeightTable, ctx: &PrintContext) -> Result<Vec<RenderedSheet>, SheetError> {
-    set.sheets().iter().map(|s| render_sheet(set, lib, contents, lw, &s.number, ctx)).collect()
+    render_all_with_mode(set, lib, contents, lw, ctx, PrintMode::Colour)
+}
+
+/// Every sheet in set order, using the same output mode.
+pub fn render_all_with_mode(set: &SheetSet, lib: &ViewLibrary, contents: &ViewContents, lw: &LineWeightTable, ctx: &PrintContext, mode: PrintMode) -> Result<Vec<RenderedSheet>, SheetError> {
+    set.sheets().iter().map(|s| render_sheet_with_mode(set, lib, contents, lw, &s.number, ctx, mode)).collect()
 }

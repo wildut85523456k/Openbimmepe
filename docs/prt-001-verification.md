@@ -1,6 +1,6 @@
 # PRT-001 candidate verification — 2026-10-18
 
-Status: implemented locally and verified at the sheets-crate level; not pushed or merged.
+Status: implemented and verified at the sheets-crate level; see the implementation PR for publication/merge status.
 PR #45 remains documentation-only. No desktop Print dialog or branch integration is claimed.
 
 Source baseline: m1c-sheets-printing at 18520949edece94c8db30f764378ba818d6433bf.
