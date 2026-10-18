@@ -234,6 +234,26 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             datum_hits.push((id, q1, q2));
         }
     }
+    if !three_d {
+        // the plan symbol of a stair: an arrow up its centre line from the first riser, with UP at the foot
+        let ink = ui.visuals().text_color();
+        for el in app.document.elements().filter(|e| e.category == Category::Stair) {
+            let Some(Geometry::Linear { start, end, level }) = el.geometry else { continue };
+            if level != level_id { continue; }
+            let (a, b) = (screen([start[0], start[1], level_z]), screen([end[0], end[1], level_z]));
+            let shown = selected_all.contains(&el.id);
+            let c = if shown { blue } else { ink };
+            painter.line_segment([a, b], Stroke::new(1.0, c));
+            painter.circle_filled(a, 2.5, c);
+            let dir = (b - a).normalized();
+            if dir.length() > 0.0 {
+                let side = Vec2::new(-dir.y, dir.x);
+                painter.line_segment([b, b - dir * 9.0 + side * 4.5], Stroke::new(1.0, c));
+                painter.line_segment([b, b - dir * 9.0 - side * 4.5], Stroke::new(1.0, c));
+            }
+            painter.text(a + Vec2::new(6.0, -4.0), egui::Align2::LEFT_BOTTOM, "UP", egui::FontId::proportional(11.0), c);
+        }
+    }
     for (id, at, text, closed) in &room_labels {
         let ink = if *closed { ui.visuals().text_color() } else { Color32::from_rgb(200, 60, 60) };
         let shown = selected_all.contains(id);
@@ -263,7 +283,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure);
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair);
             let pending = !app.edit_pts.is_empty() || app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
@@ -380,6 +400,41 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 match hit { Some(h) => app.wall_pick_line(level_id, h, to_model(p)), None => app.message = "Pick Lines: click a grid, a wall or a beam".into() }
             } else { app.wall_click(level_id, to_model(p)); }
         }
+    } else if app.tool == crate::Tool::Stair && !three_d {
+        // the foot of the first riser, then the direction; the treads are drawn from the first point toward the pointer
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let first = app.edit_pts.first().copied();
+        let to_model = |p: Pos2| {
+            let v = (p - centre - pan) / scale + bc;
+            let mut m = [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05];
+            if let (true, Some(s)) = (ortho, first) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
+            m
+        };
+        if let (Some(s), Some(h)) = (first, response.hover_pos()) {
+            let m = to_model(h);
+            let l = (m[0] - s[0]).hypot(m[1] - s[1]);
+            if l > 0.05 {
+                let rise = match app.document.level_above(level_id) {
+                    Some(a) => app.document.get(a).map_or(0.0, |a| a.elevation_m) - app.document.get(level_id).map_or(0.0, |l| l.elevation_m) - app.elevation_mm / 1000.0,
+                    None => app.stair_rise_mm / 1000.0,
+                };
+                if rise >= 0.2 {
+                    let n = openbim_document::risers_for(rise, app.stair_riser_mm / 1000.0);
+                    let (d, right, t, w) = ([(m[0] - s[0]) / l, (m[1] - s[1]) / l], [(m[1] - s[1]) / l, -(m[0] - s[0]) / l], app.stair_tread_mm / 1000.0, app.stair_width_mm / 1000.0);
+                    let pt = |along: f64, lat: f64| screen([s[0] + d[0] * along + right[0] * lat, s[1] + d[1] * along + right[1] * lat, level_z]);
+                    let ghost = Stroke::new(1.0, blue);
+                    for i in 0..n { let a = f64::from(i) * t; painter.line_segment([pt(a, -w / 2.0), pt(a, w / 2.0)], ghost); }
+                    let run = f64::from(n - 1) * t;
+                    painter.line_segment([pt(0.0, -w / 2.0), pt(run, -w / 2.0)], Stroke::new(1.5, blue));
+                    painter.line_segment([pt(0.0, w / 2.0), pt(run, w / 2.0)], Stroke::new(1.5, blue));
+                    painter.text(pt(run, 0.0) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{n} risers, {:.0} mm", rise / f64::from(n) * 1000.0), egui::FontId::proportional(13.0), blue);
+                }
+            }
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if app.edit_pts.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.edit_pts.clear(); }
+        } else if let Some(p) = pick { app.stair_click(level_id, to_model(p)); }
     } else if app.tool == crate::Tool::Room && !three_d {
         // the space under the pointer is previewed; a click places a room in it
         if let Some(h) = response.hover_pos() {
@@ -1770,5 +1825,28 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![]);
         assert!(app.tool == crate::Tool::Select || app.tool == crate::Tool::Slab);
         let _ = y;
+    }
+
+    #[test]
+    fn stair_tool_draws_by_press_drag_release_and_shows_its_plan_symbol() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("stair", "Stair");
+        let (a, b) = (Pos2::new(300.0, 200.0), Pos2::new(300.0, 500.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
+        frame(&ctx, screen, &mut app, vec![button(a, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(b)]);
+        frame(&ctx, screen, &mut app, vec![button(b, false)]);
+        let stairs = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Stair).count();
+        assert_eq!(stairs(&app), 1, "{}", app.message);
+        let id = app.document.elements().find(|e| e.category == Category::Stair).unwrap().id;
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(id).unwrap().geometry else { panic!() };
+        // the run goes the way it was dragged (down the screen is toward -y), and is as long as its treads
+        assert!((start[0] - end[0]).abs() < 1e-9 && end[1] < start[1], "{start:?} {end:?}");
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        app.select_element(Some(id));
+        frame(&ctx, screen, &mut app, vec![]);
     }
 }

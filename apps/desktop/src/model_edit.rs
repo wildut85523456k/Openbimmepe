@@ -196,7 +196,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Stair)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && {
@@ -659,6 +659,25 @@ impl Desktop {
         }
     }
 
+    /// A click of the Stair tool: the foot of the first riser, then the way the stair climbs. The climb is the height
+    /// to the level above (less the base offset), or the height of the options bar when there is none.
+    pub(crate) fn stair_click(&mut self, level: ElementId, point: [f64; 2]) {
+        let Some(start) = self.edit_pts.first().copied() else { self.edit_pts.push(point); self.message = "Stair: pick a point in the direction it climbs".into(); return };
+        if (point[0] - start[0]).hypot(point[1] - start[1]) < 0.05 { return; }
+        let base = self.elevation_mm / 1000.0;
+        let rise = match self.document.level_above(level) {
+            Some(above) => self.document.get(above).map_or(0.0, |a| a.elevation_m) - self.document.get(level).map_or(0.0, |l| l.elevation_m) - base,
+            None => self.stair_rise_mm / 1000.0,
+        };
+        if rise < 0.2 { self.message = "Stair: the base is too close to the top level (nothing to climb)".into(); return; }
+        let risers = openbim_document::risers_for(rise, self.stair_riser_mm / 1000.0);
+        let spec = openbim_document::StairSpec { start, toward: point, width_m: self.stair_width_mm / 1000.0, rise_m: rise, risers, tread_m: self.stair_tread_mm / 1000.0, base_offset_m: base };
+        match self.document.place_stair(level, &spec) {
+            Ok(id) => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm, {} treads of {:.0} mm; undo removes it", id.0, rise / f64::from(risers) * 1000.0, risers - 1, self.stair_tread_mm); }
+            Err(e) => self.message = format!("Stair rejected ({e:?}): check the riser height and tread depth"),
+        }
+    }
+
     /// A click of the Room tool: a room in the closed space under the point.
     pub(crate) fn room_click(&mut self, level: ElementId, at: [f64; 2]) {
         match self.document.place_room(level, at) {
@@ -929,7 +948,7 @@ impl Desktop {
             commands.push(Command::SetSlabKind { id, kind: self.slab_kind_pick });
             commands.push(Command::SetMaterial { id, material: self.material_pick });
         }
-        if matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe) {
+        if matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Stair) {
             let round = el.category == Category::Pipe || (matches!(el.category, Category::Beam | Category::Column) && self.section_pick == 1);
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
                 height_m: if round { self.width_mm } else { self.height_mm } / 1000.0 });
@@ -1261,6 +1280,45 @@ mod tests {
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
         assert_eq!(out.text.matches("IFCCOVERING(").count(), 2);
         assert!(out.text.contains(".CEILING."));
+    }
+
+    #[test]
+    fn a_stair_is_drawn_by_two_clicks_with_risers_from_the_level_height_edited_and_exported() {
+        let mut app = Desktop::sample();
+        let level = ElementId(10);
+        app.run_command("stair", "Stair");
+        assert!(app.tool == Tool::Stair && app.message.contains("first riser"), "{}", app.message);
+        let above = app.document.level_above(level).unwrap();
+        let rise = app.document.get(above).unwrap().elevation_m - app.document.get(level).unwrap().elevation_m;
+        app.stair_click(level, [1.0, 1.0]);
+        assert!(app.message.contains("direction"), "{}", app.message);
+        app.stair_click(level, [1.0, 9.0]);
+        let id = app.document.elements().find(|e| e.category == Category::Stair).expect("placed").id;
+        let f = app.document.stair_figures(id).unwrap();
+        assert_eq!(f.risers, openbim_document::risers_for(rise, 0.175));
+        assert!(f.riser_m <= 0.175 + 1e-9 && (f.tread_m - 0.28).abs() < 1e-9 && (f.rise_m - rise).abs() < 1e-9, "{f:?}");
+        assert!(app.message.contains("risers of"), "{}", app.message);
+        // a narrower stair with a higher riser limit and the next stair starts afresh
+        (app.stair_width_mm, app.stair_riser_mm) = (900.0, 200.0);
+        app.stair_click(level, [3.0, 1.0]);
+        app.stair_click(level, [3.0, 9.0]);
+        let second = app.document.elements().filter(|e| e.category == Category::Stair).last().unwrap().clone();
+        assert!(second.count < f.risers && second.width_m == 0.9);
+        // selecting one: width and total rise are its dimensions; widen it to 1200 mm
+        app.select_element(Some(id));
+        assert!(!app.has_pending_edit());
+        app.width_mm = 1200.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.get(id).unwrap().width_m, 1.2, "{}", app.message);
+        // exported as an IfcStair with its figures
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCSTAIR(").count(), 2);
+        assert!(out.text.contains("Pset_StairCommon"));
+        // Esc after the first click forgets it
+        app.edit_pts.clear();
+        app.stair_click(level, [5.0, 5.0]);
+        assert_eq!(app.edit_pts.len(), 1);
     }
 
     #[test]

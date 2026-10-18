@@ -74,6 +74,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
+        C::Stair => &[Field::Width, Field::Height, Field::Elevation],
         C::Family => &[Field::Angle, Field::Elevation],
         C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
@@ -146,6 +147,9 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Height if category == C::Footing => "Length (mm)",
         Field::Height if category == C::WallFooting => "Depth (mm)",
         Field::Elevation if category == C::Footing || category == C::WallFooting => "Top Offset (mm)",
+        Field::Width if category == C::Stair => "Width (mm)",
+        Field::Height if category == C::Stair => "Total Rise (mm)",
+        Field::Elevation if category == C::Stair => "Base Offset (mm)",
         Field::Width if category == C::Wall || category == C::Slab => "Thickness (mm)",
         Field::Elevation if category == C::Slab => "Top Offset (mm)",
         Field::Width if category == C::Pipe => "Diameter (mm)",
@@ -208,7 +212,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
-        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"),
+        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
@@ -480,6 +484,25 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         });
         return;
     }
+    if app.tool == crate::Tool::Stair {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Stair");
+            ui.separator();
+            ui.label("Width (mm)");
+            ui.add(egui::DragValue::new(&mut app.stair_width_mm).speed(5.0).range(200.0..=10000.0));
+            ui.label("Max Riser Height (mm)");
+            ui.add(egui::DragValue::new(&mut app.stair_riser_mm).speed(1.0).range(60.0..=400.0));
+            ui.label("Tread Depth (mm)");
+            ui.add(egui::DragValue::new(&mut app.stair_tread_mm).speed(1.0).range(100.0..=1000.0));
+            ui.label("Base Offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.elevation_mm).speed(5.0));
+            if app.document.level_above(app.plan_level()).is_none() {
+                ui.label("Height (mm)");
+                ui.add(egui::DragValue::new(&mut app.stair_rise_mm).speed(5.0).range(200.0..=50000.0));
+            }
+        });
+        return;
+    }
     if app.tool == crate::Tool::Slab {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Slab");
@@ -658,6 +681,10 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
                     }
                     if el.is_roof() { roof_group(app, ui, el); }
+                    if let Some(f) = app.document.stair_figures(el.id) {
+                        let (r, t, rh, td, run) = (f.risers.to_string(), f.treads.to_string(), format!("{:.1}", f.riser_m * 1000.0), format!("{:.1}", f.tread_m * 1000.0), format!("{:.3}", f.run_m));
+                        read_only_group(ui, "Derived Geometry", &query, &[("Number of Risers", &r), ("Number of Treads", &t), ("Actual Riser Height (mm)", &rh), ("Actual Tread Depth (mm)", &td), ("Run Length (m)", &run)]);
+                    }
                     if el.category == openbim_document::Category::Slab {
                         slab_combos(app, ui);
                         let area = openbim_geom::profile::polygon_area(&el.outline).abs();

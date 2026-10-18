@@ -322,6 +322,21 @@ pub struct RoofItem {
     pub shape: &'static str,
 }
 
+/// A straight stair: a stepped block `width` wide that climbs `risers` risers over `risers - 1` treads along `dir`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StairItem {
+    pub id: u64,
+    pub name: String,
+    /// the foot of the first riser, at the middle of the width
+    pub start: [f64; 3],
+    /// the unit direction of the run in plan
+    pub dir: [f64; 2],
+    pub width: f64,
+    pub risers: u32,
+    pub riser_height: f64,
+    pub tread_length: f64,
+}
+
 pub struct Scene {
     pub project_name: String,
     /// 48-bit key that makes the GlobalIds of this project different from every other project's
@@ -337,6 +352,8 @@ pub struct Scene {
     pub slabs: Vec<SlabItem>,
     /// roofs by footprint, each written as an IfcRoof with a faceted solid
     pub roofs: Vec<RoofItem>,
+    /// straight stairs, each an IfcStair with its side profile extruded across its width
+    pub stairs: Vec<StairItem>,
     /// structural columns, each a straight prism on a convex footprint
     pub columns: Vec<ColumnItem>,
     /// beams, each a straight member with a rectangular section
@@ -397,6 +414,7 @@ pub struct Report {
     pub openings: usize,
     pub slabs: usize,
     pub roofs: usize,
+    pub stairs: usize,
     pub bars: usize,
     pub segments: usize,
     pub fittings: usize,
@@ -917,6 +935,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     }
     write_slabs(&mut o)?;
     write_roofs(&mut o)?;
+    write_stairs(&mut o)?;
     write_columns(&mut o)?;
     write_beams(&mut o)?;
     write_member_materials(&mut o);
@@ -1353,6 +1372,42 @@ fn write_roofs(o: &mut Out) -> Result<(), ExportError> {
         o.contain(st, roof);
         o.member_entities.push((item.id, roof));
         o.report.roofs += 1;
+    }
+    Ok(())
+}
+
+/// Stairs: an IfcStair whose body is the side profile of the steps extruded across the width, with the figures of
+/// Pset_StairCommon.
+fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for s in &scene.stairs {
+        if s.risers < 2 || !(s.riser_height > 0.0) || !(s.tread_length > 0.0) || !(s.width > 0.0) || (s.dir[0].hypot(s.dir[1]) - 1.0).abs() > 1e-6 {
+            return Err(ExportError::Unsupported(format!("stair {}: a run with no steps or no direction", s.name)));
+        }
+        let st = o.storey_for(s.start[2]);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        // the profile in (along, up), extruded to the right of the run
+        let mut pts: Vec<[f64; 2]> = vec![[0.0, 0.0]];
+        for i in 1..s.risers {
+            pts.push([f64::from(i - 1) * s.tread_length, f64::from(i) * s.riser_height]);
+            pts.push([f64::from(i) * s.tread_length, f64::from(i) * s.riser_height]);
+        }
+        pts.push([f64::from(s.risers - 1) * s.tread_length, 0.0]);
+        let prof = o.poly_profile(&pts);
+        let right = [s.dir[1], -s.dir[0], 0.0];
+        let origin = [s.start[0] - right[0] * s.width / 2.0, s.start[1] - right[1] * s.width / 2.0, s.start[2] - elev];
+        let solid = o.extrusion(prof, origin, Some(right), Some([s.dir[0], s.dir[1], 0.0]), s.width);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(s.id, 0);
+        let stair = o.s.add(format!("IFCSTAIR({g},$,{},$,$,#{pl},#{shape},$,.STRAIGHT_RUN_STAIR.)", string(&s.name)));
+        o.contain(st, stair);
+        o.member_entities.push((s.id, stair));
+        o.pset(stair, "Pset_StairCommon", vec![
+            ("NumberOfRiser", Val::Int(i64::from(s.risers))), ("NumberOfTreads", Val::Int(i64::from(s.risers - 1))),
+            ("RiserHeight", Val::Len(s.riser_height)), ("TreadLength", Val::Len(s.tread_length)),
+        ]);
+        o.report.stairs += 1;
     }
     Ok(())
 }

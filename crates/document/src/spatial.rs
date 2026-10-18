@@ -145,6 +145,14 @@ fn valid_ring(r: &[[f64; 2]]) -> bool {
     true
 }
 
+/// A stair has between 2 and 200 risers of 50 to 400 mm, treads of 100 mm to 1 m, and a width of 0.2 to 10 m.
+fn stair_ok(el: &Element, start: [f64; 2], end: [f64; 2]) -> bool {
+    let n = f64::from(el.count);
+    if !(2..=200).contains(&el.count) || !(0.2..=10.0).contains(&el.width_m) { return false; }
+    let (riser, tread) = (el.height_m / n, (end[0] - start[0]).hypot(end[1] - start[1]) / (n - 1.0));
+    (0.05..=0.4).contains(&riser) && (0.1..=1.0).contains(&tread)
+}
+
 pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), EditError> {
     let mut names = std::collections::BTreeSet::new();
     for el in elements.values() {
@@ -222,7 +230,8 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Linear { start, end, level }) => {
                 let datum = elements.get(level).filter(|l| l.category == Category::Level
                     && l.geometry == Some(Geometry::Level));
-                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe | Category::Truss)
+                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe | Category::Truss | Category::Stair)
+                    && (el.category != Category::Stair || stair_ok(el, *start, *end))
                     && (el.category != Category::Truss || (0.05..=1000.0).contains(&el.spacing_m))
                     && valid_axis(*start, *end) && datum.is_some()
                     && el.width_m <= 1e6 && el.height_m <= 1e6
@@ -430,6 +439,10 @@ impl Document {
             let mut faces = vec![vec![3, 2, 1, 0], vec![4, 5, 6, 7]];
             for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
+        }
+        if el.category == Category::Stair {
+            let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
+            return crate::stair::mesh(start, end, el.width_m, el.height_m, el.count, self.get(level)?.elevation_m + el.elevation_m);
         }
         if matches!(el.category, Category::BeamSystem | Category::Truss) { return None; }
         if el.category == Category::Rebar { return self.rebar_mesh(el); }

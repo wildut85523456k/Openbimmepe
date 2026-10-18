@@ -10,6 +10,8 @@ mod spatial;
 mod edit;
 mod rooms;
 mod roof;
+mod stair;
+pub use stair::{StairSpec, StairFigures, risers_for, MAX_RISER_M as MAX_STAIR_RISER_M, TREAD_M as STAIR_TREAD_M, WIDTH_M as STAIR_WIDTH_M, mesh as stair_mesh, profile as stair_profile};
 pub use roof::{is_convex as roof_is_convex, RoofFigures, mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
 pub use rooms::RoomShape;
 pub mod native;
@@ -45,6 +47,9 @@ pub enum Category {
     /// A space: a point in a closed region of a level (`Geometry::Room`). Its floor is bounded by the faces of the walls
     /// and columns around it, worked out when asked for.
     Room,
+    /// A straight stair (`Geometry::Linear` along its run from the foot of the first riser): `width_m` wide, climbing
+    /// `height_m` from `elevation_m` above its level in `count` risers over `count - 1` treads.
+    Stair,
     /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
     /// `height_m` deep, `elevation_m` the height of its centre line above the level.
     Beam,
@@ -356,7 +361,7 @@ impl Element {
             && (k != Category::Truss || self.angle_deg == 0.0)
             && (k != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category == Category::Beam || self.parent.is_none())
-            && (k == Category::Rebar || self.count == 0)
+            && (matches!(k, Category::Rebar | Category::Stair) || self.count == 0)
             && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
@@ -1035,7 +1040,7 @@ impl Document {
                 }
                 Command::SetCount { id, count } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.kind() != Category::Rebar { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.kind(), Category::Rebar | Category::Stair) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.count = *count;
                     el.revision = revision;
                 }

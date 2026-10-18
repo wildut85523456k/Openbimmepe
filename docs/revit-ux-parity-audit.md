@@ -88,14 +88,26 @@ Wall, Wall Joins, Door, Window, Component, Column, Beam, Brace, Floor/Slab, Foun
 | Ceiling type with layers/materials, Ceiling Plan view (reflected ceiling plan), ceiling grid, slope, openings | missing; in a plan the ceiling is drawn faint under everything and picked last |
 | IFC: IfcCovering CEILING (a room's ceiling for space boundaries), back from the app's own file unchanged | done; a covering that is not a ceiling is skipped on import |
 
+## Stair (by component, one straight run)
+| Revit behaviour | State |
+|---|---|
+| Stair > Run > Straight: click the foot of the first riser, then the direction; the number of risers follows from the height between the base and the top level and the Maximum Riser Height; treads are drawn as you move | done (press-drag-release works; Shift keeps it square) |
+| Options bar: Width (1000), Max Riser Height (175), Tread Depth (280), Base Offset; Height when no level is above | done (defaults are mine, not checked against Revit's template) |
+| Plan symbol: arrow up the centre line with UP at the foot | done (no cut line or break line, no riser/tread numbering) |
+| 3D: a monolithic stepped block; the top riser is the edge of the floor above | done (no soffit slope, no stringers, no supports, no nosing) |
+| Properties: Width, Total Rise, Base Offset editable; risers, treads, actual riser height and tread depth, run length shown | done (riser count is not editable: place the stair again) |
+| Move / rotate / mirror / copy / delete / undo, saved | done |
+| IFC: IfcStair STRAIGHT_RUN_STAIR with the side profile extruded across the width and Pset_StairCommon, in all three schemas; the app's own file brings it back unchanged | done; a stair written by another program is not read (skipped) |
+| Winder, L and U shapes, landings, runs from sketch, stair by sketch, railings, top/base level choice, ramps | missing |
+
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level: not drawn in an elevation view (no elevation or section views). Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all (80 ribbon buttons)
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, stair, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Stair, Opening (Room, Roof and Ceiling are done).
+1. Opening (Room, Roof, Ceiling and Stair are done); railings and L/U stairs follow.
 2. Elevation/section views and levels drawn in them.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
