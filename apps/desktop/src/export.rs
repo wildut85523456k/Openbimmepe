@@ -126,7 +126,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             (Category::Slab, Some(Geometry::Area { level })) if el.is_roof() => {
                 let z0 = level_of(level).ok_or("a roof lies on a level that is gone")? + el.elevation_m;
                 let slope = el.slope_ratio.unwrap_or(0.0);
-                let mesh = openbim_document::roof_mesh(&el.outline, &el.slope_edges, slope, z0, el.height_m).ok_or_else(|| format!("roof {} has no shape (an outline that is not convex cannot slope yet)", el.name))?;
+                let mesh = openbim_document::roof_mesh(&el.outline, &el.slope_edges, slope, z0, el.height_m).ok_or_else(|| format!("roof {} has no shape (a footprint with reflex corners needs every edge to slope)", el.name))?;
                 let sloping = el.slope_edges.iter().filter(|b| **b).count();
                 let shape = if sloping == 0 || slope == 0.0 { "FLAT_ROOF" } else { match sloping { 1 => "SHED_ROOF", 2 => "GABLE_ROOF", _ => "HIP_ROOF" } };
                 roofs.push(openbim_ifc::RoofItem { id: el.id.0, name: el.name.clone(), eaves_z: z0, verts: mesh.vertices, faces: mesh.faces, shape });
@@ -163,7 +163,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             }
             // the beams, members or bars they make are exported in their place
             (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
-            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::Opening | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
+            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::Opening | Category::Section | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct | Category::Pipe, Some(Geometry::Linear { start, end, level })) => {
                 let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
                 let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);

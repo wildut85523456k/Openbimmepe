@@ -1,7 +1,8 @@
 //! Roofs by footprint, as Revit makes them: the outline is at the eaves, and each edge that "defines slope" makes a
 //! plane that rises from it at the roof's slope. The roof is the lowest of those planes (a hip roof when all edges
 //! slope, a gable with two opposite ones, a shed with one, flat with none); an edge that does not slope is open at
-//! its end, where a wall can be attached up to the roof.
+//! its end, where a wall can be attached up to the roof. A footprint with reflex corners (an L, a T, a U) slopes on all
+//! its edges: the faces then come from its straight skeleton and meet in valleys.
 use super::{Document, ElementId, Geometry, Material, Mesh};
 
 type P = [f64; 2];
@@ -27,7 +28,7 @@ pub struct RoofSpec {
 
 fn cross(o: P, a: P, b: P) -> f64 { (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]) }
 
-/// Whether the polygon never turns the other way (a roof with sloping edges needs that: valleys are not made yet).
+/// Whether the polygon never turns the other way.
 pub fn is_convex(r: &[P]) -> bool {
     let n = r.len();
     if n < 3 { return false; }
@@ -66,7 +67,8 @@ fn clip(poly: &[[f64; 3]], f: [f64; 3]) -> Vec<[f64; 3]> {
 }
 
 /// The top surface of a roof as convex faces counter-clockwise from above, with `z0` the height at the eaves. None for an
-/// outline that is not a polygon, or a roof with sloping edges on a footprint that is not convex.
+/// outline that is not a polygon, or a roof on a footprint with reflex corners where only some edges slope (or that is
+/// too complicated for the solver).
 pub fn top_faces(outline: &[P], edges: &[bool], slope: f64, z0: f64) -> Option<Vec<Vec<[f64; 3]>>> {
     if outline.len() < 3 || edges.len() != outline.len() { return None; }
     let (ring, edges) = ccw(outline, edges);
@@ -75,7 +77,17 @@ pub fn top_faces(outline: &[P], edges: &[bool], slope: f64, z0: f64) -> Option<V
     if sloping.is_empty() || slope == 0.0 {
         return Some(vec![ring.iter().map(|p| [p[0], p[1], z0]).collect()]);
     }
-    if !is_convex(&ring) { return None; }
+    if !is_convex(&ring) {
+        // valleys: every edge must slope (a gable end on a footprint with a reflex corner is not made yet)
+        if sloping.len() != n { return None; }
+        let faces = crate::skeleton::faces(&ring)?;
+        return Some(faces.into_iter().map(|(e, poly)| {
+            let (p, q) = (ring[e], ring[(e + 1) % n]);
+            let l = (q[0] - p[0]).hypot(q[1] - p[1]);
+            let (nx, ny) = (-(q[1] - p[1]) / l, (q[0] - p[0]) / l);
+            poly.into_iter().map(|v| [v[0], v[1], z0 + slope * (nx * (v[0] - p[0]) + ny * (v[1] - p[1]))]).collect()
+        }).collect());
+    }
     // the distance inward from edge i is the linear function d_i = a x + b y + c
     let dist = |i: usize| -> [f64; 3] {
         let (p, q) = (ring[i], ring[(i + 1) % n]);
@@ -209,9 +221,10 @@ mod tests {
         assert!(near(top(&shed), 3.0));
         let flat = top_faces(&rect(10.0, 6.0), &[false; 4], 0.5, 2.0).unwrap();
         assert_eq!((flat.len(), top(&flat)), (1, 2.0));
-        // a footprint with a reflex corner cannot slope yet, but can be flat
+        // a footprint with a reflex corner slopes on all its edges (valleys), or is flat; some edges only is not made yet
         let l = vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]];
-        assert!(top_faces(&l, &[true; 6], 0.5, 0.0).is_none());
+        assert!(top_faces(&l, &[true; 6], 0.5, 0.0).is_some());
+        assert!(top_faces(&l, &[true, true, false, true, true, true], 0.5, 0.0).is_none());
         assert!(top_faces(&l, &[false; 6], 0.5, 0.0).is_some());
     }
 
@@ -262,9 +275,11 @@ mod tests {
         let f = d.roof_figures(id).unwrap();
         // 10 x 6 gable at 0.5: ridge 1.5 m, surface = plan x sqrt(1 + 0.5^2)
         assert!((f.rise_m - 1.5).abs() < 1e-9 && (f.plan_m2 - 60.0).abs() < 1e-9 && (f.surface_m2 - 60.0 * 1.25f64.sqrt()).abs() < 1e-9, "{f:?}");
-        // a hip roof is refused on an outline with a reflex corner, a flat one is not
+        // a roof on an outline with a reflex corner: all edges slope (valleys); a gable end there is refused
         let l = vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]];
-        assert!(d.place_roof(level, &RoofSpec { outline: l.clone(), edges: vec![], ..spec.clone() }).is_err());
+        let lroof = d.place_roof(level, &RoofSpec { outline: l.clone(), edges: vec![], ..spec.clone() }).unwrap();
+        assert!(d.mesh(lroof).is_some());
+        assert!(d.place_roof(level, &RoofSpec { outline: l.clone(), edges: vec![true, true, false, true, true, true], ..spec.clone() }).is_err());
         assert!(d.place_roof(level, &RoofSpec { outline: l, edges: vec![false; 6], ..spec.clone() }).is_ok());
         assert!(d.place_roof(level, &RoofSpec { slope_ratio: 9.0, ..spec.clone() }).is_err());
         // saved natively and restored

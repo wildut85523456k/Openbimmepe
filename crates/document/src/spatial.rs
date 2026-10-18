@@ -254,7 +254,7 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Linear { start, end, level }) => {
                 let datum = elements.get(level).filter(|l| l.category == Category::Level
                     && l.geometry == Some(Geometry::Level));
-                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe | Category::Truss | Category::Stair)
+                matches!(el.category, Category::Wall | Category::Beam | Category::Duct | Category::Pipe | Category::Truss | Category::Stair | Category::Section)
                     && (el.category != Category::Stair || stair_ok(el, *start, *end))
                     && (el.category != Category::Truss || (0.05..=1000.0).contains(&el.spacing_m))
                     && valid_axis(*start, *end) && datum.is_some()

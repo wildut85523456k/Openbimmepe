@@ -377,3 +377,55 @@ fn an_elevation_is_the_same_on_any_number_of_threads_and_draws_with_white_faces(
     // the shaded look paints faces light grey
     assert!(section_svg_with(&one, &SvgStyle::shaded()).contains("#f1f1f1"));
 }
+
+fn gable() -> openbim_ifc::RoofItem {
+    // a closed prism: eaves at z = 3 over 4 x 6, ridge at z = 4 along x at y = 3
+    let verts = vec![[0.0, 0.0, 3.0], [4.0, 0.0, 3.0], [4.0, 6.0, 3.0], [0.0, 6.0, 3.0], [0.0, 3.0, 4.0], [4.0, 3.0, 4.0]];
+    let raw: Vec<Vec<usize>> = vec![vec![0, 1, 2, 3], vec![0, 1, 5, 4], vec![3, 2, 5, 4], vec![0, 3, 4], vec![1, 2, 5]];
+    let c = [2.0, 3.0, 3.4];
+    let faces = raw.into_iter().map(|f| {
+        let mut n = [0.0; 3];
+        for k in 0..f.len() {
+            let (a, b) = (verts[f[k]], verts[f[(k + 1) % f.len()]]);
+            n[0] += (a[1] - b[1]) * (a[2] + b[2]); n[1] += (a[2] - b[2]) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+        }
+        let m = f.iter().fold([0.0; 3], |s, &i| [s[0] + verts[i][0] / f.len() as f64, s[1] + verts[i][1] / f.len() as f64, s[2] + verts[i][2] / f.len() as f64]);
+        if n[0] * (m[0] - c[0]) + n[1] * (m[1] - c[1]) + n[2] * (m[2] - c[2]) >= 0.0 { f } else { f.into_iter().rev().collect() }
+    }).collect();
+    openbim_ifc::RoofItem { id: 500, name: "R".into(), eaves_z: 3.0, verts, faces, shape: "GABLE_ROOF" }
+}
+
+fn area(r: &[[f64; 2]]) -> f64 { (0..r.len()).map(|k| r[k][0] * r[(k + 1) % r.len()][1] - r[(k + 1) % r.len()][0] * r[k][1]).sum::<f64>().abs() / 2.0 }
+
+#[test]
+fn a_roof_is_seen_in_an_elevation_from_the_side_it_slopes_to_and_cut_by_a_section() {
+    let mut s = scene(vec![]);
+    s.roofs = vec![gable()];
+    // from the south the sloping face toward the viewer is a rectangle 4 wide and 1 high on top of the eaves
+    let v = elevation_view(&s, south()).unwrap();
+    let f: Vec<_> = v.items.iter().filter(|i| i.element.kind == Kind::Roof).filter_map(|i| if let Shape::Region { outer, .. } = &i.shape { Some(outer.clone()) } else { None }).collect();
+    assert!(f.iter().any(|o| (area(o) - 4.0).abs() < 1e-9), "{f:?}");
+    // the gable end seen from the east is a triangle 6 wide and 1 high
+    let east = Section { a: [10.0, -1.0], b: [10.0, 7.0], bottom: -0.5, top: 6.0, depth: 20.0 };
+    let v = elevation_view(&s, east).unwrap();
+    let f: Vec<_> = v.items.iter().filter(|i| i.element.kind == Kind::Roof).filter_map(|i| if let Shape::Region { outer, .. } = &i.shape { Some(outer.clone()) } else { None }).collect();
+    assert!(f.iter().any(|o| (area(o) - 3.0).abs() < 1e-9), "{f:?}");
+    // a section across the ridge cuts a triangle with the roof's profile
+    let cut = Section { a: [2.0, -1.0], b: [2.0, 7.0], bottom: -0.5, top: 6.0, depth: 5.0 };
+    let v = section_view(&s, cut).unwrap();
+    let c: Vec<_> = v.items.iter().filter(|i| i.element.kind == Kind::Roof && i.class == Class::Cut).filter_map(|i| if let Shape::Region { outer, .. } = &i.shape { Some(outer.clone()) } else { None }).collect();
+    assert_eq!(c.len(), 1);
+    assert!((area(&c[0]) - 3.0).abs() < 1e-9, "{:?}", c[0]);
+}
+
+#[test]
+fn a_stair_is_cut_in_steps_by_a_section_along_it() {
+    let mut s = scene(vec![]);
+    s.stairs = vec![openbim_ifc::StairItem { id: 600, name: "S".into(), start: [0.0, 0.0, 0.0], dir: [0.0, 1.0], width: 1.0, risers: 3, riser_height: 0.2, tread_length: 0.3 }];
+    // along the run, through the middle of it
+    let v = section_view(&s, Section { a: [0.0, -1.0], b: [0.0, 2.0], bottom: -0.5, top: 3.0, depth: 5.0 }).unwrap();
+    let c: Vec<_> = v.items.iter().filter(|i| i.element.kind == Kind::Stair && i.class == Class::Cut).filter_map(|i| if let Shape::Region { outer, .. } = &i.shape { Some(outer.clone()) } else { None }).collect();
+    assert_eq!(c.len(), 2);
+    let total: f64 = c.iter().map(|r| area(r)).sum();
+    assert!((total - (0.3 * 0.2 + 0.3 * 0.4)).abs() < 1e-9, "{total}");
+}

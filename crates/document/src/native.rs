@@ -8,8 +8,8 @@ use super::{Category, Document, Element, ElementId, Geometry, Material, Section,
 /// Written first in every set of records.
 pub const FORMAT: &str = "obim-records-1";
 
-const CATEGORIES: [(Category, &str); 21] = [
-    (Category::Wall, "Wall"), (Category::Tag, "Tag"), (Category::Dimension, "Dimension"), (Category::Room, "Room"), (Category::Stair, "Stair"), (Category::Opening, "Opening"), (Category::Beam, "Beam"), (Category::Column, "Column"), (Category::Slab, "Slab"), (Category::Footing, "Footing"),
+const CATEGORIES: [(Category, &str); 22] = [
+    (Category::Wall, "Wall"), (Category::Tag, "Tag"), (Category::Dimension, "Dimension"), (Category::Room, "Room"), (Category::Stair, "Stair"), (Category::Opening, "Opening"), (Category::Section, "Section"), (Category::Beam, "Beam"), (Category::Column, "Column"), (Category::Slab, "Slab"), (Category::Footing, "Footing"),
     (Category::WallFooting, "WallFooting"), (Category::BeamSystem, "BeamSystem"), (Category::Truss, "Truss"), (Category::Rebar, "Rebar"),
     (Category::Family, "Family"), (Category::Type, "Type"), (Category::Duct, "Duct"), (Category::Pipe, "Pipe"), (Category::Equipment, "Equipment"),
     (Category::Level, "Level"), (Category::Grid, "Grid"),

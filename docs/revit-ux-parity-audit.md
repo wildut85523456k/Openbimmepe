@@ -71,12 +71,20 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 |---|---|
 | Roof by Footprint: click the corners at the eaves, close with Enter / first corner / Finish; options bar Base Offset, Thickness, Slope | done (the ribbon Roof button uses the slab drawing flow; no Pick Walls, no Overhang, no Pick Lines, no arc/circle sketch lines) |
 | Every edge "Defines Slope" by default; each can be turned off in Properties | done: checkbox per edge in Properties; slope in degrees; changes are immediate and undoable |
-| Hip, gable (two opposite edges), shed (one edge), flat (none) from the same rule: the roof is the lowest of the planes rising from the sloping edges | done for convex outlines; an outline with a reflex corner can only be flat (valleys are not made yet: refused with the reason) |
+| Hip, gable (two opposite edges), shed (one edge), flat (none) from the same rule: the roof is the lowest of the planes rising from the sloping edges | done for convex outlines; a non-convex outline (L, U, T) with every edge sloping gets hips and valleys from a straight skeleton (up to 64 corners; the faces are several coplanar trapezoids, so extra lines show in plan). A non-convex outline with some edges not sloping (gable on an L) is still refused with the reason |
 | Thickness square to the slope | done (not checked against Revit) |
 | Roof 3D solid, plan drawn under walls and picked last, moves/rotates/mirrors keeping the right edges sloping, saved, undo | done |
 | Derived figures: surface area, plan area, rise above the eaves | done (Properties) |
 | IFC: IfcRoof with HIP/GABLE/SHED/FLAT_ROOF and a closed faceted solid in IFC2X3, IFC4 and IFC4.3; the app's own file brings it back unchanged | done; a roof from another program is not read (reported as skipped); no layers, material layers or roof types |
 | Roof by Extrusion, Roof Soffit, Fascia, Gutter, Join/Cut Roof, Attach Walls to Roof, Dormer, slope arrows, ridge/hip/valley editing, roof openings | missing |
+
+## Elevations and sections (done 2026-10-19, read-only)
+| Revit behaviour | State |
+|---|---|
+| Four building elevations (East, North, South, West) under Elevations in the Project Browser, with level lines and names/heights | done: walls, slabs, roofs, stairs, openings in slabs, families; hidden-line order far to near; no elevation markers in plans (the ribbon Elevation button opens East) |
+| Section tool: two picks in a plan (click or press-drag-release), the view looks to the left of the line, tick shows the side; listed in the Project Browser and as a tab; Properties: View Depth, Open view | done; saved, undoable; section heads/bubbles, flipping, split segments, cut-plane offsets and crop regions are missing |
+| Cut elements are filled dark, below/overhead/beyond are lines and tints, levels are dashed lines with labels | done (line weights are fixed, no view templates or detail levels) |
+| Editing in these views (selecting, moving, tags, dimensions, drawing), wall openings drawn in elevation, Elevation tool placing markers, callouts, legends | missing: the views are read-only |
 
 ## Ceiling
 | Revit behaviour | State |
@@ -116,13 +124,13 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Vertical opening (cuts one floor, roof or ceiling you pick), By Face, Dormer, openings in curved walls, arc / polygon / circle sketch of a shaft, shaft symbol options, a roof cut by a shaft, a slab split in two by a shaft (only the larger piece is drawn in 3D; the file is right) | missing |
 
 ## Still missing for every element
-Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level: not drawn in an elevation view (no elevation or section views). Level 1 and Level 2 are fixed tabs.
+Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Elevation/section views and levels drawn in them (Room, Roof, Ceiling, Stair and Opening are done); wall openings should then be drawn in elevation as Revit does.
+1. Wall openings drawn in elevation as Revit does, editing in elevation/section views, elevation markers (Room, Roof, Ceiling, Stair, Opening and read-only elevations/sections are done).
 2. Railings, L/U stairs, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.

@@ -238,6 +238,12 @@ fn build(scene: &Scene, sec: Section, faces: bool) -> Result<SectionView, ViewEr
             }
         }
     }
+    for r in &scene.roofs {
+        roof_items(r, &fr, &sec, faces, &mut items, &mut far);
+    }
+    for st in &scene.stairs {
+        stair_items(st, &fr, &sec, faces, &mut items, &mut far);
+    }
     if faces {
         // what sits in the walls: the boxes of each family, each one a face
         for it in &scene.items {
@@ -317,6 +323,93 @@ fn build(scene: &Scene, sec: Section, faces: bool) -> Result<SectionView, ViewEr
         labels,
         warnings,
     })
+}
+
+/// The stepped block of a stair: one prism per tread, as high as the top of that tread, cut by the plane and seen in front of it.
+fn stair_items(st: &openbim_ifc::StairItem, fr: &Fr, sec: &Section, faces: bool, items: &mut Vec<Item>, far: &mut Vec<Face>) {
+    let el = Element { kind: Kind::Stair, id: st.id };
+    let (d, nrm) = (st.dir, [-st.dir[1], st.dir[0]]);
+    for k in 1..st.risers {
+        let (a, b) = ((f64::from(k) - 1.0) * st.tread_length, f64::from(k) * st.tread_length);
+        let at = |along: f64, side: f64| [st.start[0] + d[0] * along + nrm[0] * side * st.width / 2.0, st.start[1] + d[1] * along + nrm[1] * side * st.width / 2.0];
+        let ring = [at(a, -1.0), at(b, -1.0), at(b, 1.0), at(a, 1.0)];
+        let z0 = st.start[2].max(sec.bottom);
+        let z1 = (st.start[2] + f64::from(k) * st.riser_height).min(sec.top);
+        if z1 - z0 <= EPS { continue; }
+        for (ua, ub) in ring_spans(&ring, fr) {
+            rect_item(items, el, ua, ub, z0, z1, fr.len);
+        }
+        if faces {
+            if let Some(f) = ring_face(el, &ring, fr, sec.depth, 1, z0, z1) { far.push(f); }
+        }
+    }
+}
+
+/// A roof: the loops where the plane cuts its solid, and, seen from outside, its faces that turn toward the viewer.
+fn roof_items(r: &openbim_ifc::RoofItem, fr: &Fr, sec: &Section, faces: bool, items: &mut Vec<Item>, far: &mut Vec<Face>) {
+    let el = Element { kind: Kind::Roof, id: r.id };
+    let w: Vec<f64> = r.verts.iter().map(|v| fr.uw([v[0], v[1]]).1).collect();
+    let uz = |i: usize| -> P { [fr.uw([r.verts[i][0], r.verts[i][1]]).0, r.verts[i][2]] };
+    // where the edge between vertices i and j crosses the plane
+    let cut_at = |i: usize, j: usize| -> P {
+        let (i, j) = if i < j { (i, j) } else { (j, i) };
+        let t = w[i] / (w[i] - w[j]);
+        let (a, b) = (uz(i), uz(j));
+        [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]
+    };
+    // segments of the cut, one per face the plane crosses
+    let mut segs: Vec<(P, P)> = Vec::new();
+    for f in &r.faces {
+        let mut hits: Vec<P> = Vec::new();
+        for k in 0..f.len() {
+            let (i, j) = (f[k], f[(k + 1) % f.len()]);
+            if (w[i] < 0.0) != (w[j] < 0.0) { hits.push(cut_at(i, j)); }
+        }
+        if hits.len() == 2 && (hits[0][0] - hits[1][0]).hypot(hits[0][1] - hits[1][1]) > 1e-9 { segs.push((hits[0], hits[1])); }
+    }
+    // joined end to end into loops
+    let key = |p: P| ((p[0] * 1e6).round() as i64, (p[1] * 1e6).round() as i64);
+    let mut used = vec![false; segs.len()];
+    for s in 0..segs.len() {
+        if used[s] { continue; }
+        used[s] = true;
+        let mut ring = vec![segs[s].0, segs[s].1];
+        loop {
+            let tail = *ring.last().expect("ring has points");
+            let next = (0..segs.len()).find(|&t| !used[t] && (key(segs[t].0) == key(tail) || key(segs[t].1) == key(tail)));
+            let Some(t) = next else { break };
+            used[t] = true;
+            ring.push(if key(segs[t].0) == key(tail) { segs[t].1 } else { segs[t].0 });
+            if key(*ring.last().expect("ring has points")) == key(ring[0]) { ring.pop(); break; }
+        }
+        if ring.len() < 3 { continue; }
+        let clipped = clip_box(&ring, 0.0, fr.len, sec.bottom, sec.top);
+        if clipped.len() < 3 { continue; }
+        items.push(Item { element: el, class: Class::Cut, shape: Shape::Region { outer: clipped.clone(), holes: vec![] } });
+        ring_lines(items, el, Class::Cut, &clipped);
+    }
+    if !faces { return; }
+    let wn = [fr.n[0], fr.n[1]];
+    for f in &r.faces {
+        if f.len() < 3 { continue; }
+        // the face turns toward the viewer when its outward normal points against the viewing direction
+        let mut nrm = [0.0; 3];
+        for k in 0..f.len() {
+            let (a, b) = (r.verts[f[k]], r.verts[f[(k + 1) % f.len()]]);
+            nrm[0] += (a[1] - b[1]) * (a[2] + b[2]);
+            nrm[1] += (a[2] - b[2]) * (a[0] + b[0]);
+            nrm[2] += (a[0] - b[0]) * (a[1] + b[1]);
+        }
+        if nrm[0] * wn[0] + nrm[1] * wn[1] >= -1e-9 { continue; }
+        let ws: Vec<f64> = f.iter().map(|&i| w[i]).collect();
+        let wmin = ws.iter().copied().fold(f64::MAX, f64::min);
+        let wmax = ws.iter().copied().fold(f64::MIN, f64::max);
+        if wmax <= 0.0 || wmin > sec.depth { continue; }
+        let poly: Vec<P> = f.iter().map(|&i| uz(i)).collect();
+        let poly = clip_box(&poly, 0.0, fr.len, sec.bottom, sec.top);
+        if poly.len() < 3 { continue; }
+        far.push(face(el, wmin.max(0.0), 1, poly, vec![]));
+    }
 }
 
 /// A ring (slab outline, column footprint) lying in front of the plane, seen from the side as a face over `z0..z1`.

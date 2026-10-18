@@ -474,13 +474,9 @@ impl Desktop {
         if self.slab_kind_pick == openbim_document::SlabKind::Roof {
             let spec = openbim_document::RoofSpec { outline: self.slab_points.clone(), thickness_m: m(self.slab_thickness_mm), base_offset_m: m(self.slab_offset_mm),
                 slope_ratio: self.roof_slope_deg.to_radians().tan(), edges: Vec::new(), material: self.material_pick };
-            if self.roof_slope_deg > 0.0 && !openbim_document::roof_is_convex(&spec.outline) {
-                self.message = "Roof rejected: a roof with sloping edges needs a convex outline for now (set the slope to 0 for a flat roof, or draw it in convex parts)".into();
-                return;
-            }
             match self.document.place_roof(level, &spec) {
                 Ok(id) => { self.slab_points.clear(); self.message = format!("Roof {} placed; select it to choose which edges slope. Undo removes it", id.0); }
-                Err(error) => self.message = format!("Roof rejected ({error:?}); Backspace takes a corner back"),
+                Err(error) => self.message = format!("Roof rejected ({error:?}): the outline must not cross itself and have at most 64 corners; Backspace takes a corner back"),
             }
             return;
         }
@@ -1239,11 +1235,32 @@ mod tests {
         app.run_command("roof", "Roof");
         assert!(app.tool == Tool::Slab && app.slab_kind_pick == openbim_document::SlabKind::Roof && app.roof_slope_deg == 30.0);
         assert!(app.message.contains("Roof by Footprint"), "{}", app.message);
-        // an L cannot slope yet: refused with the reason, and its corners are kept
+        // an L slopes on all its edges and has a valley: a closed solid with the volume of its footprint x thickness / cos(slope)
+        let volume_of = |app: &Desktop, id: ElementId| -> f64 {
+            let batch = crate::view3d::batch(&app.document);
+            let ei = batch.elements.iter().position(|e| e.id == id.0).expect("in 3D") as u32;
+            batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
+                let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+                (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+            }).sum()
+        };
         for p in [[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]] { app.slab_click(ElementId(10), p, false); }
         app.finish_slab(ElementId(10));
-        assert!(app.message.contains("convex") && app.slab_points.len() == 6, "{}", app.message);
-        app.slab_points.clear();
+        assert!(app.slab_points.is_empty(), "{}", app.message);
+        let l = app.document.elements().find(|e| e.is_roof()).expect("the L roof").id;
+        let lf = app.document.roof_figures(l).unwrap();
+        assert!((lf.plan_m2 - 27.0).abs() < 1e-9 && lf.rise_m > 0.8, "{lf:?}");
+        assert!((volume_of(&app, l) - 27.0 * 0.2 / 30f64.to_radians().cos()).abs() < 1e-3, "{}", volume_of(&app, l));
+        // a gable end on it is refused (not made yet), and the roof stays as it was
+        let before = app.document.get(l).unwrap().slope_edges.clone();
+        let refused = app.document.transact(app.document.revision(), &[Command::SetRoof { id: l, slope_ratio: 0.5, edges: vec![true, false, true, false, true, true] }]);
+        assert!(refused.is_err());
+        assert_eq!(app.document.get(l).unwrap().slope_edges, before);
+        // exported as a roof, in the file the app reads back
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCROOF(").count(), 1);
+        let ops = app.document.delete_commands(&[l]).unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
         // a 10 x 6 hip roof at 30 degrees, 200 mm thick, its eaves 3 m up
         app.slab_offset_mm = 3000.0;
         for p in [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]] { app.slab_click(ElementId(10), p, false); }

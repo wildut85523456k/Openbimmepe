@@ -7,6 +7,7 @@ mod ribbon;
 mod panels;
 mod model_view;
 mod view3d;
+mod section_ui;
 mod model_edit;
 mod export;
 mod import;
@@ -26,10 +27,16 @@ use eframe::egui::{self, Vec2};
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum View { Plan, UpperPlan, ThreeD, Mechanical, /// the plan of a level added with the Level tool
+enum View {
+    Plan, UpperPlan, ThreeD, Mechanical,
+    /// one of the four building elevations: East, North, South, West
+    Elevation(u8),
+    /// the view of a section line (its element number)
+    Section(u64),
+    /// the plan of a level added with the Level tool
     Level(u64) }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Stair, Room, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+enum Tool { Select, Stair, Room, Section, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TempDim { Length(ElementId), Distance(ElementId, ElementId) }
@@ -268,6 +275,7 @@ impl Desktop {
             Tool::Slab if self.slab_kind_pick == openbim_document::SlabKind::Ceiling => "Ceiling: Automatic Ceiling hangs a ceiling in the closed space you click (its outline shows as you move); untick Automatic in the options bar to sketch the corners instead (Enter, a click on the first corner or Finish closes it). Esc ends.".into(),
             Tool::Slab if self.slab_kind_pick == openbim_document::SlabKind::Roof => "Roof by Footprint: click the corners of the roof at the eaves in a plan view, then Enter, a click on the first corner or Finish closes it. Every edge slopes by the Slope in the options bar; select the roof afterwards to choose which edges define a slope (two opposite ones make a gable, one a shed). Backspace takes the last corner back, Esc cancels.".into(),
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
+            Tool::Section => "Section: pick the two ends of the line in a plan view (or press, drag and release); the view looks to the left of the line. Open it from the Project Browser. Esc ends.".into(),
             Tool::Shaft => "Shaft Opening: click the corners of the shaft in a plan view, then Enter, a click on the first corner or Finish closes it. It cuts every floor, foundation slab and ceiling between its base and its top level (set in the options bar). Esc cancels.".into(),
             Tool::WallOpening => "Wall Opening: click a wall at one end of the opening, then at the other end; the sill and head heights are in the options bar. Esc ends.".into(),
             Tool::Footing => "Isolated footing: click its place in a plan view; it is as wide and long as the options bar says, under the level (Esc ends).".into(),
@@ -365,6 +373,8 @@ impl Desktop {
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
+            "elevation" => { self.view = View::Elevation(0); self.selected = None; self.message = "Elevation: the building seen from the east; the other sides are under Elevations in the Project Browser".into(); }
+            "section" => { self.edit_pts.clear(); self.choose_tool(Tool::Section) }
             "shaft" => { (self.shaft_base_mm, self.shaft_top_mm, self.shaft_top) = (0.0, 0.0, None); self.choose_tool(Tool::Shaft) }
             "opening_wall" => self.choose_tool(Tool::WallOpening),
             "stair" => { self.elevation_mm = 0.0; self.edit_pts.clear(); self.choose_tool(Tool::Stair) }
@@ -425,7 +435,7 @@ impl Desktop {
                         for cmd in group.commands {
                             let roofing = self.tool == Tool::Slab && matches!(self.slab_kind_pick, openbim_document::SlabKind::Roof | openbim_document::SlabKind::Ceiling);
                             let active = (cmd.id == "roof" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Roof) || (cmd.id == "ceiling" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Ceiling) || (!matches!(cmd.id, "roof" | "ceiling") && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("shaft", Tool::Shaft) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("section", Tool::Section) | ("shaft", Tool::Shaft) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

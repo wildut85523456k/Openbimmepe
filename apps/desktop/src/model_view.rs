@@ -36,9 +36,12 @@ fn segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
+        let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0))).collect();
         let tabs = [("Level 1".to_string(), View::Plan), ("Level 2".to_string(), View::UpperPlan)].into_iter()
             .chain(added.into_iter().map(|(v, n)| (n, v)))
-            .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)]);
+            .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)])
+            .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
+            .chain(sections);
         for (label, view) in tabs {
             if ui.selectable_label(app.view == view, label).clicked() { app.view = view; }
         }
@@ -50,6 +53,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) { app.delete_selected(); }
     if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
+    if matches!(app.view, View::Elevation(_) | View::Section(_)) { return crate::section_ui::show(app, ui); }
     let level_id = app.plan_level();
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);
     let three_d = app.view == View::ThreeD;
@@ -137,6 +141,20 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 for p in [a, b] {
                     painter.circle(p, 11.0, ui.visuals().panel_fill, stroke);
                     painter.text(p, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(12.0), stroke.color);
+                }
+                datum_hits.push((el.id, a, b));
+            }
+            Some(Geometry::Linear { start, end, level }) if el.category == Category::Section && !three_d && level == level_id => {
+                // the section line with a tick toward the side the view looks to (the left of the line)
+                let (a, b) = (screen([start[0], start[1], level_z]), screen([end[0], end[1], level_z]));
+                let stroke = Stroke::new(if active { 2.5 } else { 1.5 }, if active { blue } else { Color32::from_rgb(190, 60, 60) });
+                dashed(&painter, a, b, stroke);
+                let d = b - a;
+                if d.length() > 1.0 {
+                    let left = Vec2::new(d.y, -d.x).normalized() * 18.0; // screen y points down, so the model's left is (dy, -dx)
+                    let m = a + d * 0.5;
+                    painter.arrow(m, left, stroke);
+                    painter.text(a, egui::Align2::CENTER_BOTTOM, &el.name, egui::FontId::proportional(12.0), stroke.color);
                 }
                 datum_hits.push((el.id, a, b));
             }
@@ -329,7 +347,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::Shaft | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair);
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::Shaft | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair | crate::Tool::Section);
             let pending = !app.edit_pts.is_empty() || app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
@@ -500,6 +518,16 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             let at = { let v = (p - rect.center() - app.pan) / scale + bounds.center().to_vec2(); [v.x as f64, -v.y as f64] };
             app.room_click(level_id, at);
         }
+    } else if app.tool == crate::Tool::Section && !three_d {
+        // two picks, snapped to 50 mm: the ends of the line; a rubber band shows it with the side the view looks to
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
+        if let (Some(a), Some(h)) = (app.edit_pts.first().copied(), response.hover_pos()) {
+            let b = to_model(h);
+            dashed(&painter, screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]), Stroke::new(1.5, Color32::from_rgb(190, 60, 60)));
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.edit_pts.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.edit_pts.clear(); } }
+        else if let Some(p) = pick { app.section_click(level_id, to_model(p)); }
     } else if app.tool == crate::Tool::WallJoins && !three_d {
         // The ends of the walls of this level are marked: green where the join is allowed, red where it is not.
         let mut ends: Vec<(ElementId, bool, Pos2, bool)> = Vec::new();
@@ -1913,6 +1941,41 @@ mod tests {
         assert!(app.tool == crate::Tool::Select);
         app.select_element(Some(id));
         frame(&ctx, screen, &mut app, vec![]);
+    }
+    #[test]
+    fn section_tool_draws_a_line_in_a_plan_and_its_view_and_the_four_elevations_show_the_building() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("section", "Section");
+        assert!(app.tool == crate::Tool::Section, "{}", app.message);
+        for at in [Pos2::new(200.0, 300.0), Pos2::new(500.0, 300.0)] {
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        let lines: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| e.id).collect();
+        assert_eq!(lines.len(), 1, "{}", app.message);
+        assert!(app.message.contains("placed"), "{}", app.message);
+        // its view shows the cut walls and the levels
+        let view = crate::section_ui::build(&app.document, View::Section(lines[0].0)).expect("the section builds");
+        assert!(!view.items.is_empty() && !view.labels.is_empty());
+        // each elevation builds and has the levels drawn in it
+        for k in 0..4u8 {
+            let v = crate::section_ui::build(&app.document, View::Elevation(k)).unwrap_or_else(|e| panic!("elevation {k}: {e}"));
+            assert!(!v.items.is_empty() && v.labels.len() >= 2, "elevation {k}");
+        }
+        // they and the section are drawn without panicking, and the line is also drawn back in the plan
+        for view in [View::Elevation(0), View::Elevation(2), View::Section(lines[0].0)] {
+            app.view = view;
+            frame(&ctx, screen, &mut app, vec![]);
+        }
+        app.view = View::Plan;
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        frame(&ctx, screen, &mut app, vec![]);
+        assert!(app.tool == crate::Tool::Select);
+        // the section is not part of the model's geometry: it is removable and does not enter the export
+        assert!(crate::export::scene_for_view(&app.document).is_ok());
     }
     #[test]
     fn shaft_tool_sketches_an_outline_cuts_the_floor_above_and_shows_its_symbol_and_wall_opening_tool_picks_two_ends() {

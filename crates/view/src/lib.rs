@@ -117,6 +117,10 @@ pub enum Kind {
     /// a placed family (door, window, fixture, equipment)
     Family,
     Slab,
+    /// a roof by footprint (a solid of several planes)
+    Roof,
+    /// a straight stair
+    Stair,
     Room,
     /// a line that bounds rooms where there is no wall
     SeparationLine,

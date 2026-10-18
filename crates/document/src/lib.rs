@@ -10,6 +10,7 @@ mod spatial;
 mod edit;
 mod rooms;
 mod roof;
+mod skeleton;
 mod stair;
 mod opening;
 pub use opening::ShaftSpec;
@@ -52,6 +53,9 @@ pub enum Category {
     /// A straight stair (`Geometry::Linear` along its run from the foot of the first riser): `width_m` wide, climbing
     /// `height_m` from `elevation_m` above its level in `count` risers over `count - 1` treads.
     Stair,
+    /// A section line (`Geometry::Linear` on a level): the view looks to the left of its direction, `width_m` deep. An
+    /// annotation: not part of the building, so it is not exported as a product.
+    Section,
     /// An opening: a rectangle cut in a wall (`Geometry::InWall`: `width_m` wide and `height_m` high, its sill `elevation_m`
     /// above the base of the wall) or a shaft cut through floors (`Geometry::Shaft`, with an `outline`).
     Opening,
@@ -390,7 +394,7 @@ impl Element {
             }
             && if self.is_roof() {
                 self.slope_edges.len() == self.outline.len()
-                    && (!self.slope_edges.contains(&true) || self.slope_ratio.unwrap_or(0.0) == 0.0 || roof::is_convex(&self.outline))
+                    && (!self.slope_edges.contains(&true) || self.slope_ratio.unwrap_or(0.0) == 0.0 || roof::is_convex(&self.outline) || roof::top_faces(&self.outline, &self.slope_edges, self.slope_ratio.unwrap_or(0.0), 0.0).is_some())
             } else { self.slope_edges.is_empty() }
     }
 }
@@ -653,6 +657,16 @@ impl Document {
             Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } => self.level_of(host),
             Geometry::Level | Geometry::Grid { .. } => None,
         }
+    }
+    /// Draws a section line from `a` to `b` on `level`, looking to the left of `a -> b`, `depth_m` deep.
+    pub fn place_section(&mut self, level: ElementId, a: [f64; 2], b: [f64; 2], depth_m: f64) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Section).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Section, name: format!("Section {n}"), width_m: depth_m, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start: a, end: b, level } },
+        ])?;
+        Ok(id)
     }
     /// Draws an aligned dimension from `a` to `b` on `level`, its line through `at`.
     pub fn place_dimension(&mut self, level: ElementId, a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Result<ElementId, EditError> {

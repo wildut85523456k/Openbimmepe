@@ -75,6 +75,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
         C::Stair | C::Opening => &[Field::Width, Field::Height, Field::Elevation],
+        C::Section => &[Field::Width],
         C::Family => &[Field::Angle, Field::Elevation],
         C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
@@ -147,6 +148,7 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Height if category == C::Footing => "Length (mm)",
         Field::Height if category == C::WallFooting => "Depth (mm)",
         Field::Elevation if category == C::Footing || category == C::WallFooting => "Top Offset (mm)",
+        Field::Width if category == C::Section => "View Depth (mm)",
         Field::Width if category == C::Stair || category == C::Opening => "Width (mm)",
         Field::Height if category == C::Opening => "Height (mm)",
         Field::Elevation if category == C::Opening => "Sill Height (mm)",
@@ -214,7 +216,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
-        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"),
+        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"), C::Section => ("Views (1)", "Section", "section"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
@@ -287,7 +289,7 @@ fn roof_group(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Eleme
         let ops = [openbim_document::Command::SetRoof { id: el.id, slope_ratio: degrees.to_radians().tan(), edges }];
         match app.document.transact(app.document.revision(), &ops) {
             Ok(_) => app.message = "Roof changed; undo takes it back".into(),
-            Err(_) => app.message = "A roof with sloping edges needs a convex outline for now (set the slope to 0, or clear the edges, for a flat roof)".into(),
+            Err(_) => app.message = "On an outline with a reflex corner (an L, a T) every edge has to slope; a gable end there is not made yet".into(),
         }
     }
     if let Some(f) = app.document.roof_figures(el.id) {
@@ -768,6 +770,10 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     if matches!(el.geometry, Some(Geometry::Shaft { .. })) { shaft_group(app, ui, el); } else {
                         edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     }
+                    if el.category == openbim_document::Category::Section && ui.button("Open view").on_hover_text("Go to the view of this section line").clicked() {
+                        app.view = View::Section(el.id.0);
+                        app.selected = None;
+                    }
                     if el.category == openbim_document::Category::Beam {
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut app.join_pick[0], "Join at start");
@@ -809,7 +815,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn view_name(view: View) -> &'static str {
-    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan" }
+    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) => "Elevation / section" }
 }
 
 struct Node {
@@ -824,7 +830,8 @@ const TREE: &[Node] = &[
         folder("Floor Plans", &[view("Level 1", View::Plan), view("Level 2", View::UpperPlan), view("M-101 - Mechanical", View::Mechanical)]),
         folder("Ceiling Plans", &[]),
         folder("3D Views", &[view("{3D}", View::ThreeD)]),
-        folder("Elevations", &[]), folder("Sections", &[]), folder("Legends", &[]),
+        folder("Elevations (Building Elevation)", &[view("East", View::Elevation(0)), view("North", View::Elevation(1)), view("South", View::Elevation(2)), view("West", View::Elevation(3))]),
+        folder("Sections (Building Section)", &[]), folder("Legends", &[]),
     ]),
     folder("Schedules/Quantities", &[]), folder("Sheets (all)", &[]),
     folder("Families", &[]), folder("Groups", &[]), folder("Model Links", &[]),
@@ -880,6 +887,13 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
                 if !matches(&query, &name) { continue; }
                 let active = app.view == View::Level(id.0);
                 if ui.selectable_label(active, RichText::new(format!("{name} (plan)"))).on_hover_text("Open the plan of this level").clicked() { app.view = View::Level(id.0); app.selected = None; }
+            }
+            // the section lines of the model, each opening its view
+            let sections: Vec<(ElementId, String)> = app.document.elements().filter(|e| e.category == openbim_document::Category::Section).map(|e| (e.id, e.name.clone())).collect();
+            for (id, name) in sections {
+                if !matches(&query, &name) { continue; }
+                let active = app.view == View::Section(id.0);
+                if ui.selectable_label(active, RichText::new(format!("{name} (section)"))).on_hover_text("Open the view of this section line").clicked() { app.view = View::Section(id.0); app.selected = None; }
             }
             if !TREE.iter().any(|node| node_matches(node, &query)) { ui.weak("No matching items"); }
         });
