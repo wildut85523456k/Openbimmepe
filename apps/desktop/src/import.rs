@@ -637,6 +637,41 @@ mod tests {
     }
 
     #[test]
+    fn a_branched_network_with_a_tee_and_a_tap_keeps_its_joins_end_points_and_systems_through_the_file() {
+        use openbim_document::{EndDemand, EndRole, MepEndpoint, MepNode, MepPort};
+        use openbim_family::mep::{Domain, System};
+        use openbim_place::penetrations::{Run, RunSize};
+        use openbim_route::snaps::{Snaps, SnapSettings};
+        let mut d = model();
+        let off = Snaps::new(SnapSettings::off());
+        let rect = RunSize::Rect { width: 0.5, height: 0.3, roll: 0.0 };
+        let duct = openbim_route::route_path(&[[0.5, 0.8, 2.7], [7.0, 0.8, 2.7]], &[rect], &crate::export::tests_support::prefs(Domain::Duct, System::SupplyAir), &off).unwrap();
+        let main = d.place_mep_route(ElementId(10), &duct).unwrap()[0];
+        let small = RunSize::Rect { width: 0.3, height: 0.2, roll: 0.0 };
+        let mut on = main;
+        for (x, tee) in [(2.5, true), (5.5, false)] {
+            let mut p = crate::export::tests_support::prefs(Domain::Duct, System::SupplyAir);
+            p.junction = if tee { openbim_route::Junction::Tee } else { openbim_route::Junction::Tap };
+            let run: Run = d.mep_run(on).unwrap();
+            let br = openbim_route::branch_from_run(&run, &[[x, 0.8, 2.7], [x, 3.8, 2.7]], &[small], &p, &off).unwrap();
+            let ids = d.place_mep_branch(ElementId(10), on, &br).unwrap();
+            if tee { on = ids[0]; }
+        }
+        // a source at the start and a terminal at the end of the branch
+        let mut data = d.mep().clone();
+        data.endpoints.push(MepEndpoint { port: MepPort { node: MepNode::Run(main), port: 0 }, role: EndRole::Source, demand: EndDemand::None, required_pressure_pa: 0.0 });
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))]).unwrap();
+        assert_eq!((d.mep().fittings.len(), d.mep().taps.len()), (2, 1));
+        for schema in crate::export::Schema::ALL {
+            let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", schema).unwrap();
+            assert!(!out.warnings.iter().any(|w| w.contains("no longer")), "{schema:?} {:?}", out.warnings);
+            let mut back = Document::new();
+            import_ifc(&mut back, &out.text).unwrap();
+            assert_eq!(back.mep(), d.mep(), "{schema:?}: joins, taps, systems and end points come back");
+        }
+    }
+
+    #[test]
     fn a_file_the_app_wrote_comes_back_with_nothing_lost_in_every_schema() {
         let d = everything();
         let kinds: BTreeSet<String> = d.elements().map(|e| format!("{:?}", e.category)).collect();

@@ -371,6 +371,14 @@ mod tests {
         app.elevation_mm = 3000.0;
         for p in [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0]] { app.run_click(p); }
         app.finish_run(ElementId(10));
+        // a branch starting in the middle of the first leg is joined with a tee
+        let n_before = app.document.elements().count();
+        app.run_click([5.0, 0.0]);
+        assert!(app.branch_main.is_some(), "{}", app.message);
+        app.run_click([5.0, -4.0]);
+        app.finish_run(ElementId(10));
+        assert!(app.branch_main.is_none() && app.run_points.is_empty(), "{}", app.message);
+        assert_eq!(app.document.elements().count(), n_before + 2, "{}", app.message);
         let runs: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Duct).map(|e| e.id).collect();
         assert!(!runs.is_empty(), "{}", app.message);
         // nothing to click on far from the run
@@ -381,19 +389,22 @@ mod tests {
         app.end_point_click(ElementId(10), [0.1, 0.0]);
         app.end_draft = EndDraft { mark: Mark::Terminal, kind: 0, a: 400.0, b: 0.0, pressure_kpa: 0.0 };
         app.end_point_click(ElementId(10), [10.0, 6.1]);
-        assert_eq!(app.document.mep().endpoints.len(), 2, "{}", app.message);
+        app.end_draft.a = 200.0;
+        app.end_point_click(ElementId(10), [5.0, -4.1]);
+        assert_eq!(app.document.mep().endpoints.len(), 3, "{}", app.message);
         // the line takes the system, the dialog computes it
         let first = runs[0];
         let line = compute::connected_runs(&app.document, first);
         compute::assign_system(&mut app.document, &line, System::SupplyAir).unwrap();
         app.compute.system = System::SupplyAir;
         (app.compute.density, app.compute.viscosity_mpas, app.compute.specific_heat, app.compute.roughness_mm) = (1.2, 0.0181, 1006.0, 0.09);
-        app.compute.catalogue = "300x200,300,200\n500x300,500,300\n800x400,800,400\n".into();
+        app.compute.catalogue = "300x200,300,200\n500x300,500,300\n800x400,800,400\n1200x600,1200,600\n".into();
         app.run_compute();
         assert!(app.compute.error.is_empty(), "{}", app.compute.error);
         let (_, r) = app.compute.report.as_ref().expect("report");
-        assert!((r.total_flow - 0.4).abs() < 1e-9);
-        assert!(r.runs.iter().all(|x| x.critical));
+        assert!((r.total_flow - 0.6).abs() < 1e-9);
+        assert!(r.runs.iter().any(|x| x.critical) && r.runs.iter().any(|x| !x.critical), "the longer way is critical, the branch is not");
+        assert_eq!(r.ends.len(), 2);
         // the window draws
         app.compute.open = true;
         let ctx = egui::Context::default();

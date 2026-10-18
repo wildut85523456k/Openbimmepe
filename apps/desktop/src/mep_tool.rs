@@ -45,9 +45,33 @@ impl Desktop {
     /// that ends there. A different size from the leg before makes a reducer.
     pub(crate) fn run_click(&mut self, point: [f64; 2]) {
         if self.run_points.last() == Some(&point) { return; }
+        if self.run_points.is_empty() {
+            self.branch_main = self.run_to_branch_from(point);
+            if let Some(id) = self.branch_main {
+                self.message = format!("Branch from {}: click the points of the branch; Enter places it with a tee", self.document.get(id).map_or("the run".into(), |e| e.name.clone()));
+            }
+        }
         self.run_points.push(point);
         if self.run_points.len() >= 2 { self.run_sizes.push(self.run_size()); }
         self.message = format!("{}: {} point{}; Enter or Finish places it, Backspace takes the last point back, Esc ends", if self.tool == Tool::Pipe { "Pipe" } else { "Duct" }, self.run_points.len(), if self.run_points.len() == 1 { "" } else { "s" });
+    }
+
+    /// The drawn run of the tool's kind that a first click lies on (inside it, at the height being drawn): the run a
+    /// branch starts from.
+    fn run_to_branch_from(&self, p: [f64; 2]) -> Option<ElementId> {
+        let want = if self.tool == Tool::Pipe { openbim_document::Category::Pipe } else { openbim_document::Category::Duct };
+        let z = |id: ElementId| -> Option<f64> { match self.document.get(id)?.geometry? { openbim_document::Geometry::Linear { level, .. } => Some(self.document.get(level)?.elevation_m + self.elevation_mm / 1000.0), _ => None } };
+        self.document.elements().filter(|e| e.category == want).find_map(|e| {
+            let r = self.document.mep_run(e.id)?;
+            let (dx, dy) = (r.b[0] - r.a[0], r.b[1] - r.a[1]);
+            let len2 = dx * dx + dy * dy;
+            if len2 < 1e-9 { return None; }
+            let s = ((p[0] - r.a[0]) * dx + (p[1] - r.a[1]) * dy) / len2;
+            let (fx, fy) = (r.a[0] + s * dx, r.a[1] + s * dy);
+            let along = s * len2.sqrt();
+            let zf = r.a[2] + (r.b[2] - r.a[2]) * s;
+            (s > 0.0 && s < 1.0 && (fx - p[0]).hypot(fy - p[1]) <= 0.05 && along > 0.1 && len2.sqrt() - along > 0.1 && (zf - z(e.id)?).abs() <= 0.02).then_some(e.id)
+        })
     }
 
     pub(crate) fn run_back(&mut self) {
@@ -61,6 +85,25 @@ impl Desktop {
         let Some(z0) = self.document.get(level).map(|l| l.elevation_m) else { return };
         let z = z0 + self.elevation_mm / 1000.0;
         let pts: Vec<[f64; 3]> = self.run_points.iter().map(|p| [p[0], p[1], z]).collect();
+        if let Some(main) = self.branch_main {
+            let Some(mrun) = self.document.mep_run(main) else { self.branch_main = None; return };
+            let sys = if mrun.system == System::Other { self.system_pick } else { mrun.system };
+            let prefs = route_prefs(self.run_domain(), sys);
+            let br = match openbim_route::branch_from_run(&mrun, &pts, &self.run_sizes, &prefs, &Snaps::new(SnapSettings::off())) {
+                Ok(b) => b,
+                Err(e) => { self.message = format!("This branch cannot be drawn ({e:?}); take a point back (Backspace), or change a size"); return; }
+            };
+            match self.document.place_mep_branch(level, main, &br) {
+                Ok(ids) => {
+                    self.run_points.clear();
+                    self.run_sizes.clear();
+                    self.branch_main = None;
+                    self.message = format!("Branch placed with a tee ({} new {}); undo removes it", ids.len(), if self.tool == Tool::Pipe { "pipes" } else { "ducts" });
+                }
+                Err(e) => self.message = format!("Branch rejected ({e:?})"),
+            }
+            return;
+        }
         let prefs = route_prefs(self.run_domain(), self.system_pick);
         let route = match route_path(&pts, &self.run_sizes, &prefs, &Snaps::new(SnapSettings::off())) {
             Ok(r) => r,

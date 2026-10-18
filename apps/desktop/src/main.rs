@@ -61,6 +61,8 @@ struct Desktop {
     slab_points: Vec<[f64; 2]>,
     /// the Duct and Pipe tools: the points clicked so far, the size of the leg that ends at each from the second on, and the system
     run_points: Vec<[f64; 2]>,
+    /// the duct or pipe the run being drawn branches from, when its first click was on one
+    branch_main: Option<ElementId>,
     run_sizes: Vec<openbim_place::penetrations::RunSize>,
     system_pick: openbim_family::mep::System,
     /// beam system: the distance between its beams and their direction
@@ -151,7 +153,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
-            slab_points: Vec::new(), run_points: Vec::new(), run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -167,6 +169,7 @@ impl Desktop {
         self.beam_start = None;
         self.slab_points.clear();
         self.run_points.clear();
+        self.branch_main = None;
         self.run_sizes.clear();
         self.message = match tool {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),

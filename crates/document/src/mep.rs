@@ -121,7 +121,7 @@ impl MepData {
         let mut ids = std::collections::BTreeSet::new();
         for f in &self.fittings {
             let n = f.fitting.ports.len();
-            if f.id < FITTING_BASE || !ids.insert(f.id) || !(2..=16).contains(&n) || f.fitting.port_sizes.len() != n || f.fitting.trim.len() != n || !f.system.domain_ok(f.domain) {
+            if f.id < FITTING_BASE || !ids.insert(f.id) || !(if matches!(f.fitting.kind, openbim_route::FittingKind::Tap { .. }) { 1..=16 } else { 2..=16 }).contains(&n) || f.fitting.port_sizes.len() != n || f.fitting.trim.len() != n || !f.system.domain_ok(f.domain) {
                 return Err(EditError::InvalidMep);
             }
         }
@@ -172,6 +172,99 @@ fn is_run(e: Option<&Element>) -> bool {
 }
 
 impl crate::Document {
+    /// A drawn duct or pipe as the routing code sees it (3D ends, section, system).
+    pub fn mep_run(&self, id: ElementId) -> Option<openbim_place::penetrations::Run> {
+        use openbim_place::penetrations::{Run, RunSize};
+        let el = self.get(id).filter(|e| is_run(Some(e)))?;
+        let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
+        let plan = (end[0] - start[0]).hypot(end[1] - start[1]);
+        let za = self.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;
+        let zb = za + el.slope_ratio.unwrap_or(0.0) * plan;
+        let system = crate::compute::system_of_run(self, id);
+        let (domain, size) = if el.category == Category::Pipe { (Domain::Pipe, RunSize::Round { diameter: el.width_m }) } else { (Domain::Duct, RunSize::Rect { width: el.width_m, height: el.height_m, roll: 0.0 }) };
+        Some(Run { label: el.name.clone(), domain, system, a: [start[0], start[1], za], b: [end[0], end[1], zb], size, margin: 0.0 })
+    }
+
+    /// Joins a branch to a duct or pipe already in the model, as a tee or a tap, in one transaction. A tee cuts the run
+    /// in two: the first half stays the same element, the second half is a new element that takes the end of the run
+    /// with its links, end point and taps. A tap leaves the run whole. The branch's own runs and fittings are new.
+    /// Gives the new elements: the second half first (tee only), then the branch runs.
+    pub fn place_mep_branch(&mut self, level: ElementId, main: ElementId, br: &openbim_route::Branch) -> Result<Vec<ElementId>, EditError> {
+        use crate::Command;
+        use openbim_place::penetrations::RunSize;
+        use openbim_route::graph::{Network, NodeRef};
+        use openbim_route::FittingKind;
+        let z0 = self.get(level).filter(|l| l.category == Category::Level).ok_or(EditError::NotFound(level))?.elevation_m;
+        let run = self.mep_run(main).ok_or(EditError::NotFound(main))?;
+        let main_level = match self.get(main).and_then(|e| e.geometry) { Some(Geometry::Linear { level, .. }) => level, _ => return Err(EditError::InvalidMep) };
+        if main_level != level { return Err(EditError::InvalidMep); }
+        let mut net = Network::new(1);
+        net.add_route(&openbim_route::Route { points: vec![], runs: vec![run.clone()], fittings: vec![] }).map_err(|_| EditError::InvalidMep)?;
+        net.add_branch(0, br).map_err(|_| EditError::InvalidMep)?;
+        let tee = matches!(br.fitting.kind, FittingKind::Tee { .. });
+        let first = self.next_id().0;
+        let (mut ops, mut ids) = (Vec::new(), Vec::new());
+        // segment 0 is the original; the others are new elements in order
+        let mut new_ids = std::collections::BTreeMap::new();
+        for (i, s) in net.segments.iter().enumerate() {
+            let r = &s.run;
+            let len = (r.b[0] - r.a[0]).hypot(r.b[1] - r.a[1]);
+            let id = if i == 0 { main } else { ElementId(first + new_ids.len() as u64) };
+            if len < 1e-9 { return Err(EditError::InvalidGeometry(id)); }
+            if i == 0 {
+                ops.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: [r.a[0], r.a[1]], end: [r.b[0], r.b[1]], level } });
+            } else {
+                let (category, w, h) = match (r.domain, r.size) {
+                    (Domain::Pipe, RunSize::Round { diameter }) => (Category::Pipe, diameter, diameter),
+                    (Domain::Duct, RunSize::Rect { width, height, roll: 0.0 }) => (Category::Duct, width, height),
+                    _ => return Err(EditError::UnsupportedProperty(id)),
+                };
+                new_ids.insert(i, id);
+                ops.push(Command::Create { id, category, name: format!("{} {}", r.label, i), width_m: w, height_m: h, elevation_m: r.a[2] - z0 });
+                ops.push(Command::SetSlope { id, slope_ratio: (r.b[2] - r.a[2]) / len });
+                ops.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: [r.a[0], r.a[1]], end: [r.b[0], r.b[1]], level } });
+                ids.push(id);
+            }
+        }
+        let rid = |i: usize| if i == 0 { main } else { new_ids[&i] };
+        let mut data = self.mep.clone();
+        // the second half of a tee takes over the end of the run
+        let half2 = if tee { Some(rid(1)) } else { None };
+        let cut = if tee { net.segments.iter().enumerate().skip(1).find(|(_, s)| (s.run.b[0] - run.b[0]).hypot(s.run.b[1] - run.b[1]) < 1e-6 && (s.run.b[2] - run.b[2]).abs() < 1e-6).map(|(i, _)| i) } else { None };
+        if tee && cut.is_none() { return Err(EditError::InvalidMep); }
+        if let Some(c) = cut {
+            let h2 = rid(c);
+            let old = MepPort { node: MepNode::Run(main), port: 1 };
+            let moved = MepPort { node: MepNode::Run(h2), port: 1 };
+            for l in data.links.iter_mut() { if l.0 == old { l.0 = moved; } else if l.1 == old { l.1 = moved; } }
+            for e in data.endpoints.iter_mut() { if e.port == old { e.port = moved; } }
+            // taps beyond the cut follow
+            let cut_at = { let a = net.segments[0].run.a; let b = net.segments[c].run.a; ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt() };
+            for t in data.taps.iter_mut() { if t.run == main && t.distance >= cut_at { t.run = h2; t.distance -= cut_at; } }
+            if let Some(sys) = data.run_system(main) { data.run_systems.push((h2, sys)); }
+        }
+        let _ = half2;
+        let base = data.next_fitting_id();
+        let fid = |i: usize| base + i as u64;
+        for (i, f) in net.fittings.iter().enumerate() {
+            data.fittings.push(MepFitting { id: fid(i), fitting: f.fitting.clone(), domain: f.domain, system: f.system });
+        }
+        // the new runs take the system of the branch
+        for (i, s) in net.segments.iter().enumerate().skip(1) {
+            if Some(i) != cut && data.run_system(rid(i)).is_none() { data.run_systems.push((rid(i), s.run.system)); }
+        }
+        let node = |n: NodeRef| match n { NodeRef::Segment(i) => Some(MepNode::Run(rid(i))), NodeRef::Fitting(i) => Some(MepNode::Fitting(fid(i))), NodeRef::Equipment(_) => None };
+        for (a, b) in net.links() {
+            let (Some(na), Some(nb)) = (node(a.node), node(b.node)) else { return Err(EditError::InvalidMep) };
+            data.links.push((MepPort { node: na, port: a.port }, MepPort { node: nb, port: b.port }));
+        }
+        for t in &net.taps { data.taps.push(MepTap { fitting: fid(t.fitting), run: rid(t.segment), distance: t.distance }); }
+        ops.push(Command::SetMep(Box::new(data)));
+        self.transact(self.revision(), &ops)?;
+        if let Some(c) = cut { ids.retain(|i| *i != rid(c)); ids.insert(0, rid(c)); }
+        Ok(ids)
+    }
+
     /// Puts a routed path into the model: one duct or pipe element for every run, the fittings between them, and the
     /// links, in one transaction. Ducts are rectangular and pipes round; a vertical run, a turned duct (roll) or a
     /// round duct cannot be held by the model yet and refuse the whole route.
@@ -211,6 +304,8 @@ impl crate::Document {
             data.links.push((MepPort { node: na, port: a.port }, MepPort { node: nb, port: b.port }));
         }
         for t in &net.taps { data.taps.push(MepTap { fitting: fid(t.fitting), run: ids[t.segment], distance: t.distance }); }
+        // every run drawn belongs to the system it was drawn for
+        for (i, s) in net.segments.iter().enumerate() { data.run_systems.push((ids[i], s.run.system)); }
         ops.push(Command::SetMep(Box::new(data)));
         self.transact(self.revision(), &ops)?;
         Ok(ids)
@@ -294,6 +389,7 @@ mod tests {
         // the first run's start and the second run's end are open
         let src = MepPort { node: MepNode::Run(ids[0]), port: 0 };
         let end = MepPort { node: MepNode::Run(ids[1]), port: 1 };
+        data.run_systems.retain(|(r, _)| *r != ids[0]);
         data.run_systems.push((ids[0], System::ReturnAir));
         data.endpoints.push(MepEndpoint { port: src, role: EndRole::Source, demand: EndDemand::None, required_pressure_pa: 0.0 });
         data.endpoints.push(MepEndpoint { port: end, role: EndRole::Terminal, demand: EndDemand::Power { watts: 5000.0, delta_t: 10.0 }, required_pressure_pa: 25.0 });
@@ -324,5 +420,38 @@ mod tests {
         assert!(d.mep().run_systems.is_empty() && d.mep().endpoints.is_empty());
         assert!(d.undo().unwrap() && d.undo().unwrap());
         assert_eq!(d.mep().endpoints.len(), 2);
+    }
+
+    #[test]
+    fn a_branch_is_joined_to_a_drawn_run_as_a_tee_or_a_tap_and_undone_in_one_step() {
+        for tee in [true, false] {
+            let mut d = Document::spatial_sample();
+            let ids = d.place_mep_route(ElementId(10), &duct_route(&[[1.0, 1.0, 2.7], [9.0, 1.0, 2.7]])).unwrap();
+            let main = ids[0];
+            let mut p = prefs(Domain::Duct, System::SupplyAir);
+            p.junction = if tee { Junction::Tee } else { Junction::Tap };
+            let mainrun = openbim_place::penetrations::Run::rect("Run", Domain::Duct, System::SupplyAir, [1.0, 1.0, 2.7], [9.0, 1.0, 2.7], 0.4, 0.3);
+            let size = RunSize::Rect { width: 0.3, height: 0.2, roll: 0.0 };
+            let br = openbim_route::branch_from_run(&mainrun, &[[5.0, 1.0, 2.7], [5.0, 5.0, 2.7]], &[size], &p, &Snaps::new(SnapSettings::off())).unwrap();
+            let rev = d.revision();
+            let new = d.place_mep_branch(ElementId(10), main, &br).unwrap_or_else(|e| panic!("tee {tee}: {e:?}"));
+            assert_eq!(d.revision(), rev + 1);
+            let m = d.mep();
+            assert_eq!(m.fittings.len(), 1);
+            assert_eq!(m.taps.len(), usize::from(!tee));
+            assert_eq!(new.len(), if tee { 2 } else { 1 });
+            // every leg of the fitting is joined (a tap's leg is, its run is held by the tap)
+            let f = m.fittings[0].id;
+            for leg in 0..m.fittings[0].fitting.ports.len() { assert!(m.partner(MepPort { node: MepNode::Fitting(f), port: leg }).is_some(), "tee {tee} leg {leg}"); }
+            // the far end of the original run is now the end of the last piece, and the system is kept on every run
+            for id in std::iter::once(main).chain(new.iter().copied()) {
+                assert_eq!(crate::compute::system_of_run(&d, id), System::SupplyAir, "tee {tee} run {id:?} of {:?}", d.mep().run_systems);
+            }
+            let text = crate::native::records(&d);
+            assert_eq!(crate::native::parse_mep(&text).unwrap(), *d.mep());
+            assert!(d.undo().unwrap());
+            assert!(d.mep().fittings.len() == 0 && d.get(main).is_some() && d.get(new[0]).is_none());
+            assert_eq!(d.mep().links.len(), 0);
+        }
     }
 }
