@@ -12,6 +12,7 @@
 //! discipline defaults are editable data. Everything is a pure function of its inputs.
 
 pub mod dxf;
+pub mod export;
 pub mod import;
 pub mod model;
 pub mod paper;
