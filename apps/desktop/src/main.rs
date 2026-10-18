@@ -11,6 +11,7 @@ mod model_edit;
 mod export;
 mod import;
 mod file;
+mod mep_tool;
 mod automation;
 mod automation_canvas;
 mod automation_groups;
@@ -57,6 +58,10 @@ struct Desktop {
     beam_level: Option<ElementId>,
     /// the corners of the slab being drawn in a plan view
     slab_points: Vec<[f64; 2]>,
+    /// the Duct and Pipe tools: the points clicked so far, the size of the leg that ends at each from the second on, and the system
+    run_points: Vec<[f64; 2]>,
+    run_sizes: Vec<openbim_place::penetrations::RunSize>,
+    system_pick: openbim_family::mep::System,
     /// beam system: the distance between its beams and their direction
     spacing_mm: f64,
     angle_deg: f64,
@@ -142,7 +147,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
-            slab_points: Vec::new(), spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), run_points: Vec::new(), run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -157,10 +162,12 @@ impl Desktop {
         self.tool = tool;
         self.beam_start = None;
         self.slab_points.clear();
+        self.run_points.clear();
+        self.run_sizes.clear();
         self.message = match tool {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),
-            Tool::Duct => "Duct command preview only; routing engine is not connected yet.".into(),
-            Tool::Pipe => "Pipe command preview only; routing engine is not connected yet.".into(),
+            Tool::Duct => { self.fit_run_system(); "Duct: click the points of the run in a plan view; elbows and reducers are placed for you. Enter or Finish places it (Backspace takes a point back, Esc ends).".into() }
+            Tool::Pipe => { self.fit_run_system(); "Pipe: click the points of the run in a plan view; elbows and reducers are placed for you. Enter or Finish places it (Backspace takes a point back, Esc ends).".into() }
             Tool::Beam => "Beam: click the start and the end in a plan view (Esc ends), or type the ends in the options bar and press Place Beam.".into(),
             Tool::Column => "Column: click its place in a plan view; it stands from that level to the next one up (Esc ends).".into(),
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
@@ -218,8 +225,8 @@ impl Desktop {
                 self.automation.show_mcp = true;
                 if id == "automation_snapshot" { self.automation.export_snapshot(&self.document); }
             }
-            "duct" => self.choose_tool(Tool::Duct),
-            "pipe" => self.choose_tool(Tool::Pipe),
+            "duct" => { (self.width_mm, self.height_mm, self.elevation_mm) = (400.0, 300.0, 2700.0); self.choose_tool(Tool::Duct) }
+            "pipe" => { (self.width_mm, self.height_mm, self.elevation_mm) = (100.0, 100.0, 600.0); self.system_pick = openbim_family::mep::System::ChilledWaterSupply; self.choose_tool(Tool::Pipe) }
             "wall" => self.choose_tool(Tool::Wall),
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),

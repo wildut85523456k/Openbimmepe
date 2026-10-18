@@ -1205,6 +1205,71 @@ mod tests {
     }
 
     #[test]
+    fn a_duct_is_drawn_by_clicks_with_its_elbow_placed_for_it_and_undone_in_one_step() {
+        let mut app = Desktop::sample();
+        let before = app.document.elements().count();
+        app.run_command("duct", "Duct");
+        assert!(app.tool == Tool::Duct && (app.width_mm, app.height_mm) == (400.0, 300.0));
+        let level = app.plan_level();
+        for p in [[1.0, 6.5], [5.0, 6.5], [5.0, 7.5]] { app.run_click(p); }
+        assert_eq!((app.run_points.len(), app.run_sizes.len()), (3, 2));
+        app.finish_run(level);
+        assert!(app.message.contains("2 ducts and 1 fitting"), "{}", app.message);
+        assert!(app.run_points.is_empty());
+        assert_eq!((app.document.elements().count(), app.document.mep().fittings.len(), app.document.mep().links.len()), (before + 2, 1, 2));
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!((out.text.matches("IFCDUCTFITTING(").count(), out.text.matches("IFCRELCONNECTSPORTS(").count()), (1, 2));
+        app.undo_document();
+        assert_eq!((app.document.elements().count(), app.document.mep().is_empty()), (before, true));
+    }
+
+    #[test]
+    fn a_change_of_size_between_two_clicks_gets_a_reducer_and_a_bend_with_a_size_change_is_refused_with_the_points_kept() {
+        let mut app = Desktop::sample();
+        app.run_command("duct", "Duct");
+        let level = app.plan_level();
+        app.run_click([1.0, 6.5]);
+        app.run_click([4.0, 6.5]);
+        app.width_mm = 250.0;
+        app.run_click([7.0, 6.5]);
+        app.finish_run(level);
+        let m = app.document.mep();
+        assert!(m.fittings.len() == 1 && matches!(m.fittings[0].fitting.kind, openbim_route::FittingKind::Transition), "{}", app.message);
+        assert_eq!(m.links.len(), 2);
+        let widths: Vec<f64> = app.document.elements().filter(|e| e.name.contains("Duct") && e.id.0 > 100).map(|e| e.width_m).collect();
+        assert_eq!(widths, vec![0.4, 0.25]);
+
+        // a bend where the size changes cannot be drawn: the points stay so that one can be taken back
+        let n = app.document.elements().count();
+        app.run_click([1.0, 3.5]);
+        app.run_click([3.0, 3.5]);
+        app.width_mm = 300.0;
+        app.run_click([3.0, 5.0]);
+        app.finish_run(level);
+        assert!(app.message.contains("cannot be drawn"), "{}", app.message);
+        assert_eq!((app.run_points.len(), app.document.elements().count()), (3, n));
+        app.run_back();
+        assert_eq!((app.run_points.len(), app.run_sizes.len()), (2, 1));
+    }
+
+    #[test]
+    fn a_pipe_is_drawn_round_in_its_system_and_the_system_list_fits_the_tool() {
+        let mut app = Desktop::sample();
+        app.run_command("pipe", "Pipe");
+        assert!(app.tool == Tool::Pipe && app.system_pick == openbim_family::mep::System::ChilledWaterSupply);
+        assert!(!app.run_systems().contains(&openbim_family::mep::System::SupplyAir));
+        let level = app.plan_level();
+        for p in [[1.0, 6.5], [4.0, 6.5], [4.0, 7.5]] { app.run_click(p); }
+        app.finish_run(level);
+        assert!(app.message.contains("2 pipes and 1 fitting"), "{}", app.message);
+        let f = &app.document.mep().fittings[0];
+        assert_eq!(f.system, openbim_family::mep::System::ChilledWaterSupply);
+        assert_eq!(f.fitting.port_sizes[0], openbim_place::penetrations::RunSize::Round { diameter: 0.1 });
+        app.run_command("duct", "Duct");
+        assert!(app.run_systems().contains(&openbim_family::mep::System::SupplyAir) && app.system_pick.domain_ok(openbim_family::mep::Domain::Duct), "a duct gets an air system");
+    }
+
+    #[test]
     fn the_types_window_opens_from_the_ribbon_and_draws_with_a_type_picked_and_drops_one_that_was_deleted() {
         let mut app = Desktop::sample();
         let beam = app.document.place_beam(ElementId(10), &BeamSpec::level([1.0, 3.0], [7.0, 3.0], 0.3, 0.5, 2.8)).unwrap();

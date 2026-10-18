@@ -234,6 +234,29 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.truss_click(level_id, to_model(p)); } }
+    } else if matches!(app.tool, crate::Tool::Duct | crate::Tool::Pipe) && !three_d {
+        // the points of a duct or pipe run, snapped to 50 mm; Enter or Esc (once it has a length) places it
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
+        let pts: Vec<Pos2> = app.run_points.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+        let colour = Color32::from_rgba_unmultiplied(90, 150, 200, 160);
+        for (i, w) in pts.windows(2).enumerate() {
+            let width = match app.run_sizes.get(i) { Some(openbim_place::penetrations::RunSize::Round { diameter }) => *diameter, Some(openbim_place::penetrations::RunSize::Rect { width, .. }) => *width, None => 0.1 } as f32;
+            painter.line_segment([w[0], w[1]], Stroke::new((width * scale).max(2.0), colour));
+        }
+        if let (Some(last), Some(h)) = (pts.last(), response.hover_pos()) {
+            let m = to_model(h);
+            painter.line_segment([*last, screen([m[0], m[1], level_z])], Stroke::new(1.0, colour));
+        }
+        for p in &pts { painter.circle_filled(*p, 3.5, colour); }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if app.run_points.len() >= 2 { app.finish_run(level_id); } else { app.run_points.clear(); app.run_sizes.clear(); app.choose_tool(crate::Tool::Select); }
+        } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.run_back();
+        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.run_points.len() >= 2 { app.finish_run(level_id);
+        } else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() { app.run_click(to_model(p)); }
+        }
     } else if app.tool == crate::Tool::Beam && !three_d {
         // two clicks place a beam, snapped to 50 mm; Esc ends the tool
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());

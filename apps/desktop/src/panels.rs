@@ -333,6 +333,10 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         });
         return;
     }
+    if matches!(app.tool, crate::Tool::Duct | crate::Tool::Pipe) {
+        ui.horizontal_wrapped(|ui| app.run_options(ui));
+        return;
+    }
     if app.tool == crate::Tool::BeamSystem {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Beam System");
