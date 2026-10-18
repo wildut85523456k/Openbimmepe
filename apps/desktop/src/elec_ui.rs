@@ -7,7 +7,7 @@ use openbim_document::compute_elec::{self, ElecComputeError, ElecComputeSettings
 use openbim_document::{Command, ElecCable, ElecKind, ElecNode, Document, ElementId};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mode { Place, Remove }
+pub(crate) enum Mode { Place, Edit, Remove }
 
 /// What the node tool places and the cable tool draws.
 #[derive(Clone)]
@@ -27,12 +27,14 @@ pub(crate) struct ElecDraft {
     pub ambient: Option<f64>,
     pub demand_factor: f64,
     pub rcd_ma: Option<f64>,
+    /// the node (Edit mode, node tool) or the cable, named by the node it feeds (Edit mode, cable tool), being edited
+    pub selected: Option<u64>,
 }
 
 impl Default for ElecDraft {
     fn default() -> Self {
         Self { mode: Mode::Place, kind: ElecKind::Load, name: String::new(), kw: 10.0, power_factor: 0.9, efficiency: 1.0, motor: false, start_multiple: 6.0, start_pf: 0.35,
-            three_phase: true, extra_m: 0.0, grouped: 1, ambient: None, demand_factor: 1.0, rcd_ma: None }
+            three_phase: true, extra_m: 0.0, grouped: 1, ambient: None, demand_factor: 1.0, rcd_ma: None, selected: None }
     }
 }
 
@@ -123,6 +125,16 @@ impl Desktop {
             data.elec_cables.retain(|c| c.from != id && c.to != id);
             return self.set_elec(data, "Node and its cables removed; undo brings them back".into());
         }
+        if self.elec_draft.mode == Mode::Edit {
+            let Some(id) = hit else { self.message = "Edit: click a node to change it".into(); return };
+            let n = data.elec_nodes.iter().find(|n| n.id == id).cloned().expect("hit node exists");
+            let d = &mut self.elec_draft;
+            (d.selected, d.kind, d.name, d.kw, d.power_factor, d.efficiency) = (Some(id), n.kind, n.name.clone(), n.watts / 1000.0, n.power_factor, n.efficiency);
+            d.motor = n.motor.is_some();
+            if let Some((a, b)) = n.motor { (d.start_multiple, d.start_pf) = (a, b); }
+            self.message = format!("{} selected: change the values in the options bar, then press Apply", n.name);
+            return;
+        }
         if hit.is_some() { self.message = "There is a node there already".into(); return; }
         let d = self.elec_draft.clone();
         if d.kind == ElecKind::Source && data.elec_nodes.iter().any(|n| n.kind == ElecKind::Source) { self.message = "There is a source already; compute one supply at a time".into(); return; }
@@ -154,6 +166,21 @@ impl Desktop {
             data.elec_cables.remove(i);
             return self.set_elec(data, "Cable removed; undo brings it back".into());
         }
+        if self.elec_draft.mode == Mode::Edit {
+            let find = |id: u64| data.elec_nodes.iter().find(|n| n.id == id).map(|n| n.at);
+            let best = data.elec_cables.iter().filter_map(|c| {
+                let mut pts = vec![find(c.from)?];
+                pts.extend(c.via.iter().copied());
+                pts.push(find(c.to)?);
+                let d = pts.windows(2).map(|w| seg_dist(at, w[0], w[1])).fold(f64::MAX, f64::min);
+                (d <= 0.3).then_some((d, c.clone()))
+            }).min_by(|a, b| a.0.total_cmp(&b.0));
+            let Some((_, c)) = best else { self.message = "Edit: click a cable to change it".into(); return };
+            let d = &mut self.elec_draft;
+            (d.selected, d.three_phase, d.extra_m, d.grouped, d.ambient, d.demand_factor, d.rcd_ma) = (Some(c.to), c.three_phase, c.extra_m, c.grouped_circuits, c.ambient_c, c.demand_factor, c.rcd_ma);
+            self.message = "Cable selected: change the values in the options bar, then press Apply".into();
+            return;
+        }
         match (self.cable_from, hit) {
             (None, Some(id)) => {
                 if data.elec_nodes.iter().find(|n| n.id == id).is_some_and(|n| n.kind == ElecKind::Load) { self.message = "A load does not feed anything: start the cable at the source or a board".into(); return; }
@@ -184,8 +211,10 @@ impl Desktop {
         ui.strong(if node_tool { "Electrical Node" } else { "Cable" });
         ui.separator();
         ui.selectable_value(&mut d.mode, Mode::Place, "Place");
+        ui.selectable_value(&mut d.mode, Mode::Edit, "Edit");
         ui.selectable_value(&mut d.mode, Mode::Remove, "Remove");
         if d.mode == Mode::Remove { return; }
+        if d.mode == Mode::Edit && d.selected.is_none() { ui.weak("Click a node or cable to change it"); return; }
         if node_tool {
             ui.selectable_value(&mut d.kind, ElecKind::Source, "Source");
             ui.selectable_value(&mut d.kind, ElecKind::Board, "Board");
@@ -221,6 +250,27 @@ impl Desktop {
             let mut rcd = d.rcd_ma.is_some();
             ui.checkbox(&mut rcd, "RCD");
             if rcd { let m = d.rcd_ma.get_or_insert(30.0); ui.add(egui::DragValue::new(m).range(1.0..=1000.0).suffix(" mA")); } else { d.rcd_ma = None; }
+        }
+        if d.mode == Mode::Edit && ui.button("Apply").clicked() { self.elec_apply(); }
+    }
+
+    /// Writes the options bar's values to the node or cable being edited.
+    pub(crate) fn elec_apply(&mut self) {
+        let Some(id) = self.elec_draft.selected else { return };
+        let d = self.elec_draft.clone();
+        let mut data = self.document.mep().clone();
+        if self.tool == crate::Tool::ElecNode {
+            let Some(n) = data.elec_nodes.iter_mut().find(|n| n.id == id) else { self.message = "That node is gone".into(); return };
+            if !d.name.trim().is_empty() { n.name = d.name.trim().to_string(); }
+            if n.kind == ElecKind::Load {
+                (n.watts, n.power_factor, n.efficiency) = (d.kw * 1000.0, d.power_factor, d.efficiency);
+                n.motor = d.motor.then_some((d.start_multiple, d.start_pf));
+            }
+            self.set_elec(data, "Node changed; undo reverts".into());
+        } else {
+            let Some(c) = data.elec_cables.iter_mut().find(|c| c.to == id) else { self.message = "That cable is gone".into(); return };
+            (c.three_phase, c.extra_m, c.grouped_circuits, c.ambient_c, c.demand_factor, c.rcd_ma) = (d.three_phase, d.extra_m, d.grouped.max(1), d.ambient, d.demand_factor, d.rcd_ma);
+            self.set_elec(data, "Cable changed; undo reverts".into());
         }
     }
 
@@ -476,5 +526,50 @@ mod tests {
         assert_eq!((app.document.mep().elec_nodes.len(), app.document.mep().elec_cables.len()), (3, 1));
         app.undo_document();
         assert_eq!((app.document.mep().elec_nodes.len(), app.document.mep().elec_cables.len()), (4, 2));
+    }
+
+    #[test]
+    fn a_node_and_a_cable_are_changed_after_placing_and_undone() {
+        let mut app = Desktop::sample();
+        let lv = ElementId(10);
+        app.choose_tool(Tool::ElecNode);
+        app.elec_draft.kind = ElecKind::Source;
+        app.elec_node_click(lv, [0.0, 0.0]);
+        app.elec_draft.kind = ElecKind::Load;
+        (app.elec_draft.kw, app.elec_draft.name) = (10.0, "Fan".into());
+        app.elec_node_click(lv, [10.0, 0.0]);
+        app.choose_tool(Tool::Cable);
+        app.cable_click(lv, [0.0, 0.0]);
+        app.cable_click(lv, [10.0, 0.0]);
+        // edit the load
+        app.choose_tool(Tool::ElecNode);
+        app.elec_draft.mode = Mode::Edit;
+        app.elec_node_click(lv, [10.1, 0.0]);
+        assert!(app.elec_draft.selected.is_some() && app.elec_draft.kw == 10.0, "{}", app.message);
+        (app.elec_draft.kw, app.elec_draft.name, app.elec_draft.motor) = (22.0, "Fan 2".into(), true);
+        app.elec_apply();
+        let n = app.document.mep().elec_nodes.iter().find(|n| n.kind == ElecKind::Load).unwrap();
+        assert_eq!((n.watts, n.name.as_str(), n.motor.is_some()), (22000.0, "Fan 2", true));
+        // edit the cable
+        app.choose_tool(Tool::Cable);
+        app.elec_draft.mode = Mode::Edit;
+        app.cable_click(lv, [5.0, 0.1]);
+        assert!(app.elec_draft.selected.is_some(), "{}", app.message);
+        (app.elec_draft.three_phase, app.elec_draft.grouped, app.elec_draft.rcd_ma) = (false, 3, Some(30.0));
+        app.elec_apply();
+        let c = &app.document.mep().elec_cables[0];
+        assert_eq!((c.three_phase, c.grouped_circuits, c.rcd_ma), (false, 3, Some(30.0)));
+        // a bad value is refused and nothing changes
+        app.choose_tool(Tool::ElecNode);
+        app.elec_draft.mode = Mode::Edit;
+        app.elec_node_click(lv, [10.0, 0.0]);
+        app.elec_draft.power_factor = 2.0;
+        app.elec_apply();
+        assert!(app.message.contains("Rejected"), "{}", app.message);
+        assert_eq!(app.document.mep().elec_nodes.iter().find(|n| n.kind == ElecKind::Load).unwrap().power_factor, 0.9);
+        app.undo_document();
+        app.undo_document();
+        assert_eq!(app.document.mep().elec_nodes.iter().find(|n| n.kind == ElecKind::Load).unwrap().name, "Fan");
+        assert!(app.document.mep().elec_cables[0].three_phase);
     }
 }
