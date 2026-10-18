@@ -45,6 +45,9 @@ pub enum Category {
     /// Reinforcement of a rectangular beam (`Geometry::OnMember`): `count` bars along the bottom and two along the
     /// top, `width_m` thick, with stirrups `height_m` thick every `spacing_m`, all `elevation_m` of cover inside.
     Rebar,
+    /// An instance of a family from the library (door, window, equipment...): `family` names it, `type_name` its
+    /// type, `overrides` its instance values; `angle_deg` turns it, `elevation_m` raises it above its level.
+    Family,
     Duct,
     Pipe,
     Equipment,
@@ -144,6 +147,17 @@ pub struct BeamSystemSpec {
 
 /// One member of a truss: start, end, height of its centre line at the start, rise, and whether it is a diagonal.
 pub type TrussMember = ([f64; 2], [f64; 2], f64, f64, bool);
+
+/// A family instance to place.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FamilySpec {
+    pub family: String,
+    pub type_name: String,
+    pub overrides: Vec<(String, f64)>,
+    pub angle_deg: f64,
+    /// height above the level (a free instance) or above the base of the wall (an instance in a wall)
+    pub elevation_m: f64,
+}
 
 /// Reinforcement to put in a beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -262,6 +276,10 @@ pub struct Element {
     pub parent: Option<ElementId>,
     /// Rebar: the number of bars along the bottom of the beam.
     pub count: u32,
+    /// Family instance: which family and type, and the values set on this instance.
+    pub family: String,
+    pub type_name: String,
+    pub overrides: Vec<(String, f64)>,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -285,11 +303,15 @@ impl Element {
             && (matches!(self.category, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
             && (matches!(self.category, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
             && (self.category == Category::Beam || self.join_ends == [true; 2])
-            && (matches!(self.category, Category::BeamSystem | Category::Truss | Category::Rebar) || (self.spacing_m == 0.0 && self.angle_deg == 0.0))
+            && (matches!(self.category, Category::BeamSystem | Category::Truss | Category::Rebar) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || self.category == Category::Family)))
             && (self.category != Category::Truss || self.angle_deg == 0.0)
             && (self.category != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category == Category::Beam || self.parent.is_none())
             && (self.category == Category::Rebar || self.count == 0)
+            && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty()))
+            && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
+            && self.overrides.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.is_finite())
+            && (self.category != Category::Family || (self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
             && (!matches!(self.category, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && !self.name.trim().is_empty()
@@ -369,6 +391,8 @@ pub enum Command {
     SetParent { id: ElementId, parent: Option<ElementId> },
     /// The number of bars along the bottom of a rebar.
     SetCount { id: ElementId, count: u32 },
+    /// The family, type and instance values of a family instance, and its turn in degrees.
+    SetFamily { id: ElementId, family: String, type_name: String, overrides: Vec<(String, f64)>, angle_deg: f64 },
     /// The structural material of a beam.
     SetMaterial { id: ElementId, material: Material },
     SetGeometry { id: ElementId, geometry: Geometry },
@@ -559,6 +583,31 @@ impl Document {
         Ok(())
     }
 
+    fn family_commands(&self, id: ElementId, spec: &FamilySpec, geometry: Geometry) -> Vec<Command> {
+        let n = self.elements.values().filter(|e| e.category == Category::Family).count() + 1;
+        vec![
+            Command::Create { id, category: Category::Family, name: format!("{} {n}", spec.family), width_m: 1.0, height_m: 1.0, elevation_m: spec.elevation_m },
+            Command::SetFamily { id, family: spec.family.clone(), type_name: spec.type_name.clone(), overrides: spec.overrides.clone(), angle_deg: spec.angle_deg },
+            Command::SetGeometry { id, geometry },
+        ]
+    }
+
+    /// Places a family instance at `at` on `level`.
+    pub fn place_family(&mut self, level: ElementId, at: [f64; 2], spec: &FamilySpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let ops = self.family_commands(id, spec, Geometry::Placed { at, level });
+        self.transact(self.revision, &ops)?;
+        Ok(id)
+    }
+
+    /// Places a family instance in the wall `host`, `along_m` from its start. It follows the wall.
+    pub fn place_family_in_wall(&mut self, host: ElementId, along_m: f64, spec: &FamilySpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let ops = self.family_commands(id, spec, Geometry::InWall { host, along_m });
+        self.transact(self.revision, &ops)?;
+        Ok(id)
+    }
+
     /// Reinforces `beam` (a rectangular one), in one undoable transaction.
     pub fn place_rebar(&mut self, beam: ElementId, spec: &RebarSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();
@@ -658,7 +707,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(),
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -704,6 +753,12 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if !matches!(el.category, Category::BeamSystem | Category::Truss | Category::Rebar) { return Err(EditError::UnsupportedProperty(*id)); }
                     (el.spacing_m, el.angle_deg) = (*spacing_m, *angle_deg);
+                    el.revision = revision;
+                }
+                Command::SetFamily { id, family, type_name, overrides, angle_deg } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Family { return Err(EditError::UnsupportedProperty(*id)); }
+                    (el.family, el.type_name, el.overrides, el.angle_deg) = (family.clone(), type_name.clone(), overrides.clone(), *angle_deg);
                     el.revision = revision;
                 }
                 Command::SetCount { id, count } => {

@@ -10,6 +10,10 @@ pub enum Geometry {
     Linear { start: [f64; 2], end: [f64; 2], level: ElementId },
     /// a point on `level` with something standing from there up to the level `top` (a column)
     Point { at: [f64; 2], level: ElementId, top: ElementId },
+    /// a family instance standing at a point of a level (turned by the element's angle)
+    Placed { at: [f64; 2], level: ElementId },
+    /// a family instance in a wall, `along_m` from its start (a door or a window)
+    InWall { host: ElementId, along_m: f64 },
     /// reinforcement placed in a beam
     OnMember { host: ElementId },
     /// a slab lies on `level`; its outline is the element's
@@ -142,12 +146,23 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss))) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
-            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar),
+            None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family),
             Some(Geometry::Level) => el.category == Category::Level && el.elevation_m.abs() <= 1e6,
             Some(Geometry::Grid { start, end }) => el.category == Category::Grid && valid_axis(*start, *end),
             Some(Geometry::OnWall { host }) => {
                 el.category == Category::WallFooting
                     && elements.get(host).is_some_and(|w| w.category == Category::Wall && matches!(w.geometry, Some(Geometry::Linear { .. })))
+            }
+            Some(Geometry::Placed { at, level }) => {
+                el.category == Category::Family && !el.family.is_empty() && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6) && el.elevation_m.abs() <= 1e6
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::InWall { host, along_m }) => {
+                el.category == Category::Family && !el.family.is_empty() && el.elevation_m.abs() <= 1e6
+                    && elements.get(host).is_some_and(|w| w.category == Category::Wall && match w.geometry {
+                        Some(Geometry::Linear { start, end, .. }) => (0.0..=(end[0] - start[0]).hypot(end[1] - start[1])).contains(along_m),
+                        _ => false,
+                    })
             }
             Some(Geometry::OnMember { host }) => {
                 let (dm, ds) = (el.width_m, el.height_m);
@@ -280,6 +295,7 @@ impl Document {
         }
         if matches!(el.category, Category::BeamSystem | Category::Truss) { return None; }
         if el.category == Category::Rebar { return self.rebar_mesh(el); }
+        if el.category == Category::Family { return None; }
         if let Some(Geometry::Area { level }) = el.geometry {
             // the slab hangs from its top, which is `elevation_m` above the level
             let ring = &el.outline;
@@ -698,5 +714,31 @@ mod tests {
         assert!(d.transact(d.revision(), &[Command::SetParent { id: kids[0], parent: Some(kids[1]) }]).is_err());
         d.delete_beam_system(t).unwrap();
         assert!(d.get(t).is_none() && d.get(kids[0]).is_none());
+    }
+
+    #[test]
+    fn family_instances_stand_on_a_level_or_in_a_wall_and_follow_it() {
+        use crate::{Command, FamilySpec};
+        let mut d = Document::spatial_sample();
+        let spec = FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("width".into(), 1.0)], angle_deg: 0.0, elevation_m: 0.0 };
+        let wall = d.elements().find(|e| e.category == Category::Wall).unwrap().id;
+        let Some(Geometry::Linear { start, end, .. }) = d.get(wall).unwrap().geometry else { panic!() };
+        let len = (end[0] - start[0]).hypot(end[1] - start[1]);
+        let door = d.place_family_in_wall(wall, len / 2.0, &spec).unwrap();
+        // beyond the wall's end, or in something that is not a wall: refused
+        assert!(d.place_family_in_wall(wall, len + 1.0, &spec).is_err());
+        assert!(d.place_family_in_wall(ElementId(10), 1.0, &spec).is_err());
+        // the wall cannot go from under it
+        assert!(d.transact(d.revision(), &[Command::Delete { id: wall }]).is_err());
+        // free standing on a level, turned
+        let fcu = d.place_family(ElementId(10), [3.0, 3.0], &FamilySpec { family: "Fan coil unit, ducted".into(), angle_deg: 90.0, elevation_m: 2.4, ..spec.clone() }).unwrap();
+        assert_eq!(d.get(fcu).unwrap().angle_deg, 90.0);
+        assert!(d.place_family(ElementId(10), [f64::NAN, 0.0], &spec).is_err());
+        assert!(d.place_family(ElementId(10), [0.0, 0.0], &FamilySpec { family: String::new(), ..spec.clone() }).is_err());
+        assert!(d.mesh(door).is_none());
+        // only families have a family
+        assert!(d.transact(d.revision(), &[Command::SetFamily { id: wall, family: "x".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0 }]).is_err());
+        d.transact(d.revision(), &[Command::SetFamily { id: door, family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("width".into(), 1.2)], angle_deg: 0.0 }]).unwrap();
+        assert_eq!(d.get(door).unwrap().overrides, vec![("width".to_string(), 1.2)]);
     }
 }

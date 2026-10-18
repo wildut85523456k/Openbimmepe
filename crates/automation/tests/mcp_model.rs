@@ -1,9 +1,9 @@
 use openbim_automation::{mcp_model::SnapshotService,protocol::{Snapshot,SnapshotElement},Property,Graph,Node,NodeKind,Type,Wire};
 fn service()->SnapshotService {
     SnapshotService::new(Snapshot { document_id:"test".into(),revision:42,elements:vec![
-        SnapshotElement { id:2,category:"Pipe".into(),name:"Drain Branch".into(),width_m:0.1,height_m:0.1,elevation_m:1.2,slope_ratio:Some(0.01),geometry:None , section: None, usage: None, material: None, outline: vec![], slab_kind: None, spacing_m: None, angle_deg: None, parent: None, join_ends: None, count: None},
-        SnapshotElement { id:1,category:"Duct".into(),name:"Supply Branch".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.),geometry:None , section: None, usage: None, material: None, outline: vec![], slab_kind: None, spacing_m: None, angle_deg: None, parent: None, join_ends: None, count: None},
-        SnapshotElement { id:3,category:"Wall".into(),name:"Corridor".into(),width_m:0.2,height_m:3.,elevation_m:0.,slope_ratio:None,geometry:None , section: None, usage: None, material: None, outline: vec![], slab_kind: None, spacing_m: None, angle_deg: None, parent: None, join_ends: None, count: None},
+        SnapshotElement { id:2,category:"Pipe".into(),name:"Drain Branch".into(),width_m:0.1,height_m:0.1,elevation_m:1.2,slope_ratio:Some(0.01),geometry:None , section: None, usage: None, material: None, outline: vec![], slab_kind: None, spacing_m: None, angle_deg: None, parent: None, join_ends: None, count: None, family: None, type_name: String::new(), overrides: vec![]},
+        SnapshotElement { id:1,category:"Duct".into(),name:"Supply Branch".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.),geometry:None , section: None, usage: None, material: None, outline: vec![], slab_kind: None, spacing_m: None, angle_deg: None, parent: None, join_ends: None, count: None, family: None, type_name: String::new(), overrides: vec![]},
+        SnapshotElement { id:3,category:"Wall".into(),name:"Corridor".into(),width_m:0.2,height_m:3.,elevation_m:0.,slope_ratio:None,geometry:None , section: None, usage: None, material: None, outline: vec![], slab_kind: None, spacing_m: None, angle_deg: None, parent: None, join_ends: None, count: None, family: None, type_name: String::new(), overrides: vec![]},
     ] }).unwrap()
 }
 #[test]

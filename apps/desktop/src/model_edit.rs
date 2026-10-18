@@ -1,5 +1,5 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
-use openbim_document::{RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
+use openbim_document::{FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -26,6 +26,7 @@ impl Desktop {
             if el.category == Category::Beam { self.join_pick = el.join_ends; }
             if matches!(el.category, Category::BeamSystem | Category::Truss) { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
             if el.category == Category::Truss { self.material_pick = el.material; }
+            if el.category == Category::Family { (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone()); }
             if el.category == Category::Rebar { (self.spacing_mm, self.bar_count) = (el.spacing_m * 1000.0, f64::from(el.count)); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) {
@@ -74,8 +75,9 @@ impl Desktop {
         };
         let system = el.category == Category::BeamSystem && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(el.angle_deg, self.angle_deg) || el.usage != self.usage_pick || el.material != self.material_pick);
         let truss = el.category == Category::Truss && (differs(el.spacing_m * 1000.0, self.spacing_mm) || el.material != self.material_pick);
+        let family = el.category == Category::Family && (differs(el.angle_deg, self.angle_deg) || el.type_name != self.family_type);
         let rebar = el.category == Category::Rebar && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(f64::from(el.count), self.bar_count));
-        let kind = system || truss || rebar || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
+        let kind = system || truss || rebar || family || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
             || (el.category == Category::WallFooting && el.material != self.material_pick)
             || (el.category == Category::Beam && el.join_ends != self.join_pick)
@@ -206,6 +208,26 @@ impl Desktop {
         }
     }
 
+    /// A click of the Family tool: a door or window goes into the wall under the click, anything else stands on the
+    /// level at the click.
+    pub(crate) fn family_click(&mut self, level: ElementId, at: [f64; 2], wall: Option<ElementId>) {
+        let spec = FamilySpec { family: self.family_pick.clone(), type_name: self.family_type.clone(), overrides: Vec::new(), angle_deg: self.angle_deg, elevation_m: self.slab_offset_mm / 1000.0 };
+        let in_wall = spec.family.starts_with("Door") || spec.family.starts_with("Window");
+        let result = if in_wall {
+            let Some(w) = wall else { self.message = format!("{}: click the wall it goes in", spec.family); return; };
+            let Some(Geometry::Linear { start, end, .. }) = self.document.get(w).and_then(|e| e.geometry) else { return; };
+            let len = (end[0] - start[0]).hypot(end[1] - start[1]);
+            let along = (((at[0] - start[0]) * (end[0] - start[0]) + (at[1] - start[1]) * (end[1] - start[1])) / len).clamp(0.0, len);
+            self.document.place_family_in_wall(w, along, &FamilySpec { angle_deg: 0.0, ..spec })
+        } else {
+            self.document.place_family(level, at, &spec)
+        };
+        self.message = match result {
+            Ok(id) => format!("{} placed as element {}; undo removes it", self.family_pick, id.0),
+            Err(error) => format!("Family rejected: {error:?}"),
+        };
+    }
+
     /// A click of the Rebar tool on a beam: reinforcement from the options bar goes into it.
     pub(crate) fn rebar_click(&mut self, beam: ElementId) {
         if self.document.get(beam).is_none_or(|b| b.category != Category::Beam) { self.message = "Rebar: click a beam".into(); return; }
@@ -253,6 +275,16 @@ impl Desktop {
         if matches!(el.category, Category::Footing | Category::WallFooting) {
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 });
             commands.push(Command::SetMaterial { id, material: self.material_pick });
+        }
+        if el.category == Category::Family {
+            let turn = if matches!(el.geometry, Some(Geometry::InWall { .. })) { 0.0 } else { self.angle_deg };
+            commands.extend([Command::SetFamily { id, family: el.family.clone(), type_name: self.family_type.clone(), overrides: el.overrides.clone(), angle_deg: turn },
+                Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }]);
+            match self.document.transact(self.document.revision(), &commands) {
+                Ok(_) => { self.sync_duct_controls(); self.message = format!("Element {} updated", id.0); }
+                Err(error) => self.message = format!("Edit rejected: {error:?}"),
+            }
+            return;
         }
         if el.category == Category::Rebar {
             let (count, spacing) = (self.bar_count.max(0.0) as u32, self.spacing_mm / 1000.0);
@@ -769,5 +801,51 @@ mod tests {
         assert!(app.document.rebar_bars(app.document.get(r).unwrap()).unwrap().len() < bars);
         app.undo_document();
         assert_eq!(app.document.get(r).unwrap().count, 3);
+    }
+
+    #[test]
+    fn a_door_goes_into_the_clicked_wall_cuts_it_in_3d_and_is_exported_with_its_opening() {
+        let mut app = Desktop::sample();
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
+        let volume = |app: &Desktop, id: ElementId| -> f64 {
+            let batch = crate::view3d::batch(&app.document);
+            let Some(ei) = batch.elements.iter().position(|e| e.id == id.0) else { return 0.0 };
+            batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei as u32).map(|(t, _)| {
+                let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+                (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+            }).sum()
+        };
+        let before = volume(&app, wall);
+        app.run_command("door", "Door");
+        assert!(app.tool == Tool::Family && app.family_pick.starts_with("Door"));
+        let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+        app.family_click(ElementId(10), mid, None);
+        assert!(app.message.contains("click the wall"), "{}", app.message);
+        app.family_click(ElementId(10), mid, Some(wall));
+        let door = app.document.elements().find(|e| e.category == Category::Family).expect("placed").id;
+        // the wall now has the opening of the door cut out of it
+        let after = volume(&app, wall);
+        assert!(after < before - 0.05, "{before} -> {after}");
+        assert!(volume(&app, door) > 0.0, "the door is in 3D");
+        // exported as a door that fills an opening in the wall
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCDOOR(").count(), 1);
+        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 1);
+        // it follows the wall: the wall moves, the door goes with it
+        app.document.transact(app.document.revision(), &[Command::SetGeometry { id: wall, geometry: Geometry::Linear { start: [start[0], start[1] + 0.5], end: [end[0], end[1] + 0.5], level: ElementId(10) } }]).unwrap();
+        assert!(volume(&app, wall) < before - 0.05);
+        // a free-standing component and its edit
+        app.run_command("ahu", "AHU");
+        app.slab_offset_mm = 2400.0;
+        app.family_click(ElementId(10), [3.0, 3.0], None);
+        let fcu = app.document.elements().filter(|e| e.category == Category::Family).map(|e| e.id).max().unwrap();
+        assert!(volume(&app, fcu) > 0.0);
+        app.select_element(Some(fcu));
+        assert!(!app.has_pending_edit());
+        app.angle_deg = 90.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.get(fcu).unwrap().angle_deg, 90.0);
     }
 }

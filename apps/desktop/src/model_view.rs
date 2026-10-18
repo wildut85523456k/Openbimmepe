@@ -1,7 +1,7 @@
 //! Orthographic plan and orbitable 3D projection of document-derived meshes.
 //! Painter-based CPU projection is an initial small-model renderer, not a full
 //! depth-buffered GPU BIM engine (cut planes/joins/hidden-line are future work).
-use crate::{Desktop, View};
+use crate::{Desktop, ElementId, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry};
 
@@ -79,6 +79,23 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
     }
+    // family instances, and the walls and members they cut, come from the scene mesher
+    if let Some(scene) = crate::view3d::scene_meshes(&app.document) {
+        for em in scene.iter() {
+            let id = ElementId(em.element.id);
+            let Some(el) = app.document.get(id) else { continue };
+            let level = match el.geometry {
+                Some(Geometry::Placed { level, .. } | Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level }) => Some(level),
+                Some(Geometry::InWall { host, .. }) => app.document.get(host).and_then(|w| match w.geometry { Some(Geometry::Linear { level, .. }) => Some(level), _ => None }),
+                _ => None,
+            };
+            let Some(level) = level else { continue };
+            if !three_d && level != level_id { continue; }
+            let mesh = crate::view3d::doc_mesh(em);
+            for vertex in &mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
+            match meshes.iter().position(|(m, _, _)| *m == id) { Some(i) => meshes[i] = (id, el.category, mesh), None => meshes.push((id, el.category, mesh)) }
+        }
+    }
     // Include datum extents so grid bubbles remain inside the viewport.
     for el in app.document.elements() {
         if let Some(Geometry::Grid { start, end }) = el.geometry {
@@ -129,6 +146,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     for (id, category, mesh) in meshes {
         let color = match category {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
+            Category::Family => Color32::from_rgb(120, 150, 110),
             Category::Beam | Category::BeamSystem | Category::Truss => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
             Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
@@ -152,7 +170,17 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if app.tool == crate::Tool::Rebar && !three_d {
+    if app.tool == crate::Tool::Family && !three_d {
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let wall = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some_and(|e| e.category == Category::Wall)).map(|(_, id, _, _)| *id);
+                app.family_click(level_id, to_model(p), wall);
+            }
+        }
+    } else if app.tool == crate::Tool::Rebar && !three_d {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if response.clicked() {
             if let Some(p) = response.interact_pointer_pos() {

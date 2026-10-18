@@ -74,6 +74,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
+        C::Family => &[Field::Angle, Field::Elevation],
         C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
         C::BeamSystem => &[Field::Spacing, Field::Angle, Field::Width, Field::Height, Field::Elevation],
@@ -128,6 +129,8 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
     match field {
         Field::Thickness => "Thickness (mm)",
         Field::Count => "Bottom Bars",
+        Field::Angle if category == C::Family => "Rotation (deg)",
+        Field::Elevation if category == C::Family => "Offset (mm)",
         Field::Width if category == C::Rebar => "Bar Diameter (mm)",
         Field::Height if category == C::Rebar => "Stirrup Diameter (mm)",
         Field::Elevation if category == C::Rebar => "Cover (mm)",
@@ -199,6 +202,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Footing => ("Structural Foundations (1)", "Isolated Footing", "foundation"),
         C::WallFooting => ("Structural Foundations (1)", "Strip Footing", "footing"),
         C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
+        C::Family => ("Specialty Equipment (1)", "Family Instance", "component"),
         C::Rebar => ("Structural Rebar (1)", "Beam Rebar", "rebar"),
         C::Truss => ("Structural Trusses (1)", "Warren Truss", "truss"),
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
@@ -206,6 +210,28 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
+}
+
+/// The family to place and its type, from the library.
+fn family_combos(app: &mut Desktop, ui: &mut egui::Ui) {
+    let lib = crate::export::library();
+    ui.label("Family");
+    egui::ComboBox::from_id_salt("family_pick").selected_text(app.family_pick.clone()).show_ui(ui, |ui| {
+        for f in lib { if ui.selectable_value(&mut app.family_pick, f.name().to_string(), f.name()).clicked() { app.family_type.clear(); } }
+    });
+    family_type_combo(app, ui, &app.family_pick.clone());
+}
+
+/// The type of the family `family` (the family's own values when none is chosen).
+fn family_type_combo(app: &mut Desktop, ui: &mut egui::Ui, family: &str) {
+    let Some(f) = crate::export::library().iter().find(|f| f.name() == family) else { return };
+    let names = f.type_names();
+    if names.is_empty() { return; }
+    ui.label("Type");
+    egui::ComboBox::from_id_salt("family_type").selected_text(if app.family_type.is_empty() { "Default" } else { app.family_type.as_str() }).show_ui(ui, |ui| {
+        ui.selectable_value(&mut app.family_type, String::new(), "Default");
+        for n in names { ui.selectable_value(&mut app.family_type, n.to_string(), n); }
+    });
 }
 
 /// The kind and the material of a slab.
@@ -242,6 +268,18 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                 ui.label(field_name(field, cat));
                 editor(app, ui, field);
             }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::Family {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Component");
+            ui.separator();
+            family_combos(app, ui);
+            ui.label("Rotation (deg)");
+            ui.add(egui::DragValue::new(&mut app.angle_deg).speed(1.0).range(-360.0..=360.0));
+            ui.label("Offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0));
         });
         return;
     }
@@ -387,6 +425,15 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
                     }
                     if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
+                    if el.category == openbim_document::Category::Family {
+                        read_only_group(ui, "Identity Data", &query, &[("Family", &el.family)]);
+                        family_type_combo(app, ui, &el.family);
+                        if let Some(Geometry::InWall { host, along_m }) = el.geometry {
+                            let name = app.document.get(host).map_or("Missing wall", |w| w.name.as_str());
+                            let along = format!("{:.0}", along_m * 1000.0);
+                            read_only_group(ui, "Constraints", &query, &[("Host Wall", name), ("Distance Along Wall (mm)", &along)]);
+                        }
+                    }
                     if let Some(Geometry::OnMember { host }) = el.geometry {
                         let name = app.document.get(host).map_or("Missing beam", |w| w.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Host Beam", name)]);

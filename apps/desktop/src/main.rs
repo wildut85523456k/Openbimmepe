@@ -23,7 +23,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar }
+enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -60,6 +60,9 @@ struct Desktop {
     angle_deg: f64,
     /// rebar: the number of bars along the bottom of the beam
     bar_count: f64,
+    /// family tool: the family and type to place, and the selected instance's type
+    family_pick: String,
+    family_type: String,
     slab_thickness_mm: f64,
     /// how far above its level the top of a new slab is
     slab_offset_mm: f64,
@@ -96,7 +99,7 @@ impl Desktop {
     }
 
     fn sample() -> Self {
-        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing", "Wall Footing", "Beam System", "Truss", "Rebar"])
+        let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing", "Wall Footing", "Beam System", "Truss", "Rebar", "Family"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
             ("Duct", &["D D"]),
@@ -110,6 +113,7 @@ impl Desktop {
             ("Beam System", &["B S"]),
             ("Truss", &["T R"]),
             ("Rebar", &["R B"]),
+            ("Family", &["C M"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
         Self {
@@ -120,7 +124,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, beam_level: None,
-            slab_points: Vec::new(), spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -147,6 +151,7 @@ impl Desktop {
             Tool::BeamSystem => "Beam system: click the corners of the area in a plan view, then Enter, a click on the first corner or Finish lays parallel beams at the spacing and angle of the options bar (Esc cancels).".into(),
             Tool::Truss => "Truss: click the start and the end of the truss in a plan view; it is built with the panel length, depth and member size of the options bar (Esc ends).".into(),
             Tool::Rebar => "Rebar: click a beam in a plan view; bars and stirrups are placed inside it and follow it (Esc ends).".into(),
+            Tool::Family => format!("{}: click in a plan view (a door or window: click the wall it goes in); Esc ends.", self.family_pick),
             Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
         };
     }
@@ -203,6 +208,9 @@ impl Desktop {
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
             "footing" => self.choose_tool(Tool::WallFooting),
             "truss" => self.choose_tool(Tool::Truss),
+            "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.choose_tool(Tool::Family) }
+            "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.choose_tool(Tool::Family) }
+            "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.choose_tool(Tool::Family) }
             "rebar" => { (self.width_mm, self.height_mm, self.elevation_mm, self.spacing_mm, self.bar_count) = (16.0, 8.0, 40.0, 200.0, 3.0); self.choose_tool(Tool::Rebar) }
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),
@@ -246,7 +254,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

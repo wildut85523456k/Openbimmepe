@@ -8,8 +8,28 @@ use openbim_viewport_egui::{Datum, Style};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// The meshes of the scene mesher for a document that has family instances: the instances, and the walls, beams,
+/// columns and slabs they cut. Kept for the revision it was made for, because it meshes the whole scene.
+pub fn scene_meshes(doc: &Document) -> Option<Arc<Vec<openbim_view::ElementMesh>>> {
+    type Cached = Option<((u64, usize, u64), Option<Arc<Vec<openbim_view::ElementMesh>>>)>;
+    thread_local! { static CACHE: std::cell::RefCell<Cached> = const { std::cell::RefCell::new(None) }; }
+    if doc.elements().all(|e| e.category != Category::Family) { return None; }
+    let key = (doc.revision(), doc.elements().count(), doc.elements().map(|e| e.id.0.wrapping_mul(31).wrapping_add(e.revision)).fold(0u64, u64::wrapping_add));
+    CACHE.with(|c| {
+        if let Some((k, v)) = c.borrow().as_ref() { if *k == key { return v.clone(); } }
+        let meshes = crate::export::scene_of(doc, "view", 1, "t").ok().and_then(|(scene, _)| openbim_view::scene_meshes(&scene).ok()).map(Arc::new);
+        *c.borrow_mut() = Some((key, meshes.clone()));
+        meshes
+    })
+}
+
+/// A mesh of the scene mesher as a document mesh (its triangles face outward).
+pub fn doc_mesh(m: &openbim_view::ElementMesh) -> openbim_document::Mesh {
+    openbim_document::Mesh { vertices: m.mesh.verts.clone(), faces: m.mesh.tris.iter().map(|t| t.iter().map(|&i| i as usize).collect()).collect() }
+}
+
 fn kind(c: Category) -> Option<Kind> {
-    match c { Category::Wall => Some(Kind::Wall), Category::Beam | Category::Rebar => Some(Kind::Beam), Category::Column => Some(Kind::Column), Category::Slab | Category::Footing | Category::WallFooting => Some(Kind::Slab), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
+    match c { Category::Wall => Some(Kind::Wall), Category::Beam | Category::Rebar => Some(Kind::Beam), Category::Family => Some(Kind::Family), Category::Column => Some(Kind::Column), Category::Slab | Category::Footing | Category::WallFooting => Some(Kind::Slab), Category::Duct | Category::Pipe => Some(Kind::Segment), Category::Equipment => Some(Kind::Family), _ => None }
 }
 
 /// The element of the view that stands for a document element.
@@ -40,6 +60,12 @@ pub fn batch(doc: &Document) -> Batch {
         let Some(mesh) = doc.mesh(el.id) else { continue };
         // a slab's outline is not convex, but its faces are wound outward by construction
         meshes.push((Element { kind: k, id: el.id.0 }, mesh, matches!(el.category, Category::Slab | Category::Footing | Category::WallFooting | Category::Rebar)));
+    }
+    if let Some(scene) = scene_meshes(doc) {
+        for em in scene.iter().filter(|em| doc.get(ElementId(em.element.id)).is_some()) {
+            let entry = (em.element, doc_mesh(em), true);
+            match meshes.iter().position(|(e, _, _)| e.id == em.element.id) { Some(i) => meshes[i] = entry, None => meshes.push(entry) }
+        }
     }
     let mut origin = [f64::MAX; 3];
     for (_, m, _) in &meshes { for v in &m.vertices { for k in 0..3 { origin[k] = origin[k].min(v[k]); } } }

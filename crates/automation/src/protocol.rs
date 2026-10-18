@@ -16,6 +16,8 @@ pub enum SnapshotGeometry {
     Pad { at:[f64;2],level:u64,thickness_m:f64 },
     OnWall { host:u64 },
     OnMember { host:u64 },
+    Placed { at:[f64;2],level:u64 },
+    InWall { host:u64,along_m:f64 },
 }
 impl From<Geometry> for SnapshotGeometry {
     fn from(value:Geometry)->Self {
@@ -28,6 +30,8 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::Pad { at,level,thickness_m }=>Self::Pad { at,level:level.0,thickness_m },
             Geometry::OnWall { host }=>Self::OnWall { host:host.0 },
             Geometry::OnMember { host }=>Self::OnMember { host:host.0 },
+            Geometry::Placed { at,level }=>Self::Placed { at,level:level.0 },
+            Geometry::InWall { host,along_m }=>Self::InWall { host:host.0,along_m },
         }
     }
 }
@@ -42,6 +46,8 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::Pad { at,level,thickness_m }=>Self::Pad { at,level:ElementId(level),thickness_m },
             SnapshotGeometry::OnWall { host }=>Self::OnWall { host:ElementId(host) },
             SnapshotGeometry::OnMember { host }=>Self::OnMember { host:ElementId(host) },
+            SnapshotGeometry::Placed { at,level }=>Self::Placed { at,level:ElementId(level) },
+            SnapshotGeometry::InWall { host,along_m }=>Self::InWall { host:ElementId(host),along_m },
         }
     }
 }
@@ -87,6 +93,13 @@ pub struct SnapshotElement {
     /// a rebar: the number of bars along the bottom of its beam
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub count:Option<u32>,
+    /// a family instance: its family, type, instance values and turn
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub family:Option<String>,
+    #[serde(default,skip_serializing_if="String::is_empty")]
+    pub type_name:String,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub overrides:Vec<(String,f64)>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -156,10 +169,13 @@ impl Snapshot {
             outline: e.outline.clone(),
             slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
             spacing_m: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.spacing_m),
-            angle_deg: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.angle_deg),
+            angle_deg: matches!(e.category, Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family).then_some(e.angle_deg),
             parent: e.parent.map(|p| p.0),
             join_ends: (e.join_ends != [true; 2]).then_some(e.join_ends),
             count: (e.category == Category::Rebar).then_some(e.count),
+            family: (e.category == Category::Family).then(|| e.family.clone()),
+            type_name: e.type_name.clone(),
+            overrides: e.overrides.clone(),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -172,7 +188,7 @@ impl Snapshot {
         for el in &self.elements {
             if !seen.insert(el.id) { return Err(format!("Duplicate element {}",el.id)); }
             let category = match el.category.as_str() {
-                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Pipe" => Category::Pipe,
+                "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Family" => Category::Family, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
                 "Level" => Category::Level, "Grid" => Category::Grid,
                 _ => return Err(format!("Unsupported category {}",el.category)),
@@ -200,7 +216,9 @@ impl Snapshot {
                 let kind = openbim_document::SlabKind::ALL.into_iter().find(|x| x.name() == k).ok_or(format!("Unsupported slab kind {k}"))?;
                 ops.push(Command::SetSlabKind { id: ElementId(el.id), kind });
             }
-            if let (Some(spacing_m), Some(angle_deg)) = (el.spacing_m, el.angle_deg) {
+            if let (Some(family), Some(angle_deg)) = (&el.family, el.angle_deg) {
+                ops.push(Command::SetFamily { id: ElementId(el.id), family: family.clone(), type_name: el.type_name.clone(), overrides: el.overrides.clone(), angle_deg });
+            } else if let (Some(spacing_m), Some(angle_deg)) = (el.spacing_m, el.angle_deg) {
                 ops.push(Command::SetBeamSystem { id: ElementId(el.id), spacing_m, angle_deg });
             }
             if let Some(count) = el.count {

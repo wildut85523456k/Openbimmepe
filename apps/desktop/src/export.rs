@@ -2,7 +2,7 @@
 use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_geom::WallChain;
-use openbim_ifc::{BeamItem, ColumnItem, FramingUsage, Scene, SlabItem, SlabRole, WallItem};
+use openbim_ifc::{BeamItem, ColumnItem, FamilyItem, FamilyRef, FramingUsage, Frame, Scene, SlabItem, SlabRole, WallItem};
 
 pub struct Exported {
     pub text: String,
@@ -39,14 +39,22 @@ pub fn column_item(doc: &Document, el: &openbim_document::Element) -> Option<Col
     ColumnItem::from_profile(el.id.0, &el.name, &el.profile(), at, base, height, !matches!(el.section, openbim_document::Section::IShape { .. })).ok()
 }
 
-/// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
-pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<Exported, String> {
+/// The compiled sample library, once: families are looked up by name.
+pub fn library() -> &'static [openbim_family::Compiled] {
+    static LIB: std::sync::OnceLock<Vec<openbim_family::Compiled>> = std::sync::OnceLock::new();
+    LIB.get_or_init(|| openbim_family::library::all().unwrap_or_default())
+}
+
+/// The scene of the document, and what could not be put in it. `timestamp` is written into the header of a file,
+/// `project_key` makes the GlobalIds of this project its own.
+pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
     let (mut walls, mut beams, mut columns, mut slabs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut materials = std::collections::BTreeMap::new();
-    let mut skipped = std::collections::BTreeMap::<&str, usize>::new();
+    let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
+    let mut instances = Vec::new();
     for el in doc.elements() {
         match (el.category, el.geometry) {
             (Category::Wall, Some(Geometry::Linear { start, end, level })) => {
@@ -90,6 +98,7 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
             // the beams, members or bars they make are exported in their place
+            (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
             (Category::Level | Category::Grid | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
             (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,
@@ -97,19 +106,72 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
             _ => *skipped.entry("elements without geometry").or_default() += 1,
         }
     }
+    // family instances, after the walls they may stand in
+    let wall_index: std::collections::BTreeMap<u64, usize> = walls.iter().enumerate().map(|(i, w): (usize, &WallItem)| (w.id, i)).collect();
+    let lib = library();
+    let mut items = Vec::new();
+    let mut families = Vec::new();
+    for el in instances {
+        let Some(fi) = lib.iter().position(|f| f.name() == el.family) else { *skipped.entry("family instances of unknown families").or_default() += 1; continue };
+        if !families.iter().any(|f: &FamilyRef| f.id == fi as u32 + 1) { families.push(FamilyRef { id: fi as u32 + 1, family: lib[fi].clone() }); }
+        let fam_index = families.iter().position(|f| f.id == fi as u32 + 1).unwrap_or(0);
+        let angle = el.angle_deg.to_radians();
+        let (frame, host, wall_t) = match el.geometry {
+            Some(Geometry::Placed { at, level }) => {
+                let z = level_of(level).ok_or("a family instance stands on a level that is gone")? + el.elevation_m;
+                (Frame { origin: [at[0], at[1], z], x: [angle.cos(), angle.sin()] }, None, None)
+            }
+            Some(Geometry::InWall { host, along_m }) => {
+                let Some(&wi) = wall_index.get(&host.0) else { *skipped.entry("family instances in missing walls").or_default() += 1; continue };
+                let mut frame = Frame::on_wall(&walls[wi].chain, 0, along_m);
+                frame.origin[2] += el.elevation_m;
+                (frame, Some((wi, 0, along_m)), Some(walls[wi].chain.thickness))
+            }
+            _ => continue,
+        };
+        let mut overrides: Vec<(&str, f64)> = el.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        let type_name = (!el.type_name.is_empty()).then_some(el.type_name.as_str());
+        // a door or window fills the wall it stands in, whatever the wall's thickness is now
+        let instance = match wall_t {
+            Some(t) if !overrides.iter().any(|(n, _)| *n == "wall_t") => {
+                overrides.push(("wall_t", t));
+                lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: vec![] })
+                    .or_else(|_| { overrides.pop(); lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: vec![] }) })
+            }
+            _ => lib[fi].solve(&openbim_family::Request { type_name, overrides, texts: vec![] }),
+        }.map_err(|e| format!("{}: {e:?}", el.name))?;
+        // a door or window opens its wall
+        if let (Some((wi, _, along)), Some([w, h, sill])) = (host, instance.opening) {
+            let c = &mut walls[wi].chain;
+            if instance.opening_rise != 0.0 {
+                if c.poly_openings.is_empty() { c.poly_openings.resize(1, Vec::new()); }
+                if let Some(outline) = instance.opening_outline(along - w / 2.0) { c.poly_openings[0].push(outline); }
+            } else {
+                if c.openings.is_empty() { c.openings.resize(1, Vec::new()); }
+                c.openings[0].push(openbim_geom::Opening { offset: along - w / 2.0, width: w, sill, height: h });
+            }
+        }
+        items.push(FamilyItem { id: el.id.0, name: el.name.clone(), family: fam_index, type_name: type_name.map(str::to_string), frame, instance, host });
+    }
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![],
+        floor_penetrations: vec![], networks: vec![], families, items, rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(),
     };
+    Ok((scene, skipped))
+}
+
+/// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
+pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<Exported, String> {
+    let (scene, skipped) = scene_of(doc, project_name, project_key, timestamp)?;
     let out = openbim_ifc::export(&scene).map_err(|e| format!("{e:?}"))?;
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
     if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
-    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: beams.len(), columns: columns.len(), slabs: scene.slabs.len(), warnings })
+    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: scene.beams.len(), columns: scene.columns.len(), slabs: scene.slabs.len(), warnings })
 }
 
 /// `2026-10-17T19:34:56` for a number of seconds since 1970 (UTC).
