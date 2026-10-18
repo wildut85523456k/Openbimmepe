@@ -179,40 +179,79 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let pending = app.cable_from.map(|f| (f, app.cable_via.as_slice()));
         crate::elec_ui::draw_overlay(&app.document, report, &painter, &screen, level_id, level_z, pending);
     }
+    // Revit's way of picking a point: a click, or press at the start, drag, release at the end. A drag
+    // starting a tool with nothing pending picks its start point at the press and its next point at the release.
+    let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting);
+    let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
+        else if response.drag_started_by(egui::PointerButton::Primary) {
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable);
+            let pending = app.beam_start.is_some() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
+            if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
+        }
+        else if response.drag_stopped_by(egui::PointerButton::Primary) { response.interact_pointer_pos().or(response.hover_pos()) }
+        else { None };
     if matches!(app.tool, crate::Tool::ElecNode | crate::Tool::Cable) && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.cable_from.is_some() { app.cable_from = None; app.cable_via.clear(); } else { app.choose_tool(crate::Tool::Select); } }
-        else if response.clicked() {
-            if let Some(p) = response.interact_pointer_pos() { if app.tool == crate::Tool::ElecNode { app.elec_node_click(level_id, to_model(p)); } else { app.cable_click(level_id, to_model(p)); } }
+        else if pick.is_some() {
+            if let Some(p) = pick { if app.tool == crate::Tool::ElecNode { app.elec_node_click(level_id, to_model(p)); } else { app.cable_click(level_id, to_model(p)); } }
         }
+    } else if app.tool == crate::Tool::Wall && !three_d {
+        // click the start, then each next point (a chain); or press, drag and release for one wall. Shift keeps it
+        // square, the ends snap to the corners of walls and the ends of grids, and the length shows while it is drawn.
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
+            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => vec![start, end],
+            Some(Geometry::Grid { start, end }) => vec![start, end],
+            _ => vec![],
+        }).collect();
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let start = app.beam_start;
+        let to_model = |p: Pos2| {
+            let v = (p - centre - pan) / scale + bc;
+            let mut m = [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05];
+            if let Some(c) = corners.iter().find(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0) { m = *c; }
+            else if let (true, Some(s)) = (ortho, start) {
+                if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; }
+            }
+            m
+        };
+        if let (Some(a), Some(h)) = (start, response.hover_pos().or(pick)) {
+            let b = to_model(h);
+            let (sa, sb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
+            painter.line_segment([sa, sb], Stroke::new((app.width_mm as f32 / 1000.0 * scale).max(2.0), Color32::from_rgba_unmultiplied(120, 120, 130, 150)));
+            painter.text(sb + Vec2::new(8.0, -8.0), egui::Align2::LEFT_BOTTOM, format!("{:.3} m", (b[0] - a[0]).hypot(b[1] - a[1])), egui::FontId::proportional(12.0), blue);
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.beam_start.is_some() { app.beam_start = None; app.message = "Wall: chain ended; Esc again leaves the tool".into(); } else { app.choose_tool(crate::Tool::Select); } }
+        else if pick.is_some() { if let Some(p) = pick { app.wall_click(level_id, to_model(p)); } }
     } else if app.tool == crate::Tool::EndPoint && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.end_point_click(level_id, to_model(p)); } }
+        else if pick.is_some() { if let Some(p) = pick { app.end_point_click(level_id, to_model(p)); } }
     } else if app.tool == crate::Tool::Family && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() {
-            if let Some(p) = response.interact_pointer_pos() {
+        else if pick.is_some() {
+            if let Some(p) = pick {
                 let wall = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some_and(|e| e.category == Category::Wall)).map(|(_, id, _, _)| *id);
                 app.family_click(level_id, to_model(p), wall);
             }
         }
     } else if app.tool == crate::Tool::Rebar && !three_d {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() {
-            if let Some(p) = response.interact_pointer_pos() {
+        else if pick.is_some() {
+            if let Some(p) = pick {
                 let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id);
                 match hit { Some(id) => app.rebar_click(id), None => app.message = "Rebar: click a beam".into() }
             }
         }
     } else if app.tool == crate::Tool::WallFooting && !three_d {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() {
-            if let Some(p) = response.interact_pointer_pos() {
+        else if pick.is_some() {
+            if let Some(p) = pick {
                 let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id);
                 match hit { Some(id) => app.wall_footing_click(id), None => app.message = "Wall footing: click a wall".into() }
             }
@@ -221,7 +260,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.footing_click(level_id, to_model(p)); } }
+        else if pick.is_some() { if let Some(p) = pick { app.footing_click(level_id, to_model(p)); } }
     } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem) && !three_d {
         // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
@@ -238,8 +277,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if app.slab_points.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.slab_points.clear(); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.slab_points.pop();
         } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= 3 { app.finish_slab(level_id);
-        } else if response.clicked() {
-            if let Some(p) = response.interact_pointer_pos() {
+        } else if pick.is_some() {
+            if let Some(p) = pick {
                 let closing = pts.first().is_some_and(|f| f.distance(p) < 10.0);
                 app.slab_click(level_id, to_model(p), closing);
             }
@@ -248,13 +287,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.column_click(level_id, to_model(p)); } }
+        else if pick.is_some() { if let Some(p) = pick { app.column_click(level_id, to_model(p)); } }
     } else if app.tool == crate::Tool::Truss && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.truss_click(level_id, to_model(p)); } }
+        else if pick.is_some() { if let Some(p) = pick { app.truss_click(level_id, to_model(p)); } }
     } else if matches!(app.tool, crate::Tool::Duct | crate::Tool::Pipe) && !three_d {
         // the points of a duct or pipe run, snapped to 50 mm; Enter or Esc (once it has a length) places it
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
@@ -275,8 +314,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if app.run_points.len() >= 2 { app.finish_run(level_id); } else { app.run_points.clear(); app.run_sizes.clear(); app.choose_tool(crate::Tool::Select); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.run_back();
         } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.run_points.len() >= 2 { app.finish_run(level_id);
-        } else if response.clicked() {
-            if let Some(p) = response.interact_pointer_pos() { app.run_click(to_model(p)); }
+        } else if pick.is_some() {
+            if let Some(p) = pick { app.run_click(to_model(p)); }
         }
     } else if app.tool == crate::Tool::Beam && !three_d {
         // two clicks place a beam, snapped to 50 mm; Esc ends the tool
@@ -288,7 +327,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 let (a, b) = (screen([a[0], a[1], level_z]), screen([to_model(h)[0], to_model(h)[1], level_z]));
                 painter.line_segment([a, b], Stroke::new((app.width_mm as f32 / 1000.0 * scale).max(2.0), Color32::from_rgba_unmultiplied(176, 140, 104, 140)));
             }
-            if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.beam_click(level_id, to_model(p)); } }
+            if pick.is_some() { if let Some(p) = pick { app.beam_click(level_id, to_model(p)); } }
         }
     } else if response.clicked() {
         if let Some(p) = response.interact_pointer_pos() {
@@ -375,5 +414,71 @@ mod tests {
         assert!(app.tool == crate::Tool::Beam, "the tool stays on");
         frame(&mut app, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
         assert!(app.tool == crate::Tool::Select);
+    }
+
+    fn frames() -> (egui::Context, Rect) { (egui::Context::default(), Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 700.0))) }
+    fn frame(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>) {
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() },
+            |ui| { egui::CentralPanel::default().show(ui, |ui| show(app, ui)); });
+        out.textures_delta.clear();
+    }
+    fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
+    fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
+
+    #[test]
+    fn a_wall_is_drawn_by_two_clicks_as_a_chain_and_by_press_drag_release() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("wall", "Wall");
+        assert!(app.tool == crate::Tool::Wall && app.width_mm == 200.0 && app.height_mm == 3000.0);
+        let (a, b, c) = (Pos2::new(300.0, 300.0), Pos2::new(500.0, 300.0), Pos2::new(500.0, 450.0));
+        let n = walls(&app);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
+        for at in [a, b] {
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(walls(&app), n + 1, "{}", app.message);
+        // the chain goes on from the end of the last wall
+        for at in [c] { frame(&ctx, screen, &mut app, vec![button(at, true)]); frame(&ctx, screen, &mut app, vec![button(at, false)]); }
+        assert_eq!(walls(&app), n + 2, "{}", app.message);
+        // Esc ends the chain, and then a press-drag-release draws one wall
+        frame(&ctx, screen, &mut app, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+        assert!(app.tool == crate::Tool::Wall && app.beam_start.is_none());
+        let (d, e) = (Pos2::new(200.0, 500.0), Pos2::new(400.0, 520.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(d)]);
+        frame(&ctx, screen, &mut app, vec![button(d, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(Pos2::new(300.0, 510.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(e)]);
+        frame(&ctx, screen, &mut app, vec![button(e, false)]);
+        assert_eq!(walls(&app), n + 3, "{}", app.message);
+        // the walls are real: undo takes them away one by one
+        app.document.undo().unwrap();
+        assert_eq!(walls(&app), n + 2);
+    }
+
+    #[test]
+    fn a_beam_and_a_duct_are_drawn_by_dragging_too() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Beam);
+        let beams = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Beam).count();
+        let n = beams(&app);
+        let (d, e) = (Pos2::new(200.0, 500.0), Pos2::new(420.0, 500.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(d)]);
+        frame(&ctx, screen, &mut app, vec![button(d, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(Pos2::new(300.0, 500.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(e)]);
+        frame(&ctx, screen, &mut app, vec![button(e, false)]);
+        assert_eq!(beams(&app), n + 1, "{}", app.message);
+        // a duct run: press and release give its two points
+        app.run_command("duct", "Duct");
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(d)]);
+        frame(&ctx, screen, &mut app, vec![button(d, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(e)]);
+        frame(&ctx, screen, &mut app, vec![button(e, false)]);
+        assert_eq!(app.run_points.len(), 2, "{}", app.message);
     }
 }

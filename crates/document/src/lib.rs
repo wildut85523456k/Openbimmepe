@@ -489,6 +489,18 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// Draws a straight wall on `level` from `start` to `end`: `thickness_m` thick, `height_m` high, its base
+    /// `base_offset_m` above the level. A wall with no length is refused.
+    pub fn place_wall(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], thickness_m: f64, height_m: f64, base_offset_m: f64) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        if (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01 { return Err(EditError::InvalidGeometry(id)); }
+        let n = self.elements.values().filter(|e| e.category == Category::Wall).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Wall, name: format!("Wall {n}"), width_m: thickness_m, height_m, elevation_m: base_offset_m },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } },
+        ])?;
+        Ok(id)
+    }
     /// Stands a column at `at` from `level` (raised by `base_offset_m`) up to the level `top`.
     pub fn place_column(&mut self, level: ElementId, top: ElementId, at: [f64; 2], col: &ColumnSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();

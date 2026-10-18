@@ -454,6 +454,18 @@ impl Desktop {
 
     /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
     /// tool stays on for the next one.
+    /// A pick of the Wall tool in the plan of `level`: the first starts a wall, each next one draws it and starts the
+    /// next (a chain, as in Revit); Esc ends the chain. A pick on the start point does nothing.
+    pub(crate) fn wall_click(&mut self, level: ElementId, point: [f64; 2]) {
+        let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Wall: pick the end (Shift keeps it square, Esc ends the chain)".into(); return; };
+        if (point[0] - start[0]).hypot(point[1] - start[1]) < 0.01 { return; }
+        let m = |v: f64| v / 1000.0;
+        match self.document.place_wall(level, start, point, m(self.width_mm), m(self.height_mm), m(self.elevation_mm)) {
+            Ok(id) => { self.beam_start = Some(point); self.message = format!("Wall {} placed; pick the next point, Esc ends the chain; undo removes it", id.0); }
+            Err(error) => self.message = format!("Wall rejected: {error:?}"),
+        }
+    }
+
     pub(crate) fn beam_click(&mut self, level: ElementId, point: [f64; 2]) {
         match self.beam_start {
             None => { self.beam_start = Some(point); self.message = "Beam: click the end".into(); }

@@ -195,7 +195,7 @@ impl Desktop {
             Tool::Truss => "Truss: click the start and the end of the truss in a plan view; it is built with the panel length, depth and member size of the options bar (Esc ends).".into(),
             Tool::Rebar => "Rebar: click a beam in a plan view; bars and stirrups are placed inside it and follow it (Esc ends).".into(),
             Tool::Family => format!("{}: click in a plan view (a door or window: click the wall it goes in); Esc ends.", self.family_pick),
-            Tool::Wall => "Wall placement is not connected yet; select an existing wall to edit it.".into(),
+            Tool::Wall => "Wall: click the start and then each next point in a plan view, or press, drag and release for one wall. Shift keeps it square; Esc ends the chain, Esc again the tool. Thickness, height and base are in the options bar.".into(),
         };
     }
 
@@ -250,7 +250,7 @@ impl Desktop {
             "elec_cable" => self.choose_tool(Tool::Cable),
             "elec_compute" => self.elec.open = true,
             "compute" => self.compute.open = true,
-            "wall" => self.choose_tool(Tool::Wall),
+            "wall" => { (self.width_mm, self.height_mm, self.elevation_mm) = (200.0, 3000.0, 0.0); self.choose_tool(Tool::Wall) }
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
