@@ -70,7 +70,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         app.zoom = (app.zoom * (scroll * 0.001).exp()).clamp(0.2, 8.0);
     }
-    let proj = |p| project(p, three_d, app.camera_yaw, app.camera_pitch);
+    let (yaw0, pitch0, pan0) = (app.camera_yaw, app.camera_pitch, app.pan);
+    let proj = |p| project(p, three_d, yaw0, pitch0);
     let mut bounds = Rect::NOTHING;
     let mut meshes = Vec::new();
     for el in app.document.elements() {
@@ -111,7 +112,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let fit = ((rect.width() - 100.0).max(10.0) / bounds.width().max(1.0))
         .min((rect.height() - 90.0).max(10.0) / bounds.height().max(1.0));
     let scale = fit * app.zoom;
-    let screen = |p| rect.center() + app.pan + (proj(p).0 - bounds.center().to_vec2()) * scale;
+    let screen = |p| rect.center() + pan0 + (proj(p).0 - bounds.center().to_vec2()) * scale;
     let selected = app.selected_id();
     let blue = ui.visuals().hyperlink_color;
     let axes: Vec<_> = app.document.elements().flat_map(|el| match el.geometry {
@@ -503,6 +504,90 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             app.select_element(hit);
         }
     }
+    if app.tool == crate::Tool::Select && !three_d {
+        // As in Revit: a selected wall shows a grip at each end, and dragging a grip moves that end (the walls joined
+        // there follow); pressing on an element and dragging moves it with what stands on it. A ghost shows the result.
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let raw = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
+            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => { let mut v = vec![start, end]; if let Some(r) = app.document.wall_plan(el.id) { v.extend(r); } v }
+            Some(Geometry::Grid { start, end }) => vec![start, end],
+            _ => vec![],
+        }).collect();
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let snap_to = |p: Pos2, from: Option<[f64; 2]>| -> [f64; 2] {
+            if let Some(c) = corners.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
+                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return *c; }
+            let r = raw(p);
+            let mut m = [(r[0] / 0.05).round() * 0.05, (r[1] / 0.05).round() * 0.05];
+            if let (true, Some(s)) = (ortho, from) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
+            m
+        };
+        let wall_ends = selected.and_then(|id| match app.document.get(id) {
+            Some(e) if e.category == Category::Wall && app.document.level_of(id) == Some(level_id) => match e.geometry { Some(Geometry::Linear { start, end, .. }) => Some((id, start, end)), _ => None },
+            _ => None,
+        });
+        let grip_at = |m: [f64; 2]| screen([m[0], m[1], level_z]);
+        if let (Some((_, a, b)), None) = (wall_ends, app.drag) {
+            for g in [a, b] { let c = grip_at(g); painter.rect_filled(Rect::from_center_size(c, Vec2::splat(9.0)), 1.0, ui.visuals().panel_fill); painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(9.0)), 1.0, Stroke::new(1.5, blue), egui::StrokeKind::Middle); }
+        }
+        if response.drag_started_by(egui::PointerButton::Primary) {
+            if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
+                if let Some((id, a, b)) = wall_ends.filter(|(_, a, b)| grip_at(*a).distance(p) < 10.0 || grip_at(*b).distance(p) < 10.0) {
+                    app.drag = Some(crate::Drag::Grip { id, at_start: grip_at(a).distance(p) <= grip_at(b).distance(p) });
+                } else if let Some(hit) = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id) {
+                    app.select_element(Some(hit));
+                    app.drag = Some(crate::Drag::Move { id: hit, from: snap_to(p, None) });
+                }
+            }
+        }
+        if let Some(d) = app.drag {
+            let here = response.interact_pointer_pos().or(response.hover_pos());
+            let ghost = Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
+            let fill = Color32::from_rgba_unmultiplied(220, 140, 0, 40);
+            let mut done: Option<Result<Vec<openbim_document::Command>, String>> = None;
+            if let Some(h) = here {
+                match d {
+                    crate::Drag::Move { id, from } => {
+                        let to = snap_to(h, Some(from));
+                        let xf = openbim_document::Xf::Move([to[0] - from[0], to[1] - from[1]]);
+                        for (_, _, points, _) in faces.iter().filter(|f| f.1 == id) {
+                            let moved: Vec<Pos2> = points.iter().map(|q| { let m = xf.point(raw(*q)); screen([m[0], m[1], level_z]) }).collect();
+                            painter.add(egui::Shape::convex_polygon(moved, fill, ghost));
+                        }
+                        painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", (to[0] - from[0]).hypot(to[1] - from[1]) * 1000.0), egui::FontId::proportional(13.0), blue);
+                        if (to[0] - from[0]).hypot(to[1] - from[1]) > 1e-6 { done = Some(app.document.transform_commands(&[id], xf)); }
+                    }
+                    crate::Drag::Grip { id, at_start } => if let Some((_, a, b)) = wall_ends {
+                        let (fixed, moving) = if at_start { (b, a) } else { (a, b) };
+                        let to = snap_to(h, Some(fixed));
+                        let (dx, dy) = (to[0] - fixed[0], to[1] - fixed[1]);
+                        let l = dx.hypot(dy);
+                        if l > 1e-6 {
+                            let w = app.document.get(id).map_or(0.2, |e| e.width_m) / 2.0;
+                            let (nx, ny) = (-dy / l * w, dx / l * w);
+                            let ring = [[fixed[0] - nx, fixed[1] - ny], [to[0] - nx, to[1] - ny], [to[0] + nx, to[1] + ny], [fixed[0] + nx, fixed[1] + ny]].map(|p| screen([p[0], p[1], level_z]));
+                            painter.add(egui::Shape::convex_polygon(ring.to_vec(), fill, ghost));
+                            painter.text(grip_at(to) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", l * 1000.0), egui::FontId::proportional(13.0), blue);
+                        }
+                        if (to[0] - moving[0]).hypot(to[1] - moving[1]) > 1e-6 { done = Some(app.document.wall_end_commands(id, at_start, to)); }
+                    }
+                }
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.drag = None; app.message = "Drag cancelled".into(); }
+            else if response.drag_stopped_by(egui::PointerButton::Primary) {
+                app.drag = None;
+                match done {
+                    Some(Ok(ops)) => match app.document.transact(app.document.revision(), &ops) {
+                        Ok(_) => app.message = "Moved; undo takes it back".into(),
+                        Err(e) => app.message = format!("Cannot do that: {e:?}"),
+                    },
+                    Some(Err(e)) => app.message = format!("Cannot do that: {e}"),
+                    None => {}
+                }
+            }
+        }
+    }
     painter.text(rect.left_bottom() + Vec2::new(8.0, -8.0), egui::Align2::LEFT_BOTTOM,
         "Document geometry • metres • in memory", egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
 }
@@ -891,5 +976,97 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![button(to, false)]);
         let after = wall_line(&app, ElementId(20));
         assert!((after.0[0] - before.0[0]).abs() < 0.2 && after.0[1] < before.0[1] - 0.1, "{before:?} {after:?} {}", app.message);
+    }
+
+    /// The screen row and the left and right ends of where a click selects wall 20 in the plan.
+    fn wall_span(ctx: &egui::Context, screen: Rect, app: &Desktop) -> (f32, f32, f32) {
+        let mut found = Vec::new();
+        for y in (100..600).step_by(4) { for x in (60..940).step_by(2) {
+            let mut probe = Desktop::sample();
+            probe.view = app.view;
+            probe.document = app.document.clone();
+            probe.select_element(None);
+            let at = Pos2::new(x as f32, y as f32);
+            frame(ctx, screen, &mut probe, vec![egui::Event::PointerMoved(at)]);
+            frame(ctx, screen, &mut probe, vec![button(at, true)]);
+            frame(ctx, screen, &mut probe, vec![button(at, false)]);
+            if probe.selected_id() == Some(ElementId(20)) { found.push((x as f32, y as f32)); }
+        } if !found.is_empty() { break; } }
+        let y = found[0].1;
+        (y, found.iter().map(|f| f.0).fold(f32::INFINITY, f32::min), found.iter().map(|f| f.0).fold(f32::NEG_INFINITY, f32::max))
+    }
+
+    #[test]
+    fn dragging_a_wall_end_grip_moves_that_end_and_the_wall_joined_to_it() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let b = app.document.place_wall(level, [8.0, 0.0], [8.0, 6.0], 0.2, 3.0, 0.0).unwrap();
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        app.select_element(Some(ElementId(20)));
+        frame(&ctx, screen, &mut app, vec![]);
+        let (press, to) = (Pos2::new(right + 9.0, y), Pos2::new(right + 70.0, y));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(20.0, 0.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        assert!(matches!(app.drag, Some(crate::Drag::Grip { at_start: false, .. })), "{:?}", app.drag);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let (a1, a2) = wall_line(&app, ElementId(20));
+        let (b1, b2) = wall_line(&app, b);
+        assert!(a2[0] > 8.2 && a1 == [0.0, 0.0] && a2[1] == 0.0, "{a1:?} {a2:?} {}", app.message);
+        assert!(b1 == a2 && b2 == [8.0, 6.0], "the joined wall follows: {b1:?} {a2:?}");
+        assert!(app.drag.is_none());
+        app.document.undo().unwrap();
+        assert_eq!(wall_line(&app, b).0, [8.0, 0.0]);
+        // the start grip: only that end moves
+        let (press, to) = (Pos2::new(left + 1.0, y), Pos2::new(left + 1.0, y + 50.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(0.0, 20.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let (a1, a2) = wall_line(&app, ElementId(20));
+        assert!(a1[1] < -0.1 && a2 == [8.0, 0.0], "{a1:?} {a2:?} {}", app.message);
+        // Esc cancels a drag in progress
+        let mid = Pos2::new((left + right) / 2.0, y);
+        let _ = mid;
+    }
+
+    #[test]
+    fn dragging_an_element_in_select_mode_moves_it_and_esc_cancels() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        let before = wall_line(&app, ElementId(20));
+        let mid = Pos2::new((left + right) / 2.0, y);
+        // Esc in the middle of a drag leaves the wall where it was
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(mid)]);
+        frame(&ctx, screen, &mut app, vec![button(mid, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(mid + Vec2::new(0.0, 30.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(mid + Vec2::new(0.0, 60.0))]);
+        assert!(matches!(app.drag, Some(crate::Drag::Move { .. })), "{:?}", app.drag);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        frame(&ctx, screen, &mut app, vec![button(mid + Vec2::new(0.0, 60.0), false)]);
+        assert!(app.drag.is_none());
+        assert_eq!(wall_line(&app, ElementId(20)), before);
+        // a full drag moves it, with its door and tag
+        let spec = openbim_document::FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 0.0 };
+        app.document.place_family_in_wall(ElementId(20), 3.0, &spec).unwrap();
+        app.document.place_tag(ElementId(20), [2.0, 1.0], [2.0, 0.0]).unwrap();
+        let to = mid + Vec2::new(0.0, 70.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(mid)]);
+        frame(&ctx, screen, &mut app, vec![button(mid, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(mid + Vec2::new(0.0, 30.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let after = wall_line(&app, ElementId(20));
+        assert!(after.0[1] < -0.1 && after.1[1] == after.0[1] && after.0[0].abs() < 0.2, "{after:?} {}", app.message);
+        let tag = app.document.elements().find(|e| e.category == Category::Tag).unwrap();
+        assert!(matches!(tag.geometry, Some(Geometry::Tag { anchor, .. }) if anchor[1] == after.0[1]));
+        app.document.undo().unwrap();
+        assert_eq!(wall_line(&app, ElementId(20)), before);
     }
 }

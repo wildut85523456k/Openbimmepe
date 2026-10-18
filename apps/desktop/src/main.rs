@@ -30,6 +30,9 @@ enum View { Plan, UpperPlan, ThreeD, Mechanical, /// the plan of a level added w
     Level(u64) }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool { Select, Move, Copy, Rotate, Mirror, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+/// What is being dragged in Select mode: an element to move, or one end of a wall.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Drag { Move { id: ElementId, from: [f64; 2] }, Grip { id: ElementId, at_start: bool } }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -69,6 +72,7 @@ struct Desktop {
     /// the Move, Copy, Rotate and Mirror tools: the points picked so far, the number typed, and whether a mirror leaves the original
     edit_pts: Vec<[f64; 2]>,
     edit_num: String,
+    drag: Option<Drag>,
     /// the element the points picked so far are about: a Copy goes on making copies of it
     edit_src: Option<ElementId>,
     mirror_copy: bool,
@@ -177,7 +181,7 @@ impl Desktop {
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
-            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), edit_src: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
+            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, edit_src: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
@@ -198,6 +202,7 @@ impl Desktop {
         self.edit_pts.clear();
         self.edit_num.clear();
         self.edit_src = None;
+        self.drag = None;
         self.slab_points.clear();
         self.run_points.clear();
         self.branch_main = None;

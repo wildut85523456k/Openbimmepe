@@ -152,6 +152,27 @@ impl Document {
         Ok(ops)
     }
 
+    /// Drags one end of a wall to `to`, as the grip of a wall does in Revit: the ends of other walls that meet it
+    /// there go with it, so that the corner stays joined.
+    pub fn wall_end_commands(&self, id: ElementId, at_start: bool, to: P) -> Result<Vec<Command>, String> {
+        let wall = self.get(id).filter(|e| e.category == Category::Wall).ok_or("not a wall")?;
+        let Some(Geometry::Linear { start, end, level }) = wall.geometry else { return Err("not a wall".into()) };
+        let old = if at_start { start } else { end };
+        if (to[0] - old[0]).hypot(to[1] - old[1]) < 1e-9 { return Err("nothing changes".into()); }
+        let close = |a: P| (a[0] - old[0]).hypot(a[1] - old[1]) < 1e-3;
+        let mut ops = Vec::new();
+        for e in self.elements().filter(|e| e.category == Category::Wall) {
+            let Some(Geometry::Linear { start: s, end: t, level: l }) = e.geometry else { continue };
+            let (ns, nt) = if e.id == id { if at_start { (to, t) } else { (s, to) } }
+                else if l == level { (if close(s) { to } else { s }, if close(t) { to } else { t }) } else { continue };
+            if (ns, nt) != (s, t) {
+                if (ns[0] - nt[0]).hypot(ns[1] - nt[1]) < 0.01 { return Err("a wall would be left with no length".into()); }
+                ops.push(Command::SetGeometry { id: e.id, geometry: Geometry::Linear { start: ns, end: nt, level } });
+            }
+        }
+        Ok(ops)
+    }
+
     /// Copies `ids` and what goes with them, changed by `xf`: the commands and the numbers of the copies of `ids`.
     pub fn copy_commands(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<ElementId>), String> {
         let copies = self.transformed_set(ids, xf, true)?;
@@ -259,5 +280,23 @@ mod tests {
         assert!(d.transform_commands(&[ElementId(10)], Xf::Move([1.0, 0.0])).is_err(), "a level");
         assert!(d.transform_commands(&[], Xf::Move([1.0, 0.0])).is_err());
         assert!(d.transform_commands(&[ElementId(20)], Xf::Move([0.0, 0.0])).is_err(), "no change");
+    }
+
+    #[test]
+    fn dragging_the_end_of_a_wall_takes_the_walls_joined_there_along() {
+        let mut d = Document::spatial_sample();
+        let level = match d.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let b = d.place_wall(level, [8.0, 0.0], [8.0, 6.0], 0.2, 3.0, 0.0).unwrap();
+        let ops = d.wall_end_commands(ElementId(20), false, [9.0, 0.0]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, ElementId(20)).1, [9.0, 0.0]) && near(line(&d, b).0, [9.0, 0.0]) && near(line(&d, b).1, [8.0, 6.0]));
+        d.undo().unwrap();
+        assert!(near(line(&d, b).0, [8.0, 0.0]));
+        // the far end of the first wall moves alone
+        let ops = d.wall_end_commands(ElementId(20), true, [0.0, -1.0]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, ElementId(20)).0, [0.0, -1.0]) && near(line(&d, b).0, [8.0, 0.0]));
+        assert!(d.wall_end_commands(ElementId(20), true, [8.0, 0.0]).is_err(), "no length left");
+        assert!(d.wall_end_commands(ElementId(10), true, [1.0, 1.0]).is_err());
     }
 }
