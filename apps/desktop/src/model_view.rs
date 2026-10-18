@@ -45,6 +45,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
+    // Spacebar turns the selected wall over
+    if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Space)) { app.flip_selected_wall(); }
     // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) { app.delete_selected(); }
     if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
@@ -266,7 +268,21 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         };
         let to_model = |p: Pos2| snap_to(p).0;
         let hover = response.hover_pos();
-        if let (Some(a), Some(h)) = (start, hover) {
+        if ui.input(|i| i.key_pressed(egui::Key::Space)) { app.wall_flip = !app.wall_flip; app.message = format!("Wall {}", if app.wall_flip { "flipped: the other face is the reference" } else { "unflipped" }); }
+        if let (1, Some(a), Some(h)) = (app.wall_mode, app.wall_pts.first().copied(), hover) {
+            let (b, _) = snap_to(h);
+            if (b[0] - a[0]).abs() > 1e-6 && (b[1] - a[1]).abs() > 1e-6 {
+                for (s, t) in app.rectangle_lines(a, b) {
+                    let (dx, dy) = (t[0] - s[0], t[1] - s[1]);
+                    let l = dx.hypot(dy).max(1e-9);
+                    let (nx, ny) = (-dy / l * app.width_mm / 2000.0, dx / l * app.width_mm / 2000.0);
+                    let ring = [[s[0] - nx, s[1] - ny], [t[0] - nx, t[1] - ny], [t[0] + nx, t[1] + ny], [s[0] + nx, s[1] + ny]].map(|p| screen([p[0], p[1], level_z]));
+                    painter.add(egui::Shape::convex_polygon(ring.to_vec(), Color32::from_rgba_unmultiplied(120, 120, 130, 110), Stroke::new(1.0, blue)));
+                }
+                painter.text(screen([b[0], b[1], level_z]) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} x {:.0} mm", (b[0] - a[0]).abs() * 1000.0, (b[1] - a[1]).abs() * 1000.0), egui::FontId::proportional(13.0), blue);
+            }
+        }
+        if let (0, Some(a), Some(h)) = (app.wall_mode, start, hover) {
             let (mut b, _) = snap_to(h);
             // a typed length keeps the direction of the pointer
             if let Ok(mm) = app.wall_len.parse::<f64>() {
@@ -303,7 +319,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 if l > 1e-9 && mm > 0.0 { app.wall_click(level_id, [a[0] + dx / l * mm / 1000.0, a[1] + dy / l * mm / 1000.0]); }
             }
         }
-        else if let Some(p) = pick { app.wall_click(level_id, to_model(p)); }
+        else if let Some(p) = pick {
+            if app.wall_mode == 2 {
+                let hit = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.line_of(*id).is_some()).map(|(_, id, _, _)| *id)
+                    .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0).map(|(id, _, _)| *id));
+                match hit { Some(h) => app.wall_pick_line(level_id, h, to_model(p)), None => app.message = "Pick Lines: click a grid, a wall or a beam".into() }
+            } else { app.wall_click(level_id, to_model(p)); }
+        }
     } else if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) && !three_d {
         // As in Revit: the element is selected first (a click selects one when none is), then the tool picks its points:
         // a base point and where to, a centre and the two rays of a turn, the two points of a mirror axis. The pointer
@@ -1127,5 +1149,69 @@ mod tests {
         assert!(near(wall_line(&app, c).1, [26.0, 0.0]) && near(wall_line(&app, d).0, [30.0, 4.0]));
         // a click on a wall in the plan reaches the tool
         frame(&ctx, screen, &mut app, vec![]);
+    }
+
+    #[test]
+    fn walls_have_types_a_rectangle_pick_lines_and_the_spacebar_flip() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("wall", "Wall");
+        let level = ElementId(10);
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
+        // a type is added from the thickness and height of the options bar and used by the walls drawn after it
+        app.width_mm = 300.0;
+        app.height_mm = 3500.0;
+        let t = app.document.add_wall_type("Exterior 300", 0.3, 3.5).unwrap();
+        app.wall_type = Some(t);
+        app.wall_click(level, [100.0, 0.0]);
+        app.wall_click(level, [104.0, 0.0]);
+        let w = app.document.elements().filter(|e| e.category == Category::Wall).last().unwrap();
+        assert_eq!((w.type_id, w.width_m, w.height_m), (Some(t), 0.3, 3.5), "{}", app.message);
+        app.wall_pts.clear();
+        app.wall_type = None;
+        // Rectangle: four joined walls from two corners, the exterior face on the picked rectangle, one undo
+        app.wall_mode = 1;
+        app.width_mm = 200.0;
+        app.wall_loc = 2;
+        let n = walls(&app);
+        app.wall_click(level, [20.0, 14.0]);
+        assert_eq!(walls(&app), n);
+        app.wall_click(level, [26.0, 20.0]);
+        assert_eq!(walls(&app), n + 4, "{}", app.message);
+        let ids: Vec<_> = app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).skip(n).collect();
+        let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+        for id in &ids { for p in app.document.wall_plan(*id).unwrap() { for k in 0..2 { lo[k] = lo[k].min(p[k]); hi[k] = hi[k].max(p[k]); } } }
+        assert!(near(lo, [20.0, 14.0]) && near(hi, [26.0, 20.0]), "{lo:?} {hi:?}");
+        app.document.undo().unwrap();
+        assert_eq!(walls(&app), n);
+        // Spacebar while drawing flips the side of the Location Line
+        app.wall_mode = 0;
+        let before = app.wall_axis([0.0, 0.0], [4.0, 0.0]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Space)]);
+        assert!(app.wall_flip);
+        let after = app.wall_axis([0.0, 0.0], [4.0, 0.0]);
+        assert!(near(before.0, [0.0, -0.1]) && near(after.0, [0.0, 0.1]), "{before:?} {after:?}");
+        app.wall_flip = false;
+        // Pick Lines: a wall along a grid, facing the side that was clicked
+        let g = app.document.place_grid([0.0, -20.0], [10.0, -20.0], "").unwrap();
+        app.wall_mode = 2;
+        app.wall_loc = 0;
+        let n = walls(&app);
+        app.wall_pick_line(level, g, [3.0, -19.0]);
+        assert_eq!(walls(&app), n + 1, "{}", app.message);
+        let last = app.document.elements().filter(|e| e.category == Category::Wall).last().unwrap();
+        assert!(matches!(last.geometry, Some(Geometry::Linear { start, end, .. }) if near(start, [0.0, -20.0]) && near(end, [10.0, -20.0])));
+        app.wall_loc = 2;
+        app.wall_pick_line(level, g, [3.0, -21.0]);
+        let last = app.document.elements().filter(|e| e.category == Category::Wall).last().unwrap();
+        assert!(matches!(last.geometry, Some(Geometry::Linear { start, end, .. }) if near(start, [10.0, -19.9]) && near(end, [0.0, -19.9])), "{:?}", last.geometry);
+        // Spacebar on a selected wall turns it over
+        app.choose_tool(crate::Tool::Select);
+        app.select_element(Some(ElementId(20)));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Space)]);
+        assert_eq!(wall_line(&app, ElementId(20)), ([8.0, 0.0], [0.0, 0.0]), "{}", app.message);
+        app.document.undo().unwrap();
+        assert_eq!(wall_line(&app, ElementId(20)), ([0.0, 0.0], [8.0, 0.0]));
     }
 }

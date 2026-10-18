@@ -468,7 +468,7 @@ impl Desktop {
         let len = dx.hypot(dy);
         if len < 1e-9 { return (a, b); }
         let half = self.width_mm / 2000.0;
-        let k = match self.wall_loc { 2 | 4 => -half, 3 | 5 => half, _ => 0.0 };
+        let k = match self.wall_loc { 2 | 4 => -half, 3 | 5 => half, _ => 0.0 } * if self.wall_flip { -1.0 } else { 1.0 };
         let (nx, ny) = (-dy / len * k, dx / len * k);
         ([a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny])
     }
@@ -477,6 +477,13 @@ impl Desktop {
     /// Location Line of the options bar) and, with Chain on, starts the next. The walls of a chain meet at the
     /// corners of their lines, and a pick on the first point closes the loop. Esc ends the chain.
     pub(crate) fn wall_click(&mut self, level: ElementId, point: [f64; 2]) {
+        if self.wall_mode == 1 {
+            let Some(first) = self.wall_pts.first().copied() else { self.wall_pts.push(point); self.message = "Wall (rectangle): pick the opposite corner (Esc cancels)".into(); return; };
+            if (point[0] - first[0]).abs() < 0.01 || (point[1] - first[1]).abs() < 0.01 { return; }
+            self.wall_pts.clear();
+            self.wall_rectangle(level, first, point);
+            return;
+        }
         let Some(&last) = self.wall_pts.last() else { self.wall_pts.push(point); self.message = "Wall: pick the end (type a length in mm, Shift keeps it square, Esc ends the chain)".into(); return; };
         if (point[0] - last[0]).hypot(point[1] - last[1]) < 0.01 { return; }
         let m = |v: f64| v / 1000.0;
@@ -500,7 +507,7 @@ impl Desktop {
                 }
             }
         }
-        match self.document.place_wall_moving(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), &moves) {
+        match self.document.place_wall_typed(level, start, end, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), &moves, self.wall_type) {
             Ok(id) => {
                 self.wall_len.clear();
                 if closing || !self.wall_chain_on { self.wall_pts.clear(); self.wall_ids.clear(); self.message = format!("Wall {} placed; undo removes it", id.0); }
@@ -626,6 +633,50 @@ impl Desktop {
                 self.message = format!("Deleted {} element(s); undo brings them back", before - self.document.elements().count());
             }
             Err(e) => self.message = format!("Cannot delete: {e}"),
+        }
+    }
+
+    /// The four lines (start, end) of a rectangle of walls drawn clockwise from the top left of the corners `a` and
+    /// `b`, along the Location Line, meeting at the corners of their offset lines.
+    pub(crate) fn rectangle_lines(&self, a: [f64; 2], b: [f64; 2]) -> Vec<([f64; 2], [f64; 2])> {
+        let (x0, x1, y0, y1) = (a[0].min(b[0]), a[0].max(b[0]), a[1].min(b[1]), a[1].max(b[1]));
+        let p = [[x0, y1], [x1, y1], [x1, y0], [x0, y0]];
+        let sides: Vec<([f64; 2], [f64; 2])> = (0..4).map(|i| self.wall_axis(p[i], p[(i + 1) % 4])).collect();
+        let corner = |i: usize| { let (s, t) = sides[(i + 3) % 4]; let (u, v) = sides[i]; openbim_document::line_meet(s, [t[0] - s[0], t[1] - s[1]], u, [v[0] - u[0], v[1] - u[1]]).unwrap_or(u) };
+        (0..4).map(|i| (corner(i), corner((i + 1) % 4))).collect()
+    }
+
+    /// The Wall tool's rectangle: four joined walls in one undoable step.
+    fn wall_rectangle(&mut self, level: ElementId, a: [f64; 2], b: [f64; 2]) {
+        let lines = self.rectangle_lines(a, b);
+        let m = |v: f64| v / 1000.0;
+        match self.document.place_walls(level, &lines, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
+            Ok(ids) => self.message = format!("{} walls placed; undo removes them together", ids.len()),
+            Err(e) => self.message = format!("Walls rejected: {e:?}"),
+        }
+    }
+
+    /// Pick Lines: a wall along the line of `hit` (a grid, wall or beam), on the Location Line, facing the side of `at`.
+    pub(crate) fn wall_pick_line(&mut self, level: ElementId, hit: ElementId, at: [f64; 2]) {
+        let Some((s, t)) = self.document.line_of(hit) else { self.message = "Pick Lines: click a grid, a wall or a beam".into(); return };
+        // the exterior is on the left of the direction: the click side is the exterior side
+        let side = (t[0] - s[0]) * (at[1] - s[1]) - (t[1] - s[1]) * (at[0] - s[0]);
+        let (s, t) = if side >= 0.0 { (s, t) } else { (t, s) };
+        let (a, b) = self.wall_axis(s, t);
+        let m = |v: f64| v / 1000.0;
+        match self.document.place_walls(level, &[(a, b)], m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
+            Ok(ids) => self.message = format!("Wall {} placed on the line; undo removes it", ids[0].0),
+            Err(e) => self.message = format!("Wall rejected: {e:?}"),
+        }
+    }
+
+    /// Spacebar on a selected wall turns it over, as Revit does.
+    pub(crate) fn flip_selected_wall(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        if self.document.get(id).is_none_or(|e| e.category != Category::Wall) { return; }
+        match self.document.flip_wall_commands(id).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
+            Ok(_) => self.message = "Wall flipped; undo takes it back".into(),
+            Err(e) => self.message = format!("Cannot flip: {e}"),
         }
     }
 

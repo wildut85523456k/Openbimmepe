@@ -503,6 +503,15 @@ impl Document {
     /// walls of a chain meet at the corners of their offset lines, so drawing the next wall moves the end of the last.
     #[allow(clippy::too_many_arguments)]
     pub fn place_wall_moving(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], thickness_m: f64, height_m: f64, base_offset_m: f64, moves: &[(ElementId, [f64; 2], [f64; 2])]) -> Result<ElementId, EditError> {
+        self.place_wall_typed(level, start, end, thickness_m, height_m, base_offset_m, moves, None)
+    }
+    /// Like `place_wall_moving`, with the wall type `type_id` when there is one: the wall then has its thickness and height.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_wall_typed(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], thickness_m: f64, height_m: f64, base_offset_m: f64, moves: &[(ElementId, [f64; 2], [f64; 2])], type_id: Option<ElementId>) -> Result<ElementId, EditError> {
+        let (thickness_m, height_m) = match type_id {
+            Some(t) => { let t = self.get(t).filter(|t| t.category == Category::Type && t.type_for == Some(Category::Wall)).ok_or(EditError::NotFound(t))?; (t.width_m, t.height_m) }
+            None => (thickness_m, height_m),
+        };
         let id = self.next_id();
         if (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01 { return Err(EditError::InvalidGeometry(id)); }
         let n = self.elements.values().filter(|e| e.category == Category::Wall).count() + 1;
@@ -510,12 +519,48 @@ impl Document {
             Command::Create { id, category: Category::Wall, name: format!("Wall {n}"), width_m: thickness_m, height_m, elevation_m: base_offset_m },
             Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } },
         ];
+        if let Some(t) = type_id { ops.push(Command::SetType { id, type_id: Some(t) }); }
         for &(w, a, b) in moves {
             if (b[0] - a[0]).hypot(b[1] - a[1]) < 0.01 { return Err(EditError::InvalidGeometry(w)); }
             ops.push(Command::SetGeometry { id: w, geometry: Geometry::Linear { start: a, end: b, level } });
         }
         self.transact(self.revision, &ops)?;
         Ok(id)
+    }
+    /// Draws several walls on `level` in one undoable step (`(start, end)` each): the same thickness, height and
+    /// base offset, and the wall type `type_id` when there is one (its thickness and height then rule).
+    pub fn place_walls(&mut self, level: ElementId, lines: &[([f64; 2], [f64; 2])], thickness_m: f64, height_m: f64, base_offset_m: f64, type_id: Option<ElementId>) -> Result<Vec<ElementId>, EditError> {
+        let (thickness_m, height_m) = match type_id {
+            Some(t) => { let t = self.get(t).filter(|t| t.category == Category::Type && t.type_for == Some(Category::Wall)).ok_or(EditError::NotFound(t))?; (t.width_m, t.height_m) }
+            None => (thickness_m, height_m),
+        };
+        let first = self.next_id().0;
+        let mut n = self.elements.values().filter(|e| e.category == Category::Wall).count();
+        let (mut ops, mut ids) = (Vec::new(), Vec::new());
+        for (i, &(start, end)) in lines.iter().enumerate() {
+            let id = ElementId(first + i as u64);
+            if (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01 { return Err(EditError::InvalidGeometry(id)); }
+            n += 1;
+            ops.push(Command::Create { id, category: Category::Wall, name: format!("Wall {n}"), width_m: thickness_m, height_m, elevation_m: base_offset_m });
+            ops.push(Command::SetGeometry { id, geometry: Geometry::Linear { start, end, level } });
+            if let Some(t) = type_id { ops.push(Command::SetType { id, type_id: Some(t) }); }
+            ids.push(id);
+        }
+        if ops.is_empty() { return Err(EditError::EmptyTransaction); }
+        self.transact(self.revision, &ops)?;
+        Ok(ids)
+    }
+    /// Turns a wall over: its start and end swap, so that its exterior (on the left of the direction) faces the other way.
+    pub fn flip_wall_commands(&self, id: ElementId) -> Result<Vec<Command>, String> {
+        let e = self.get(id).filter(|e| e.category == Category::Wall).ok_or("flip: select a wall")?;
+        let Some(Geometry::Linear { start, end, level }) = e.geometry else { return Err("flip: select a wall".into()) };
+        let length = (end[0] - start[0]).hypot(end[1] - start[1]);
+        let mut ops = vec![Command::SetGeometry { id, geometry: Geometry::Linear { start: end, end: start, level } }];
+        // what stands in the wall is measured from its start, so it keeps its place along the wall
+        for d in self.elements.values() {
+            if let Some(Geometry::InWall { host, along_m }) = d.geometry { if host == id { ops.push(Command::SetGeometry { id: d.id, geometry: Geometry::InWall { host, along_m: length - along_m } }); } }
+        }
+        Ok(ops)
     }
     /// The name the next grid gets, counting on from the last one drawn as Revit does: 3 gives 4, C gives D, Z gives
     /// AA; a name already in use is passed over.

@@ -149,6 +149,20 @@ impl Document {
         Ok(id)
     }
 
+    /// A new type of walls, `thickness_m` thick and `height_m` high, ready to be drawn with (no element has it yet).
+    pub fn add_wall_type(&mut self, name: &str, thickness_m: f64, height_m: f64) -> Result<ElementId, EditError> {
+        let name = name.trim();
+        if name.is_empty() || thickness_m <= 0.0 || height_m <= 0.0 { return Err(EditError::InvalidElement); }
+        if self.types_for(Category::Wall).iter().any(|t| t.name == name) { return Err(EditError::InvalidElement); }
+        let id = self.next_id();
+        let ops = vec![
+            Command::Create { id, category: Category::Type, name: name.into(), width_m: thickness_m, height_m, elevation_m: 0.0 },
+            Command::SetTypeFor { id, category: Category::Wall },
+        ];
+        self.transact(self.revision, &ops)?;
+        Ok(id)
+    }
+
     /// Gives `ids` the type `type_id`, and with it the values of the type, in one transaction.
     pub fn assign_type(&mut self, ids: &[ElementId], type_id: ElementId) -> Result<(), EditError> {
         let ty = self.get(type_id).filter(|t| t.category == Category::Type).ok_or(EditError::NotFound(type_id))?;

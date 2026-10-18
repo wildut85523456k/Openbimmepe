@@ -332,13 +332,35 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             egui::ComboBox::from_id_salt("wall_loc").selected_text(Desktop::WALL_LOCATIONS[app.wall_loc]).show_ui(ui, |ui| {
                 for (i, name) in Desktop::WALL_LOCATIONS.iter().enumerate() { ui.selectable_value(&mut app.wall_loc, i, *name); }
             });
+            ui.label("Draw");
+            egui::ComboBox::from_id_salt("wall_mode").selected_text(["Line", "Rectangle", "Pick Lines"][app.wall_mode]).show_ui(ui, |ui| {
+                for (i, name) in ["Line", "Rectangle", "Pick Lines"].iter().enumerate() { if ui.selectable_value(&mut app.wall_mode, i, *name).clicked() { app.wall_pts.clear(); app.wall_ids.clear(); } }
+            });
+            ui.label("Type");
+            let types: Vec<(ElementId, String, f64, f64)> = app.document.types_for(openbim_document::Category::Wall).iter().map(|t| (t.id, t.name.clone(), t.width_m, t.height_m)).collect();
+            let shown = app.wall_type.and_then(|t| types.iter().find(|x| x.0 == t)).map_or("Custom".to_string(), |t| t.1.clone());
+            egui::ComboBox::from_id_salt("wall_type").selected_text(shown).show_ui(ui, |ui| {
+                if ui.selectable_label(app.wall_type.is_none(), "Custom").clicked() { app.wall_type = None; }
+                for (id, name, w, h) in &types {
+                    if ui.selectable_label(app.wall_type == Some(*id), format!("{name}  ({:.0} x {:.0})", w * 1000.0, h * 1000.0)).clicked() { app.wall_type = Some(*id); app.width_mm = w * 1000.0; app.height_mm = h * 1000.0; }
+                }
+            });
             ui.label("Thickness (mm)");
-            ui.add(egui::DragValue::new(&mut app.width_mm).speed(5.0).range(10.0..=2000.0));
+            if ui.add(egui::DragValue::new(&mut app.width_mm).speed(5.0).range(10.0..=2000.0)).changed() { app.wall_type = None; }
             ui.label("Height (mm)");
-            ui.add(egui::DragValue::new(&mut app.height_mm).speed(10.0).range(100.0..=30000.0));
+            if ui.add(egui::DragValue::new(&mut app.height_mm).speed(10.0).range(100.0..=30000.0)).changed() { app.wall_type = None; }
+            ui.add(egui::TextEdit::singleline(&mut app.wall_type_name).hint_text("new type name").desired_width(110.0));
+            if ui.button("Add type").on_hover_text("A wall type with this thickness and height").clicked() {
+                let name = app.wall_type_name.clone();
+                match app.document.add_wall_type(&name, app.width_mm / 1000.0, app.height_mm / 1000.0) {
+                    Ok(id) => { app.wall_type = Some(id); app.wall_type_name.clear(); app.message = format!("Wall type {name} added"); }
+                    Err(_) => app.message = "A wall type needs a name that is not used yet".into(),
+                }
+            }
             ui.label("Base offset (mm)");
             ui.add(egui::DragValue::new(&mut app.elevation_mm).speed(10.0));
             ui.checkbox(&mut app.wall_chain_on, "Chain");
+            ui.checkbox(&mut app.wall_flip, "Flip (Space)");
         });
         return;
     }

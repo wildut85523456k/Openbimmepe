@@ -174,7 +174,7 @@ impl Document {
     }
 
     /// The line a wall, beam or grid is drawn on, with its level for the first two.
-    fn line_of(&self, id: ElementId) -> Option<(P, P)> {
+    pub fn line_of(&self, id: ElementId) -> Option<(P, P)> {
         let e = self.get(id)?;
         match e.geometry {
             Some(Geometry::Linear { start, end, .. }) if matches!(e.category, Category::Wall | Category::Beam) => Some((start, end)),
@@ -387,5 +387,32 @@ mod tests {
         assert!(matches!(up, Xf::Move(v) if near(v, [0.0, 1.5])) && matches!(down, Xf::Move(v) if near(v, [0.0, -1.5])), "{up:?} {down:?}");
         assert!(d.offset_xf(ElementId(20), 0.0, [2.0, 7.0]).is_err());
         assert!(d.offset_xf(ElementId(10), 1.0, [2.0, 7.0]).is_err());
+    }
+
+    #[test]
+    fn wall_types_walls_in_one_step_and_flipping_a_wall() {
+        let (mut d, wall, door, _) = with_door_and_tag();
+        let level = match d.get(wall).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let t = d.add_wall_type("Exterior 300", 0.3, 3.5).unwrap();
+        assert!(d.add_wall_type("Exterior 300", 0.3, 3.5).is_err() && d.add_wall_type("  ", 0.3, 3.0).is_err() && d.add_wall_type("x", 0.0, 3.0).is_err());
+        assert_eq!(d.types_for(Category::Wall).iter().filter(|x| x.name == "Exterior 300").count(), 1);
+        // four walls of a rectangle in one step, with the type's thickness and height, and one undo takes them all
+        let n = d.elements().count();
+        let ids = d.place_walls(level, &[([20.0, 0.0], [30.0, 0.0]), ([30.0, 0.0], [30.0, -5.0]), ([30.0, -5.0], [20.0, -5.0]), ([20.0, -5.0], [20.0, 0.0])], 0.1, 2.0, 0.0, Some(t)).unwrap();
+        assert_eq!(ids.len(), 4);
+        assert!(ids.iter().all(|i| d.get(*i).is_some_and(|w| w.width_m == 0.3 && w.height_m == 3.5 && w.type_id == Some(t))));
+        // joined at the corners: the first wall's plan is mitred, wider than 0.3 by nothing and its corner points meet the neighbour's
+        assert!(d.wall_plan(ids[0]).is_some());
+        d.undo().unwrap();
+        assert_eq!(d.elements().count(), n);
+        assert!(d.place_walls(level, &[([0.0, 0.0], [0.0, 0.0])], 0.2, 3.0, 0.0, None).is_err());
+        assert!(d.place_walls(level, &[([0.0, 0.0], [1.0, 0.0])], 0.2, 3.0, 0.0, Some(wall)).is_err(), "only a wall type can be used");
+        // flipping swaps the ends, and the door keeps its place in the world
+        let before = d.get(door).unwrap().geometry;
+        let ops = d.flip_wall_commands(wall).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, wall).0, [8.0, 0.0]) && near(line(&d, wall).1, [0.0, 0.0]));
+        assert!(matches!((before, d.get(door).unwrap().geometry), (Some(Geometry::InWall { along_m: a, .. }), Some(Geometry::InWall { along_m: b, .. })) if (a + b - 8.0).abs() < 1e-9));
+        assert!(d.flip_wall_commands(door).is_err());
     }
 }
