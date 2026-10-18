@@ -134,3 +134,5 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 2. Railings, L/U stairs, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
+
+The 3D view (editing in 3D, the orbit control at the top right, GPU needs) is its own topic: `docs/3d-view-parity-plan.md` (project doc `claude/3d-view-parity-plan.md`). To be cleared at a later stage, on the owner's request of 2026-10-19.
