@@ -262,6 +262,34 @@ fn family_type_combo(app: &mut Desktop, ui: &mut egui::Ui, family: &str) {
 }
 
 /// The kind and the material of a slab.
+/// The slope of a selected roof, and which edges of its outline define it (Revit's "Defines Slope" of each line).
+fn roof_group(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
+    ui.separator();
+    ui.strong("Roof");
+    let mut degrees = el.slope_ratio.unwrap_or(0.0).atan().to_degrees();
+    let mut edges = el.slope_edges.clone();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label("Slope (°)");
+        changed |= ui.add(egui::DragValue::new(&mut degrees).speed(0.5).range(0.0..=78.0)).changed();
+    });
+    ui.label("Defines slope:");
+    ui.horizontal_wrapped(|ui| {
+        for (i, e) in edges.iter_mut().enumerate() { changed |= ui.checkbox(e, format!("{}", i + 1)).changed(); }
+    });
+    if changed {
+        let ops = [openbim_document::Command::SetRoof { id: el.id, slope_ratio: degrees.to_radians().tan(), edges }];
+        match app.document.transact(app.document.revision(), &ops) {
+            Ok(_) => app.message = "Roof changed; undo takes it back".into(),
+            Err(_) => app.message = "A roof with sloping edges needs a convex outline for now (set the slope to 0, or clear the edges, for a flat roof)".into(),
+        }
+    }
+    if let Some(f) = app.document.roof_figures(el.id) {
+        let (s, p, r) = (format!("{:.2}", f.surface_m2), format!("{:.2}", f.plan_m2), format!("{:.3}", f.rise_m));
+        read_only_group(ui, "Derived Geometry", "", &[("Surface Area (m²)", &s), ("Plan Area (m²)", &p), ("Rise above Eaves (m)", &r)]);
+    }
+}
+
 fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.label("Kind");
     egui::ComboBox::from_id_salt("slab_kind").selected_text(app.slab_kind_pick.name()).show_ui(ui, |ui| {
@@ -459,8 +487,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             slab_combos(app, ui);
             ui.label("Thickness (mm)");
             ui.add(egui::DragValue::new(&mut app.slab_thickness_mm).speed(1.0).range(1.0..=5000.0));
-            ui.label("Top Offset (mm)");
+            let roof = app.slab_kind_pick == openbim_document::SlabKind::Roof;
+            ui.label(if roof { "Base Offset (mm)" } else { "Top Offset (mm)" });
             ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0));
+            if roof {
+                ui.label("Slope (°)");
+                ui.add(egui::DragValue::new(&mut app.roof_slope_deg).speed(0.5).range(0.0..=78.0));
+            }
             ui.label(format!("{} corners", app.slab_points.len()));
             if ui.add_enabled(app.slab_points.len() >= 3, egui::Button::new("Finish")).clicked() { app.finish_slab(app.plan_level()); }
             if ui.add_enabled(!app.slab_points.is_empty(), egui::Button::new("Clear")).clicked() { app.slab_points.clear(); }
@@ -622,6 +655,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let level_name = app.document.get(level).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Reference Level", level_name)]);
                     }
+                    if el.is_roof() { roof_group(app, ui, el); }
                     if el.category == openbim_document::Category::Slab {
                         slab_combos(app, ui);
                         let area = openbim_geom::profile::polygon_area(&el.outline).abs();

@@ -10,7 +10,7 @@ mod spatial;
 mod edit;
 mod rooms;
 mod roof;
-pub use roof::{mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
+pub use roof::{is_convex as roof_is_convex, RoofFigures, mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
 pub use rooms::RoomShape;
 pub mod native;
 mod rebar;

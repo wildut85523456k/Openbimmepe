@@ -66,14 +66,26 @@ Wall, Wall Joins, Door, Window, Component, Column, Beam, Brace, Floor/Slab, Foun
 | Saved in OpenBIM records and the automation snapshot | done; not exported to IFC (no IfcSpace yet) |
 | Room separation lines, Area/Room schedules, Place Room Automatically, room bounding of floors, ceilings, doors | missing |
 
+## Roof (by footprint)
+| Revit behaviour | State |
+|---|---|
+| Roof by Footprint: click the corners at the eaves, close with Enter / first corner / Finish; options bar Base Offset, Thickness, Slope | done (the ribbon Roof button uses the slab drawing flow; no Pick Walls, no Overhang, no Pick Lines, no arc/circle sketch lines) |
+| Every edge "Defines Slope" by default; each can be turned off in Properties | done: checkbox per edge in Properties; slope in degrees; changes are immediate and undoable |
+| Hip, gable (two opposite edges), shed (one edge), flat (none) from the same rule: the roof is the lowest of the planes rising from the sloping edges | done for convex outlines; an outline with a reflex corner can only be flat (valleys are not made yet: refused with the reason) |
+| Thickness square to the slope | done (not checked against Revit) |
+| Roof 3D solid, plan drawn under walls and picked last, moves/rotates/mirrors keeping the right edges sloping, saved, undo | done |
+| Derived figures: surface area, plan area, rise above the eaves | done (Properties) |
+| IFC: IfcRoof with HIP/GABLE/SHED/FLAT_ROOF and a closed faceted solid in IFC2X3, IFC4 and IFC4.3; the app's own file brings it back unchanged | done; a roof from another program is not read (reported as skipped); no layers, material layers or roof types |
+| Roof by Extrusion, Roof Soffit, Fascia, Gutter, Join/Cut Roof, Attach Walls to Roof, Dormer, slope arrows, ridge/hip/valley editing, roof openings | missing |
+
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level: not drawn in an elevation view (no elevation or section views). Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all (80 ribbon buttons)
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, roof, ceiling, curtain wall, stair, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, ceiling, curtain wall, stair, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Roof, Ceiling, Stair, Opening (Room is done).
+1. Ceiling, Stair, Opening (Room and Roof are done).
 2. Elevation/section views and levels drawn in them.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.

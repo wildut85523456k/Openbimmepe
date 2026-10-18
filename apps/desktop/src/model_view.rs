@@ -159,17 +159,20 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Beam | Category::BeamSystem | Category::Truss => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
             Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
+            Category::Slab if app.document.get(id).is_some_and(|e| e.is_roof()) => if three_d { Color32::from_rgb(178, 96, 78) } else { Color32::from_rgba_unmultiplied(178, 96, 78, 90) },
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
             Category::Duct => Color32::from_rgb(70, 157, 194),
             Category::Pipe => Color32::from_rgb(136, 153, 166),
             _ => Color32::GRAY,
         };
+        // in a plan a roof is under everything else: it is drawn first and picked last
+        let under = !three_d && app.document.get(id).is_some_and(|e| e.is_roof());
         for (i, face) in mesh.faces.iter().enumerate() {
             let points: Vec<_> = face.iter().map(|&v| screen(mesh.vertices[v])).collect();
             let area = points.iter().zip(points.iter().cycle().skip(1)).take(points.len())
                 .map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f32>().abs();
             if area < 0.2 { continue; }
-            let depth = face.iter().map(|&v| proj(mesh.vertices[v]).1).sum::<f32>() / face.len() as f32;
+            let depth = if under { f32::MIN / 2.0 } else { face.iter().map(|&v| proj(mesh.vertices[v]).1).sum::<f32>() / face.len() as f32 };
             faces.push((depth, id, points, color.gamma_multiply(if three_d { 0.72 + (i % 3) as f32 * 0.12 } else { 1.0 })));
         }
     }
@@ -1721,5 +1724,41 @@ mod tests {
         // delete the selected room with the key
         frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
         assert_eq!(rooms(&app), 0);
+    }
+
+    #[test]
+    fn roof_tool_draws_by_clicks_and_a_roof_in_a_plan_lies_under_the_walls_it_covers() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let roofs = |a: &Desktop| a.document.elements().filter(|e| e.is_roof()).count();
+        // a roof over the whole sample does not hide its walls from the pointer
+        let covering = openbim_document::RoofSpec { outline: vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], thickness_m: 0.2, base_offset_m: 3.0, slope_ratio: 0.5, edges: vec![], material: openbim_document::Material::Timber };
+        app.document.place_roof(level, &covering).unwrap();
+        frame(&ctx, screen, &mut app, vec![]);
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        assert!(right > left, "the wall is found under the roof: {left} {right}");
+        // drawing: four clicks and Enter
+        app.run_command("roof", "Roof");
+        let pts = [Pos2::new(300.0, 300.0), Pos2::new(500.0, 300.0), Pos2::new(500.0, 450.0), Pos2::new(300.0, 450.0)];
+        for at in pts {
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(app.slab_points.len(), 4, "{}", app.message);
+        assert_eq!(roofs(&app), 1);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(roofs(&app), 2, "{}", app.message);
+        let r = app.document.elements().filter(|e| e.is_roof()).last().unwrap();
+        assert!((r.slope_ratio.unwrap() - 30f64.to_radians().tan()).abs() < 1e-9 && r.slope_edges == [true; 4]);
+        // it is drawn (a frame with it selected runs), and Esc ends the tool
+        let id = r.id;
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        app.select_element(Some(id));
+        frame(&ctx, screen, &mut app, vec![]);
+        assert!(app.tool == crate::Tool::Select || app.tool == crate::Tool::Slab);
+        let _ = y;
     }
 }

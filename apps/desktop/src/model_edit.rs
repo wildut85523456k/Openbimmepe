@@ -413,6 +413,19 @@ impl Desktop {
             }
             return;
         }
+        if self.slab_kind_pick == openbim_document::SlabKind::Roof {
+            let spec = openbim_document::RoofSpec { outline: self.slab_points.clone(), thickness_m: m(self.slab_thickness_mm), base_offset_m: m(self.slab_offset_mm),
+                slope_ratio: self.roof_slope_deg.to_radians().tan(), edges: Vec::new(), material: self.material_pick };
+            if self.roof_slope_deg > 0.0 && !openbim_document::roof_is_convex(&spec.outline) {
+                self.message = "Roof rejected: a roof with sloping edges needs a convex outline for now (set the slope to 0 for a flat roof, or draw it in convex parts)".into();
+                return;
+            }
+            match self.document.place_roof(level, &spec) {
+                Ok(id) => { self.slab_points.clear(); self.message = format!("Roof {} placed; select it to choose which edges slope. Undo removes it", id.0); }
+                Err(error) => self.message = format!("Roof rejected ({error:?}); Backspace takes a corner back"),
+            }
+            return;
+        }
         let spec = SlabSpec { outline: self.slab_points.clone(), thickness_m: m(self.slab_thickness_mm), top_offset_m: m(self.slab_offset_mm),
             kind: self.slab_kind_pick, material: self.material_pick };
         match self.document.place_slab(level, &spec) {
@@ -1141,6 +1154,49 @@ mod tests {
         assert_eq!(pipe.width_m, 0.15);
         assert_eq!(pipe.height_m, 0.15);
         assert_eq!(pipe.slope_ratio, Some(-0.02));
+    }
+
+    #[test]
+    fn a_roof_is_drawn_like_a_slab_slopes_from_its_eaves_shows_in_3d_and_is_exported_as_a_roof() {
+        let mut app = Desktop::sample();
+        app.run_command("roof", "Roof");
+        assert!(app.tool == Tool::Slab && app.slab_kind_pick == openbim_document::SlabKind::Roof && app.roof_slope_deg == 30.0);
+        assert!(app.message.contains("Roof by Footprint"), "{}", app.message);
+        // an L cannot slope yet: refused with the reason, and its corners are kept
+        for p in [[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]] { app.slab_click(ElementId(10), p, false); }
+        app.finish_slab(ElementId(10));
+        assert!(app.message.contains("convex") && app.slab_points.len() == 6, "{}", app.message);
+        app.slab_points.clear();
+        // a 10 x 6 hip roof at 30 degrees, 200 mm thick, its eaves 3 m up
+        app.slab_offset_mm = 3000.0;
+        for p in [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]] { app.slab_click(ElementId(10), p, false); }
+        app.slab_click(ElementId(10), [0.0, 0.0], true);
+        assert!(app.slab_points.is_empty(), "{}", app.message);
+        let id = app.document.elements().find(|e| e.is_roof()).expect("placed").id;
+        let f = app.document.roof_figures(id).unwrap();
+        assert!((f.rise_m - 3.0 * 30f64.to_radians().tan()).abs() < 1e-9, "{f:?}");
+        assert!((f.surface_m2 - 60.0 / 30f64.to_radians().cos()).abs() < 1e-6, "{f:?}");
+        // in 3D it is a closed solid of that volume
+        let batch = crate::view3d::batch(&app.document);
+        let ei = batch.elements.iter().position(|e| e.id == id.0).expect("in 3D") as u32;
+        let volume: f64 = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
+            let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+            (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+        }).sum();
+        assert!((volume - 60.0 * 0.2 / 30f64.to_radians().cos()).abs() < 1e-3, "{volume}");
+        // selecting it changes nothing; making two opposite edges the sloping ones makes it a gable
+        app.select_element(Some(id));
+        assert!(!app.has_pending_edit());
+        let el = app.document.get(id).unwrap().clone();
+        app.document.transact(app.document.revision(), &[Command::SetRoof { id, slope_ratio: 0.5, edges: vec![true, false, true, false] }]).unwrap();
+        assert!((app.document.roof_figures(id).unwrap().rise_m - 1.5).abs() < 1e-9);
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCROOF(").count(), 1);
+        assert!(out.text.contains(".GABLE_ROOF."));
+        assert_eq!(el.slope_edges.len(), 4);
+        // undo takes the gable back to the hip, and the next undo removes the roof
+        app.document.undo().unwrap();
+        assert_eq!(app.document.get(id).unwrap().slope_edges, [true; 4]);
     }
 
     #[test]

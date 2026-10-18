@@ -2,7 +2,7 @@
 //! plane that rises from it at the roof's slope. The roof is the lowest of those planes (a hip roof when all edges
 //! slope, a gable with two opposite ones, a shed with one, flat with none); an edge that does not slope is open at
 //! its end, where a wall can be attached up to the roof.
-use super::{Material, Mesh};
+use super::{Document, ElementId, Geometry, Material, Mesh};
 
 type P = [f64; 2];
 
@@ -133,6 +133,38 @@ pub fn mesh(outline: &[P], edges: &[bool], slope: f64, z0: f64, thickness: f64) 
     Some(Mesh { vertices, faces: out })
 }
 
+/// What a roof measures, from its shape.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoofFigures {
+    /// the area of its top surface (square to the slope), m²
+    pub surface_m2: f64,
+    /// the area of its footprint in plan, m²
+    pub plan_m2: f64,
+    /// how far the highest point is above the eaves, m
+    pub rise_m: f64,
+}
+
+impl Document {
+    /// The figures of the roof `id`: None for anything else, or a roof that has no shape.
+    pub fn roof_figures(&self, id: ElementId) -> Option<RoofFigures> {
+        let el = self.get(id).filter(|e| e.is_roof())?;
+        let Some(Geometry::Area { level }) = el.geometry else { return None };
+        let z0 = self.get(level)?.elevation_m + el.elevation_m;
+        let faces = top_faces(&el.outline, &el.slope_edges, el.slope_ratio.unwrap_or(0.0), z0)?;
+        let mut surface = 0.0;
+        for f in &faces {
+            let mut s = [0.0; 3];
+            for k in 0..f.len() {
+                let (a, b) = (f[k], f[(k + 1) % f.len()]);
+                s[0] += a[1] * b[2] - a[2] * b[1]; s[1] += a[2] * b[0] - a[0] * b[2]; s[2] += a[0] * b[1] - a[1] * b[0];
+            }
+            surface += (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt() / 2.0;
+        }
+        let rise = faces.iter().flatten().map(|p| p[2] - z0).fold(0.0, f64::max);
+        Some(RoofFigures { surface_m2: surface, plan_m2: openbim_geom::profile::polygon_area(&el.outline).abs(), rise_m: rise })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +259,9 @@ mod tests {
         let m = d.mesh(id).unwrap();
         let top = m.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max);
         assert!((top - (d.get(level).unwrap().elevation_m + 3.0 + 1.5)).abs() < 1e-9, "{top}");
+        let f = d.roof_figures(id).unwrap();
+        // 10 x 6 gable at 0.5: ridge 1.5 m, surface = plan x sqrt(1 + 0.5^2)
+        assert!((f.rise_m - 1.5).abs() < 1e-9 && (f.plan_m2 - 60.0).abs() < 1e-9 && (f.surface_m2 - 60.0 * 1.25f64.sqrt()).abs() < 1e-9, "{f:?}");
         // a hip roof is refused on an outline with a reflex corner, a flat one is not
         let l = vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [3.0, 3.0], [3.0, 6.0], [0.0, 6.0]];
         assert!(d.place_roof(level, &RoofSpec { outline: l.clone(), edges: vec![], ..spec.clone() }).is_err());
