@@ -20,6 +20,7 @@ openbim-family = { path = "../../crates/family" }
 openbim-route = { path = "../../crates/route" }
 openbim-view = { path = "../../crates/view" }
 openbim-viewport-egui = { path = "../../crates/viewport-egui" }
+rfd = "0.17.2"
 
 [lints.rust]
 unsafe_code = "forbid"

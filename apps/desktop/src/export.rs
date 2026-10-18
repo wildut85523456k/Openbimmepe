@@ -80,7 +80,7 @@ pub fn instance_texts(family: &str, type_name: &str, overrides: &[(String, f64)]
 
 /// The scene of the document, and what could not be put in it. `timestamp` is written into the header of a file,
 /// `project_key` makes the GlobalIds of this project its own.
-pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
+pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, own_data: bool) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
@@ -200,20 +200,20 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         items.push(FamilyItem { id: el.id.0, name: el.name.clone(), family: fam_index, type_name: type_name.map(str::to_string), frame, instance, host });
     }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
-    let (types, member_info) = types_of(doc, &mep_ids, &beams, &columns, &slabs);
+    let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs);
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, columns: columns.clone(), shafts: vec![],
         floor_penetrations: vec![], networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
-        room_lighting: Default::default(), pset_map: Default::default(), types, member_info,
+        room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
 }
 
 /// 16 hex digits over the values of an element that the file carries (FNV-1a, so the same on every machine).
-fn fingerprint(el: &openbim_document::Element) -> String {
+pub fn fingerprint(el: &openbim_document::Element) -> String {
     let text = format!("{:?}", (&el.name, el.width_m, el.height_m, el.elevation_m, el.section, el.material, el.usage, el.geometry, &el.outline));
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in text.bytes() { h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3); }
@@ -221,8 +221,8 @@ fn fingerprint(el: &openbim_document::Element) -> String {
 }
 
 /// The IFC type objects of the document's types, and the `OpenBIM_Element` data of the members that were written.
-fn types_of(doc: &Document, mep_ids: &[u64], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
-    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).collect();
+fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
+    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(walls.iter().map(|w| w.id)).chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).collect();
     let mut info = std::collections::BTreeMap::new();
     for el in doc.elements().filter(|e| written.contains(&e.id.0)) {
         let type_name = el.type_id.and_then(|t| doc.get(t)).map(|t| t.name.clone()).unwrap_or_default();
@@ -272,8 +272,15 @@ impl Schema {
     pub fn name(self) -> &'static str { match self { Schema::Ifc4x3 => "IFC 4.3", Schema::Ifc4 => "IFC4", Schema::Ifc2x3 => "IFC2X3" } }
 }
 
+#[cfg(test)]
 pub fn export_ifc_as(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, schema: Schema) -> Result<Exported, String> {
-    let (scene, skipped) = scene_of(doc, project_name, project_key, timestamp)?;
+    export_ifc_with(doc, project_name, project_key, timestamp, schema, true)
+}
+
+/// `own_data` puts the app's own records of the whole model in the file, so that this app reads it back with nothing lost;
+/// leave it out for a file that goes outside.
+pub fn export_ifc_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, schema: Schema, own_data: bool) -> Result<Exported, String> {
+    let (scene, skipped) = scene_of(doc, project_name, project_key, timestamp, own_data)?;
     let out = match schema { Schema::Ifc4x3 => openbim_ifc::export_ifc4x3(&scene), Schema::Ifc4 => openbim_ifc::export(&scene), Schema::Ifc2x3 => openbim_ifc::export_ifc2x3(&scene) }.map_err(|e| format!("{e:?}"))?;
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
@@ -351,7 +358,7 @@ mod tests {
         assert_eq!(out.text.matches("IFCRELDEFINESBYTYPE(").count(), 1);
         assert_eq!(line("IFCRELDEFINESBYTYPE(").matches('#').count(), 4, "its own number, two beams and the type");
         // every beam carries the element set, with the type name only on the typed ones
-        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 5, "three beams, the sample's duct and pipe");
+        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 11, "six walls, three beams, the sample's duct and pipe");
         assert_eq!(out.text.matches("IFCLABEL('Beam 300 x 500')").count(), 2, "on the two typed beams");
         assert!(out.text.contains(&format!("IFCINTEGER({})", free.0)));
         assert!(out.text.contains("'OpenBIM_Type'") && out.text.contains("IFCLABEL('Concrete')"));
@@ -370,7 +377,7 @@ mod tests {
         let out = export_ifc(&d, "P", 1, "2026-10-18T00:00:00").unwrap();
         // a 6 m pipe falling 2%: the extrusion is 6.0 * sqrt(1 + 0.02^2) = 6.0012 m long
         assert!(out.text.contains("6.001199"), "{}", out.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).collect::<Vec<_>>().join("\n"));
-        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 2, "one for the duct, one for the pipe");
+        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 8, "six walls, the duct and the pipe");
         assert!(out.text.contains("IFCLABEL('Pipe')") && out.text.contains("IFCLABEL('Duct')"));
         assert!(out.text.contains("IFCDISTRIBUTIONPORT("));
         assert_eq!(out.text, export_ifc(&d, "P", 1, "2026-10-18T00:00:00").unwrap().text);

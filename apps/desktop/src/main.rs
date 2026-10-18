@@ -9,6 +9,7 @@ mod model_view;
 mod view3d;
 mod model_edit;
 mod export;
+mod import;
 mod automation;
 mod automation_canvas;
 mod automation_groups;
@@ -90,6 +91,7 @@ struct Desktop {
     show_warnings: bool,
     /// the export window, while it is open
     export_dialog: Option<model_edit::ExportDialog>,
+    import_dialog: Option<model_edit::ImportDialog>,
     /// the name for a new type
     type_name_input: String,
     warnings_cache: (u64, Vec<openbim_document::Warning>),
@@ -140,7 +142,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),
-            show_properties: true, show_browser: true, show_warnings: false, export_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -228,6 +230,7 @@ impl Desktop {
             "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
+            "ifc_import" => self.import_ifc_file(),
             "undo" => self.undo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
             "zoom_out" => self.zoom = (self.zoom / 1.25).max(0.3),
@@ -330,6 +333,7 @@ impl eframe::App for Desktop {
         });
         self.warnings_window(&ctx);
         self.export_window(&ctx);
+        self.import_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));

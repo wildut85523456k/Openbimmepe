@@ -14,6 +14,8 @@
 //!   `IfcFlowTerminal` that owns the connector ports, until families are exported as types.
 //!
 //! The output is the same bytes for the same input: nothing in it depends on the clock or on hash order.
+pub mod reader;
+pub mod step_read;
 mod families;
 pub mod guid;
 pub mod boundaries;
@@ -338,6 +340,8 @@ pub struct Scene {
     pub types: Vec<TypeItem>,
     /// what the exchange needs to know of each beam, column, slab and footing, by element number (see `MemberInfo`)
     pub member_info: BTreeMap<u64, MemberInfo>,
+    /// the app's own records of the whole model (see `openbim_document::native`), carried in the project's `OpenBIM_Document` set so that the app can read its own file back with nothing lost; empty for none
+    pub native: Vec<String>,
     /// where one wall element meets another (see `walls::find_joins`)
     pub wall_joins: Vec<walls::WallJoin>,
     /// where the project is on the earth; without it the file has no map and the site has no position
@@ -840,6 +844,11 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     };
     let g = o.gen_gid();
     let project = o.s.add(format!("IFCPROJECT({g},$,{},$,$,$,$,(#{ctx}),#{units})", string(&scene.project_name)));
+    if !scene.native.is_empty() {
+        let names: Vec<String> = (0..scene.native.len()).map(|i| format!("R{i:07}")).collect();
+        let props: Vec<(&str, Val)> = names.iter().zip(&scene.native).map(|(n, l)| (n.as_str(), Val::Text(l.clone()))).collect();
+        o.pset(project, "OpenBIM_Document", props);
+    }
     // spatial structure
     // the site carries the whole model, so it is where the file's origin is moved to
     let site_pl = match &scene.georef {
@@ -980,6 +989,7 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         o.contain(st, wall);
         o.report.walls += 1;
         o.wall_entities.push(wall);
+        o.member_entities.push((w.id, wall));
         if let Some(ti) = w.wall_type.filter(|_| !v2) {
             let (t, (_, ls)) = (scene.wall_types.get(ti).ok_or_else(|| ExportError::Unsupported(format!("wall {}: no wall type {ti}", w.name)))?, type_ids[ti]);
             if (t.thickness() - c.thickness).abs() > 1e-9 {
@@ -1130,12 +1140,16 @@ fn write_beams(o: &mut Out) -> Result<(), ExportError> {
             let pts: Vec<String> = bar.path.iter().map(|p| { let id = o.p3([p[0], p[1], p[2] - elev]); format!("#{id}") }).collect();
             let curve = o.s.add(format!("IFCPOLYLINE(({}))", pts.join(",")));
             let r = o.r(bar.diameter / 2.0, "size");
-            let solid = o.s.add(format!("IFCSWEPTDISKSOLID(#{curve},{r},$,$,$)"));
+            // IFC2X3 wants the range of the sweep (a polyline counts one for each corner); IFC4 may leave it out
+            let range = if o.v2 { format!("0.,{}.", bar.path.len() - 1) } else { "$,$".to_string() };
+            let solid = o.s.add(format!("IFCSWEPTDISKSOLID(#{curve},{r},$,{range})"));
             let shape = o.shape(&[solid]);
             let g = o.gid(bar.id, k as u16);
             let d = o.r(bar.diameter, "size");
             let kind = if bar.shear { ".SHEAR." } else { ".MAIN." };
-            let rb = o.s.add(format!("IFCREINFORCINGBAR({g},$,{},$,$,#{pl},#{shape},$,$,{d},$,$,{kind},$)", string(&bar.name)));
+            // IFC2X3 requires the cross-section area and the role; IFC4 does not
+            let area = if o.v2 { o.r(std::f64::consts::PI * bar.diameter * bar.diameter / 4.0, "size") } else { "$".into() };
+            let rb = o.s.add(format!("IFCREINFORCINGBAR({g},$,{},$,$,#{pl},#{shape},$,$,{d},{area},$,{kind},$)", string(&bar.name)));
             o.contain(st, rb);
             o.report.bars += 1;
         }

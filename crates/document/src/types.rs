@@ -43,7 +43,7 @@ impl TypeValues {
     }
 
     /// The commands that give `id`, an element or a type of `kind`, these values.
-    fn commands(&self, id: ElementId, kind: Category) -> Vec<Command> {
+    pub fn commands(&self, id: ElementId, kind: Category) -> Vec<Command> {
         let mut ops = vec![Command::Resize { id, width_m: self.width_m, height_m: self.height_m }];
         match kind {
             Category::Beam => ops.extend([Command::SetSection { id, section: self.section }, Command::SetMaterial { id, material: self.material }, Command::SetUsage { id, usage: self.usage }]),

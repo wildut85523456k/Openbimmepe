@@ -3,7 +3,10 @@ use eframe::egui;
 use openbim_document::{FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 /// The state of the export window.
-pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Schema }
+pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Schema, pub own_data: bool }
+
+/// The state of the import window.
+pub(crate) struct ImportDialog { pub path: String }
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
@@ -143,7 +146,7 @@ impl Desktop {
 
     /// Opens the export window: a file name and a schema, IFC 4.3 first.
     pub(crate) fn export_ifc_file(&mut self) {
-        self.export_dialog = Some(ExportDialog { path: "openbim-export.ifc".into(), schema: crate::export::Schema::Ifc4x3 });
+        self.export_dialog = Some(ExportDialog { path: "openbim-export.ifc".into(), schema: crate::export::Schema::Ifc4x3, own_data: true });
     }
 
     /// The export window: where to write the file and in which schema (IFC 4.3 unless another is picked).
@@ -151,23 +154,70 @@ impl Desktop {
         let Some(mut dialog) = self.export_dialog.take() else { return };
         let (mut open, mut go) = (true, false);
         egui::Window::new("Export IFC").open(&mut open).collapsible(false).show(ctx, |ui| {
-            ui.horizontal(|ui| { ui.label("File"); ui.text_edit_singleline(&mut dialog.path); });
+            ui.horizontal(|ui| {
+                ui.label("File");
+                ui.text_edit_singleline(&mut dialog.path);
+                if ui.button("Browse...").clicked() {
+                    let start = std::path::Path::new(&dialog.path);
+                    let mut fd = rfd::FileDialog::new().set_title("Export IFC").add_filter("IFC", &["ifc"]);
+                    if let Some(name) = start.file_name().and_then(|n| n.to_str()) { fd = fd.set_file_name(name); }
+                    if let Some(dir) = start.parent().filter(|d| d.is_dir() && !d.as_os_str().is_empty()) { fd = fd.set_directory(dir); }
+                    if let Some(p) = fd.save_file() { dialog.path = p.display().to_string(); }
+                }
+            });
             ui.horizontal(|ui| {
                 ui.label("Schema");
                 egui::ComboBox::from_id_salt("export_schema").selected_text(dialog.schema.name()).show_ui(ui, |ui| {
                     for s in crate::export::Schema::ALL { ui.selectable_value(&mut dialog.schema, s, s.name()); }
                 });
             });
+            ui.checkbox(&mut dialog.own_data, "Include this app's own data (this app reads the file back with nothing lost)");
+            if !dialog.own_data { ui.small("Without it a re-import reads only what IFC can hold."); }
             if dialog.schema == crate::export::Schema::Ifc2x3 { ui.small("IFC2X3 leaves out types, joins and service networks."); }
             go = ui.button("Export").clicked();
         });
-        if go { self.write_ifc(&dialog.path, dialog.schema); } else if open { self.export_dialog = Some(dialog); }
+        if go { self.write_ifc(&dialog.path, dialog.schema, dialog.own_data); } else if open { self.export_dialog = Some(dialog); }
+    }
+
+    /// Opens the import window.
+    pub(crate) fn import_ifc_file(&mut self) {
+        self.import_dialog = Some(ImportDialog { path: String::new() });
+    }
+
+    /// The import window: a file, what it is, and the button.
+    pub(crate) fn import_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.import_dialog.take() else { return };
+        let (mut open, mut go) = (true, false);
+        egui::Window::new("Import IFC").open(&mut open).collapsible(false).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("File");
+                ui.text_edit_singleline(&mut dialog.path);
+                if ui.button("Browse...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("Import IFC").add_filter("IFC (IFC2X3, IFC4, IFC 4.3)", &["ifc"]).pick_file() { dialog.path = p.display().to_string(); }
+                }
+            });
+            if !dialog.path.trim().is_empty() { ui.small(crate::import::describe_file(dialog.path.trim())); }
+            ui.small("Reads IFC2X3, IFC4 and IFC 4.3. A file written by this app with its own data comes back exactly; any other file is read from its geometry.");
+            go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Import")).clicked();
+        });
+        if go { self.read_ifc(dialog.path.trim()); } else if open { self.import_dialog = Some(dialog); }
+    }
+
+    /// Reads the file at `path` into the document, as one undoable step.
+    pub(crate) fn read_ifc(&mut self, path: &str) {
+        self.message = match std::fs::read(path) {
+            Err(e) => format!("Could not read {path}: {e}"),
+            Ok(bytes) => match crate::import::import_ifc(&mut self.document, &String::from_utf8_lossy(&bytes)) {
+                Ok(report) => { self.sync_duct_controls(); self.selected = None; report.text() }
+                Err(e) => format!("Import failed, nothing changed: {e}"),
+            },
+        };
     }
 
     /// Writes the document to `path` in `schema` and says what was and was not written.
-    pub(crate) fn write_ifc(&mut self, path: &str, schema: crate::export::Schema) {
+    pub(crate) fn write_ifc(&mut self, path: &str, schema: crate::export::Schema, own_data: bool) {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        match crate::export::export_ifc_as(&self.document, "Project1", 1, &crate::export::iso_time(secs), schema) {
+        match crate::export::export_ifc_with(&self.document, "Project1", 1, &crate::export::iso_time(secs), schema, own_data) {
             Ok(out) => match std::fs::write(path, &out.text) {
                 Ok(()) => self.message = format!("Exported {path} ({}): {} walls, {} beams, {} columns, {} slabs. {}", schema.name(), out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
                 Err(e) => self.message = format!("Could not write {path}: {e}"),
@@ -1090,10 +1140,34 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         for (schema, needle) in [(crate::export::Schema::Ifc4x3, "IFC4X3_ADD2"), (crate::export::Schema::Ifc4, "FILE_SCHEMA(('IFC4'))"), (crate::export::Schema::Ifc2x3, "IFC2X3")] {
             let path = dir.join("m.ifc");
-            app.write_ifc(path.to_str().unwrap(), schema);
+            app.write_ifc(path.to_str().unwrap(), schema, true);
             assert!(std::fs::read_to_string(&path).unwrap().contains(needle), "{}", app.message);
             assert!(app.message.contains(schema.name()));
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_import_window_reads_a_file_the_app_wrote_back_into_an_empty_model() {
+        let mut app = Desktop::sample();
+        let dir = std::env::temp_dir().join(format!("obim-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.ifc");
+        app.write_ifc(path.to_str().unwrap(), crate::export::Schema::Ifc4x3, true);
+        let want = app.document.elements().count();
+        app.document = openbim_document::Document::new();
+        app.run_command("ifc_import", "Import IFC");
+        assert!(app.import_dialog.is_some(), "the window opens");
+        assert!(crate::import::describe_file(path.to_str().unwrap()).contains("IFC4X3_ADD2"));
+        app.read_ifc(path.to_str().unwrap());
+        assert_eq!(app.document.elements().count(), want, "{}", app.message);
+        assert!(app.message.contains("Restored"), "{}", app.message);
+        app.read_ifc(dir.join("missing.ifc").to_str().unwrap());
+        assert!(app.message.contains("Could not read"), "{}", app.message);
+        std::fs::write(dir.join("bad.ifc"), "not an ifc").unwrap();
+        app.read_ifc(dir.join("bad.ifc").to_str().unwrap());
+        assert!(app.message.contains("Import failed"), "{}", app.message);
+        assert_eq!(app.document.elements().count(), want);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

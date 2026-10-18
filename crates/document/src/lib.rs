@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 mod spatial;
+pub mod native;
 mod rebar;
 mod types;
 mod warnings;
@@ -379,6 +380,8 @@ impl Site {
 pub enum Command {
     /// Set where the project is (latitude, longitude, angle to true north, clock offset).
     SetSite(Site),
+    /// An element as it was saved, with every value; for restoring a document from its records.
+    Restore(Box<Element>),
     Create {
         id: ElementId,
         category: Category,
@@ -850,6 +853,10 @@ impl Document {
                     if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
                     el.type_for = Some(*category);
                     el.revision = revision;
+                }
+                Command::Restore(element) => {
+                    if trial.contains_key(&element.id) { return Err(EditError::AlreadyExists(element.id)); }
+                    trial.insert(element.id, Element { revision, ..(**element).clone() });
                 }
                 Command::SetSite(site) => {
                     if !site.valid() { return Err(EditError::InvalidSite); }
