@@ -2,6 +2,9 @@ use crate::{Desktop, ElementId, SampleElement, Tool};
 use eframe::egui;
 use openbim_document::{FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
+/// The state of the export window.
+pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Schema }
+
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
         match self.selected { Some(SampleElement::Duct) => Some(ElementId(1)),
@@ -138,13 +141,36 @@ impl Desktop {
         size || section || kind || elevation || slope || axis
     }
 
-    /// Writes the document as `openbim-export.ifc` in the working directory and says what was and was not written.
+    /// Opens the export window: a file name and a schema, IFC 4.3 first.
     pub(crate) fn export_ifc_file(&mut self) {
+        self.export_dialog = Some(ExportDialog { path: "openbim-export.ifc".into(), schema: crate::export::Schema::Ifc4x3 });
+    }
+
+    /// The export window: where to write the file and in which schema (IFC 4.3 unless another is picked).
+    pub(crate) fn export_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.export_dialog.take() else { return };
+        let (mut open, mut go) = (true, false);
+        egui::Window::new("Export IFC").open(&mut open).collapsible(false).show(ctx, |ui| {
+            ui.horizontal(|ui| { ui.label("File"); ui.text_edit_singleline(&mut dialog.path); });
+            ui.horizontal(|ui| {
+                ui.label("Schema");
+                egui::ComboBox::from_id_salt("export_schema").selected_text(dialog.schema.name()).show_ui(ui, |ui| {
+                    for s in crate::export::Schema::ALL { ui.selectable_value(&mut dialog.schema, s, s.name()); }
+                });
+            });
+            if dialog.schema == crate::export::Schema::Ifc2x3 { ui.small("IFC2X3 leaves out types, joins and service networks."); }
+            go = ui.button("Export").clicked();
+        });
+        if go { self.write_ifc(&dialog.path, dialog.schema); } else if open { self.export_dialog = Some(dialog); }
+    }
+
+    /// Writes the document to `path` in `schema` and says what was and was not written.
+    pub(crate) fn write_ifc(&mut self, path: &str, schema: crate::export::Schema) {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        match crate::export::export_ifc(&self.document, "Project1", 1, &crate::export::iso_time(secs)) {
-            Ok(out) => match std::fs::write("openbim-export.ifc", &out.text) {
-                Ok(()) => self.message = format!("Exported openbim-export.ifc (IFC 4.3): {} walls, {} beams, {} columns, {} slabs. {}", out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
-                Err(e) => self.message = format!("Could not write openbim-export.ifc: {e}"),
+        match crate::export::export_ifc_as(&self.document, "Project1", 1, &crate::export::iso_time(secs), schema) {
+            Ok(out) => match std::fs::write(path, &out.text) {
+                Ok(()) => self.message = format!("Exported {path} ({}): {} walls, {} beams, {} columns, {} slabs. {}", schema.name(), out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
+                Err(e) => self.message = format!("Could not write {path}: {e}"),
             },
             Err(e) => self.message = format!("IFC export failed: {e}"),
         }
@@ -1052,5 +1078,22 @@ mod tests {
         assert!(app.message.contains("do not fit") && app.document.revision() == rev, "{}", app.message);
         // the file still exports
         assert!(crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap().text.contains("IFCDOOR("));
+    }
+
+    #[test]
+    fn the_export_window_offers_ifc_4_3_first_and_writes_the_schema_picked() {
+        let mut app = Desktop::sample();
+        app.run_command("ifc_export", "Export IFC");
+        let d = app.export_dialog.as_ref().expect("the window opens");
+        assert_eq!(d.schema, crate::export::Schema::Ifc4x3);
+        let dir = std::env::temp_dir().join(format!("obim-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (schema, needle) in [(crate::export::Schema::Ifc4x3, "IFC4X3_ADD2"), (crate::export::Schema::Ifc4, "FILE_SCHEMA(('IFC4'))"), (crate::export::Schema::Ifc2x3, "IFC2X3")] {
+            let path = dir.join("m.ifc");
+            app.write_ifc(path.to_str().unwrap(), schema);
+            assert!(std::fs::read_to_string(&path).unwrap().contains(needle), "{}", app.message);
+            assert!(app.message.contains(schema.name()));
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

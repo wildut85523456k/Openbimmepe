@@ -88,6 +88,8 @@ struct Desktop {
     show_browser: bool,
     /// the warnings window is open; the list is worked out again only when the document has a new revision
     show_warnings: bool,
+    /// the export window, while it is open
+    export_dialog: Option<model_edit::ExportDialog>,
     /// the name for a new type
     type_name_input: String,
     warnings_cache: (u64, Vec<openbim_document::Warning>),
@@ -138,7 +140,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),
-            show_properties: true, show_browser: true, show_warnings: false, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, export_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -327,6 +329,7 @@ impl eframe::App for Desktop {
             });
         });
         self.warnings_window(&ctx);
+        self.export_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));

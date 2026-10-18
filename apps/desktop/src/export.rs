@@ -263,15 +263,17 @@ pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestam
 
 /// The schema of an exported file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Schema { Ifc4x3, Ifc4 }
+pub enum Schema { Ifc4x3, Ifc4, Ifc2x3 }
 
 impl Schema {
-    pub fn name(self) -> &'static str { match self { Schema::Ifc4x3 => "IFC 4.3", Schema::Ifc4 => "IFC4" } }
+    /// The default first: the newest.
+    pub const ALL: [Schema; 3] = [Schema::Ifc4x3, Schema::Ifc4, Schema::Ifc2x3];
+    pub fn name(self) -> &'static str { match self { Schema::Ifc4x3 => "IFC 4.3", Schema::Ifc4 => "IFC4", Schema::Ifc2x3 => "IFC2X3" } }
 }
 
 pub fn export_ifc_as(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, schema: Schema) -> Result<Exported, String> {
     let (scene, skipped) = scene_of(doc, project_name, project_key, timestamp)?;
-    let out = match schema { Schema::Ifc4x3 => openbim_ifc::export_ifc4x3(&scene), Schema::Ifc4 => openbim_ifc::export(&scene) }.map_err(|e| format!("{e:?}"))?;
+    let out = match schema { Schema::Ifc4x3 => openbim_ifc::export_ifc4x3(&scene), Schema::Ifc4 => openbim_ifc::export(&scene), Schema::Ifc2x3 => openbim_ifc::export_ifc2x3(&scene) }.map_err(|e| format!("{e:?}"))?;
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
     if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
