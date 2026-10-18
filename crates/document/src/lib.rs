@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 mod spatial;
+mod edit;
 pub mod native;
 mod rebar;
 mod types;
@@ -20,6 +21,7 @@ pub use types::TypeValues;
 pub use elec::{ElecCable, ElecKind, ElecNode};
 pub use mep::{EquipLink, EndDemand, EndRole, MepData, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
+pub use edit::Xf;
 pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh};
 
 /// Document-local, stable element identity. Future versions require
