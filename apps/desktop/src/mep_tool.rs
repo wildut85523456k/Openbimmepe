@@ -104,6 +104,31 @@ impl Desktop {
             }
             return;
         }
+        // a run that starts (or ends) on an equipment connector leaves it straight, as Revit does: a stub along the
+        // connector's axis at its size, a reducer to the size drawn, elbows at the bends, all at the connector's height
+        let n = self.run_points.len();
+        let from_conn = [(0usize, false), (n - 1, true)].into_iter().find_map(|(i, rev)| {
+            crate::elec_ui::equipment_connector_near(&self.document, level, self.run_points[i], 0.5, self.run_domain()).map(|(_, c)| (c, rev))
+        });
+        if let Some((c, rev)) = from_conn {
+            let mut after: Vec<[f64; 3]> = if rev { self.run_points[..n - 1].iter().rev().map(|p| [p[0], p[1], c.pos[2]]).collect() } else { self.run_points[1..].iter().map(|p| [p[0], p[1], c.pos[2]]).collect() };
+            after.dedup();
+            let prefs = route_prefs(self.run_domain(), c.system);
+            let route = match openbim_route::route_from_connector(&c, &after, self.run_size(), &prefs, &Snaps::new(SnapSettings::off())) {
+                Ok(r) => if rev { r.reversed() } else { r },
+                Err(e) => { self.message = format!("This run cannot leave the connector '{}' ({e:?}); move the points or change the size", c.name); return; }
+            };
+            match self.document.place_mep_route(level, &route) {
+                Ok(ids) => {
+                    self.link_run_ends_to_equipment(level, &route, &ids);
+                    self.run_points.clear();
+                    self.run_sizes.clear();
+                    self.message = format!("{} run(s) and {} fitting(s) placed; the run leaves '{}' straight and is joined to it; undo removes it", ids.len(), route.fittings.len(), c.name);
+                }
+                Err(e) => self.message = format!("Run rejected ({e:?})"),
+            }
+            return;
+        }
         let prefs = route_prefs(self.run_domain(), self.system_pick);
         let route = match route_path(&pts, &self.run_sizes, &prefs, &Snaps::new(SnapSettings::off())) {
             Ok(r) => r,

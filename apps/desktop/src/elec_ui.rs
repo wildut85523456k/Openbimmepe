@@ -698,7 +698,7 @@ mod tests {
         let lines = openbim_document::native::records(&app.document);
         assert_eq!(openbim_document::native::parse_mep(&lines).unwrap(), *app.document.mep());
         let out = crate::export::export_ifc_as(&app.document, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4).unwrap();
-        assert_eq!(out.text.matches("IFCRELCONNECTSPORTS(").count(), 1, "the run end is joined to the unit's own port");
+        assert_eq!(out.text.matches("IFCRELCONNECTSPORTS(").count(), 3, "two at the reducer, one to the unit's own port");
         assert!(!out.text.contains("OpenBIM_Equipment"), "no placeholder: the unit's own port is used");
         assert!(!out.warnings.iter().any(|w| w.contains("do not fit")), "{:?}", out.warnings);
         let mut back = Document::new();
@@ -726,5 +726,56 @@ mod tests {
         // deleting the unit drops the tie but keeps the end point and the run
         app.document.transact(app.document.revision(), &[Command::Delete { id: fcu }]).unwrap();
         assert!(app.document.mep().equip_links.is_empty() && app.document.mep().endpoints.len() == 1);
+    }
+
+    #[test]
+    fn a_run_drawn_from_a_connector_leaves_it_straight_with_a_reducer_and_elbows_and_is_joined() {
+        use openbim_document::FamilySpec;
+        let mut app = Desktop::sample();
+        let lv = ElementId(10);
+        let fcu = app.document.place_family(lv, [5.0, 5.0], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2 }).unwrap();
+        let air = instance_connectors(&app.document, fcu).into_iter().find(|c| c.domain == Domain::Duct && c.flow > 0.0 && c.system == openbim_family::mep::System::SupplyAir).unwrap();
+        let (nx, ny) = (air.dir[0], air.dir[1]);
+        // the tool's size differs from the connector's: a reducer; the second point is to one side: an elbow
+        app.choose_tool(Tool::Duct);
+        (app.width_mm, app.height_mm) = (600.0, 300.0);
+        app.run_click([air.pos[0] + 0.2 * -ny, air.pos[1] + 0.2 * nx]); // near the connector, not on it
+        app.run_click([air.pos[0] + 6.0 * nx, air.pos[1] + 6.0 * ny]);
+        app.run_click([air.pos[0] + 6.0 * nx - 4.0 * ny, air.pos[1] + 6.0 * ny + 4.0 * nx]);
+        app.finish_run(lv);
+        let link = app.document.mep().equip_links.first().unwrap_or_else(|| panic!("joined: {}", app.message)).clone();
+        assert_eq!(link.element, fcu);
+        let openbim_document::MepNode::Run(first) = link.port.node else { panic!() };
+        let r = app.document.mep_run(first).unwrap();
+        let (end, other) = if link.port.port == 0 { (r.a, r.b) } else { (r.b, r.a) };
+        assert!(end.iter().zip(&air.pos).all(|(a, b)| (a - b).abs() < 1e-9), "starts exactly on the connector: {end:?} against {:?}", air.pos);
+        let d = [other[0] - end[0], other[1] - end[1], other[2] - end[2]];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        assert!((d[0] * air.dir[0] + d[1] * air.dir[1] + d[2] * air.dir[2]) / len > 1.0 - 1e-9, "the first run is along the connector's axis");
+        // the stub is at the connector's size
+        let el = app.document.get(first).unwrap();
+        let openbim_family::mep::Size::Rect { width, height } = air.size else { panic!() };
+        assert_eq!((el.width_m, el.height_m), (width, height));
+        let kinds: Vec<_> = app.document.mep().fittings.iter().map(|f| std::mem::discriminant(&f.fitting.kind)).collect();
+        assert!(kinds.len() >= 2, "a reducer and an elbow: {kinds:?}");
+        assert!(app.document.mep().fittings.iter().any(|f| matches!(f.fitting.kind, openbim_route::FittingKind::Transition)));
+        assert!(app.document.mep().fittings.iter().any(|f| matches!(f.fitting.kind, openbim_route::FittingKind::Elbow { .. })));
+        // one undo step removes the join, one the run
+        app.undo_document();
+        assert!(app.document.mep().equip_links.is_empty());
+        app.undo_document();
+        assert!(app.document.mep().fittings.is_empty());
+        // ending on a connector works the same, drawn the other way round
+        app.choose_tool(Tool::Duct);
+        app.run_click([air.pos[0] + 6.0 * nx - 4.0 * ny, air.pos[1] + 6.0 * ny + 4.0 * nx]);
+        app.run_click([air.pos[0] + 6.0 * nx, air.pos[1] + 6.0 * ny]);
+        app.run_click([air.pos[0] + 0.2 * -ny, air.pos[1] + 0.2 * nx]);
+        app.finish_run(lv);
+        assert_eq!(app.document.mep().equip_links.len(), 1, "{}", app.message);
+        let q = &app.document.mep().equip_links[0];
+        let openbim_document::MepNode::Run(last) = q.port.node else { panic!() };
+        let r = app.document.mep_run(last).unwrap();
+        let end = if q.port.port == 0 { r.a } else { r.b };
+        assert!(end.iter().zip(&air.pos).all(|(a, b)| (a - b).abs() < 1e-9), "{end:?}");
     }
 }
