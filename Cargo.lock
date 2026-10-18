@@ -2418,6 +2418,7 @@ dependencies = [
 name = "openbim-document"
 version = "0.0.1"
 dependencies = [
+ "openbim-calc",
  "openbim-family",
  "openbim-geom",
  "openbim-place",

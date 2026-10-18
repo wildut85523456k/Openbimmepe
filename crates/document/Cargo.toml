@@ -13,3 +13,4 @@ openbim-geom = { path = "../geom" }
 openbim-route = { path = "../route" }
 openbim-family = { path = "../family" }
 openbim-place = { path = "../place" }
+openbim-calc = { path = "../calc" }

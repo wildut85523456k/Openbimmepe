@@ -10,11 +10,12 @@ mod spatial;
 pub mod native;
 mod rebar;
 mod types;
+pub mod compute;
 pub mod mep;
 mod warnings;
 pub use rebar::BarPath;
 pub use types::TypeValues;
-pub use mep::{MepData, MepFitting, MepNode, MepPort, MepTap};
+pub use mep::{EndDemand, EndRole, MepData, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
 pub use spatial::{system_lines, BeamExtent, Geometry, Mesh};
 

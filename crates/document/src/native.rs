@@ -147,6 +147,17 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
     }
     for (a, b) in &m.links { out.push(format!("L|a={}|b={}", port_text(a), port_text(b))); }
     for t in &m.taps { out.push(format!("P|f={}|r={}|d={:?}", t.fitting, t.run.0, t.distance)); }
+    for (r, s) in &m.run_systems { out.push(format!("Z|r={}|sys={}", r.0, s.code())); }
+    for e in &m.endpoints {
+        let dem = match e.demand {
+            super::EndDemand::None => "N".to_string(),
+            super::EndDemand::Flow(q) => format!("F:{q:?}"),
+            super::EndDemand::Power { watts, delta_t } => format!("W:{watts:?}:{delta_t:?}"),
+            super::EndDemand::LoadingUnits(u) => format!("U:{u:?}"),
+            super::EndDemand::Sprinkler { k_l_min_bar, min_flow_l_min } => format!("K:{k_l_min_bar:?}:{min_flow_l_min:?}"),
+        };
+        out.push(format!("N|p={}|role={}|dem={dem}|rp={:?}", port_text(&e.port), if e.role == super::EndRole::Source { "S" } else { "T" }, e.required_pressure_pa));
+    }
     out
 }
 
@@ -156,10 +167,28 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !(line.starts_with("T|") || line.starts_with("L|") || line.starts_with("P|")) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         if line.starts_with("L|") { m.links.push((parse_port(get("a")?)?, parse_port(get("b")?)?)); continue; }
+        if line.starts_with("Z|") {
+            m.run_systems.push((ElementId(int(get("r")?)?), System::from_code(int(get("sys")?)? as u8).ok_or("an unknown system")?));
+            continue;
+        }
+        if line.starts_with("N|") {
+            let d: Vec<&str> = get("dem")?.split(':').collect();
+            let demand = match (d[0], d.len()) {
+                ("N", 1) => super::EndDemand::None,
+                ("F", 2) => super::EndDemand::Flow(num(d[1])?),
+                ("W", 3) => super::EndDemand::Power { watts: num(d[1])?, delta_t: num(d[2])? },
+                ("U", 2) => super::EndDemand::LoadingUnits(num(d[1])?),
+                ("K", 3) => super::EndDemand::Sprinkler { k_l_min_bar: num(d[1])?, min_flow_l_min: num(d[2])? },
+                _ => return Err("an unknown end point demand".into()),
+            };
+            let role = match get("role")? { "S" => super::EndRole::Source, "T" => super::EndRole::Terminal, _ => return Err("an unknown end point role".into()) };
+            m.endpoints.push(super::MepEndpoint { port: parse_port(get("p")?)?, role, demand, required_pressure_pa: num(get("rp")?)? });
+            continue;
+        }
         if line.starts_with("P|") { m.taps.push(super::MepTap { fitting: int(get("f")?)?, run: ElementId(int(get("r")?)?), distance: num(get("d")?)? }); continue; }
         let angle = num(get("ang")?)?;
         let kind = match get("kind")? { "E" => FittingKind::Elbow { angle }, "T" => FittingKind::Transition, "Y" => FittingKind::Tee { branch_angle: angle }, "P" => FittingKind::Tap { branch_angle: angle }, _ => return Err("an unknown fitting kind".into()) };
@@ -195,7 +224,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if line.starts_with("T|") || line.starts_with("L|") || line.starts_with("P|") { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

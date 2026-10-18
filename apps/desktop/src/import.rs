@@ -426,6 +426,12 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
     for t in incoming.taps {
         if !refused.contains(&t.fitting) && !out.taps.iter().any(|x| x.fitting == t.fitting) { out.taps.push(t); }
     }
+    for (r, s) in incoming.run_systems {
+        if out.run_system(r).is_none() { out.run_systems.push((r, s)); }
+    }
+    for e in incoming.endpoints {
+        if !involves(&e.port) && out.endpoint_at(e.port).is_none() && out.partner(e.port).is_none() { out.endpoints.push(e); }
+    }
     out
 }
 

@@ -42,15 +42,57 @@ pub struct MepTap {
     pub distance: f64,
 }
 
+/// What an open end of the network is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndRole {
+    /// where the water, air or supply comes from: a pump, a fan, a riser, a main board; the root of the computation
+    Source,
+    /// where it is used: a coil, a diffuser, a fixture, a sprinkler
+    Terminal,
+}
+
+/// What a terminal takes. Units are the model's: metres, m3/s, watts, kelvin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EndDemand {
+    None,
+    /// a flow, m3/s
+    Flow(f64),
+    /// a cooling or heating power across a temperature difference
+    Power { watts: f64, delta_t: f64 },
+    /// loading units of a fixture (plumbing)
+    LoadingUnits(f64),
+    /// a sprinkler: its K-factor as printed (l/min per root bar) and the flow the density asks for, l/min
+    Sprinkler { k_l_min_bar: f64, min_flow_l_min: f64 },
+}
+
+/// A source or a terminal at an open port of a run or fitting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MepEndpoint {
+    pub port: MepPort,
+    pub role: EndRole,
+    pub demand: EndDemand,
+    /// the pressure it needs, Pa (a coil's drop, a terminal's, a sprinkler's minimum)
+    pub required_pressure_pa: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct MepData {
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
+    /// the system each duct or pipe belongs to, where the designer has said so (otherwise it takes its fittings')
+    pub run_systems: Vec<(ElementId, System)>,
+    pub endpoints: Vec<MepEndpoint>,
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() }
+
+    /// The system the designer gave a run, if any.
+    pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
+
+    /// The source or terminal at a port, if any.
+    pub fn endpoint_at(&self, p: MepPort) -> Option<&MepEndpoint> { self.endpoints.iter().find(|e| e.port == p) }
 
     /// The first fitting number that no fitting has.
     pub fn next_fitting_id(&self) -> u64 { self.fittings.iter().map(|f| f.id + 1).max().unwrap_or(FITTING_BASE).max(FITTING_BASE) }
@@ -69,6 +111,8 @@ impl MepData {
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
+            run_systems: self.run_systems.iter().filter(|(r, _)| is_run(elements.get(r))).copied().collect(),
+            endpoints: self.endpoints.iter().filter(|e| alive(&e.port.node)).copied().collect(),
         }
     }
 
@@ -98,6 +142,26 @@ impl MepData {
         for t in &self.taps {
             let tap_fitting = self.fitting(t.fitting).is_some_and(|f| matches!(f.fitting.kind, openbim_route::FittingKind::Tap { .. }));
             if !tap_fitting || !is_run(elements.get(&t.run)) || !t.distance.is_finite() || t.distance < 0.0 || !tapped.insert(t.fitting) { return Err(EditError::InvalidMep); }
+        }
+        let mut systemed = std::collections::BTreeSet::new();
+        for (id, sys) in &self.run_systems {
+            let domain = match elements.get(id).map(|e| e.category) { Some(Category::Duct) => Domain::Duct, Some(Category::Pipe) => Domain::Pipe, _ => return Err(EditError::InvalidMep) };
+            if !is_run(elements.get(id)) || !sys.domain_ok(domain) || !systemed.insert(*id) { return Err(EditError::InvalidMep); }
+        }
+        let mut ended = std::collections::BTreeSet::new();
+        for e in &self.endpoints {
+            let open = ports(&e.port.node).is_some_and(|n| e.port.port < n) && self.partner(e.port).is_none();
+            let pos = |v: f64| v.is_finite() && v >= 0.0;
+            let demand_ok = match e.demand {
+                EndDemand::None => true,
+                EndDemand::Flow(q) => pos(q),
+                EndDemand::Power { watts, delta_t } => pos(watts) && delta_t.is_finite() && delta_t > 0.0,
+                EndDemand::LoadingUnits(u) => pos(u),
+                EndDemand::Sprinkler { k_l_min_bar, min_flow_l_min } => k_l_min_bar.is_finite() && k_l_min_bar > 0.0 && pos(min_flow_l_min),
+            };
+            if !open || !pos(e.required_pressure_pa) || !demand_ok || (e.role == EndRole::Source && e.demand != EndDemand::None) || !ended.insert(e.port) {
+                return Err(EditError::InvalidMep);
+            }
         }
         Ok(())
     }
@@ -220,5 +284,45 @@ mod tests {
         // a link to a port that is not there
         let bad = MepData { links: vec![(MepPort { node: MepNode::Run(ElementId(1)), port: 5 }, MepPort { node: MepNode::Run(ElementId(2)), port: 0 })], ..Default::default() };
         assert_eq!(d.transact(d.revision(), &[Command::SetMep(Box::new(bad))]), Err(EditError::InvalidMep));
+    }
+
+    #[test]
+    fn run_systems_and_end_points_are_checked_kept_with_the_model_and_come_back_from_the_records() {
+        let mut d = Document::spatial_sample();
+        let ids = d.place_mep_route(ElementId(10), &duct_route(&[[1.0, 1.0, 2.7], [5.0, 1.0, 2.7], [5.0, 4.0, 2.7]])).unwrap();
+        let mut data = d.mep().clone();
+        // the first run's start and the second run's end are open
+        let src = MepPort { node: MepNode::Run(ids[0]), port: 0 };
+        let end = MepPort { node: MepNode::Run(ids[1]), port: 1 };
+        data.run_systems.push((ids[0], System::ReturnAir));
+        data.endpoints.push(MepEndpoint { port: src, role: EndRole::Source, demand: EndDemand::None, required_pressure_pa: 0.0 });
+        data.endpoints.push(MepEndpoint { port: end, role: EndRole::Terminal, demand: EndDemand::Power { watts: 5000.0, delta_t: 10.0 }, required_pressure_pa: 25.0 });
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data.clone()))]).unwrap();
+        assert_eq!(d.mep().run_system(ids[0]), Some(System::ReturnAir));
+        assert_eq!(d.mep().endpoint_at(end).unwrap().required_pressure_pa, 25.0);
+        // the text form gives the same data back, whatever the kind of demand
+        let mut every = data.clone();
+        every.endpoints[1].demand = EndDemand::Sprinkler { k_l_min_bar: 80.0, min_flow_l_min: 60.0 };
+        for dem in [EndDemand::None, EndDemand::Flow(0.003), EndDemand::LoadingUnits(7.5), every.endpoints[1].demand, EndDemand::Power { watts: 0.1 + 0.2, delta_t: 5.0 }] {
+            let mut x = data.clone();
+            x.endpoints[1].demand = dem;
+            let lines = crate::native::mep_records(&x);
+            assert_eq!(crate::native::parse_mep(&lines).unwrap(), x);
+        }
+        // a linked port is not an end; a system of the wrong kind, a second end point and a bad value are refused
+        let linked = MepPort { node: MepNode::Run(ids[0]), port: 1 };
+        let bad = |f: &dyn Fn(&mut MepData)| { let mut x = data.clone(); f(&mut x); d.clone().transact(d.revision(), &[Command::SetMep(Box::new(x))]) };
+        assert_eq!(bad(&|x| x.endpoints.push(MepEndpoint { port: linked, role: EndRole::Terminal, demand: EndDemand::None, required_pressure_pa: 0.0 })), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.run_systems[0].1 = System::ChilledWaterSupply), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.endpoints.push(x.endpoints[0])), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.endpoints[1].demand = EndDemand::Power { watts: 1.0, delta_t: 0.0 }), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.endpoints[0].demand = EndDemand::Flow(1.0)), Err(EditError::InvalidMep));
+        // deleting the run takes its end point and system away; undo brings them back
+        d.transact(d.revision(), &[Command::Delete { id: ids[1] }]).unwrap();
+        assert!(d.mep().endpoint_at(end).is_none() && d.mep().endpoint_at(src).is_some());
+        d.transact(d.revision(), &[Command::Delete { id: ids[0] }]).unwrap();
+        assert!(d.mep().run_systems.is_empty() && d.mep().endpoints.is_empty());
+        assert!(d.undo().unwrap() && d.undo().unwrap());
+        assert_eq!(d.mep().endpoints.len(), 2);
     }
 }
