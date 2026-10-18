@@ -510,6 +510,15 @@ impl Desktop {
         }
     }
 
+    /// A click of the Tag tool on `host`: a tag on it, standing off on a leader when the options bar says so.
+    pub(crate) fn tag_click(&mut self, host: ElementId, at: [f64; 2]) {
+        let head = if self.tag_leader { [at[0] + 0.6, at[1] + 0.6] } else { at };
+        match self.document.place_tag(host, head, at) {
+            Ok(id) => self.message = format!("Tagged {}; undo removes the tag", self.document.tag_text(id)),
+            Err(_) => self.message = "Tag: click a building element (walls, doors, ducts, equipment, ...)".into(),
+        }
+    }
+
     /// A pick of the Grid tool: the first starts a grid line, the second draws it, named after the last one.
     pub(crate) fn grid_click(&mut self, point: [f64; 2]) {
         let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Grid: pick the end (Shift keeps it square, Esc ends)".into(); return; };

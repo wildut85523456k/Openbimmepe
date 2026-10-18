@@ -208,7 +208,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
-        C::Type => ("Types", "Type", "component"),
+        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
@@ -271,6 +271,15 @@ fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
+    if app.tool == crate::Tool::Tag {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Tag by Category");
+            ui.separator();
+            ui.checkbox(&mut app.tag_leader, "Leader");
+            ui.weak("click an element in a plan view; the tag says its type, or its name when it has none");
+        });
+        return;
+    }
     if app.tool == crate::Tool::Level {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Level");

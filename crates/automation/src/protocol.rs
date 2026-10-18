@@ -18,6 +18,7 @@ pub enum SnapshotGeometry {
     OnMember { host:u64 },
     Placed { at:[f64;2],level:u64 },
     InWall { host:u64,along_m:f64 },
+    Tag { host:u64,at:[f64;2],anchor:[f64;2] },
 }
 impl From<Geometry> for SnapshotGeometry {
     fn from(value:Geometry)->Self {
@@ -32,6 +33,7 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::OnMember { host }=>Self::OnMember { host:host.0 },
             Geometry::Placed { at,level }=>Self::Placed { at,level:level.0 },
             Geometry::InWall { host,along_m }=>Self::InWall { host:host.0,along_m },
+            Geometry::Tag { host,at,anchor }=>Self::Tag { host:host.0,at,anchor },
         }
     }
 }
@@ -48,6 +50,7 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::OnMember { host }=>Self::OnMember { host:ElementId(host) },
             SnapshotGeometry::Placed { at,level }=>Self::Placed { at,level:ElementId(level) },
             SnapshotGeometry::InWall { host,along_m }=>Self::InWall { host:ElementId(host),along_m },
+            SnapshotGeometry::Tag { host,at,anchor }=>Self::Tag { host:ElementId(host),at,anchor },
         }
     }
 }
@@ -204,7 +207,7 @@ impl Snapshot {
             let category = match el.category.as_str() {
                 "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Family" => Category::Family, "Type" => Category::Type, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
-                "Level" => Category::Level, "Grid" => Category::Grid,
+                "Level" => Category::Level, "Grid" => Category::Grid, "Tag" => Category::Tag,
                 _ => return Err(format!("Unsupported category {}",el.category)),
             };
             let type_for = match &el.type_for {

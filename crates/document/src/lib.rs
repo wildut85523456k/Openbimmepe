@@ -30,6 +30,9 @@ pub struct ElementId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
     Wall,
+    /// An annotation: the label of the element it is on (`Geometry::Tag`). It is drawn in the plan of its element's level
+    /// and is not part of the building, so it is not exported as a product.
+    Tag,
     /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
     /// `height_m` deep, `elevation_m` the height of its centre line above the level.
     Beam,
@@ -560,6 +563,37 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// The level an element stands on: its own, or its host's.
+    pub fn level_of(&self, id: ElementId) -> Option<ElementId> {
+        match self.get(id)?.geometry? {
+            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } => Some(level),
+            Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } => self.level_of(host),
+            Geometry::Level | Geometry::Grid { .. } => None,
+        }
+    }
+    /// What a tag says: the type of its element when it has one (a door's type, a wall type), else its name.
+    pub fn tag_text(&self, tag: ElementId) -> String {
+        let Some(Geometry::Tag { host, .. }) = self.get(tag).and_then(|t| t.geometry) else { return String::new() };
+        let Some(h) = self.get(host) else { return "?".into() };
+        match h.type_id.and_then(|t| self.get(t)) {
+            Some(t) => t.name.clone(),
+            None if h.category == Category::Family && !h.type_name.is_empty() => h.type_name.clone(),
+            None if h.category == Category::Family => h.family.clone(),
+            None => h.name.clone(),
+        }
+    }
+    /// Tags `host`: the label at `at`, with a leader to `anchor` (the point of the element that was clicked).
+    pub fn place_tag(&mut self, host: ElementId, at: [f64; 2], anchor: [f64; 2]) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let ok = self.get(host).is_some_and(|h| !matches!(h.category, Category::Tag | Category::Level | Category::Grid | Category::Type));
+        if !ok { return Err(EditError::NotFound(host)); }
+        let n = self.elements.values().filter(|e| e.category == Category::Tag).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Tag, name: format!("Tag {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Tag { host, at, anchor } },
+        ])?;
+        Ok(id)
+    }
     /// Stands a column at `at` from `level` (raised by `base_offset_m`) up to the level `top`.
     pub fn place_column(&mut self, level: ElementId, top: ElementId, at: [f64; 2], col: &ColumnSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();
@@ -958,6 +992,8 @@ impl Document {
                 }
                 Command::Delete { id } => {
                     if trial.remove(id).is_none() { return Err(EditError::NotFound(*id)); }
+                    // the tags of an element go with it
+                    trial.retain(|_, e| !matches!(e.geometry, Some(Geometry::Tag { host, .. }) if host == *id));
                 }
             }
         }

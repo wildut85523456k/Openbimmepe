@@ -182,6 +182,23 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let pending = app.cable_from.map(|f| (f, app.cable_via.as_slice()));
         crate::elec_ui::draw_overlay(&app.document, report, &painter, &screen, level_id, level_z, pending);
     }
+    if !three_d {
+        // tags: the label of an element, boxed, at a constant size, on a leader to the place that was clicked
+        let tag_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Tag).map(|e| e.id).collect();
+        for id in tag_ids {
+            let Some(Geometry::Tag { host, at, anchor }) = app.document.get(id).and_then(|t| t.geometry) else { continue };
+            if app.document.level_of(host) != Some(level_id) { continue; }
+            let (head, tip) = (screen([at[0], at[1], level_z]), screen([anchor[0], anchor[1], level_z]));
+            let text = app.document.tag_text(id);
+            let ink = ui.visuals().text_color();
+            if head.distance(tip) > 2.0 { painter.line_segment([head, tip], Stroke::new(1.0, ink)); painter.circle_filled(tip, 2.5, ink); }
+            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.0), ink);
+            let r = Rect::from_center_size(head, galley.size() + Vec2::new(10.0, 6.0));
+            painter.rect_filled(r, 2.0, ui.visuals().panel_fill);
+            painter.rect_stroke(r, 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Middle);
+            painter.galley(r.center() - galley.size() / 2.0, galley, ink);
+        }
+    }
     // Revit's way of picking a point: a click, or press at the start, drag, release at the end. A drag
     // starting a tool with nothing pending picks its start point at the press and its next point at the release.
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
@@ -284,6 +301,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
         else if let Some(p) = pick { app.wall_click(level_id, to_model(p)); }
+    } else if app.tool == crate::Tool::Tag && !three_d {
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if let Some(p) = pick {
+            let hit = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some()).map(|(_, id, _, _)| *id);
+            match hit { Some(id) => app.tag_click(id, to_model(p)), None => app.message = "Tag: click an element".into() }
+        }
     } else if app.tool == crate::Tool::Grid && !three_d {
         // two picks (or press, drag, release) draw a grid line, snapped to 50 mm and to the ends of other grid lines
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
@@ -658,5 +683,29 @@ mod tests {
         for at in w { frame(&ctx, screen, &mut app, vec![button(at, true)]); frame(&ctx, screen, &mut app, vec![button(at, false)]); }
         let wall = app.document.elements().filter(|e| e.category == Category::Wall).last().unwrap();
         assert!(matches!(wall.geometry, Some(Geometry::Linear { level: l, .. }) if l == level), "{:?}", wall.geometry);
+    }
+
+    #[test]
+    fn a_tag_is_placed_on_the_clicked_element_drawn_in_its_plan_and_undone() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("tag", "Tag");
+        assert!(app.tool == crate::Tool::Tag);
+        let tags = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Tag).count();
+        app.tag_click(ElementId(20), [2.0, 0.0]);
+        assert_eq!(tags(&app), 1, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![]);
+        app.view = View::UpperPlan;
+        frame(&ctx, screen, &mut app, vec![]);
+        app.tag_leader = false;
+        app.tag_click(ElementId(1), [3.0, 2.0]);
+        let last = app.document.elements().filter(|e| e.category == Category::Tag).last().unwrap();
+        assert!(matches!(last.geometry, Some(Geometry::Tag { at, anchor, .. }) if at == anchor));
+        // levels cannot be tagged
+        app.tag_click(ElementId(10), [0.0, 0.0]);
+        assert_eq!(tags(&app), 2);
+        app.document.undo().unwrap();
+        assert_eq!(tags(&app), 1);
     }
 }

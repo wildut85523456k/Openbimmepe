@@ -22,6 +22,8 @@ pub enum Geometry {
     Pad { at: [f64; 2], level: ElementId, thickness_m: f64 },
     /// a strip footing hosted by the wall `host`, along its axis
     OnWall { host: ElementId },
+    /// a tag: its label at `at` in the plan, with a leader to `anchor`, on the element `host`
+    Tag { host: ElementId, at: [f64; 2], anchor: [f64; 2] },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -161,6 +163,10 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::OnWall { host }) => {
                 el.category == Category::WallFooting
                     && elements.get(host).is_some_and(|w| w.category == Category::Wall && matches!(w.geometry, Some(Geometry::Linear { .. })))
+            }
+            Some(Geometry::Tag { host, at, anchor }) => {
+                el.category == Category::Tag && at.iter().chain(anchor.iter()).all(|v| v.is_finite() && v.abs() <= 1e6)
+                    && elements.get(host).is_some_and(|h| !matches!(h.category, Category::Tag | Category::Level | Category::Grid | Category::Type))
             }
             Some(Geometry::Placed { at, level }) => {
                 el.category == Category::Family && !el.family.is_empty() && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6) && el.elevation_m.abs() <= 1e6
@@ -523,6 +529,28 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_tag_says_the_type_follows_its_element_goes_with_it_and_is_saved() {
+        let mut d = Document::spatial_sample();
+        d.create_type(ElementId(20), "Wall 200 x 3000").unwrap();
+        let tag = d.place_tag(ElementId(20), [1.0, 1.0], [0.5, 0.0]).unwrap();
+        assert_eq!(d.tag_text(tag), "Wall 200 x 3000");
+        // an element without a type is tagged with its name; levels, grids and tags are not tagged
+        let tag2 = d.place_tag(ElementId(21), [8.5, 1.0], [8.0, 1.0]).unwrap();
+        assert_eq!(d.tag_text(tag2), "Wall 2");
+        assert!(d.place_tag(ElementId(10), [0.0, 0.0], [0.0, 0.0]).is_err() && d.place_tag(tag, [0.0, 0.0], [0.0, 0.0]).is_err());
+        assert_eq!(d.level_of(tag), Some(ElementId(10)));
+        // it is saved with the model and comes back as it was
+        let lines = crate::native::records(&d);
+        let (elements, _) = crate::native::parse_records(&lines).unwrap();
+        assert_eq!(elements.iter().find(|e| e.id == tag).unwrap().geometry, d.get(tag).unwrap().geometry);
+        // deleting the element takes its tags, and undo brings them back
+        d.transact(d.revision(), &[Command::Delete { id: ElementId(21) }]).unwrap();
+        assert!(d.get(tag2).is_none() && d.get(tag).is_some());
+        d.undo().unwrap();
+        assert!(d.get(tag2).is_some());
+    }
 
     #[test]
     fn walls_are_joined_as_revit_joins_them() {
