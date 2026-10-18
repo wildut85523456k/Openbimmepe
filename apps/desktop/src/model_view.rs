@@ -170,7 +170,16 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
                 if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
     }
-    if app.tool == crate::Tool::Family && !three_d {
+    if !three_d {
+        let report = app.compute.report.as_ref().map(|(_, r)| r);
+        crate::compute_ui::draw_overlay(&app.document, report, &painter, &screen, level_z, app.tool == crate::Tool::EndPoint);
+    }
+    if app.tool == crate::Tool::EndPoint && !three_d {
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() { if let Some(p) = response.interact_pointer_pos() { app.end_point_click(level_id, to_model(p)); } }
+    } else if app.tool == crate::Tool::Family && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }

@@ -12,6 +12,7 @@ mod export;
 mod import;
 mod file;
 mod mep_tool;
+mod compute_ui;
 mod automation;
 mod automation_canvas;
 mod automation_groups;
@@ -26,7 +27,7 @@ enum Workspace { Design, Coordination, Automation }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View { Plan, UpperPlan, ThreeD, Mechanical }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Duct, Pipe, Wall, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+enum Tool { Select, Duct, Pipe, EndPoint, Wall, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
 
@@ -99,6 +100,9 @@ struct Desktop {
     file: file::FileState,
     /// the types window, while it is open
     types_dialog: Option<model_edit::TypesDialog>,
+    /// the End Point tool and the Compute window
+    end_draft: compute_ui::EndDraft,
+    compute: compute_ui::ComputeDialog,
     /// the export window, while it is open
     export_dialog: Option<model_edit::ExportDialog>,
     import_dialog: Option<model_edit::ImportDialog>,
@@ -153,7 +157,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, end_draft: Default::default(), compute: Default::default(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -168,6 +172,7 @@ impl Desktop {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),
             Tool::Duct => { self.fit_run_system(); "Duct: click the points of the run in a plan view; elbows and reducers are placed for you. Enter or Finish places it (Backspace takes a point back, Esc ends).".into() }
             Tool::Pipe => { self.fit_run_system(); "Pipe: click the points of the run in a plan view; elbows and reducers are placed for you. Enter or Finish places it (Backspace takes a point back, Esc ends).".into() }
+            Tool::EndPoint => "End point: click an open end of a duct or pipe to mark the source (pump, fan) or a terminal (coil, diffuser, fixture, sprinkler) and what it takes. Esc ends.".into(),
             Tool::Beam => "Beam: click the start and the end in a plan view (Esc ends), or type the ends in the options bar and press Place Beam.".into(),
             Tool::Column => "Column: click its place in a plan view; it stands from that level to the next one up (Esc ends).".into(),
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
@@ -227,6 +232,8 @@ impl Desktop {
             }
             "duct" => { (self.width_mm, self.height_mm, self.elevation_mm) = (400.0, 300.0, 2700.0); self.choose_tool(Tool::Duct) }
             "pipe" => { (self.width_mm, self.height_mm, self.elevation_mm) = (100.0, 100.0, 600.0); self.system_pick = openbim_family::mep::System::ChilledWaterSupply; self.choose_tool(Tool::Pipe) }
+            "end_point" => self.choose_tool(Tool::EndPoint),
+            "compute" => self.compute.open = true,
             "wall" => self.choose_tool(Tool::Wall),
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
@@ -285,7 +292,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("wall", Tool::Wall) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }
@@ -354,6 +361,7 @@ impl eframe::App for Desktop {
         self.export_window(&ctx);
         self.import_window(&ctx);
         self.types_window(&ctx);
+        self.compute_window(&ctx);
         self.file_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)

@@ -2402,6 +2402,7 @@ dependencies = [
  "image",
  "openbim-arch",
  "openbim-automation",
+ "openbim-calc",
  "openbim-document",
  "openbim-family",
  "openbim-geom",

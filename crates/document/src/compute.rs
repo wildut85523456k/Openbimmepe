@@ -315,6 +315,38 @@ fn system_of_endpoint(doc: &Document, p: MepPort) -> System {
     match p.node { MepNode::Run(id) => system_of_run(doc, id), MepNode::Fitting(f) => doc.mep().fitting(f).map_or(System::Other, |f| f.system) }
 }
 
+/// Every duct or pipe joined to `start` through links, fittings and taps (the line the designer would call one system).
+pub fn connected_runs(doc: &Document, start: ElementId) -> Vec<ElementId> {
+    let data = doc.mep();
+    let mut seen: BTreeSet<MepNode> = BTreeSet::new();
+    let mut todo = vec![MepNode::Run(start)];
+    while let Some(n) = todo.pop() {
+        if !seen.insert(n) { continue; }
+        let mut next: Vec<MepNode> = Vec::new();
+        for (a, b) in &data.links {
+            if a.node == n { next.push(b.node); } else if b.node == n { next.push(a.node); }
+        }
+        for t in &data.taps {
+            if n == MepNode::Run(t.run) { next.push(MepNode::Fitting(t.fitting)); }
+            if n == MepNode::Fitting(t.fitting) { next.push(MepNode::Run(t.run)); }
+        }
+        todo.extend(next);
+    }
+    seen.into_iter().filter_map(|n| if let MepNode::Run(id) = n { Some(id) } else { None }).collect()
+}
+
+/// Gives these runs a system, in one transaction. A run whose kind does not suit the system (a duct on a water system)
+/// refuses the whole change.
+pub fn assign_system(doc: &mut Document, runs: &[ElementId], system: System) -> Result<(), EditError> {
+    let mut data = doc.mep().clone();
+    for &r in runs {
+        data.run_systems.retain(|(id, _)| *id != r);
+        data.run_systems.push((r, system));
+    }
+    doc.transact(doc.revision(), &[Command::SetMep(Box::new(data))])?;
+    Ok(())
+}
+
 /// Sets the computed sizes on the drawing in one transaction; returns how many runs changed.
 pub fn apply_sizes(doc: &mut Document, report: &SystemReport) -> Result<usize, EditError> {
     let ops = report.resize_commands(doc);
@@ -604,5 +636,24 @@ mod tests {
         assert!((r.source_pressure - (run.dp_total + 30.0)).abs() < 1e-9);
         let cmds = r.resize_commands(&d);
         assert_eq!(cmds, vec![Command::Resize { id, width_m: 0.8, height_m: 0.4 }]);
+    }
+
+    #[test]
+    fn a_line_is_found_through_its_fittings_and_taps_and_given_a_system_in_one_step() {
+        let (mut d, [p1, p2, p3]) = tee_network();
+        assert_eq!(connected_runs(&d, p3), vec![p1, p2, p3]);
+        let lone = pipe(&mut d, [20.0, 20.0], [24.0, 20.0], 0.05);
+        assert_eq!(connected_runs(&d, lone), vec![lone]);
+        let rev = d.revision();
+        let line = connected_runs(&d, p1);
+        assign_system(&mut d, &line, System::HeatingWaterSupply).unwrap();
+        assert_eq!(d.revision(), rev + 1);
+        assert!([p1, p2, p3].iter().all(|r| system_of_run(&d, *r) == System::HeatingWaterSupply) && system_of_run(&d, lone) == System::Other);
+        // a duct system on a pipe is refused and nothing changes
+        let rev = d.revision();
+        assert_eq!(assign_system(&mut d, &[p1], System::SupplyAir), Err(EditError::InvalidMep));
+        assert_eq!(d.revision(), rev);
+        assert!(d.undo().unwrap());
+        assert_eq!(system_of_run(&d, p1), System::ChilledWaterSupply);
     }
 }

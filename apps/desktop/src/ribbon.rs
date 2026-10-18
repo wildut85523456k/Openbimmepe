@@ -62,6 +62,7 @@ const HVAC: &[Group] = &[
     Group { title: "Air Terminals", commands: &[
         c("air_terminal", "Air Terminal"), c("diffuser", "Diffuser"), c("grille", "Grille"),
     ]},
+    Group { title: "Analysis", commands: &[c("end_point", "End Point"), c("compute", "Compute")] },
     Group { title: "Mechanical Equipment", commands: &[
         c("ahu", "AHU"), c("fan", "Fan"), c("vav_box", "VAV Box"),
         c("mechanical_equipment", "Equipment"), c("chiller", "Chiller"), c("cooling_tower", "Cooling Tower"),
@@ -81,6 +82,7 @@ const PLUMBING: &[Group] = &[
         c("plumbing_fixture", "Plumbing Fixture"), c("sprinkler", "Sprinkler"), c("drain", "Drain"),
         c("cleanout", "Cleanout"), c("pump", "Pump"),
     ]},
+    Group { title: "Analysis", commands: &[c("end_point", "End Point"), c("compute", "Compute")] },
 ];
 
 const ELECTRICAL: &[Group] = &[
@@ -140,9 +142,10 @@ const ANNOTATE: &[Group] = &[
     Group { title: "Tag", commands: &[c("tag", "Tag")] },
     Group { title: "Revision", commands: &[c("revision_cloud", "Revision Cloud")] },
 ];
-const ANALYZE: &[Group] = &[Group { title: "Coordination", commands: &[
-    c("clash", "Clash Detection"), c("interference_check", "Interference Check"),
-]}];
+const ANALYZE: &[Group] = &[
+    Group { title: "Systems", commands: &[c("end_point", "End Point"), c("compute", "Compute")] },
+    Group { title: "Coordination", commands: &[c("clash", "Clash Detection"), c("interference_check", "Interference Check")] },
+];
 const MASSING: &[Group] = &[Group { title: "Model Site", commands: &[c("component", "Site Component")] }];
 const COLLABORATE: &[Group] = &[
     Group { title: "Manage Collaboration", commands: &[c("workset", "Worksets"), c("phase", "Phases")] },
