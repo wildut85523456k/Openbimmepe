@@ -173,6 +173,7 @@ const MODIFY: &[Group] = &[
         c("move", "Move"), c("rotate", "Rotate"), c("mirror", "Mirror"), c("align", "Align"),
         c("offset", "Offset"), c("trim", "Trim/Extend"), c("delete", "Delete"),
     ]},
+    Group { title: "Geometry", commands: &[c("wall_joins", "Wall Joins")] },
     Group { title: "Measure", commands: &[c("measure", "Measure")] },
 ];
 

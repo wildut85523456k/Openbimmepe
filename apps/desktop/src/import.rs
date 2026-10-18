@@ -624,7 +624,7 @@ mod tests {
             let pipe = openbim_route::route_path(&[[1.0, 3.5, 0.6], [6.0, 3.5, 0.6], [6.0, 3.0, 0.4]], &[round, round], &crate::export::tests_support::prefs(Domain::Pipe, System::ChilledWaterSupply), &off).unwrap();
             d.place_mep_route(ElementId(10), &pipe).unwrap();
         }
-        d.transact(d.revision(), &[Command::SetJoins { id: b, start: false, end: true }, Command::SetSlope { id: ElementId(2), slope_ratio: -0.02 }, Command::Create { id: ElementId(900), category: Category::Equipment, name: "Pump \u{b5} | 1; two=2".into(), width_m: 0.6, height_m: 0.5, elevation_m: 0.1 }]).unwrap();
+        d.transact(d.revision(), &[Command::SetJoins { id: b, start: false, end: true }, Command::SetJoins { id: ElementId(20), start: true, end: false }, Command::SetSlope { id: ElementId(2), slope_ratio: -0.02 }, Command::Create { id: ElementId(900), category: Category::Equipment, name: "Pump \u{b5} | 1; two=2".into(), width_m: 0.6, height_m: 0.5, elevation_m: 0.1 }]).unwrap();
         d
     }
 

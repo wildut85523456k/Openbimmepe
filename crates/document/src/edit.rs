@@ -282,6 +282,17 @@ impl Document {
         self.wall_end_commands(id, false, [s[0] + (t[0] - s[0]) / l * new_m, s[1] + (t[1] - s[1]) / l * new_m])
     }
 
+    /// Wall Joins: allows or disallows the join at one end of a wall. A wall end that is not joined stays square, and so
+    /// does the end of a wall that met it.
+    pub fn wall_join_commands(&self, id: ElementId, at_start: bool, allow: bool) -> Result<Vec<Command>, String> {
+        let e = self.get(id).filter(|e| e.category == Category::Wall).ok_or("select the end of a wall")?;
+        let mut joins = e.join_ends;
+        let i = usize::from(!at_start);
+        if joins[i] == allow { return Err(if allow { "the join is allowed already".into() } else { "the join is disallowed already".into() }); }
+        joins[i] = allow;
+        Ok(vec![Command::SetJoins { id, start: joins[0], end: joins[1] }])
+    }
+
     /// Copies `ids` and what goes with them, changed by `xf`: the commands and the numbers of the copies of `ids`.
     pub fn copy_commands(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<ElementId>), String> {
         let copies = self.transformed_set(ids, xf, true)?;
@@ -504,5 +515,37 @@ mod tests {
         assert!(d.place_dimension(level, [0.0, 0.0], [0.0, 0.0], [1.0, 1.0]).is_err());
         let (els, _) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
         assert_eq!(els.iter().find(|e| e.id == dim).unwrap().geometry, d.get(dim).unwrap().geometry);
+    }
+
+    #[test]
+    fn a_wall_join_can_be_disallowed_and_allowed_again() {
+        let mut d = Document::spatial_sample();
+        let level = match d.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let ids = d.place_walls(level, &[([50.0, 0.0], [60.0, 0.0]), ([60.0, 0.0], [60.0, 10.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let plan = |d: &Document, id: ElementId| d.wall_plan(id).unwrap();
+        // the longest extent of a wall along its axis: 10 m when its end is square, more or less when mitred
+        let reach = |d: &Document, id: ElementId, axis: usize| { let p = plan(d, id); p.iter().map(|q| q[axis]).fold(f64::MIN, f64::max) };
+        let joined = (reach(&d, ids[0], 0), reach(&d, ids[1], 1));
+        assert!((joined.0 - 60.1).abs() < 1e-9 && (joined.1 - 10.0).abs() < 1e-9 || joined.0 != 60.0, "mitred: {joined:?}");
+        let before = (plan(&d, ids[0]), plan(&d, ids[1]));
+        let ops = d.wall_join_commands(ids[0], false, false).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        // the end is square now (it stops at x = 60), and the wall that met it is square too
+        assert!((reach(&d, ids[0], 0) - 60.0).abs() < 1e-9, "{:?}", plan(&d, ids[0]));
+        assert!(plan(&d, ids[1]) != before.1 && plan(&d, ids[0]) != before.0);
+        assert!(d.wall_join_commands(ids[0], false, false).is_err());
+        // saved and restored
+        let (els, _) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
+        assert_eq!(els.iter().find(|e| e.id == ids[0]).unwrap().join_ends, [true, false]);
+        d.undo().unwrap();
+        assert_eq!((plan(&d, ids[0]), plan(&d, ids[1])), before);
+        // the other wall can refuse as well, and allowing it again restores the mitre
+        let ops = d.wall_join_commands(ids[1], true, false).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(plan(&d, ids[0]) != before.0);
+        let ops = d.wall_join_commands(ids[1], true, true).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert_eq!((plan(&d, ids[0]), plan(&d, ids[1])), before);
+        assert!(d.wall_join_commands(ElementId(10), true, false).is_err());
     }
 }

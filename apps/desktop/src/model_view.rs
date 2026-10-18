@@ -344,6 +344,32 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 match hit { Some(h) => app.wall_pick_line(level_id, h, to_model(p)), None => app.message = "Pick Lines: click a grid, a wall or a beam".into() }
             } else { app.wall_click(level_id, to_model(p)); }
         }
+    } else if app.tool == crate::Tool::WallJoins && !three_d {
+        // The ends of the walls of this level are marked: green where the join is allowed, red where it is not.
+        let mut ends: Vec<(ElementId, bool, Pos2, bool)> = Vec::new();
+        for el in app.document.elements().filter(|e| e.category == Category::Wall) {
+            if let Some(Geometry::Linear { start, end, level }) = el.geometry {
+                if level != level_id { continue; }
+                ends.push((el.id, true, screen([start[0], start[1], level_z]), el.join_ends[0]));
+                ends.push((el.id, false, screen([end[0], end[1], level_z]), el.join_ends[1]));
+            }
+        }
+        let hover = response.hover_pos();
+        let near = hover.and_then(|h| ends.iter().filter(|e| e.2.distance(h) < 14.0).min_by(|a, b| a.2.distance(h).total_cmp(&b.2.distance(h))).copied());
+        for (_, _, p, allowed) in &ends {
+            let c = if *allowed { Color32::from_rgb(60, 160, 80) } else { Color32::from_rgb(200, 60, 60) };
+            painter.circle_stroke(*p, 5.0, Stroke::new(1.5, c));
+        }
+        if let Some((_, _, p, _)) = near { painter.circle_stroke(p, 9.0, Stroke::new(2.0, blue)); }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                match ends.iter().filter(|e| e.2.distance(p) < 14.0).min_by(|a, b| a.2.distance(p).total_cmp(&b.2.distance(p))) {
+                    Some(&(id, at_start, _, _)) => app.wall_join_click(id, at_start),
+                    None => app.message = "Wall Joins: click the end of a wall".into(),
+                }
+            }
+        }
     } else if matches!(app.tool, crate::Tool::Dimension | crate::Tool::Measure) && !three_d {
         // Two points (a corner of a wall, the end of a grid, else 50 mm); the Dimension tool then takes the place of its line.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
@@ -1562,6 +1588,29 @@ mod tests {
         app.measure_click([3.0, 4.0]);
         assert!(app.message.contains("5000") && app.measured == Some(([0.0, 0.0], [3.0, 4.0])), "{}", app.message);
         frame(&ctx, screen, &mut app, vec![]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+    }
+
+    #[test]
+    fn wall_joins_tool_disallows_and_allows_the_join_at_a_wall_end() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let ids = app.document.place_walls(ElementId(10), &[([50.0, 0.0], [60.0, 0.0]), ([60.0, 0.0], [60.0, 10.0])], 0.2, 3.0, 0.0, None).unwrap();
+        app.run_command("wall_joins", "Wall Joins");
+        assert!(app.tool == crate::Tool::WallJoins);
+        frame(&ctx, screen, &mut app, vec![]);
+        let before = app.document.wall_plan(ids[0]).unwrap();
+        app.wall_join_click(ids[0], false);
+        assert_eq!(app.document.get(ids[0]).unwrap().join_ends, [true, false], "{}", app.message);
+        assert!(app.document.wall_plan(ids[0]).unwrap() != before);
+        frame(&ctx, screen, &mut app, vec![]);
+        app.wall_join_click(ids[0], false);
+        assert_eq!(app.document.get(ids[0]).unwrap().join_ends, [true, true]);
+        assert_eq!(app.document.wall_plan(ids[0]).unwrap(), before);
+        app.document.undo().unwrap();
+        assert_eq!(app.document.get(ids[0]).unwrap().join_ends, [true, false]);
         frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
         assert!(app.tool == crate::Tool::Select);
     }

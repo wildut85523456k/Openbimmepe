@@ -29,7 +29,7 @@ enum Workspace { Design, Coordination, Automation }
 enum View { Plan, UpperPlan, ThreeD, Mechanical, /// the plan of a level added with the Level tool
     Level(u64) }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+enum Tool { Select, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TempDim { Length(ElementId), Distance(ElementId, ElementId) }
@@ -258,6 +258,7 @@ impl Desktop {
             Tool::Copy => "Copy: pick the base point, then each point a copy goes to (or press, drag and release); type a distance in mm and Enter. Esc ends.".into(),
             Tool::Rotate => "Rotate: pick the centre, then the start and the end of the turn; or type an angle in degrees (counter-clockwise) and Enter. Esc ends.".into(),
             Tool::Mirror => "Mirror: draw the axis by two points (or press, drag and release); Copy in the options bar keeps the original. Esc ends.".into(),
+            Tool::WallJoins => "Wall Joins: click the end of a wall (a marker shows the ends) to disallow its join, so that it stays square, or to allow it again. Esc ends.".into(),
             Tool::Dimension => "Aligned Dimension: click the first point, the second point, then where the dimension line goes (corners of walls, ends of grids and 50 mm positions snap; Shift keeps it square). Esc ends.".into(),
             Tool::Measure => "Measure between two points: click both; the distance, its x and y parts and the angle are shown. Esc ends.".into(),
             Tool::Align => "Align: click the wall, beam or grid to align to, then the one to move onto its line (it keeps the reference until Esc).".into(),
@@ -325,6 +326,7 @@ impl Desktop {
             "tag" => self.choose_tool(Tool::Tag),
             "move" => self.choose_tool(Tool::Move),
             "dimension" => self.choose_tool(Tool::Dimension),
+            "wall_joins" => self.choose_tool(Tool::WallJoins),
             "measure" => { self.measured = None; self.choose_tool(Tool::Measure) }
             "align" => self.choose_tool(Tool::Align),
             "trim" => self.choose_tool(Tool::Trim),
@@ -392,7 +394,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

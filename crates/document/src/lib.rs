@@ -335,7 +335,7 @@ impl Element {
             && (matches!(k, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
             && (matches!(k, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
             && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
-            && (k == Category::Beam || self.join_ends == [true; 2])
+            && (matches!(k, Category::Beam | Category::Wall) || self.join_ends == [true; 2])
             && (matches!(k, Category::BeamSystem | Category::Truss | Category::Rebar) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || k == Category::Family)))
             && (k != Category::Truss || self.angle_deg == 0.0)
             && (k != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
@@ -996,7 +996,7 @@ impl Document {
                 }
                 Command::SetJoins { id, start, end } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Wall) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.join_ends = [*start, *end];
                     el.revision = revision;
                 }

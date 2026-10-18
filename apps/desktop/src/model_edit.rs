@@ -612,6 +612,15 @@ impl Desktop {
         }
     }
 
+    /// A click of Wall Joins on one end of a wall: its join is disallowed, or allowed again if it was.
+    pub(crate) fn wall_join_click(&mut self, id: ElementId, at_start: bool) {
+        let allowed = self.document.get(id).is_some_and(|w| w.join_ends[usize::from(!at_start)]);
+        match self.document.wall_join_commands(id, at_start, !allowed).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
+            Ok(_) => self.message = format!("Join {} at the {} of the wall; undo takes it back", if allowed { "disallowed" } else { "allowed" }, if at_start { "start" } else { "end" }),
+            Err(e) => self.message = format!("Wall Joins: {e}"),
+        }
+    }
+
     /// A pick of the Dimension tool: the two points, then the place of the dimension line.
     pub(crate) fn dimension_click(&mut self, level: ElementId, point: [f64; 2]) {
         match self.edit_pts.as_slice() {

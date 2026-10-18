@@ -252,9 +252,9 @@ pub fn line_meet(p: P2, d: P2, q: P2, e: P2) -> Option<P2> {
 
 impl Document {
     /// The walls of a level other than `id`, as (start, end, thickness).
-    fn walls_around(&self, id: ElementId, level: ElementId) -> Vec<(P2, P2, f64)> {
+    fn walls_around(&self, id: ElementId, level: ElementId) -> Vec<(P2, P2, f64, [bool; 2])> {
         self.elements().filter(|e| e.id != id && e.category == Category::Wall).filter_map(|e| match e.geometry {
-            Some(Geometry::Linear { start, end, level: l }) if l == level && p2_len(p2_sub(end, start)) > 1e-6 => Some((start, end, e.width_m)),
+            Some(Geometry::Linear { start, end, level: l }) if l == level && p2_len(p2_sub(end, start)) > 1e-6 => Some((start, end, e.width_m, e.join_ends)),
             _ => None,
         }).collect()
     }
@@ -265,14 +265,16 @@ impl Document {
     /// the end of the wall stops.
     fn wall_end_stop(&self, w: &Element, at_start: bool) -> Option<openbim_geom::StopLine> {
         let Some(Geometry::Linear { start, end, level }) = w.geometry else { return None };
+        // a join that is not allowed at this end leaves it square
+        if !w.join_ends[usize::from(!at_start)] { return None; }
         let (e, far) = if at_start { (start, end) } else { (end, start) };
         let dw = p2_unit(p2_sub(far, e));
         let tw = w.width_m;
         let others = self.walls_around(w.id, level);
         // the walls that end at the same point, as the direction they leave it in
-        let meeting: Vec<(P2, f64)> = others.iter().filter_map(|&(s, t, th)| {
-            if p2_len(p2_sub(s, e)) < 1e-3 { Some((p2_unit(p2_sub(t, s)), th)) }
-            else if p2_len(p2_sub(t, e)) < 1e-3 { Some((p2_unit(p2_sub(s, t)), th)) } else { None }
+        let meeting: Vec<(P2, f64)> = others.iter().filter_map(|&(s, t, th, joins)| {
+            if p2_len(p2_sub(s, e)) < 1e-3 { joins[0].then(|| (p2_unit(p2_sub(t, s)), th)) }
+            else if p2_len(p2_sub(t, e)) < 1e-3 { joins[1].then(|| (p2_unit(p2_sub(s, t)), th)) } else { None }
         }).collect();
         let face = |d: P2, t: f64, toward: P2| -> openbim_geom::StopLine {
             let side = if p2_cross(d, toward) >= 0.0 { 1.0 } else { -1.0 };
@@ -303,7 +305,7 @@ impl Document {
             }
         }
         // an end on the body of another wall
-        for (s, t, th) in others {
+        for (s, t, th, _) in others {
             let d = p2_unit(p2_sub(t, s));
             let len = p2_len(p2_sub(t, s));
             let along = p2_dot(p2_sub(e, s), d);
