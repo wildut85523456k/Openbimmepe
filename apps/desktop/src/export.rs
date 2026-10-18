@@ -244,6 +244,21 @@ fn add_connections(doc: &Document, net: &mut Network, skipped: &mut std::collect
     for t in &data.taps {
         if let (Some(&f), Some(&s)) = (fit.get(&t.fitting), seg.get(&t.run.0)) { net.taps.push(Tapping { fitting: f, segment: s, distance: t.distance }); }
     }
+    // run ends joined to equipment connectors: the equipment's own port, met square-on by the end of the run
+    for q in &data.equip_links {
+        let (MepNode::Run(id), Some(c)) = (q.port.node, crate::elec_ui::instance_connectors(doc, q.element).into_iter().find(|c| c.name == q.connector)) else { continue };
+        let Some(&si) = seg.get(&id.0) else { continue };
+        let run = net.segments[si].run.clone();
+        let (pos, from) = if q.port.port == 0 { (run.a, run.b) } else { (run.b, run.a) };
+        let toward = [pos[0] - from[0], pos[1] - from[1], pos[2] - from[2]];
+        let n = (toward[0] * toward[0] + toward[1] * toward[1] + toward[2] * toward[2]).sqrt();
+        if n < 1e-9 { continue; }
+        // what the file says: the equipment's port sits where the run ends and faces it
+        let ei = net.equipment.len();
+        net.equipment.push(openbim_route::graph::NetEquipment { element: q.element.0, connector: c.name.clone(), domain: run.domain, system: c.system, flow_dir: c.flow_dir, pos, dir: [-toward[0] / n, -toward[1] / n, -toward[2] / n], size: run.size });
+        let linked = net.link(PortRef { node: NodeRef::Segment(si), port: q.port.port }, PortRef { node: NodeRef::Equipment(ei), port: 0 });
+        if linked.is_err() { net.equipment.pop(); *skipped.entry("connections to equipment that do not fit (left out)").or_default() += 1; }
+    }
     if net.validate().is_err() { net.taps.clear(); *skipped.entry("taps that no longer sit on their run (left out)").or_default() += 1; }
 }
 

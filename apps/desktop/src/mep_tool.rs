@@ -121,22 +121,28 @@ impl Desktop {
         }
     }
 
-    /// A new run that ends on a connector of a family instance (same kind, a system that fits, within 15 cm in plan) is
-    /// joined to it, as Revit does. One more undoable step.
+    /// A new run that ends on a connector of a family instance (same kind, a system that fits, within 15 cm in plan and
+    /// arriving square to it, within 10 degrees) is joined to it, as Revit does, and put exactly on it. One more undoable step.
     fn link_run_ends_to_equipment(&mut self, level: ElementId, route: &openbim_route::Route, ids: &[ElementId]) {
         let (Some(first), Some(last)) = (route.runs.first(), route.runs.last()) else { return };
         let domain = self.run_domain();
         let mut data = self.document.mep().clone();
-        let mut made = 0;
-        for (id, port, p, sys) in [(ids[0], 0usize, first.a, first.system), (ids[ids.len() - 1], 1usize, last.b, last.system)] {
+        let (mut cmds, mut made) = (Vec::new(), 0);
+        for (id, port, p, away, sys) in [(ids[0], 0usize, first.a, [first.a[0] - first.b[0], first.a[1] - first.b[1], first.a[2] - first.b[2]], first.system), (ids[ids.len() - 1], 1usize, last.b, [last.b[0] - last.a[0], last.b[1] - last.a[1], last.b[2] - last.a[2]], last.system)] {
             let mp = openbim_document::MepPort { node: openbim_document::MepNode::Run(id), port };
             if data.partner(mp).is_some() || data.equip_links.iter().any(|q| q.port == mp) { continue; }
-                let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, [p[0], p[1]], 0.15, domain).filter(|(_, c)| c.system.compatible(sys)) else { continue };
-            data.equip_links.push(openbim_document::EquipLink { port: mp, element: el, connector: c.name });
+            let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, [p[0], p[1]], 0.15, domain).filter(|(_, c)| c.system.compatible(sys)) else { continue };
+            // the run must arrive along the connector's axis: its outward direction opposes the way the connector faces
+            let (n, k) = ((away[0] * away[0] + away[1] * away[1] + away[2] * away[2]).sqrt(), (c.dir[0] * c.dir[0] + c.dir[1] * c.dir[1] + c.dir[2] * c.dir[2]).sqrt());
+            if n < 1e-9 || k < 1e-9 || -(away[0] * c.dir[0] + away[1] * c.dir[1] + away[2] * c.dir[2]) / (n * k) < 10f64.to_radians().cos() { continue; }
+            let q = openbim_document::EquipLink { port: mp, element: el, connector: c.name.clone() };
+            cmds.extend(crate::compute_ui::snap_commands(&self.document, &q, &c));
+            data.equip_links.push(q);
             made += 1;
         }
-        if made > 0 && self.document.transact(self.document.revision(), &[openbim_document::Command::SetMep(Box::new(data))]).is_ok() {
-            self.message = format!("{made} end(s) joined to equipment connectors");
+        if made > 0 {
+            cmds.push(openbim_document::Command::SetMep(Box::new(data)));
+            if self.document.transact(self.document.revision(), &cmds).is_ok() { self.message = format!("{made} end(s) joined to equipment connectors"); }
         }
     }
 

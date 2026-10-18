@@ -677,10 +677,13 @@ mod tests {
         let air = instance_connectors(&app.document, fcu).into_iter().find(|c| c.name == air.name).unwrap();
         app.choose_tool(Tool::Duct);
         app.elevation_mm = 2200.0;
-        app.run_click([air.pos[0] - 3.0, air.pos[1]]);
-        app.run_click([air.pos[0], air.pos[1]]);
+        app.run_click([air.pos[0] + 3.0 * air.dir[0], air.pos[1] + 3.0 * air.dir[1]]);
+        app.run_click([air.pos[0] + 0.1 * air.dir[0], air.pos[1] + 0.1 * air.dir[1]]);
         app.finish_run(lv);
-        // the run was joined to the connector when it was drawn
+        // the run was joined to the connector when it was drawn, and put exactly on it
+        let run_end = |app: &Desktop| { let id = app.document.mep().equip_links[0].port; let r = app.document.mep_run(match id.node { openbim_document::MepNode::Run(r) => r, _ => unreachable!() }).unwrap(); if id.port == 0 { r.a } else { r.b } };
+        let end = run_end(&app);
+        assert!(end.iter().zip(&air.pos).all(|(a, b)| (a - b).abs() < 1e-9), "{end:?} against {:?}", air.pos);
         assert_eq!(app.document.mep().equip_links.len(), 1, "{}", app.message);
         assert_eq!(app.document.mep().equip_links[0].element, fcu);
         app.choose_tool(Tool::EndPoint);
@@ -695,9 +698,24 @@ mod tests {
         let lines = openbim_document::native::records(&app.document);
         assert_eq!(openbim_document::native::parse_mep(&lines).unwrap(), *app.document.mep());
         let out = crate::export::export_ifc_as(&app.document, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4).unwrap();
+        assert_eq!(out.text.matches("IFCRELCONNECTSPORTS(").count(), 1, "the run end is joined to the unit's own port");
+        assert!(!out.text.contains("OpenBIM_Equipment"), "no placeholder: the unit's own port is used");
+        assert!(!out.warnings.iter().any(|w| w.contains("do not fit")), "{:?}", out.warnings);
         let mut back = Document::new();
         crate::import::import_ifc(&mut back, &out.text).unwrap();
         assert_eq!(back.mep().equip_links, app.document.mep().equip_links);
+        // the unit moves: the run follows it, exactly, and the join stays
+        app.document.transact(app.document.revision(), &[Command::SetGeometry { id: fcu, geometry: Geometry::Placed { at: [9.0, 6.0], level: lv } }]).unwrap();
+        assert_eq!(app.refresh_equipment_ends(), 1, "{}", app.message);
+        let air2 = instance_connectors(&app.document, fcu).into_iter().find(|c| c.name == air.name).unwrap();
+        let end = run_end(&app);
+        assert!(end.iter().zip(&air2.pos).all(|(a, b)| (a - b).abs() < 1e-9), "{end:?} against {:?}", air2.pos);
+        assert_eq!(app.document.mep().equip_links.len(), 1);
+        assert_eq!(app.refresh_equipment_ends(), 0);
+        app.undo_document();
+        let end = run_end(&app);
+        assert!(end.iter().zip(&air.pos).all(|(a, b)| (a - b).abs() < 1e-9), "undo puts the run back: {end:?}");
+        app.document.transact(app.document.revision(), &[Command::SetGeometry { id: fcu, geometry: Geometry::Placed { at: [8.0, 5.0], level: lv } }]).unwrap();
         // the end point differs from what the unit gives now (as after a change of type): compute brings it back
         let mut stale = app.document.mep().clone();
         stale.endpoints[0].demand = openbim_document::EndDemand::Flow(0.25);

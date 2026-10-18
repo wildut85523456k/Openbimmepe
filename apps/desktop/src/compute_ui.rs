@@ -191,19 +191,25 @@ impl Desktop {
         })
     }
 
-    /// End points tied to equipment take the equipment's flow and pressure drop again (one undoable step). Gives how many changed.
+    /// Brings what is tied to equipment up to date: a run end joined to a connector follows the unit (the whole run moves
+    /// when its other end is free, otherwise the end is stretched), and an end point takes the unit's flow and pressure
+    /// drop again. One undoable step. Gives how many run ends and end points changed.
     pub(crate) fn refresh_equipment_ends(&mut self) -> usize {
         let mut data = self.document.mep().clone();
-        let mut changed = 0;
+        let (mut ends, mut moved) = (0, 0);
+        let mut cmds: Vec<Command> = Vec::new();
         for q in data.equip_links.clone() {
-            let Some(e) = data.endpoints.iter_mut().find(|e| e.port == q.port && matches!(e.demand, EndDemand::Flow(_))) else { continue };
             let Some(c) = crate::elec_ui::instance_connectors(&self.document, q.element).into_iter().find(|c| c.name == q.connector && matches!(c.domain, openbim_family::mep::Domain::Duct | openbim_family::mep::Domain::Pipe)) else { continue };
-            if e.demand != EndDemand::Flow(c.flow) || e.required_pressure_pa != c.pressure_drop { (e.demand, e.required_pressure_pa) = (EndDemand::Flow(c.flow), c.pressure_drop); changed += 1; }
+            let snap = snap_commands(&self.document, &q, &c);
+            if !snap.is_empty() { moved += 1; cmds.extend(snap); }
+            let Some(e) = data.endpoints.iter_mut().find(|e| e.port == q.port && matches!(e.demand, EndDemand::Flow(_))) else { continue };
+            if e.demand != EndDemand::Flow(c.flow) || e.required_pressure_pa != c.pressure_drop { (e.demand, e.required_pressure_pa) = (EndDemand::Flow(c.flow), c.pressure_drop); ends += 1; }
         }
-        if changed > 0 {
-            self.message = match self.document.transact(self.document.revision(), &[Command::SetMep(Box::new(data))]) { Ok(_) => format!("{changed} end point(s) updated from their equipment; undo reverts"), Err(e) => format!("Rejected ({e:?})") };
+        if ends + moved > 0 {
+            if ends > 0 { cmds.push(Command::SetMep(Box::new(data))); }
+            self.message = match self.document.transact(self.document.revision(), &cmds) { Ok(_) => format!("{moved} run end(s) moved to their equipment, {ends} end point(s) updated; undo reverts"), Err(e) => format!("Rejected ({e:?})") };
         }
-        changed
+        ends + moved
     }
 
     pub(crate) fn run_compute(&mut self) {
@@ -446,4 +452,36 @@ mod tests {
         // a bad catalogue line is explained
         assert!(parse_catalogue("a,b,c\n300x200,300\n", true).is_err());
     }
+}
+
+/// The commands that put the run end of `q` on the connector `c`: when the run's other end is free (nothing joined, no
+/// tap on the run) the whole run moves, so it keeps its direction and square-on meeting; otherwise the end is stretched
+/// to the connector and the run takes the slope the height asks. Nothing when it is there already (or cannot follow).
+pub(crate) fn snap_commands(doc: &Document, q: &openbim_document::EquipLink, c: &openbim_family::mep::Connector) -> Vec<Command> {
+    let MepNode::Run(id) = q.port.node else { return Vec::new() };
+    let Some(e) = doc.get(id) else { return Vec::new() };
+    let Some(Geometry::Linear { start, end, level }) = e.geometry else { return Vec::new() };
+    let lz = doc.get(level).map_or(0.0, |l| l.elevation_m);
+    let (z0, slope) = (lz + e.elevation_m, e.slope_ratio.unwrap_or(0.0));
+    let plan = (end[0] - start[0]).hypot(end[1] - start[1]);
+    let z1 = z0 + slope * plan;
+    let (p, pz) = if q.port.port == 0 { (start, z0) } else { (end, z1) };
+    let d = [c.pos[0] - p[0], c.pos[1] - p[1], c.pos[2] - pz];
+    if d.iter().all(|v| v.abs() < 1e-9) { return Vec::new(); }
+    let other = MepPort { node: q.port.node, port: 1 - q.port.port };
+    let has_taps = doc.mep().taps.iter().any(|t| t.run == id);
+    let mut out = Vec::new();
+    if doc.mep().partner(other).is_none() && !has_taps {
+        out.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: [start[0] + d[0], start[1] + d[1]], end: [end[0] + d[0], end[1] + d[1]], level } });
+        if d[2].abs() > 1e-12 { out.push(Command::MoveElevation { id, elevation_m: e.elevation_m + d[2] }); }
+    } else {
+        let (ns, ne) = if q.port.port == 0 { ([c.pos[0], c.pos[1]], end) } else { (start, [c.pos[0], c.pos[1]]) };
+        let np = (ne[0] - ns[0]).hypot(ne[1] - ns[1]);
+        if np < 0.05 || (q.port.port == 0 && has_taps) { return Vec::new(); }
+        let (nz0, nz1) = if q.port.port == 0 { (c.pos[2], z1) } else { (z0, c.pos[2]) };
+        out.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: ns, end: ne, level } });
+        out.push(Command::MoveElevation { id, elevation_m: nz0 - lz });
+        out.push(Command::SetSlope { id, slope_ratio: (nz1 - nz0) / np });
+    }
+    out
 }
