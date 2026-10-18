@@ -111,12 +111,32 @@ impl Desktop {
         };
         match self.document.place_mep_route(level, &route) {
             Ok(ids) => {
+                self.link_run_ends_to_equipment(level, &route, &ids);
                 let (runs, fits) = (ids.len(), route.fittings.len());
                 self.run_points.clear();
                 self.run_sizes.clear();
                 self.message = format!("{runs} {} and {fits} fitting{} placed; undo removes them", if self.tool == Tool::Pipe { "pipes" } else { "ducts" }, if fits == 1 { "" } else { "s" });
             }
             Err(e) => self.message = format!("Run rejected ({e:?})"),
+        }
+    }
+
+    /// A new run that ends on a connector of a family instance (same kind, a system that fits, within 15 cm in plan) is
+    /// joined to it, as Revit does. One more undoable step.
+    fn link_run_ends_to_equipment(&mut self, level: ElementId, route: &openbim_route::Route, ids: &[ElementId]) {
+        let (Some(first), Some(last)) = (route.runs.first(), route.runs.last()) else { return };
+        let domain = self.run_domain();
+        let mut data = self.document.mep().clone();
+        let mut made = 0;
+        for (id, port, p, sys) in [(ids[0], 0usize, first.a, first.system), (ids[ids.len() - 1], 1usize, last.b, last.system)] {
+            let mp = openbim_document::MepPort { node: openbim_document::MepNode::Run(id), port };
+            if data.partner(mp).is_some() || data.equip_links.iter().any(|q| q.port == mp) { continue; }
+                let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, [p[0], p[1]], 0.15, domain).filter(|(_, c)| c.system.compatible(sys)) else { continue };
+            data.equip_links.push(openbim_document::EquipLink { port: mp, element: el, connector: c.name });
+            made += 1;
+        }
+        if made > 0 && self.document.transact(self.document.revision(), &[openbim_document::Command::SetMep(Box::new(data))]).is_ok() {
+            self.message = format!("{made} end(s) joined to equipment connectors");
         }
     }
 

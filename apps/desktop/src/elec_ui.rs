@@ -639,7 +639,7 @@ mod tests {
         let fcu = app.document.place_family(lv, [5.0, 5.0], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 90.0, elevation_m: 2.2 }).unwrap();
         let conns = instance_connectors(&app.document, fcu);
         let power = conns.iter().find(|c| c.domain == Domain::Electrical).expect("electrical connector").clone();
-        let air = conns.iter().find(|c| c.domain == Domain::Duct && c.flow > 0.0).expect("an air connector").clone();
+        let air = conns.iter().find(|c| c.domain == Domain::Duct && c.flow > 0.0 && c.system == openbim_family::mep::System::SupplyAir).expect("an air connector").clone();
         // a click near the unit makes a load at its connector with the connector's power
         app.choose_tool(Tool::ElecNode);
         app.elec_draft.kind = ElecKind::Load;
@@ -680,6 +680,9 @@ mod tests {
         app.run_click([air.pos[0] - 3.0, air.pos[1]]);
         app.run_click([air.pos[0], air.pos[1]]);
         app.finish_run(lv);
+        // the run was joined to the connector when it was drawn
+        assert_eq!(app.document.mep().equip_links.len(), 1, "{}", app.message);
+        assert_eq!(app.document.mep().equip_links[0].element, fcu);
         app.choose_tool(Tool::EndPoint);
         app.end_draft.mark = crate::compute_ui::Mark::Terminal;
         app.end_draft.kind = 4;
@@ -687,5 +690,23 @@ mod tests {
         let e = app.document.mep().endpoints.first().unwrap_or_else(|| panic!("{}", app.message));
         assert_eq!(e.demand, openbim_document::EndDemand::Flow(air.flow));
         assert_eq!(e.required_pressure_pa, air.pressure_drop);
+        assert_eq!(app.document.mep().equip_links.len(), 1);
+        // the tie is saved, comes back from the file, and a change of the unit's airflow reaches the end point on compute
+        let lines = openbim_document::native::records(&app.document);
+        assert_eq!(openbim_document::native::parse_mep(&lines).unwrap(), *app.document.mep());
+        let out = crate::export::export_ifc_as(&app.document, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4).unwrap();
+        let mut back = Document::new();
+        crate::import::import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(back.mep().equip_links, app.document.mep().equip_links);
+        // the end point differs from what the unit gives now (as after a change of type): compute brings it back
+        let mut stale = app.document.mep().clone();
+        stale.endpoints[0].demand = openbim_document::EndDemand::Flow(0.25);
+        app.document.transact(app.document.revision(), &[Command::SetMep(Box::new(stale))]).unwrap();
+        assert_eq!(app.refresh_equipment_ends(), 1, "{}", app.message);
+        assert_eq!(app.document.mep().endpoints[0].demand, openbim_document::EndDemand::Flow(air.flow));
+        assert_eq!(app.refresh_equipment_ends(), 0);
+        // deleting the unit drops the tie but keeps the end point and the run
+        app.document.transact(app.document.revision(), &[Command::Delete { id: fcu }]).unwrap();
+        assert!(app.document.mep().equip_links.is_empty() && app.document.mep().endpoints.len() == 1);
     }
 }

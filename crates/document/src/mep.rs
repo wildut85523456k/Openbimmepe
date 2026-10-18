@@ -65,6 +65,15 @@ pub enum EndDemand {
     Sprinkler { k_l_min_bar: f64, min_flow_l_min: f64 },
 }
 
+/// A duct or pipe end joined to a connector of a family instance (an air handler, a fan coil, a pump).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EquipLink {
+    pub port: MepPort,
+    pub element: ElementId,
+    /// the connector's name in the family
+    pub connector: String,
+}
+
 /// A source or a terminal at an open port of a run or fitting.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MepEndpoint {
@@ -87,10 +96,12 @@ pub struct MepData {
     pub elec_nodes: Vec<crate::elec::ElecNode>,
     /// the cables between them
     pub elec_cables: Vec<crate::elec::ElecCable>,
+    /// run ends joined to equipment connectors
+    pub equip_links: Vec<EquipLink>,
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -117,6 +128,7 @@ impl MepData {
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
             run_systems: self.run_systems.iter().filter(|(r, _)| is_run(elements.get(r))).copied().collect(),
             endpoints: self.endpoints.iter().filter(|e| alive(&e.port.node)).copied().collect(),
+            equip_links: self.equip_links.iter().filter(|q| alive(&q.port.node) && elements.get(&q.element).is_some_and(|x| x.category == Category::Family)).cloned().collect(),
             elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().map(|mut n| { if n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family)) { n.element = None; n.connector.clear(); } n }).collect(),
             elec_cables: { let keep: std::collections::BTreeSet<u64> = self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).map(|n| n.id).collect(); self.elec_cables.iter().filter(|c| keep.contains(&c.from) && keep.contains(&c.to)).cloned().collect() },
         }
@@ -170,6 +182,11 @@ impl MepData {
             }
         }
         if self.elec_nodes.iter().any(|n| n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family))) { return Err(EditError::InvalidMep); }
+        let mut linked = std::collections::BTreeSet::new();
+        for q in &self.equip_links {
+            let open = matches!(q.port.node, MepNode::Run(_)) && ports(&q.port.node).is_some_and(|n| q.port.port < n) && self.partner(q.port).is_none();
+            if !open || q.connector.is_empty() || !elements.get(&q.element).is_some_and(|x| x.category == Category::Family) || !linked.insert(q.port) { return Err(EditError::InvalidMep); }
+        }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }
         Ok(())

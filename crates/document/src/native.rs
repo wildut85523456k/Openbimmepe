@@ -158,6 +158,7 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
         };
         out.push(format!("N|p={}|role={}|dem={dem}|rp={:?}", port_text(&e.port), if e.role == super::EndRole::Source { "S" } else { "T" }, e.required_pressure_pa));
     }
+    for q in &m.equip_links { out.push(format!("Q|p={}|el={}|cn={}", port_text(&q.port), q.element.0, esc(&q.connector))); }
     for n in &m.elec_nodes {
         let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
         let motor = n.motor.map_or("N".to_string(), |(m, p)| format!("{m:?}:{p:?}"));
@@ -176,11 +177,12 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
         let opt = |t: &str| -> Result<Option<f64>, String> { if t == "N" { Ok(None) } else { num(t).map(Some) } };
+        if line.starts_with("Q|") { m.equip_links.push(super::EquipLink { port: parse_port(get("p")?)?, element: ElementId(int(get("el")?)?), connector: unesc(get("cn")?)? }); continue; }
         if line.starts_with("B|") {
             let kind = match get("kind")? { "S" => super::ElecKind::Source, "B" => super::ElecKind::Board, "L" => super::ElecKind::Load, _ => return Err("an unknown electrical node kind".into()) };
             let motor = match get("mot")? { "N" => None, t => { let (a, b) = t.split_once(':').ok_or("a motor without ':'")?; Some((num(a)?, num(b)?)) } };
@@ -246,7 +248,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

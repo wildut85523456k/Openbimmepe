@@ -18,7 +18,7 @@ mod warnings;
 pub use rebar::BarPath;
 pub use types::TypeValues;
 pub use elec::{ElecCable, ElecKind, ElecNode};
-pub use mep::{EndDemand, EndRole, MepData, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
+pub use mep::{EquipLink, EndDemand, EndRole, MepData, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
 pub use spatial::{system_lines, BeamExtent, Geometry, Mesh};
 

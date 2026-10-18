@@ -129,6 +129,7 @@ impl Desktop {
         let mut data = self.document.mep().clone();
         let had = data.endpoints.len();
         data.endpoints.retain(|e| e.port != port);
+        data.equip_links.retain(|q| q.port != port);
         let removed = data.endpoints.len() != had;
         let d = self.end_draft.clone();
         match d.mark {
@@ -140,6 +141,7 @@ impl Desktop {
                 let (domain, at) = (if self.document.get(match port.node { MepNode::Run(id) => id, _ => ElementId(0) }).is_some_and(|e| e.category == Category::Pipe) { openbim_family::mep::Domain::Pipe } else { openbim_family::mep::Domain::Duct }, port_pos(&self.document, port).unwrap_or(at));
                 let Some((el, c)) = crate::elec_ui::equipment_connector_near(&self.document, level, at, 0.6, domain) else { self.message = "End point: no equipment connector of this kind within 0.6 m of that end".into(); return };
                 if c.flow <= 0.0 { self.message = format!("The connector '{}' of {} has no flow", c.name, self.document.get(el).map_or("the equipment", |e| e.name.as_str())); return; }
+                data.equip_links.push(openbim_document::EquipLink { port, element: el, connector: c.name.clone() });
                 data.endpoints.push(MepEndpoint { port, role: EndRole::Terminal, demand: EndDemand::Flow(c.flow), required_pressure_pa: c.pressure_drop });
             }
             Mark::Terminal => data.endpoints.push(MepEndpoint { port, role: EndRole::Terminal, demand: d.demand(), required_pressure_pa: d.pressure_kpa * 1000.0 }),
@@ -189,8 +191,24 @@ impl Desktop {
         })
     }
 
+    /// End points tied to equipment take the equipment's flow and pressure drop again (one undoable step). Gives how many changed.
+    pub(crate) fn refresh_equipment_ends(&mut self) -> usize {
+        let mut data = self.document.mep().clone();
+        let mut changed = 0;
+        for q in data.equip_links.clone() {
+            let Some(e) = data.endpoints.iter_mut().find(|e| e.port == q.port && matches!(e.demand, EndDemand::Flow(_))) else { continue };
+            let Some(c) = crate::elec_ui::instance_connectors(&self.document, q.element).into_iter().find(|c| c.name == q.connector && matches!(c.domain, openbim_family::mep::Domain::Duct | openbim_family::mep::Domain::Pipe)) else { continue };
+            if e.demand != EndDemand::Flow(c.flow) || e.required_pressure_pa != c.pressure_drop { (e.demand, e.required_pressure_pa) = (EndDemand::Flow(c.flow), c.pressure_drop); changed += 1; }
+        }
+        if changed > 0 {
+            self.message = match self.document.transact(self.document.revision(), &[Command::SetMep(Box::new(data))]) { Ok(_) => format!("{changed} end point(s) updated from their equipment; undo reverts"), Err(e) => format!("Rejected ({e:?})") };
+        }
+        changed
+    }
+
     pub(crate) fn run_compute(&mut self) {
         self.compute.error.clear();
+        self.refresh_equipment_ends();
         let settings = match self.compute_settings() { Ok(s) => s, Err(e) => { self.compute.error = e; return } };
         match compute::compute_system(&self.document, &settings) {
             Ok(r) => { self.message = format!("{} computed: {} runs, duty {:.1} kPa", r.system.name(), r.runs.len(), r.source_pressure / 1000.0); self.compute.report = Some((self.document.revision(), r)); }
