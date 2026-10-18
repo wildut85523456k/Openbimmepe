@@ -2,11 +2,13 @@
 name = "openbim-sheets"
 version = "0.0.1"
 edition = "2021"
+rust-version = "1.88"
 description = "Sheets, title blocks, discipline view visibility, vector PDF/DXF printing and Excel sheet-set import"
 publish = false
 
 [dependencies]
-calamine = "0.26"
+# Pinned upstream fix uses quick-xml >=0.41 and zip >=9; replace with a release when available.
+calamine = { git = "https://github.com/tafia/calamine.git", rev = "39ebf5d851543e4f3dc5964baeadd383eb17a3ae" }
 
 [dev-dependencies]
 proptest = "1"
