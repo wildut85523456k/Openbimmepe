@@ -1,10 +1,40 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
+use eframe::egui;
 use openbim_document::{FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 impl Desktop {
     pub(crate) fn selected_id(&self) -> Option<ElementId> {
         match self.selected { Some(SampleElement::Duct) => Some(ElementId(1)),
             Some(SampleElement::Model(id)) => Some(id), _ => None }
+    }
+
+    /// The document's warnings, worked out again only when the document has changed.
+    pub(crate) fn warnings(&mut self) -> &[openbim_document::Warning] {
+        if self.warnings_cache.0 != self.document.revision() {
+            self.warnings_cache = (self.document.revision(), self.document.warnings());
+        }
+        &self.warnings_cache.1
+    }
+
+    /// A window listing the warnings, each with a button that selects the element it is about.
+    pub(crate) fn warnings_window(&mut self, ctx: &egui::Context) {
+        if !self.show_warnings { return; }
+        let list: Vec<_> = self.warnings().to_vec();
+        let mut open = true;
+        let mut pick = None;
+        egui::Window::new("Warnings").open(&mut open).default_width(420.0).show(ctx, |ui| {
+            if list.is_empty() { ui.label("The model has no warnings."); }
+            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                for w in &list {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.small_button("Select").clicked() { pick = w.elements.first().copied(); }
+                        ui.label(&w.message);
+                    });
+                }
+            });
+        });
+        if !open { self.show_warnings = false; }
+        if let Some(id) = pick { self.select_element(Some(id)); }
     }
 
     pub(crate) fn select_element(&mut self, id: Option<ElementId>) {
@@ -801,6 +831,35 @@ mod tests {
         assert_eq!(app.document.system_beams(t).len(), 6);
         app.undo_document();
         assert_eq!(app.document.system_beams(t).len(), 10);
+    }
+
+    #[test]
+    fn warnings_are_counted_listed_and_select_the_element_they_are_about() {
+        let mut app = Desktop::sample();
+        assert!(app.warnings().is_empty());
+        let beam = app.document.place_beam(ElementId(10), &BeamSpec::level([1.0, 3.0], [7.0, 3.0], 0.3, 0.5, 2.8)).unwrap();
+        app.run_command("rebar", "Rebar");
+        app.rebar_click(beam);
+        assert!(app.document.elements().any(|e| e.category == Category::Rebar), "{}", app.message);
+        assert!(app.warnings().is_empty());
+        // the beam is made too narrow for its bars: the rebar is not drawn and the list says why
+        app.select_element(Some(beam));
+        app.width_mm = 60.0;
+        app.apply_selected_edit();
+        let message = app.message.clone();
+        assert_eq!(app.warnings().len(), 1, "{message}");
+        assert!(app.warnings()[0].message.contains("do not fit"));
+        app.show_warnings = true;
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 550.0))), ..Default::default() }, |ui| app.warnings_window(ui.ctx()));
+        assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
+        app.select_element(None);
+        let first = app.warnings()[0].elements[0];
+        app.select_element(Some(first));
+        assert_eq!(app.selected_id(), Some(first));
+        app.undo_document();
+        assert!(app.warnings().is_empty(), "the list follows the document");
     }
 
     #[test]

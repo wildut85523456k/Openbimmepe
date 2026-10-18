@@ -86,6 +86,9 @@ struct Desktop {
     message: String,
     show_properties: bool,
     show_browser: bool,
+    /// the warnings window is open; the list is worked out again only when the document has a new revision
+    show_warnings: bool,
+    warnings_cache: (u64, Vec<openbim_document::Warning>),
     show_help: bool,
     dark: bool,
     zoom: f32,
@@ -133,7 +136,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - no BIM edits are saved".into(),
-            show_properties: true, show_browser: true, show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -313,10 +316,15 @@ impl eframe::App for Desktop {
                 ui.separator();
                 ui.label(format!("In-memory BIM revision {} | NOT saved / synchronized", self.document.revision()));
                 ui.separator();
+                let n = self.warnings().len();
+                let label = if n == 0 { "No warnings".to_string() } else { format!("⚠ {n} warning{}", if n == 1 { "" } else { "s" }) };
+                if ui.selectable_label(self.show_warnings, label).clicked() { self.show_warnings = !self.show_warnings; }
+                ui.separator();
                 ui.checkbox(&mut self.show_properties, "Properties");
                 ui.checkbox(&mut self.show_browser, "Browser");
             });
         });
+        self.warnings_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));

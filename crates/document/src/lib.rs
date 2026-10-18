@@ -8,7 +8,9 @@
 use std::collections::BTreeMap;
 mod spatial;
 mod rebar;
+mod warnings;
 pub use rebar::BarPath;
+pub use warnings::{Warning, WarningKind};
 pub use spatial::{system_lines, BeamExtent, Geometry, Mesh};
 
 /// Document-local, stable element identity. Future versions require
