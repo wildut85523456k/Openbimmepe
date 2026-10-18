@@ -171,7 +171,7 @@ const MODIFY: &[Group] = &[
     Group { title: "Clipboard", commands: &[c("copy", "Copy")] },
     Group { title: "Modify", commands: &[
         c("move", "Move"), c("rotate", "Rotate"), c("mirror", "Mirror"), c("align", "Align"),
-        c("trim", "Trim/Extend"), c("delete", "Delete"),
+        c("offset", "Offset"), c("trim", "Trim/Extend"), c("delete", "Delete"),
     ]},
     Group { title: "Measure", commands: &[c("measure", "Measure")] },
 ];

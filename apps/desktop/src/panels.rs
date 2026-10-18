@@ -300,6 +300,19 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         });
         return;
     }
+    if matches!(app.tool, crate::Tool::Align | crate::Tool::Trim | crate::Tool::Offset) {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong(match app.tool { crate::Tool::Align => "Modify | Align", crate::Tool::Trim => "Modify | Trim/Extend to Corner", _ => "Modify | Offset" });
+            ui.separator();
+            if app.tool == crate::Tool::Offset {
+                ui.label("Offset (mm)");
+                ui.add(egui::DragValue::new(&mut app.offset_mm).speed(10.0).range(1.0..=100000.0));
+                ui.checkbox(&mut app.offset_copy, "Copy");
+            }
+            if let Some((id, _)) = app.edit_ref { if let Some(e) = app.document.get(id) { ui.label(format!("first: {}", e.name)); } }
+        });
+        return;
+    }
     if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) {
         ui.horizontal_wrapped(|ui| {
             ui.strong(match app.tool { crate::Tool::Move => "Modify | Move", crate::Tool::Copy => "Modify | Copy", crate::Tool::Rotate => "Modify | Rotate", _ => "Modify | Mirror" });

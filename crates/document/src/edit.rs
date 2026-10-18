@@ -173,6 +173,61 @@ impl Document {
         Ok(ops)
     }
 
+    /// The line a wall, beam or grid is drawn on, with its level for the first two.
+    fn line_of(&self, id: ElementId) -> Option<(P, P)> {
+        let e = self.get(id)?;
+        match e.geometry {
+            Some(Geometry::Linear { start, end, .. }) if matches!(e.category, Category::Wall | Category::Beam) => Some((start, end)),
+            Some(Geometry::Grid { start, end }) => Some((start, end)),
+            _ => None,
+        }
+    }
+
+    /// Trim/Extend to Corner: two walls (or beams), each picked on the part to keep, are trimmed or extended to meet
+    /// at the corner of their lines.
+    pub fn trim_corner_commands(&self, a: ElementId, pick_a: P, b: ElementId, pick_b: P) -> Result<Vec<Command>, String> {
+        if a == b { return Err("pick two different elements".into()); }
+        let (la, lb) = (self.line_of(a).filter(|_| self.get(a).is_some_and(|e| e.category != Category::Grid)).ok_or("trim: pick walls or beams")?,
+            self.line_of(b).filter(|_| self.get(b).is_some_and(|e| e.category != Category::Grid)).ok_or("trim: pick walls or beams")?);
+        let v = super::line_meet(la.0, [la.1[0] - la.0[0], la.1[1] - la.0[1]], lb.0, [lb.1[0] - lb.0[0], lb.1[1] - lb.0[1]]).ok_or("the two lines are parallel and never meet")?;
+        let mut ops = Vec::new();
+        for (id, (s, t), pick) in [(a, la, pick_a), (b, lb, pick_b)] {
+            let (dx, dy) = (t[0] - s[0], t[1] - s[1]);
+            let l2 = dx * dx + dy * dy;
+            let param = |q: P| ((q[0] - s[0]) * dx + (q[1] - s[1]) * dy) / l2;
+            let (ns, nt) = if param(v) < param(pick) { (v, t) } else { (s, v) };
+            if (ns[0] - nt[0]).hypot(ns[1] - nt[1]) < 0.01 { return Err("the corner would leave no length".into()); }
+            if (ns, nt) == (s, t) { continue; }
+            let level = match self.get(id).and_then(|e| e.geometry) { Some(Geometry::Linear { level, .. }) => level, _ => return Err("trim: pick walls or beams".into()) };
+            ops.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: ns, end: nt, level } });
+        }
+        if ops.is_empty() { return Err("they already meet at the corner".into()); }
+        Ok(ops)
+    }
+
+    /// The move that puts `target` on the line of `reference` (both walls, beams or grids that run the same way).
+    pub fn align_xf(&self, reference: ElementId, target: ElementId) -> Result<Xf, String> {
+        let (r, t) = (self.line_of(reference).ok_or("align: pick walls, beams or grids")?, self.line_of(target).ok_or("align: pick walls, beams or grids")?);
+        let (rd, td) = ([r.1[0] - r.0[0], r.1[1] - r.0[1]], [t.1[0] - t.0[0], t.1[1] - t.0[1]]);
+        let (rl, tl) = (rd[0].hypot(rd[1]), td[0].hypot(td[1]));
+        if (rd[0] * td[1] - rd[1] * td[0]).abs() / (rl * tl) > 1e-3 { return Err("they do not run the same way".into()); }
+        let n = [-rd[1] / rl, rd[0] / rl];
+        let d = (r.0[0] - t.0[0]) * n[0] + (r.0[1] - t.0[1]) * n[1];
+        if d.abs() < 1e-6 { return Err("they are aligned already".into()); }
+        Ok(Xf::Move([n[0] * d, n[1] * d]))
+    }
+
+    /// The move of Offset: `dist` metres at right angles to the line of `id`, to the side `toward` is on.
+    pub fn offset_xf(&self, id: ElementId, dist: f64, toward: P) -> Result<Xf, String> {
+        let (s, t) = self.line_of(id).ok_or("offset: pick a wall, a beam or a grid")?;
+        let (dx, dy) = (t[0] - s[0], t[1] - s[1]);
+        let l = dx.hypot(dy);
+        if dist <= 0.0 { return Err("offset: the distance must be more than zero".into()); }
+        let side = (toward[0] - s[0]) * -dy + (toward[1] - s[1]) * dx;
+        let k = if side >= 0.0 { 1.0 } else { -1.0 };
+        Ok(Xf::Move([-dy / l * dist * k, dx / l * dist * k]))
+    }
+
     /// Copies `ids` and what goes with them, changed by `xf`: the commands and the numbers of the copies of `ids`.
     pub fn copy_commands(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<ElementId>), String> {
         let copies = self.transformed_set(ids, xf, true)?;
@@ -298,5 +353,39 @@ mod tests {
         assert!(near(line(&d, ElementId(20)).0, [0.0, -1.0]) && near(line(&d, b).0, [8.0, 0.0]));
         assert!(d.wall_end_commands(ElementId(20), true, [8.0, 0.0]).is_err(), "no length left");
         assert!(d.wall_end_commands(ElementId(10), true, [1.0, 1.0]).is_err());
+    }
+
+    #[test]
+    fn trim_align_and_offset_work_on_the_lines_of_walls() {
+        let mut d = Document::spatial_sample();
+        let level = match d.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        // two walls that do not reach each other, and one that crosses past the other
+        let b = d.place_wall(level, [10.0, 2.0], [10.0, 8.0], 0.2, 3.0, 0.0).unwrap();
+        let c = d.place_wall(level, [4.0, -3.0], [4.0, 5.0], 0.2, 3.0, 0.0).unwrap();
+        // corner of wall 20 (y=0) and b (x=10): 20 is extended, b is extended down
+        let ops = d.trim_corner_commands(ElementId(20), [2.0, 0.0], b, [10.0, 6.0]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, ElementId(20)).1, [10.0, 0.0]) && near(line(&d, ElementId(20)).0, [0.0, 0.0]));
+        assert!(near(line(&d, b).0, [10.0, 0.0]) && near(line(&d, b).1, [10.0, 8.0]));
+        // c crosses wall 20: picking the upper part of c and the left of 20 trims both back to the crossing
+        let ops = d.trim_corner_commands(ElementId(20), [1.0, 0.0], c, [4.0, 3.0]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, ElementId(20)).1, [4.0, 0.0]) && near(line(&d, c).0, [4.0, 0.0]) && near(line(&d, c).1, [4.0, 5.0]));
+        assert!(d.trim_corner_commands(ElementId(20), [1.0, 0.0], ElementId(20), [2.0, 0.0]).is_err());
+        let par = d.place_wall(level, [0.0, 9.0], [5.0, 9.0], 0.2, 3.0, 0.0).unwrap();
+        assert!(d.trim_corner_commands(ElementId(20), [1.0, 0.0], par, [1.0, 9.0]).unwrap_err().contains("parallel"));
+        // align: the parallel wall goes onto the line of wall 20 (y = 0)
+        let xf = d.align_xf(ElementId(20), par).unwrap();
+        let ops = d.transform_commands(&[par], xf).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, par).0, [0.0, 0.0]) && near(line(&d, par).1, [5.0, 0.0]));
+        assert!(d.align_xf(ElementId(20), par).unwrap_err().contains("already"));
+        assert!(d.align_xf(ElementId(20), c).unwrap_err().contains("same way"));
+        // offset: to the side of the pointer, either way
+        let up = d.offset_xf(ElementId(20), 1.5, [2.0, 7.0]).unwrap();
+        let down = d.offset_xf(ElementId(20), 1.5, [2.0, -7.0]).unwrap();
+        assert!(matches!(up, Xf::Move(v) if near(v, [0.0, 1.5])) && matches!(down, Xf::Move(v) if near(v, [0.0, -1.5])), "{up:?} {down:?}");
+        assert!(d.offset_xf(ElementId(20), 0.0, [2.0, 7.0]).is_err());
+        assert!(d.offset_xf(ElementId(10), 1.0, [2.0, 7.0]).is_err());
     }
 }

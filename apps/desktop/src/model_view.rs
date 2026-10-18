@@ -360,6 +360,19 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         } else if selected.is_none() && response.clicked() {
             if let Some(p) = response.interact_pointer_pos() { let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id); app.select_element(hit); }
         }
+    } else if matches!(app.tool, crate::Tool::Align | crate::Tool::Trim | crate::Tool::Offset) && !three_d {
+        // Revit's pick tools: Align takes the line to align to and then the element to move, Trim/Extend two elements
+        // on the parts to keep, Offset one element on the side to offset to.
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.edit_ref.is_some() { app.edit_ref = None; app.message = "Pick the first element".into(); } else { app.choose_tool(crate::Tool::Select); } }
+        else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id)
+                    .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0).map(|(id, _, _)| *id));
+                app.modify_click(hit, to_model(p));
+            }
+        }
     } else if app.tool == crate::Tool::Tag && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
@@ -1068,5 +1081,51 @@ mod tests {
         assert!(matches!(tag.geometry, Some(Geometry::Tag { anchor, .. }) if anchor[1] == after.0[1]));
         app.document.undo().unwrap();
         assert_eq!(wall_line(&app, ElementId(20)), before);
+    }
+
+    #[test]
+    fn offset_align_and_trim_work_by_clicking_the_elements() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
+        // Offset with Copy: a new wall 1.5 m to the side clicked; the original stays
+        app.run_command("offset", "Offset");
+        assert!(app.tool == crate::Tool::Offset);
+        app.offset_mm = 1500.0;
+        app.offset_copy = true;
+        let n = walls(&app);
+        app.modify_click(Some(ElementId(20)), [2.0, 0.5]);
+        assert_eq!(walls(&app), n + 1, "{}", app.message);
+        assert!(near(wall_line(&app, app.selected_id().unwrap()).0, [0.0, 1.5]) && near(wall_line(&app, ElementId(20)).0, [0.0, 0.0]));
+        // without Copy it moves the wall itself, to the other side
+        app.offset_copy = false;
+        app.modify_click(Some(ElementId(20)), [2.0, -0.5]);
+        assert!(near(wall_line(&app, ElementId(20)).0, [0.0, -1.5]), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        // Align: the second wall goes onto the line of the first, which stays the reference until Esc
+        let a = app.document.place_wall(level, [0.0, 6.0], [4.0, 6.0], 0.2, 3.0, 0.0).unwrap();
+        let b = app.document.place_wall(level, [0.0, 9.0], [4.0, 9.0], 0.2, 3.0, 0.0).unwrap();
+        app.run_command("align", "Align");
+        app.modify_click(Some(ElementId(20)), [1.0, 0.0]);
+        app.modify_click(Some(a), [1.0, 6.0]);
+        assert!(near(wall_line(&app, a).0, [0.0, -1.5]), "{}", app.message);
+        app.modify_click(Some(b), [1.0, 9.0]);
+        assert!(near(wall_line(&app, b).1, [4.0, -1.5]), "{}", app.message);
+        app.modify_click(None, [0.0, 0.0]);
+        assert!(app.message.contains("Click a wall"));
+        // Trim/Extend to Corner: two walls that stop short of each other meet at the corner
+        app.run_command("trim", "Trim/Extend");
+        let c = app.document.place_wall(level, [20.0, 0.0], [26.0, 0.0], 0.2, 3.0, 0.0).unwrap();
+        let d = app.document.place_wall(level, [30.0, 4.0], [30.0, 10.0], 0.2, 3.0, 0.0).unwrap();
+        app.modify_click(Some(c), [21.0, 0.0]);
+        app.modify_click(Some(d), [30.0, 8.0]);
+        assert!(near(wall_line(&app, c).1, [30.0, 0.0]) && near(wall_line(&app, d).0, [30.0, 0.0]), "{}", app.message);
+        app.document.undo().unwrap();
+        assert!(near(wall_line(&app, c).1, [26.0, 0.0]) && near(wall_line(&app, d).0, [30.0, 4.0]));
+        // a click on a wall in the plan reaches the tool
+        frame(&ctx, screen, &mut app, vec![]);
     }
 }

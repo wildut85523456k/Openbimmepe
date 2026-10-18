@@ -29,7 +29,7 @@ enum Workspace { Design, Coordination, Automation }
 enum View { Plan, UpperPlan, ThreeD, Mechanical, /// the plan of a level added with the Level tool
     Level(u64) }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Move, Copy, Rotate, Mirror, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+enum Tool { Select, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// What is being dragged in Select mode: an element to move, or one end of a wall.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Drag { Move { id: ElementId, from: [f64; 2] }, Grip { id: ElementId, at_start: bool } }
@@ -73,6 +73,10 @@ struct Desktop {
     edit_pts: Vec<[f64; 2]>,
     edit_num: String,
     drag: Option<Drag>,
+    /// Align, Trim/Extend and Offset: the element picked first (and where), and the offset distance and whether it copies
+    edit_ref: Option<(ElementId, [f64; 2])>,
+    offset_mm: f64,
+    offset_copy: bool,
     /// the element the points picked so far are about: a Copy goes on making copies of it
     edit_src: Option<ElementId>,
     mirror_copy: bool,
@@ -181,7 +185,7 @@ impl Desktop {
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
-            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, edit_src: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
+            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, edit_ref: None, offset_mm: 1000.0, offset_copy: false, edit_src: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
@@ -202,6 +206,7 @@ impl Desktop {
         self.edit_pts.clear();
         self.edit_num.clear();
         self.edit_src = None;
+        self.edit_ref = None;
         self.drag = None;
         self.slab_points.clear();
         self.run_points.clear();
@@ -229,6 +234,9 @@ impl Desktop {
             Tool::Copy => "Copy: pick the base point, then each point a copy goes to (or press, drag and release); type a distance in mm and Enter. Esc ends.".into(),
             Tool::Rotate => "Rotate: pick the centre, then the start and the end of the turn; or type an angle in degrees (counter-clockwise) and Enter. Esc ends.".into(),
             Tool::Mirror => "Mirror: draw the axis by two points (or press, drag and release); Copy in the options bar keeps the original. Esc ends.".into(),
+            Tool::Align => "Align: click the wall, beam or grid to align to, then the one to move onto its line (it keeps the reference until Esc).".into(),
+            Tool::Trim => "Trim/Extend to Corner: click the first wall on the part to keep, then the second wall on the part to keep; both meet at the corner of their lines (Esc ends).".into(),
+            Tool::Offset => "Offset: set the distance in the options bar and click a wall, beam or grid on the side to offset to; Copy keeps the original (Esc ends).".into(),
             Tool::Tag => "Tag: click an element in a plan view; the tag shows its type (or its name) and follows the element. With Leader on, the label stands off the element on a leader line. Esc ends.".into(),
             Tool::Grid => "Grid: click the start and the end of the grid line in a plan view, or press, drag and release; each is named after the last (Shift keeps it square, Esc ends).".into(),
             Tool::Level => "Level: set the elevation (and a name, if you want one) in the options bar and click in a plan view. Revit draws a level in an elevation view; there is none here yet, so the click only confirms. The level gets its own plan view.".into(),
@@ -290,6 +298,9 @@ impl Desktop {
             "grid" => self.choose_tool(Tool::Grid),
             "tag" => self.choose_tool(Tool::Tag),
             "move" => self.choose_tool(Tool::Move),
+            "align" => self.choose_tool(Tool::Align),
+            "trim" => self.choose_tool(Tool::Trim),
+            "offset" => self.choose_tool(Tool::Offset),
             "copy" => self.choose_tool(Tool::Copy),
             "rotate" => self.choose_tool(Tool::Rotate),
             "mirror" => self.choose_tool(Tool::Mirror),
@@ -353,7 +364,7 @@ impl Desktop {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
                             let active = matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

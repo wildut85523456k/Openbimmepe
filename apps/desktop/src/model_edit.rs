@@ -579,6 +579,42 @@ impl Desktop {
         }
     }
 
+    /// A click of Align, Trim/Extend or Offset on `hit` (or on nothing), at `at`.
+    pub(crate) fn modify_click(&mut self, hit: Option<ElementId>, at: [f64; 2]) {
+        let Some(id) = hit else { self.message = "Click a wall, beam or grid".into(); return };
+        let revision = self.document.revision();
+        match self.tool {
+            Tool::Align => match self.edit_ref {
+                None => { self.edit_ref = Some((id, at)); self.message = "Align: now click the element to move onto that line".into(); }
+                Some((reference, _)) => {
+                    let done = self.document.align_xf(reference, id).and_then(|xf| self.document.transform_commands(&[id], xf))
+                        .and_then(|ops| self.document.transact(revision, &ops).map_err(|e| format!("{e:?}")));
+                    self.message = match done { Ok(_) => "Aligned; undo takes it back (pick the next element, Esc ends)".into(), Err(e) => format!("Align: {e}") };
+                }
+            },
+            Tool::Trim => match self.edit_ref {
+                None => { self.edit_ref = Some((id, at)); self.message = "Trim/Extend: now click the second element on the part to keep".into(); }
+                Some((first, first_at)) => {
+                    self.edit_ref = None;
+                    let done = self.document.trim_corner_commands(first, first_at, id, at)
+                        .and_then(|ops| self.document.transact(revision, &ops).map_err(|e| format!("{e:?}")));
+                    self.message = match done { Ok(_) => "Trimmed to the corner; undo takes it back".into(), Err(e) => format!("Trim/Extend: {e}") };
+                }
+            },
+            Tool::Offset => {
+                let result = self.document.offset_xf(id, self.offset_mm / 1000.0, at).and_then(|xf| {
+                    if self.offset_copy { self.document.copy_commands(&[id], xf).map(|(ops, n)| (ops, n.first().copied())) }
+                    else { self.document.transform_commands(&[id], xf).map(|ops| (ops, None)) }
+                }).and_then(|(ops, new)| self.document.transact(revision, &ops).map(|_| new).map_err(|e| format!("{e:?}")));
+                match result {
+                    Ok(new) => { if let Some(n) = new { self.select_element(Some(n)); } self.message = "Offset; undo takes it back".into(); }
+                    Err(e) => self.message = format!("Offset: {e}"),
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Delete: the selected element with what is hosted by it or tagged on it, in one undoable step.
     pub(crate) fn delete_selected(&mut self) {
         let Some(id) = self.selected_id() else { self.message = "Delete: select an element first".into(); return };

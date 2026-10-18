@@ -99,6 +99,7 @@ pub static ICONS: &[Icon] = &[
     icon!("measure"),
     icon!("mechanical_equipment"),
     icon!("mirror"),
+    icon!("offset"),
     icon!("model_line"),
     icon!("move"),
     icon!("new"),
