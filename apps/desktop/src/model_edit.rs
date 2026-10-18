@@ -26,7 +26,10 @@ impl Desktop {
             if el.category == Category::Beam { self.join_pick = el.join_ends; }
             if matches!(el.category, Category::BeamSystem | Category::Truss) { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
             if el.category == Category::Truss { self.material_pick = el.material; }
-            if el.category == Category::Family { (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone()); }
+            if el.category == Category::Family {
+                (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone());
+                self.family_values = crate::export::instance_values(&el.family, &el.type_name, &el.overrides).unwrap_or_default();
+            }
             if el.category == Category::Rebar { (self.spacing_mm, self.bar_count) = (el.spacing_m * 1000.0, f64::from(el.count)); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
             if matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) {
@@ -75,7 +78,7 @@ impl Desktop {
         };
         let system = el.category == Category::BeamSystem && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(el.angle_deg, self.angle_deg) || el.usage != self.usage_pick || el.material != self.material_pick);
         let truss = el.category == Category::Truss && (differs(el.spacing_m * 1000.0, self.spacing_mm) || el.material != self.material_pick);
-        let family = el.category == Category::Family && (differs(el.angle_deg, self.angle_deg) || el.type_name != self.family_type);
+        let family = el.category == Category::Family && (differs(el.angle_deg, self.angle_deg) || el.type_name != self.family_type || self.family_values_changed(el));
         let rebar = el.category == Category::Rebar && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(f64::from(el.count), self.bar_count));
         let kind = system || truss || rebar || family || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
@@ -208,6 +211,20 @@ impl Desktop {
         }
     }
 
+    /// Whether the instance values in the Properties differ from those of the selected family instance.
+    fn family_values_changed(&self, el: &openbim_document::Element) -> bool {
+        let Some(now) = crate::export::instance_values(&el.family, &el.type_name, &el.overrides) else { return false };
+        // a changed type brings its own values, so only a same-type edit counts
+        el.type_name == self.family_type && now.len() == self.family_values.len()
+            && now.iter().zip(&self.family_values).any(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() > 1e-9 || !b.1.is_finite())
+    }
+
+    /// The overrides that make `values` on top of the family's `type_name`: what differs from the type's own.
+    fn family_overrides(&self, family: &str, type_name: &str, values: &[(String, f64)]) -> Vec<(String, f64)> {
+        let base = crate::export::instance_values(family, type_name, &[]).unwrap_or_default();
+        values.iter().filter(|(n, v)| base.iter().find(|b| b.0 == *n).is_none_or(|b| (b.1 - v).abs() > 1e-9)).cloned().collect()
+    }
+
     /// A click of the Family tool: a door or window goes into the wall under the click, anything else stands on the
     /// level at the click.
     pub(crate) fn family_click(&mut self, level: ElementId, at: [f64; 2], wall: Option<ElementId>) {
@@ -278,7 +295,13 @@ impl Desktop {
         }
         if el.category == Category::Family {
             let turn = if matches!(el.geometry, Some(Geometry::InWall { .. })) { 0.0 } else { self.angle_deg };
-            commands.extend([Command::SetFamily { id, family: el.family.clone(), type_name: self.family_type.clone(), overrides: el.overrides.clone(), angle_deg: turn },
+            // a changed type starts from its own values; the same type keeps the edited ones
+            let overrides = if el.type_name == self.family_type { self.family_overrides(&el.family, &self.family_type, &self.family_values) } else { Vec::new() };
+            if crate::export::instance_values(&el.family, &self.family_type, &overrides).is_none() {
+                self.message = "Those values do not fit the family (out of range?)".into();
+                return;
+            }
+            commands.extend([Command::SetFamily { id, family: el.family.clone(), type_name: self.family_type.clone(), overrides, angle_deg: turn },
                 Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }]);
             match self.document.transact(self.document.revision(), &commands) {
                 Ok(_) => { self.sync_duct_controls(); self.message = format!("Element {} updated", id.0); }
@@ -847,5 +870,31 @@ mod tests {
         assert!(app.has_pending_edit());
         app.apply_selected_edit();
         assert_eq!(app.document.get(fcu).unwrap().angle_deg, 90.0);
+    }
+
+    #[test]
+    fn instance_values_of_a_door_are_edited_in_the_properties_and_change_the_door() {
+        let mut app = Desktop::sample();
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
+        app.run_command("door", "Door");
+        app.family_click(ElementId(10), [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], Some(wall));
+        let door = app.document.elements().find(|e| e.category == Category::Family).unwrap().id;
+        app.select_element(Some(door));
+        assert!(app.family_values.iter().any(|(n, _)| n == "open_angle"), "{:?}", app.family_values);
+        assert!(!app.family_values.iter().any(|(n, _)| n == "wall_t" || n == "width"), "type values and the wall's are not instance values");
+        assert!(!app.has_pending_edit());
+        app.family_values.iter_mut().find(|(n, _)| n == "open_angle").unwrap().1 = 60.0;
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.get(door).unwrap().overrides, vec![("open_angle".to_string(), 60.0)]);
+        assert!(!app.has_pending_edit());
+        // a value out of range is refused and nothing changes
+        app.family_values.iter_mut().find(|(n, _)| n == "open_angle").unwrap().1 = 400.0;
+        let rev = app.document.revision();
+        app.apply_selected_edit();
+        assert!(app.message.contains("do not fit") && app.document.revision() == rev, "{}", app.message);
+        app.undo_document();
+        assert!(app.document.get(door).unwrap().overrides.is_empty());
     }
 }

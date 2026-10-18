@@ -45,6 +45,18 @@ pub fn library() -> &'static [openbim_family::Compiled] {
     LIB.get_or_init(|| openbim_family::library::all().unwrap_or_default())
 }
 
+/// The instance values of a family (its numbers and yes/no inputs of instance scope, `wall_t` left out because the
+/// wall sets it) as solved for `type_name` with `overrides`; None for an unknown family or values that do not solve.
+pub fn instance_values(family: &str, type_name: &str, overrides: &[(String, f64)]) -> Option<Vec<(String, f64)>> {
+    let f = library().iter().find(|f| f.name() == family)?;
+    let inst = f.solve(&openbim_family::Request {
+        type_name: (!type_name.is_empty()).then_some(type_name),
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: vec![] }).ok()?;
+    Some(f.input_values(&inst).into_iter()
+        .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Instance))
+        .map(|(n, v)| (n.to_string(), v)).collect())
+}
+
 /// The scene of the document, and what could not be put in it. `timestamp` is written into the header of a file,
 /// `project_key` makes the GlobalIds of this project its own.
 pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {

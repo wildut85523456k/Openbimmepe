@@ -428,6 +428,18 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     if el.category == openbim_document::Category::Family {
                         read_only_group(ui, "Identity Data", &query, &[("Family", &el.family)]);
                         family_type_combo(app, ui, &el.family);
+                        if !app.family_values.is_empty() {
+                            egui::CollapsingHeader::new(RichText::new("Instance Parameters").strong()).id_salt("family_values").default_open(true).show(ui, |ui| {
+                                egui::Grid::new("family_value_rows").num_columns(2).striped(true).show(ui, |ui| {
+                                    for (name, value) in app.family_values.iter_mut() {
+                                        if !matches(&query, name) && !matches(&query, "instance parameters") { continue; }
+                                        ui.label(name.replace('_', " "));
+                                        ui.add(egui::DragValue::new(value).speed(0.01));
+                                        ui.end_row();
+                                    }
+                                });
+                            });
+                        }
                         if let Some(Geometry::InWall { host, along_m }) = el.geometry {
                             let name = app.document.get(host).map_or("Missing wall", |w| w.name.as_str());
                             let along = format!("{:.0}", along_m * 1000.0);
