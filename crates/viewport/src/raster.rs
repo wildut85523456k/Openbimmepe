@@ -28,7 +28,7 @@ impl Image {
     /// Binary PPM, for tests and for looking at.
     pub fn ppm(&self) -> Vec<u8> {
         let mut o = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
-        for p in self.rgba.chunks_exact(4) { o.extend_from_slice(&p[..3]); }
+        for p in self.rgba.as_chunks::<4>().0 { o.extend_from_slice(&p[..3]); }
         o
     }
 }
