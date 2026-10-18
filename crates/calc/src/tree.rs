@@ -1,5 +1,5 @@
 use crate::friction::friction_per_metre;
-use crate::{flow_from_power, Fluid, Size};
+use crate::{flow_from_power, Fluid, LoadingCurve, Size};
 use rayon::prelude::*;
 
 /// What an end point takes.
@@ -11,6 +11,8 @@ pub enum Demand {
     Flow(f64),
     /// a power across a temperature difference: a coil, a radiator, a terminal unit
     Power { watts: f64, delta_t: f64 },
+    /// loading units of a fixture (plumbing): the flow of a branch comes from the sum downstream, by the loading curve
+    LoadingUnits(f64),
 }
 
 /// The branch that leads to a node from its parent.
@@ -58,6 +60,8 @@ pub struct Settings {
     pub catalogue: Vec<Size>,
     /// count the height difference as a pressure (an open or draining system); false for a closed circuit or a duct
     pub count_static: bool,
+    /// loading units to flow; needed when any end point gives loading units
+    pub loading: Option<LoadingCurve>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -70,6 +74,8 @@ pub enum TreeError {
     Disconnected(usize),
     BadValue(usize, &'static str),
     BadSettings(&'static str),
+    /// the loading units downstream of this node are more than the loading curve covers
+    OutsideCurve(usize),
     /// no size in the catalogue meets the limits for this node's branch
     NoSize(usize),
 }
@@ -142,6 +148,10 @@ fn check(tree: &Tree, s: &Settings) -> Result<Vec<usize>, TreeError> {
         match nd.demand {
             Demand::None => {}
             Demand::Flow(q) => if !ok(q) { return Err(TreeError::BadValue(i, "flow")); },
+            Demand::LoadingUnits(u) => {
+                if !ok(u) { return Err(TreeError::BadValue(i, "loading units")); }
+                if s.loading.is_none() { return Err(TreeError::BadSettings("no loading curve for loading units")); }
+            }
             Demand::Power { watts, delta_t } => if flow_from_power(watts, delta_t, &s.fluid).is_none() { return Err(TreeError::BadValue(i, "power or temperature difference")); },
         }
     }
@@ -157,7 +167,7 @@ fn check(tree: &Tree, s: &Settings) -> Result<Vec<usize>, TreeError> {
 }
 
 fn demand_flow(d: Demand, fluid: &Fluid) -> f64 {
-    match d { Demand::None => 0.0, Demand::Flow(q) => q, Demand::Power { watts, delta_t } => flow_from_power(watts, delta_t, fluid).unwrap_or(0.0) }
+    match d { Demand::None => 0.0, Demand::Flow(q) => q, Demand::Power { watts, delta_t } => flow_from_power(watts, delta_t, fluid).unwrap_or(0.0), Demand::LoadingUnits(_) => 0.0 }
 }
 
 /// Sizes and losses of the whole tree: see the crate's description for the method.
@@ -165,9 +175,16 @@ pub fn compute(tree: &Tree, s: &Settings) -> Result<Results, TreeError> {
     let order = check(tree, s)?;
     let n = tree.nodes.len();
     // 1 and 2: the flow in every branch, from the end points back to the source
+    // flows that are given add up as they are; loading units add up as units and then become a flow by the curve
     let mut flow: Vec<f64> = tree.nodes.iter().map(|nd| demand_flow(nd.demand, &s.fluid)).collect();
+    let mut units: Vec<f64> = tree.nodes.iter().map(|nd| if let Demand::LoadingUnits(u) = nd.demand { u } else { 0.0 }).collect();
     for &i in order.iter().rev() {
-        if let Some(p) = tree.nodes[i].parent { let q = flow[i]; flow[p] += q; }
+        if let Some(p) = tree.nodes[i].parent { let (q, u) = (flow[i], units[i]); flow[p] += q; units[p] += u; }
+    }
+    if let Some(curve) = &s.loading {
+        for i in 0..n {
+            if units[i] > 0.0 { flow[i] += curve.flow(units[i]).ok_or(TreeError::OutsideCurve(i))?; }
+        }
     }
     // 3 and 4: size and losses of each branch, all at once (they do not depend on each other)
     let mut catalogue = s.catalogue.clone();
@@ -243,7 +260,7 @@ mod tests {
     }
 
     fn settings() -> Settings {
-        Settings { fluid: Fluid::WATER, roughness: 0.045e-3, criteria: Criteria { max_velocity: Some(1.5), max_friction: None }, catalogue: catalogue(), count_static: false }
+        Settings { fluid: Fluid::WATER, roughness: 0.045e-3, criteria: Criteria { max_velocity: Some(1.5), max_friction: None }, catalogue: catalogue(), count_static: false, loading: None }
     }
 
     fn node(parent: Option<usize>, demand: Demand, required: f64, length: f64, k: f64) -> Node {
@@ -336,7 +353,7 @@ mod tests {
             node(Some(0), Demand::Flow(1.0), 50.0, 30.0, 1.0),
         ] };
         let cat = vec![Size::rect("400 x 300", 0.4, 0.3), Size::rect("800 x 400", 0.8, 0.4), Size::rect("1000 x 500", 1.0, 0.5), Size::rect("1200 x 600", 1.2, 0.6)];
-        let s = Settings { fluid: Fluid::AIR, roughness: 0.09e-3, criteria: Criteria { max_velocity: Some(8.0), max_friction: Some(1.0) }, catalogue: cat, count_static: false };
+        let s = Settings { fluid: Fluid::AIR, roughness: 0.09e-3, criteria: Criteria { max_velocity: Some(8.0), max_friction: Some(1.0) }, catalogue: cat, count_static: false, loading: None };
         let r = compute(&t, &s).unwrap();
         let b = &r.branches[1];
         assert!(b.friction_per_metre <= 1.0 && b.velocity <= 8.0);
@@ -384,5 +401,61 @@ mod tests {
         }).collect();
         let together = compute_all(&systems);
         for ((t, s), r) in systems.iter().zip(&together) { assert_eq!(&compute(t, s), r); }
+    }
+
+    // made-up table (q = 0.1 * LU^0.6 l/s), not any code's
+    fn curve() -> LoadingCurve {
+        LoadingCurve::from_csv("lu,l/s\n1,0.1\n10,0.398107\n100,1.584893\n1000,6.309573").unwrap()
+    }
+
+    /// source 0 - riser 1 - floors 2 and 3, each with two fixtures (4,5 and 6,7)
+    fn building() -> Tree {
+        Tree { nodes: vec![
+            node(None, Demand::None, 0.0, 0.0, 0.0),
+            node(Some(0), Demand::None, 0.0, 12.0, 1.0),
+            node(Some(1), Demand::None, 0.0, 8.0, 1.0),
+            node(Some(1), Demand::None, 0.0, 14.0, 1.0),
+            node(Some(2), Demand::LoadingUnits(6.0), 100_000.0, 5.0, 1.0),
+            node(Some(2), Demand::LoadingUnits(14.0), 100_000.0, 9.0, 1.0),
+            node(Some(3), Demand::LoadingUnits(6.0), 100_000.0, 4.0, 1.0),
+            node(Some(3), Demand::LoadingUnits(2.0), 100_000.0, 6.0, 1.0),
+        ] }
+    }
+
+    #[test]
+    fn loading_units_are_summed_and_then_turned_into_a_flow_so_simultaneity_is_respected() {
+        let s = Settings { loading: Some(curve()), ..settings() };
+        let r = compute(&building(), &s).unwrap();
+        let c = curve();
+        let q = |lu: f64| c.flow(lu).unwrap();
+        assert!((r.branches[4].flow - q(6.0)).abs() < 1e-12);
+        assert!((r.branches[2].flow - q(20.0)).abs() < 1e-12, "the floor takes the curve of 20 units, not 6 + 14 worth of flows");
+        assert!((r.branches[1].flow - q(28.0)).abs() < 1e-12);
+        assert!((r.branches[0].flow - q(28.0)).abs() < 1e-12);
+        assert!(r.branches[1].flow < q(6.0) + q(14.0) + q(6.0) + q(2.0), "diversity: less than all fixtures open together");
+        // the floor 2 path (more units, longer pipes at the far fixture) is the more resistant one, and every end has a size
+        assert!(r.branches.iter().skip(1).all(|b| b.size.is_some() && b.velocity <= 1.5));
+        assert_eq!(*r.critical_path.first().unwrap(), 0);
+        assert!(r.ends.iter().all(|e| e.excess >= 0.0) && r.ends.iter().any(|e| e.excess == 0.0));
+    }
+
+    #[test]
+    fn a_continuous_flow_is_added_after_the_curve_and_a_missing_curve_is_named() {
+        let s = Settings { loading: Some(curve()), ..settings() };
+        let mut t = building();
+        t.nodes.push(node(Some(3), Demand::Flow(0.0005), 0.0, 3.0, 0.0));
+        let r = compute(&t, &s).unwrap();
+        assert!((r.branches[3].flow - (curve().flow(8.0).unwrap() + 0.0005)).abs() < 1e-12);
+        assert_eq!(compute(&building(), &settings()), Err(TreeError::BadSettings("no loading curve for loading units")));
+    }
+
+    #[test]
+    fn more_units_than_the_table_covers_are_refused_and_the_node_is_named() {
+        let s = Settings { loading: Some(curve()), ..settings() };
+        let mut t = building();
+        t.nodes[7].demand = Demand::LoadingUnits(990.0);
+        assert_eq!(compute(&t, &s), Err(TreeError::OutsideCurve(0)));
+        t.nodes[5].demand = Demand::LoadingUnits(-1.0);
+        assert_eq!(compute(&t, &s), Err(TreeError::BadValue(5, "loading units")));
     }
 }
