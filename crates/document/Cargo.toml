@@ -10,3 +10,6 @@ unsafe_code = "forbid"
 
 [dependencies]
 openbim-geom = { path = "../geom" }
+openbim-route = { path = "../route" }
+openbim-family = { path = "../family" }
+openbim-place = { path = "../place" }

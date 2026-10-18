@@ -98,7 +98,89 @@ pub fn records(doc: &Document) -> Vec<String> {
     let mut out = vec![format!("F|{FORMAT}")];
     if let Some(s) = doc.site() { out.push(format!("S|lat={:?}|lon={:?}|ang={:?}|utc={:?}", s.latitude, s.longitude, s.angle_to_true_north_deg, s.utc_offset_hours)); }
     out.extend(doc.elements().map(element_record));
+    out.extend(mep_records(doc.mep()));
     out
+}
+
+fn size_text(s: openbim_place::penetrations::RunSize) -> String {
+    use openbim_place::penetrations::RunSize;
+    match s { RunSize::Round { diameter } => format!("R:{diameter:?}"), RunSize::Rect { width, height, roll } => format!("Q:{width:?}:{height:?}:{roll:?}") }
+}
+
+fn parse_size(s: &str) -> Result<openbim_place::penetrations::RunSize, String> {
+    use openbim_place::penetrations::RunSize;
+    let p: Vec<&str> = s.split(':').collect();
+    match (p[0], p.len()) {
+        ("R", 2) => Ok(RunSize::Round { diameter: num(p[1])? }),
+        ("Q", 4) => Ok(RunSize::Rect { width: num(p[1])?, height: num(p[2])?, roll: num(p[3])? }),
+        _ => Err("an unknown pipe or duct size".into()),
+    }
+}
+
+fn v3_text(v: [f64; 3]) -> String { format!("{:?},{:?},{:?}", v[0], v[1], v[2]) }
+
+fn parse_v3(s: &str) -> Result<[f64; 3], String> {
+    let p: Vec<&str> = s.split(',').collect();
+    if p.len() != 3 { return Err("a point without three numbers".into()); }
+    Ok([num(p[0])?, num(p[1])?, num(p[2])?])
+}
+
+fn port_text(p: &super::MepPort) -> String {
+    match p.node { super::MepNode::Run(id) => format!("R{}.{}", id.0, p.port), super::MepNode::Fitting(id) => format!("F{id}.{}", p.port) }
+}
+
+fn parse_port(s: &str) -> Result<super::MepPort, String> {
+    let (node, port) = s.split_once('.').ok_or("a port without '.'")?;
+    let n = int(node.get(1..).unwrap_or(""))?;
+    let node = match node.as_bytes().first() { Some(b'R') => super::MepNode::Run(ElementId(n)), Some(b'F') => super::MepNode::Fitting(n), _ => return Err("a port of an unknown kind".into()) };
+    Ok(super::MepPort { node, port: int(port)? as usize })
+}
+
+/// The lines of the fittings (`T`), the links (`L`) and the taps (`P`) of the ducts and pipes.
+pub fn mep_records(m: &super::MepData) -> Vec<String> {
+    use openbim_route::FittingKind;
+    let mut out = Vec::new();
+    for f in &m.fittings {
+        let (k, a) = match f.fitting.kind { FittingKind::Elbow { angle } => ("E", angle), FittingKind::Transition => ("T", 0.0), FittingKind::Tee { branch_angle } => ("Y", branch_angle), FittingKind::Tap { branch_angle } => ("P", branch_angle) };
+        let legs: Vec<String> = (0..f.fitting.ports.len()).map(|i| format!("{}/{}/{:?}", v3_text(f.fitting.ports[i]), size_text(f.fitting.port_sizes[i]), f.fitting.trim[i])).collect();
+        out.push(format!("T|id={}|dom={}|sys={}|kind={k}|ang={a:?}|tn={}|pc={}|at={}|rad={:?}|legs={}", f.id, f.domain.code(), f.system.code(), esc(&f.fitting.type_name), esc(&f.fitting.part_code), v3_text(f.fitting.at), f.fitting.radius, legs.join(";")));
+    }
+    for (a, b) in &m.links { out.push(format!("L|a={}|b={}", port_text(a), port_text(b))); }
+    for t in &m.taps { out.push(format!("P|f={}|r={}|d={:?}", t.fitting, t.run.0, t.distance)); }
+    out
+}
+
+/// Reads the fittings, links and taps out of the lines `records` wrote (the other lines are not looked at).
+pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
+    use openbim_family::mep::{Domain, System};
+    use openbim_route::{Fitting, FittingKind};
+    let mut m = super::MepData::default();
+    for line in lines {
+        if !(line.starts_with("T|") || line.starts_with("L|") || line.starts_with("P|")) { continue; }
+        let f = fields(line)?;
+        let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
+        if line.starts_with("L|") { m.links.push((parse_port(get("a")?)?, parse_port(get("b")?)?)); continue; }
+        if line.starts_with("P|") { m.taps.push(super::MepTap { fitting: int(get("f")?)?, run: ElementId(int(get("r")?)?), distance: num(get("d")?)? }); continue; }
+        let angle = num(get("ang")?)?;
+        let kind = match get("kind")? { "E" => FittingKind::Elbow { angle }, "T" => FittingKind::Transition, "Y" => FittingKind::Tee { branch_angle: angle }, "P" => FittingKind::Tap { branch_angle: angle }, _ => return Err("an unknown fitting kind".into()) };
+        let (mut ports, mut port_sizes, mut trim) = (Vec::new(), Vec::new(), Vec::new());
+        for leg in get("legs")?.split(';') {
+            let p: Vec<&str> = leg.split('/').collect();
+            if p.len() != 3 { return Err("a fitting leg without three parts".into()); }
+            ports.push(parse_v3(p[0])?);
+            port_sizes.push(parse_size(p[1])?);
+            trim.push(num(p[2])?);
+        }
+        let dom = int(get("dom")?)?;
+        let sys = int(get("sys")?)?;
+        m.fittings.push(super::MepFitting {
+            id: int(get("id")?)?,
+            fitting: Fitting { type_name: unesc(get("tn")?)?, part_code: unesc(get("pc")?)?, kind, at: parse_v3(get("at")?)?, ports, port_sizes, radius: num(get("rad")?)?, trim },
+            domain: Domain::from_code(dom as u8).ok_or("an unknown domain")?,
+            system: System::from_code(sys as u8).ok_or("an unknown system")?,
+        });
+    }
+    Ok(m)
 }
 
 fn fields(line: &str) -> Result<std::collections::BTreeMap<&str, &str>, String> {
@@ -113,6 +195,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
+        if line.starts_with("T|") || line.starts_with("L|") || line.starts_with("P|") { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

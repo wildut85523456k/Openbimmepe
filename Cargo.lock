@@ -2411,7 +2411,10 @@ dependencies = [
 name = "openbim-document"
 version = "0.0.1"
 dependencies = [
+ "openbim-family",
  "openbim-geom",
+ "openbim-place",
+ "openbim-route",
 ]
 
 [[package]]

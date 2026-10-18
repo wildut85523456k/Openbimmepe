@@ -10,9 +10,11 @@ mod spatial;
 pub mod native;
 mod rebar;
 mod types;
+pub mod mep;
 mod warnings;
 pub use rebar::BarPath;
 pub use types::TypeValues;
+pub use mep::{MepData, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
 pub use spatial::{system_lines, BeamExtent, Geometry, Mesh};
 
@@ -428,6 +430,8 @@ pub enum Command {
     SetTypeFor { id: ElementId, category: Category },
     /// The name of a type.
     Rename { id: ElementId, name: String },
+    /// The fittings of the ducts and pipes and which ports are joined, as a whole.
+    SetMep(Box<MepData>),
     Delete { id: ElementId },
 }
 
@@ -444,15 +448,18 @@ pub enum EditError {
     InvalidSite,
     /// A type that elements still use cannot be deleted.
     TypeInUse(ElementId),
+    /// fittings or links that do not make sense: a link to a port that is not there or is taken twice
+    InvalidMep,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
     elements: BTreeMap<ElementId, Element>,
     site: Option<Site>,
+    mep: MepData,
     revision: u64,
     /// Undo checkpoints are local, bounded by the hosting application's policy.
-    history: Vec<(BTreeMap<ElementId, Element>, Option<Site>)>,
+    history: Vec<(BTreeMap<ElementId, Element>, Option<Site>, MepData)>,
 }
 
 impl Document {
@@ -460,6 +467,8 @@ impl Document {
     pub fn revision(&self) -> u64 { self.revision }
     /// Where the project is, if it has been set.
     pub fn site(&self) -> Option<Site> { self.site }
+    /// The fittings and the links between the ducts and pipes.
+    pub fn mep(&self) -> &MepData { &self.mep }
     /// The next element number that no element has.
     pub fn next_id(&self) -> ElementId { ElementId(self.elements.keys().next_back().map_or(1, |k| k.0 + 1)) }
     /// Places a beam on `level` in one undoable transaction.
@@ -731,6 +740,7 @@ impl Document {
         let revision = self.revision.checked_add(1).ok_or(EditError::RevisionOverflow)?;
         let mut trial = self.elements.clone();
         let mut trial_site = self.site;
+        let mut trial_mep = self.mep.clone();
         for op in ops {
             match op {
                 Command::Create { id, category, name, width_m, height_m, elevation_m } => {
@@ -856,6 +866,7 @@ impl Document {
                     el.type_for = Some(*category);
                     el.revision = revision;
                 }
+                Command::SetMep(mep) => { trial_mep = (**mep).clone(); }
                 Command::Rename { id, name } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
@@ -877,7 +888,10 @@ impl Document {
         }
         if trial.values().any(|e| !e.valid()) { return Err(EditError::InvalidElement); }
         spatial::validate(&trial)?;
-        self.history.push((std::mem::replace(&mut self.elements, trial), std::mem::replace(&mut self.site, trial_site)));
+        // what was joined to a run that is gone is no longer joined
+        let trial_mep = trial_mep.pruned(&trial);
+        trial_mep.check(&trial)?;
+        self.history.push((std::mem::replace(&mut self.elements, trial), std::mem::replace(&mut self.site, trial_site), std::mem::replace(&mut self.mep, trial_mep)));
         self.revision = revision;
         Ok(revision)
     }
@@ -887,7 +901,7 @@ impl Document {
     pub fn undo(&mut self) -> Result<bool, EditError> {
         if self.history.is_empty() { return Ok(false); }
         let revision = self.revision.checked_add(1).ok_or(EditError::RevisionOverflow)?;
-        (self.elements, self.site) = self.history.pop().expect("checked history");
+        (self.elements, self.site, self.mep) = self.history.pop().expect("checked history");
         self.revision = revision;
         // Elements restored by undo are changed at the new document revision.
         for el in self.elements.values_mut() { el.revision = revision; }

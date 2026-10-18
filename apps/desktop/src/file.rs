@@ -16,8 +16,11 @@ pub(crate) fn file_text(doc: &Document) -> String {
 pub(crate) fn document_from(text: &str) -> Result<Document, String> {
     let lines: Vec<String> = text.lines().filter(|l| !l.trim().is_empty()).map(str::to_string).collect();
     let (elements, site) = native::parse_records(&lines)?;
+    let mep = native::parse_mep(&lines)?;
     let mut doc = Document::new();
-    doc.transact(0, &native::restore_commands(elements, site)).map_err(|e| format!("the file does not make a model: {e:?}"))?;
+    let mut ops = native::restore_commands(elements, site);
+    if !mep.is_empty() { ops.push(openbim_document::Command::SetMep(Box::new(mep))); }
+    doc.transact(0, &ops).map_err(|e| format!("the file does not make a model: {e:?}"))?;
     doc.clear_undo_history();
     Ok(doc)
 }
@@ -143,6 +146,10 @@ mod tests {
         assert!(!app.is_dirty());
         let beam = app.document.place_beam(openbim_document::ElementId(10), &openbim_document::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.3, 0.5, 2.8)).unwrap();
         app.document.create_type(beam, "B 300 x 500").unwrap();
+        let size = openbim_place::penetrations::RunSize::Rect { width: 0.4, height: 0.3, roll: 0.0 };
+        let route = openbim_route::route_path(&[[1.0, 6.5, 2.7], [5.0, 6.5, 2.7], [5.0, 7.5, 2.7]], &[size, size], &crate::export::tests_support::duct_prefs(), &openbim_route::snaps::Snaps::new(openbim_route::snaps::SnapSettings::off())).unwrap();
+        app.document.place_mep_route(openbim_document::ElementId(10), &route).unwrap();
+        assert_eq!(app.document.mep().links.len(), 2);
         assert!(app.is_dirty());
         app.write_model(path);
         assert!(!app.is_dirty() && app.message.starts_with("Saved"), "{}", app.message);
@@ -154,6 +161,7 @@ mod tests {
         let got: Vec<_> = other.document.elements().cloned().map(|mut e| { e.revision = 0; e }).collect();
         assert_eq!(want, got, "{}", other.message);
         assert_eq!(other.document.site(), app.document.site());
+        assert_eq!(other.document.mep(), app.document.mep(), "the fittings and links come back");
         assert!(!other.document.can_undo() && !other.is_dirty());
         assert_eq!(other.file.path.as_deref(), Some(path));
 

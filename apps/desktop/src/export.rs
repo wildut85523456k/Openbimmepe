@@ -3,7 +3,7 @@ use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_family::mep::{Domain, System};
 use openbim_geom::WallChain;
-use openbim_route::graph::{NetSegment, Network};
+use openbim_route::graph::{NetFitting, NetSegment, Network, NodeRef, PortRef, Tapping};
 use openbim_ifc::{MemberInfo, TypeClass, TypeItem, TypeProp, BeamItem, ColumnItem, FamilyItem, FamilyRef, FramingUsage, Frame, Scene, SlabItem, SlabRole, WallItem};
 
 pub struct Exported {
@@ -152,6 +152,7 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
             _ => *skipped.entry("elements without geometry").or_default() += 1,
         }
     }
+    add_connections(doc, &mut mep, &mut skipped);
     // family instances, after the walls they may stand in
     let wall_index: std::collections::BTreeMap<u64, usize> = walls.iter().enumerate().map(|(i, w): (usize, &WallItem)| (w.id, i)).collect();
     let lib = library();
@@ -210,6 +211,40 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
+}
+
+/// The fittings of the model and what is joined to what, into the network of the runs that were added: a fitting
+/// stays joined to the very ducts and pipes it was joined to. A run takes the system of the fittings it is joined to
+/// (the model does not say it otherwise yet). A link whose ends no longer meet (a run was moved after) is left out and
+/// counted.
+fn add_connections(doc: &Document, net: &mut Network, skipped: &mut std::collections::BTreeMap<&'static str, usize>) {
+    use openbim_document::{MepNode, MepPort};
+    let data = doc.mep();
+    if data.is_empty() { return; }
+    let seg: std::collections::BTreeMap<u64, usize> = net.segments.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
+    let fit: std::collections::BTreeMap<u64, usize> = data.fittings.iter().enumerate().map(|(i, f)| (f.id, i)).collect();
+    let node = |p: &MepPort| -> Option<PortRef> {
+        let n = match p.node { MepNode::Run(id) => NodeRef::Segment(*seg.get(&id.0)?), MepNode::Fitting(id) => NodeRef::Fitting(*fit.get(&id)?) };
+        Some(PortRef { node: n, port: p.port })
+    };
+    for f in &data.fittings { net.fittings.push(NetFitting { id: f.id, fitting: f.fitting.clone(), domain: f.domain, system: f.system }); }
+    for (a, b) in &data.links {
+        for (r, f) in [(a, b), (b, a)] {
+            if let (MepNode::Run(id), MepNode::Fitting(fid)) = (r.node, f.node) {
+                if let (Some(&si), Some(&fi)) = (seg.get(&id.0), fit.get(&fid)) { net.segments[si].run.system = data.fittings[fi].system; }
+            }
+        }
+    }
+    for (a, b) in &data.links {
+        match (node(a), node(b)) {
+            (Some(pa), Some(pb)) if net.link(pa, pb).is_ok() => {}
+            _ => *skipped.entry("connections whose ends no longer meet (left out)").or_default() += 1,
+        }
+    }
+    for t in &data.taps {
+        if let (Some(&f), Some(&s)) = (fit.get(&t.fitting), seg.get(&t.run.0)) { net.taps.push(Tapping { fitting: f, segment: s, distance: t.distance }); }
+    }
+    if net.validate().is_err() { net.taps.clear(); *skipped.entry("taps that no longer sit on their run (left out)").or_default() += 1; }
 }
 
 /// 16 hex digits over the values of an element that the file carries (FNV-1a, so the same on every machine).
@@ -391,5 +426,22 @@ mod tests {
         assert_eq!(iso_time(0), "1970-01-01T00:00:00");
         assert_eq!(iso_time(1_781_998_496), "2026-06-20T23:34:56");
         assert_eq!(iso_time(951_782_400), "2000-02-29T00:00:00");
+    }
+}
+
+/// Shared by the tests of the export, the import and the file.
+#[cfg(test)]
+pub mod tests_support {
+    use openbim_family::mep::{Domain, System};
+    use openbim_route::{AngleSet, Junction, RoutingPrefs};
+
+    pub fn duct_prefs() -> RoutingPrefs { prefs(Domain::Duct, System::SupplyAir) }
+
+    pub fn prefs(domain: Domain, system: System) -> RoutingPrefs {
+        RoutingPrefs {
+            domain, system, label: "Run".into(), elbow_angles: AngleSet::Any, bend_radius_factor: 1.5, min_straight: 0.0,
+            junction: Junction::Tee, tee_angles: AngleSet::Any, tee_half_factor: 1.0, branch_stub_factor: 1.0, pick_tolerance: 0.02, transition_angle_deg: 30.0,
+            min_transition_len: 0.1, connector_stub: 0.5, margin: 0.0, catalogue: None,
+        }
     }
 }

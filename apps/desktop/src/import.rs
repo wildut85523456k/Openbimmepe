@@ -410,11 +410,32 @@ fn unchanged_in_file(native: &openbim_document::Element, nd: &Document, read: &o
         && native.outline.len() == read.outline.len() && native.outline.iter().zip(&read.outline).all(|(a, b)| close2(*a, *b))
 }
 
+/// The fittings, links and taps already in the model, and those of the file that do not clash with them. A link whose
+/// run is gone is dropped by the model itself when the import is applied.
+fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepData) -> openbim_document::MepData {
+    let mut out = have.clone();
+    let mut refused: BTreeSet<u64> = BTreeSet::new();
+    for f in incoming.fittings {
+        match have.fitting(f.id) { None => out.fittings.push(f), Some(h) if *h == f => {}, Some(_) => { refused.insert(f.id); } }
+    }
+    let involves = |p: &openbim_document::MepPort| matches!(p.node, openbim_document::MepNode::Fitting(id) if refused.contains(&id));
+    for (a, b) in incoming.links {
+        if involves(&a) || involves(&b) || out.links.contains(&(a, b)) || out.links.contains(&(b, a)) { continue; }
+        if out.partner(a).is_none() && out.partner(b).is_none() { out.links.push((a, b)); }
+    }
+    for t in incoming.taps {
+        if !refused.contains(&t.fitting) && !out.taps.iter().any(|x| x.fitting == t.fitting) { out.taps.push(t); }
+    }
+    out
+}
+
 /// Puts back the model from the file's own records. Every element that the file still shows with the values the app
 /// wrote comes back exactly as it was; one that was changed in another program is read from the file's geometry
 /// (with the same number), one deleted there stays deleted, one added there is imported as a new element.
 fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
     let (elements, site) = openbim_document::native::parse_records(&imp.native)?;
+    let mep_in = openbim_document::native::parse_mep(&imp.native)?;
+    let merged_fittings = mep_in.fittings.len();
     let number_of = |m: &Member| m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
     let by_number: BTreeMap<u64, &Member> = imp.members.iter().filter_map(|m| number_of(m).map(|n| (n, m))).collect();
     // IFC2X3 has no pipes or ducts here, and no predefined type to say what a beam is for
@@ -469,12 +490,15 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
     };
     let (ops2, mut report) = plan(&scratch, &rest);
     // products the records account for (doors, windows, equipment, and the ports and bars of what was exported) are not news
-    let explained = saved.elements().filter(|e| matches!(e.category, Category::Family | Category::Equipment)).count();
+    let explained = saved.elements().filter(|e| matches!(e.category, Category::Family | Category::Equipment)).count() + merged_fittings;
     let others: usize = imp.skipped.iter().filter(|(k, _)| !matches!(k.as_str(), "IFCDISTRIBUTIONPORT" | "IFCREINFORCINGBAR")).map(|(_, n)| *n).sum();
     report.skipped = if others <= explained { BTreeMap::new() } else {
         imp.skipped.iter().filter(|(k, _)| !matches!(k.as_str(), "IFCDISTRIBUTIONPORT" | "IFCREINFORCINGBAR")).map(|(k, n)| (format!("{k} (not an extruded profile this app reads)"), *n)).collect()
     };
-    let all: Vec<Command> = restore_ops.into_iter().chain(ops2).collect();
+    let mut all: Vec<Command> = restore_ops.into_iter().chain(ops2).collect();
+    // the fittings and what is joined to what come back with the runs they were joined to
+    let merged = merge_mep(doc.mep(), mep_in);
+    if merged != *doc.mep() { all.push(Command::SetMep(Box::new(merged))); }
     report.schema = imp.schema.clone();
     if all.is_empty() {
         report.notes.push(format!("The model already holds everything in this file ({already} elements were already in the model)"));
@@ -568,8 +592,42 @@ mod tests {
         d.place_family_in_wall(ElementId(21), 2.0, &FamilySpec { family: "Window, fixed with mullions".into(), overrides: vec![], elevation_m: 0.9, ..door.clone() }).unwrap();
         d.place_family(ElementId(10), [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), overrides: vec![], angle_deg: 90.0, elevation_m: 2.2, ..door }).unwrap();
         let b = d.place_beam(ElementId(10), &BeamSpec::level([1.0, 5.5], [5.0, 5.5], 0.2, 0.3, 2.5)).unwrap();
+        // a duct with an elbow and a pipe with an elbow, joined to their fittings
+        {
+            use openbim_family::mep::{Domain, System};
+            use openbim_place::penetrations::RunSize;
+            let off = openbim_route::snaps::Snaps::new(openbim_route::snaps::SnapSettings::off());
+            let rect = RunSize::Rect { width: 0.4, height: 0.3, roll: 0.0 };
+            let duct = openbim_route::route_path(&[[1.0, 0.8, 2.7], [5.0, 0.8, 2.7], [5.0, 1.8, 2.7]], &[rect, rect], &crate::export::tests_support::prefs(Domain::Duct, System::SupplyAir), &off).unwrap();
+            d.place_mep_route(ElementId(10), &duct).unwrap();
+            let round = RunSize::Round { diameter: 0.1 };
+            let pipe = openbim_route::route_path(&[[1.0, 3.5, 0.6], [6.0, 3.5, 0.6], [6.0, 3.0, 0.4]], &[round, round], &crate::export::tests_support::prefs(Domain::Pipe, System::ChilledWaterSupply), &off).unwrap();
+            d.place_mep_route(ElementId(10), &pipe).unwrap();
+        }
         d.transact(d.revision(), &[Command::SetJoins { id: b, start: false, end: true }, Command::SetSlope { id: ElementId(2), slope_ratio: -0.02 }, Command::Create { id: ElementId(900), category: Category::Equipment, name: "Pump \u{b5} | 1; two=2".into(), width_m: 0.6, height_m: 0.5, elevation_m: 0.1 }]).unwrap();
         d
+    }
+
+    #[test]
+    fn exported_fittings_are_joined_to_their_ducts_and_pipes_by_ports_and_the_network_is_in_the_file() {
+        let d = everything();
+        assert_eq!((d.mep().fittings.len(), d.mep().links.len()), (2, 4));
+        let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4x3).unwrap();
+        let count = |what: &str| out.text.matches(what).count();
+        assert_eq!(count("IFCDUCTFITTING("), 1, "the duct elbow");
+        assert_eq!(count("IFCPIPEFITTING("), 1, "the pipe elbow");
+        assert_eq!(count("IFCRELCONNECTSPORTS("), 4, "each elbow leg is joined to the end of its run");
+        assert_eq!(count("IFCDISTRIBUTIONSYSTEM("), 3, "the air, the chilled water, and the sample's own duct and pipe whose system is not set");
+        assert!(!out.warnings.iter().any(|w| w.contains("no longer meet")), "{:?}", out.warnings);
+        // a run moved after it was joined no longer meets its fitting: the link is left out, said so, and nothing else changes
+        let mut moved = d.clone();
+        let run = d.mep().links.iter().find_map(|(a, b)| match (a.node, b.node) { (openbim_document::MepNode::Run(r), _) | (_, openbim_document::MepNode::Run(r)) => Some(r), _ => None }).unwrap();
+        let el = moved.get(run).unwrap().clone();
+        let Some(Geometry::Linear { start, end, level }) = el.geometry else { panic!() };
+        moved.transact(moved.revision(), &[Command::SetGeometry { id: run, geometry: Geometry::Linear { start: [start[0] + 0.5, start[1]], end: [end[0] + 0.5, end[1]], level } }]).unwrap();
+        let out = crate::export::export_ifc_as(&moved, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4x3).unwrap();
+        assert!(out.warnings.iter().any(|w| w.contains("no longer meet")), "{:?}", out.warnings);
+        assert!(out.text.matches("IFCRELCONNECTSPORTS(").count() < 4);
     }
 
     #[test]
@@ -582,6 +640,7 @@ mod tests {
             let mut back = Document::new();
             let report = import_ifc(&mut back, &out.text).unwrap();
             assert_eq!(back.site(), d.site());
+            assert_eq!(back.mep(), d.mep(), "{schema:?}: the fittings and what is joined to what come back");
             let (want, got) = (all(&d), all(&back));
             for (w, g) in want.iter().zip(&got) { assert_eq!(w, g, "{schema:?}: {}", report.text()); }
             assert_eq!(want.len(), got.len(), "{schema:?}: {}", report.text());
