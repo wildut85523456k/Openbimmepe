@@ -91,6 +91,9 @@ pub struct SnapshotElement {
     /// the kind of a slab when it is not a Floor: Foundation
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub slab_kind:Option<String>,
+    /// a roof: whether each edge of its outline defines a slope
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub slope_edges:Vec<bool>,
     /// a beam system: the distance between its beams and their direction (degrees)
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub spacing_m:Option<f64>,
@@ -188,6 +191,7 @@ impl Snapshot {
             material: (e.material != openbim_document::Material::Unspecified).then(|| e.material.name().to_string()),
             outline: e.outline.clone(),
             slab_kind: (e.slab_kind != openbim_document::SlabKind::Floor).then(|| e.slab_kind.name().to_string()),
+            slope_edges: e.slope_edges.clone(),
             spacing_m: matches!(e.kind(), Category::BeamSystem | Category::Truss | Category::Rebar).then_some(e.spacing_m),
             angle_deg: matches!(e.kind(), Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family).then_some(e.angle_deg),
             parent: e.parent.map(|p| p.0),
@@ -220,7 +224,8 @@ impl Snapshot {
                 Some(c) => Some(CATEGORIES.iter().copied().find(|k| format!("{k:?}") == *c).ok_or(format!("Unsupported type category {c}"))?),
                 None => None,
             };
-            if category.supports_slope() != el.slope_ratio.is_some() {
+            let roof = el.slab_kind.as_deref() == Some("Roof");
+            if (category.supports_slope() || (roof && category == Category::Slab)) != el.slope_ratio.is_some() {
                 return Err(format!("Invalid slope property for element {}",el.id));
             }
             ops.push(Command::Create { id: ElementId(el.id), category, name: el.name.clone(),
@@ -231,7 +236,7 @@ impl Snapshot {
             if let Some(t) = el.type_id {
                 ops.push(Command::SetType { id: ElementId(el.id), type_id: Some(ElementId(t)) });
             }
-            if let Some(slope_ratio) = el.slope_ratio {
+            if let (Some(slope_ratio), false) = (el.slope_ratio, roof) {
                 ops.push(Command::SetSlope { id: ElementId(el.id), slope_ratio });
             }
             if let Some(u) = &el.usage {
@@ -248,6 +253,9 @@ impl Snapshot {
             if let Some(k) = &el.slab_kind {
                 let kind = openbim_document::SlabKind::ALL.into_iter().find(|x| x.name() == k).ok_or(format!("Unsupported slab kind {k}"))?;
                 ops.push(Command::SetSlabKind { id: ElementId(el.id), kind });
+            }
+            if let (true, Some(slope_ratio)) = (roof, el.slope_ratio) {
+                ops.push(Command::SetRoof { id: ElementId(el.id), slope_ratio, edges: el.slope_edges.clone() });
             }
             if let (Some(family), Some(angle_deg)) = (&el.family, el.angle_deg) {
                 ops.push(Command::SetFamily { id: ElementId(el.id), family: family.clone(), type_name: el.type_name.clone(), overrides: el.overrides.clone(), angle_deg });

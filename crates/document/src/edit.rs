@@ -108,7 +108,7 @@ impl Document {
             }
             Some(Geometry::Area { level }) => {
                 e.outline = e.outline.iter().map(|q| p(*q)).collect();
-                if xf.flips() { e.outline.reverse(); }
+                if xf.flips() { e.outline.reverse(); e.slope_edges = crate::roof::reversed_edges(&e.slope_edges); }
                 e.geometry = Some(Geometry::Area { level });
             }
             Some(Geometry::Tag { host, at, anchor }) => e.geometry = Some(Geometry::Tag { host, at: p(at), anchor: p(anchor) }),
@@ -146,6 +146,7 @@ impl Document {
             let old = self.get(e.id).ok_or("an element is gone")?;
             if e.geometry != old.geometry { ops.push(Command::SetGeometry { id: e.id, geometry: e.geometry.ok_or("no geometry")? }); }
             if e.outline != old.outline { ops.push(Command::SetOutline { id: e.id, outline: e.outline.clone() }); }
+            if e.slope_edges != old.slope_edges { ops.push(Command::SetRoof { id: e.id, slope_ratio: e.slope_ratio.unwrap_or(crate::roof::DEFAULT_SLOPE), edges: e.slope_edges.clone() }); }
             if e.angle_deg != old.angle_deg && e.category == Category::Family {
                 ops.push(Command::SetFamily { id: e.id, family: e.family.clone(), type_name: e.type_name.clone(), overrides: e.overrides.clone(), angle_deg: e.angle_deg });
             }

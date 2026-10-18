@@ -182,6 +182,7 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
             "IFCBEAM" | "IFCMEMBER" => Category::Beam,
             "IFCCOLUMN" => Category::Column,
             "IFCSLAB" => Category::Slab,
+            "IFCROOF" => { skip(&mut report, "IFCROOF (a roof written by another program is not read yet)"); continue }
             "IFCFOOTING" => if m.predefined == "STRIP_FOOTING" { Category::WallFooting } else { Category::Footing },
             "IFCWALL" | "IFCWALLSTANDARDCASE" => Category::Wall,
             "IFCPIPESEGMENT" => Category::Pipe,
@@ -482,8 +483,9 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
                 None => { deleted += 1; continue }
                 Some(m) => {
                     let fp = m.psets.get("OpenBIM_Element").and_then(|p| p.get("Fingerprint")).and_then(|p| p.text());
-                    let same_values = read.get(e.id).is_some_and(|g| unchanged_in_file(&e, &saved, g, &read, v2));
-                    if fp != Some(crate::export::fingerprint(&e).as_str()) || !same_values { changed.insert(e.id.0); continue; }
+                    // a roof is a solid of several planes, which is not read back: it stays as the records have it
+                    let same_values = e.is_roof() || read.get(e.id).is_some_and(|g| unchanged_in_file(&e, &saved, g, &read, v2));
+                    if !e.is_roof() && (fp != Some(crate::export::fingerprint(&e).as_str()) || !same_values) { changed.insert(e.id.0); continue; }
                 }
             }
         }
@@ -608,6 +610,7 @@ mod tests {
         d.place_beam_system(ElementId(11), &BeamSystemSpec { outline: vec![[0.5, 0.5], [7.5, 0.5], [7.5, 5.5], [0.5, 5.5]], spacing_m: 1.5, angle_deg: 0.0, width_m: 0.15, depth_m: 0.3, elevation_m: -0.2, section: Section::Rectangle, usage: Usage::Joist, material: Material::Timber }).unwrap();
         d.place_truss(ElementId(11), &TrussSpec { start: [1.0, 5.8], end: [7.0, 5.8], spacing_m: 1.5, depth_m: 1.0, member_m: 0.1, elevation_m: 0.1, material: Material::Steel }).unwrap();
         let door = FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("rise".into(), 0.0)], angle_deg: 0.0, elevation_m: 0.0 };
+        d.place_roof(ElementId(11), &openbim_document::RoofSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true, false, true, false], material: Material::Timber }).unwrap();
         d.place_family_in_wall(ElementId(20), 3.0, &FamilySpec { overrides: vec![], ..door.clone() }).unwrap();
         d.place_family_in_wall(ElementId(21), 2.0, &FamilySpec { family: "Window, fixed with mullions".into(), overrides: vec![], elevation_m: 0.9, ..door.clone() }).unwrap();
         d.place_family(ElementId(10), [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), overrides: vec![], angle_deg: 90.0, elevation_m: 2.2, ..door }).unwrap();
@@ -714,6 +717,8 @@ mod tests {
         assert!(kinds.len() >= 15, "the model should use every kind: {kinds:?}");
         for schema in crate::export::Schema::ALL {
             let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", schema).unwrap();
+            assert_eq!(out.text.matches("IFCROOF(").count(), 1, "{schema:?}");
+            assert!(out.text.contains(".GABLE_ROOF.") && out.text.contains("IFCFACETEDBREP"), "{schema:?}: the roof is a gable solid");
             let mut back = Document::new();
             let report = import_ifc(&mut back, &out.text).unwrap();
             assert_eq!(back.site(), d.site());

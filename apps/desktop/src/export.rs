@@ -84,7 +84,7 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
-    let (mut walls, mut beams, mut columns, mut slabs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut walls, mut beams, mut columns, mut slabs, mut roofs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
     let mut instances = Vec::new();
@@ -102,6 +102,15 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
             }
             (Category::Column, Some(Geometry::Point { .. })) => {
                 columns.push(column_item(doc, el).ok_or_else(|| format!("column {} has no height or a section that does not check", el.name))?);
+                if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
+            }
+            (Category::Slab, Some(Geometry::Area { level })) if el.is_roof() => {
+                let z0 = level_of(level).ok_or("a roof lies on a level that is gone")? + el.elevation_m;
+                let slope = el.slope_ratio.unwrap_or(0.0);
+                let mesh = openbim_document::roof_mesh(&el.outline, &el.slope_edges, slope, z0, el.height_m).ok_or_else(|| format!("roof {} has no shape (an outline that is not convex cannot slope yet)", el.name))?;
+                let sloping = el.slope_edges.iter().filter(|b| **b).count();
+                let shape = if sloping == 0 || slope == 0.0 { "FLAT_ROOF" } else { match sloping { 1 => "SHED_ROOF", 2 => "GABLE_ROOF", _ => "HIP_ROOF" } };
+                roofs.push(openbim_ifc::RoofItem { id: el.id.0, name: el.name.clone(), eaves_z: z0, verts: mesh.vertices, faces: mesh.faces, shape });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
             (Category::Slab, Some(Geometry::Area { level })) => {
@@ -201,11 +210,11 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         items.push(FamilyItem { id: el.id.0, name: el.name.clone(), family: fam_index, type_name: type_name.map(str::to_string), frame, instance, host });
     }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
-    let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs);
+    let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs);
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
-        walls, wall_penetrations: vec![], firestops: Default::default(), slabs, columns: columns.clone(), shafts: vec![],
+        walls, wall_penetrations: vec![], firestops: Default::default(), slabs, roofs, columns: columns.clone(), shafts: vec![],
         floor_penetrations: vec![], networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
@@ -264,15 +273,16 @@ fn add_connections(doc: &Document, net: &mut Network, skipped: &mut std::collect
 
 /// 16 hex digits over the values of an element that the file carries (FNV-1a, so the same on every machine).
 pub fn fingerprint(el: &openbim_document::Element) -> String {
-    let text = format!("{:?}", (&el.name, el.width_m, el.height_m, el.elevation_m, el.section, el.material, el.usage, el.geometry, &el.outline));
+    let mut text = format!("{:?}", (&el.name, el.width_m, el.height_m, el.elevation_m, el.section, el.material, el.usage, el.geometry, &el.outline));
+    if el.is_roof() { text.push_str(&format!("{:?}", (el.slope_ratio, &el.slope_edges))); }
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in text.bytes() { h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3); }
     format!("{h:016x}")
 }
 
 /// The IFC type objects of the document's types, and the `OpenBIM_Element` data of the members that were written.
-fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
-    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(walls.iter().map(|w| w.id)).chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).collect();
+fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem], roofs: &[openbim_ifc::RoofItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
+    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(walls.iter().map(|w| w.id)).chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).chain(roofs.iter().map(|r| r.id)).collect();
     let mut info = std::collections::BTreeMap::new();
     for el in doc.elements().filter(|e| written.contains(&e.id.0)) {
         let type_name = el.type_id.and_then(|t| doc.get(t)).map(|t| t.name.clone()).unwrap_or_default();
@@ -290,7 +300,7 @@ fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamIt
             Category::Wall => TypeClass::Wall,
             _ => continue, // rebar types have no IFC type object
         };
-        let instances: Vec<u64> = doc.elements().filter(|e| e.type_id == Some(t.id)).map(|e| e.id.0).collect();
+        let instances: Vec<u64> = doc.elements().filter(|e| e.type_id == Some(t.id) && !e.is_roof()).map(|e| e.id.0).collect();
         let v = openbim_document::TypeValues::of(t);
         let mut props = vec![("Category".to_string(), TypeProp::Text(format!("{kind:?}"))), ("Width".into(), TypeProp::Len(v.width_m)), ("Height".into(), TypeProp::Len(v.height_m))];
         if matches!(kind, Category::Beam | Category::Column) {
@@ -338,7 +348,7 @@ pub fn export_ifc_with(doc: &Document, project_name: &str, project_key: u64, tim
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
     if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
-    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: scene.beams.len(), columns: scene.columns.len(), slabs: scene.slabs.len(), warnings })
+    Ok(Exported { text: out.text, walls: scene.walls.len(), beams: scene.beams.len(), columns: scene.columns.len(), slabs: scene.slabs.len() + scene.roofs.len(), warnings })
 }
 
 /// `2026-10-17T19:34:56` for a number of seconds since 1970 (UTC).

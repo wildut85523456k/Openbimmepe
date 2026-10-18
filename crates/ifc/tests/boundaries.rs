@@ -29,7 +29,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(), types: vec![], member_info: Default::default(), native: vec![],
+        pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], native: vec![],
     }
 }
 fn room(outline: &[[f64; 2]], level: usize) -> Room {

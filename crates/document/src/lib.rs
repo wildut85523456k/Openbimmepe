@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 mod spatial;
 mod edit;
 mod rooms;
+mod roof;
+pub use roof::{mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
 pub use rooms::RoomShape;
 pub mod native;
 mod rebar;
@@ -127,12 +129,14 @@ pub enum SlabKind {
     Floor,
     /// a structural slab on the ground
     Foundation,
+    /// a roof by footprint (Revit's Roof): the outline at the eaves, a slope, and which edges slope
+    Roof,
 }
 
 impl SlabKind {
-    pub const ALL: [SlabKind; 2] = [SlabKind::Floor, SlabKind::Foundation];
+    pub const ALL: [SlabKind; 3] = [SlabKind::Floor, SlabKind::Foundation, SlabKind::Roof];
     pub fn name(self) -> &'static str {
-        match self { SlabKind::Floor => "Floor", SlabKind::Foundation => "Foundation" }
+        match self { SlabKind::Floor => "Floor", SlabKind::Foundation => "Foundation", SlabKind::Roof => "Roof" }
     }
 }
 
@@ -293,6 +297,8 @@ pub struct Element {
     /// The plan outline of a slab (counter-clockwise or clockwise); empty for everything else.
     pub outline: Vec<[f64; 2]>,
     pub slab_kind: SlabKind,
+    /// A roof: whether each edge of the outline defines a slope (rises from the eaves); empty for everything else.
+    pub slope_edges: Vec<bool>,
     /// Whether each end of a beam (start, end) is joined to the column it ends in: a joined end is cut back to the
     /// face of the column. All true for everything but a beam that has had a join disallowed.
     pub join_ends: [bool; 2],
@@ -327,6 +333,8 @@ impl Element {
             Section::IShape { web_m, flange_m } => Profile::I { width: self.width_m, depth: self.height_m, web: web_m, flange: flange_m },
         }
     }
+    /// A roof by footprint: a slab of kind Roof.
+    pub fn is_roof(&self) -> bool { self.kind() == Category::Slab && self.slab_kind == SlabKind::Roof }
     /// The category whose rules apply to the values of this element: a type is held to those of what it is a type of.
     pub fn kind(&self) -> Category { if self.category == Category::Type { self.type_for.unwrap_or(Category::Type) } else { self.category } }
     /// Whether elements of `category` can have a type.
@@ -364,9 +372,13 @@ impl Element {
             && self.width_m > 0.0
             && self.height_m > 0.0
             && match self.slope_ratio {
-                Some(slope) => self.category.supports_slope() && slope.is_finite(),
-                None => !self.category.supports_slope(),
+                Some(slope) => (self.category.supports_slope() || self.is_roof()) && slope.is_finite() && (!self.is_roof() || (0.0..=5.0).contains(&slope)),
+                None => !self.category.supports_slope() && !self.is_roof(),
             }
+            && if self.is_roof() {
+                self.slope_edges.len() == self.outline.len()
+                    && (!self.slope_edges.contains(&true) || self.slope_ratio.unwrap_or(0.0) == 0.0 || roof::is_convex(&self.outline))
+            } else { self.slope_edges.is_empty() }
     }
 }
 
@@ -425,8 +437,10 @@ pub enum Command {
     SetUsage { id: ElementId, usage: Usage },
     /// The plan outline of a slab.
     SetOutline { id: ElementId, outline: Vec<[f64; 2]> },
-    /// Floor or foundation slab.
+    /// Floor, foundation or roof slab. A roof starts with a 30 degree slope on every edge.
     SetSlabKind { id: ElementId, kind: SlabKind },
+    /// The slope (rise over run) of a roof and which of the edges of its outline define it.
+    SetRoof { id: ElementId, slope_ratio: f64, edges: Vec<bool> },
     /// Allow or disallow the join of a beam's start and end with the columns they end in.
     SetJoins { id: ElementId, start: bool, end: bool },
     /// The spacing and direction of a beam system.
@@ -685,6 +699,21 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// Lays a roof by footprint on `level`: see `RoofSpec`.
+    pub fn place_roof(&mut self, level: ElementId, roof: &RoofSpec) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Slab && e.slab_kind == SlabKind::Roof).count() + 1;
+        let edges = if roof.edges.is_empty() { vec![true; roof.outline.len()] } else { roof.edges.clone() };
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Slab, name: format!("Roof {n}"), width_m: roof.thickness_m, height_m: roof.thickness_m, elevation_m: roof.base_offset_m },
+            Command::SetSlabKind { id, kind: SlabKind::Roof },
+            Command::SetMaterial { id, material: roof.material },
+            Command::SetOutline { id, outline: roof.outline.clone() },
+            Command::SetRoof { id, slope_ratio: roof.slope_ratio, edges },
+            Command::SetGeometry { id, geometry: Geometry::Area { level } },
+        ])?;
+        Ok(id)
+    }
     /// Lays an isolated footing on `level` under the point `at`.
     pub fn place_footing(&mut self, level: ElementId, at: [f64; 2], f: &FootingSpec) -> Result<ElementId, EditError> {
         let id = self.next_id();
@@ -926,7 +955,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None,
                     };
                     // a type is made in steps: what it is a type of is set by the next command
                     if *category != Category::Type && !element.valid() { return Err(EditError::InvalidElement); }
@@ -967,6 +996,7 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.outline = outline.clone();
+                    if el.slab_kind == SlabKind::Roof && el.slope_edges.len() != el.outline.len() { el.slope_edges = vec![true; el.outline.len()]; }
                     el.revision = revision;
                 }
                 Command::SetBeamSystem { id, spacing_m, angle_deg } => {
@@ -1009,6 +1039,17 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Slab { return Err(EditError::UnsupportedProperty(*id)); }
                     el.slab_kind = *kind;
+                    if *kind == SlabKind::Roof {
+                        el.slope_ratio.get_or_insert(roof::DEFAULT_SLOPE);
+                        if el.slope_edges.len() != el.outline.len() { el.slope_edges = vec![true; el.outline.len()]; }
+                    } else { el.slope_ratio = None; el.slope_edges.clear(); }
+                    el.revision = revision;
+                }
+                Command::SetRoof { id, slope_ratio, edges } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Slab || el.slab_kind != SlabKind::Roof { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.slope_ratio = Some(*slope_ratio);
+                    el.slope_edges = edges.clone();
                     el.revision = revision;
                 }
                 Command::SetMaterial { id, material } => {

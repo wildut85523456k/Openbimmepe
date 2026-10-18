@@ -92,9 +92,9 @@ pub fn element_record(e: &Element) -> String {
     let tx: Vec<String> = e.texts.iter().map(|(n, v)| format!("{},{}", esc(n), esc(v))).collect();
     let tf = e.type_for.and_then(|t| CATEGORIES.iter().find(|c| c.0 == t)).map_or("", |c| c.1);
     format!(
-        "E|id={}|cat={cat}|name={}|w={:?}|h={:?}|el={:?}|sl={}|geo={}|sec={section}|use={usage}|mat={}|out={}|sk={}|je={}{}|sp={:?}|an={:?}|par={}|cnt={}|fam={}|tn={}|ov={}|tx={}|tid={}|tf={tf}",
+        "E|id={}|cat={cat}|name={}|w={:?}|h={:?}|el={:?}|sl={}|geo={}|sec={section}|use={usage}|mat={}|out={}|sk={}|se={}|je={}{}|sp={:?}|an={:?}|par={}|cnt={}|fam={}|tn={}|ov={}|tx={}|tid={}|tf={tf}",
         e.id.0, esc(&e.name), e.width_m, e.height_m, e.elevation_m, e.slope_ratio.map_or(String::new(), |s| format!("{s:?}")), geometry_text(e.geometry),
-        e.material.name(), outline.join(";"), e.slab_kind.name(), if e.join_ends[0] { 'T' } else { 'F' }, if e.join_ends[1] { 'T' } else { 'F' },
+        e.material.name(), outline.join(";"), e.slab_kind.name(), e.slope_edges.iter().map(|b| if *b { 'T' } else { 'F' }).collect::<String>(), if e.join_ends[0] { 'T' } else { 'F' }, if e.join_ends[1] { 'T' } else { 'F' },
         e.spacing_m, e.angle_deg, id(e.parent), e.count, esc(&e.family), esc(&e.type_name), ov.join(";"), tx.join(";"), id(e.type_id),
     )
 }
@@ -282,6 +282,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
             material: *Material::ALL.iter().find(|m| m.name() == get("mat").unwrap_or("")).ok_or("an unknown material")?,
             outline: if get("out")?.is_empty() { Vec::new() } else { get("out")?.split(';').map(|p| { let (a, b) = p.split_once(',').ok_or("a corner without ','")?; Ok([num(a)?, num(b)?]) }).collect::<Result<_, String>>()? },
             slab_kind: *SlabKind::ALL.iter().find(|k| k.name() == get("sk").unwrap_or("")).ok_or("an unknown slab kind")?,
+            slope_edges: get("se").unwrap_or("").chars().map(|c| c == 'T').collect(),
             join_ends: [je.starts_with('T'), je.ends_with('T')],
             spacing_m: num(get("sp")?)?, angle_deg: num(get("an")?)?, parent: opt_id(get("par")?)?, count: int(get("cnt")?)? as u32,
             family: unesc(get("fam")?)?, type_name: unesc(get("tn")?)?,

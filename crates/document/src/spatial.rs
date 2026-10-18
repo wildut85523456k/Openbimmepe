@@ -434,6 +434,14 @@ impl Document {
         if matches!(el.category, Category::BeamSystem | Category::Truss) { return None; }
         if el.category == Category::Rebar { return self.rebar_mesh(el); }
         if el.category == Category::Family { return None; }
+        if let (Some(Geometry::Area { level }), true) = (el.geometry, el.is_roof()) {
+            // a roof by footprint: sloped planes from the eaves
+            let z0 = self.get(level)?.elevation_m + el.elevation_m;
+            return crate::roof::mesh(&el.outline, &el.slope_edges, el.slope_ratio.unwrap_or(0.0), z0, el.height_m).or_else(|| {
+                // not sloping (or not a shape that can): flat, as a slab
+                crate::roof::mesh(&el.outline, &vec![false; el.outline.len()], 0.0, z0, el.height_m)
+            });
+        }
         if let Some(Geometry::Area { level }) = el.geometry {
             // the slab hangs from its top, which is `elevation_m` above the level
             let ring = &el.outline;

@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 fn request() -> PreviewRequest {
     PreviewRequest { version:1,request_id:"test-run".into(),snapshot:Snapshot {
         document_id:"test-document".into(),revision:42,elements:vec![SnapshotElement {
-            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slab_kind:None,spacing_m:None,angle_deg:None,parent:None,join_ends:None,count:None,family:None,type_name:String::new(),overrides:vec![],texts:vec![],type_id:None,type_for:None,
+            id:1,category:"Duct".into(),name:"Supply".into(),width_m:0.2,height_m:0.3,elevation_m:2.7,slope_ratio:Some(0.01),geometry:None,section:None,usage:None,material:None,outline:vec![],slope_edges:vec![],slab_kind:None,spacing_m:None,angle_deg:None,parent:None,join_ends:None,count:None,family:None,type_name:String::new(),overrides:vec![],texts:vec![],type_id:None,type_for:None,
         }],
     },graph:Graph::example(vec![1]) }
 }

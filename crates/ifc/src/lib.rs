@@ -309,6 +309,19 @@ pub struct MemberInfo {
     pub fingerprint: String,
 }
 
+/// A roof by footprint: its solid as faces (each a ring of points, wound outward) and the shape it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoofItem {
+    pub id: u64,
+    pub name: String,
+    /// the height of the eaves, which puts the roof on a storey
+    pub eaves_z: f64,
+    pub verts: Vec<[f64; 3]>,
+    pub faces: Vec<Vec<usize>>,
+    /// IfcRoofTypeEnum: FLAT_ROOF, SHED_ROOF, GABLE_ROOF, HIP_ROOF or NOTDEFINED
+    pub shape: &'static str,
+}
+
 pub struct Scene {
     pub project_name: String,
     /// 48-bit key that makes the GlobalIds of this project different from every other project's
@@ -322,6 +335,8 @@ pub struct Scene {
     /// firestop records of the wall penetrations (product, installed, inspected), entered by hand or by external software
     pub firestops: Firestops,
     pub slabs: Vec<SlabItem>,
+    /// roofs by footprint, each written as an IfcRoof with a faceted solid
+    pub roofs: Vec<RoofItem>,
     /// structural columns, each a straight prism on a convex footprint
     pub columns: Vec<ColumnItem>,
     /// beams, each a straight member with a rectangular section
@@ -381,6 +396,7 @@ pub struct Report {
     pub walls: usize,
     pub openings: usize,
     pub slabs: usize,
+    pub roofs: usize,
     pub bars: usize,
     pub segments: usize,
     pub fittings: usize,
@@ -900,6 +916,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
         families::write_families(&mut o)?;
     }
     write_slabs(&mut o)?;
+    write_roofs(&mut o)?;
     write_columns(&mut o)?;
     write_beams(&mut o)?;
     write_member_materials(&mut o);
@@ -1304,6 +1321,37 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             }
             o.pset(oe, "OpenBIM_Penetration", props);
         }
+    }
+    Ok(())
+}
+
+/// Roofs by footprint: an IfcRoof whose body is a closed faceted solid, since a roof of several planes is not an extrusion.
+fn write_roofs(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for item in &scene.roofs {
+        if item.faces.is_empty() || item.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= item.verts.len())) {
+            return Err(ExportError::Unsupported(format!("roof {}: a solid without faces", item.name)));
+        }
+        let st = o.storey_for(item.eaves_z);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let pts: Vec<u32> = item.verts.iter().map(|v| o.p3([v[0], v[1], v[2] - elev])).collect();
+        let mut faces = Vec::new();
+        for f in &item.faces {
+            let ring: Vec<String> = f.iter().map(|&i| format!("#{}", pts[i])).collect();
+            let lp = o.s.add(format!("IFCPOLYLOOP(({}))", ring.join(",")));
+            let bound = o.s.add(format!("IFCFACEOUTERBOUND(#{lp},.T.)"));
+            faces.push(format!("#{}", o.s.add(format!("IFCFACE((#{bound}))"))));
+        }
+        let shell = o.s.add(format!("IFCCLOSEDSHELL(({}))", faces.join(",")));
+        let brep = o.s.add(format!("IFCFACETEDBREP(#{shell})"));
+        let rep = o.shape_rep("Brep", &[brep]);
+        let shape = o.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+        let g = o.gid(item.id, 0);
+        let roof = o.s.add(format!("IFCROOF({g},$,{},$,$,#{pl},#{shape},$,.{}.)", string(&item.name), item.shape));
+        o.contain(st, roof);
+        o.member_entities.push((item.id, roof));
+        o.report.roofs += 1;
     }
     Ok(())
 }
