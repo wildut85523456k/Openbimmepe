@@ -116,6 +116,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let scale = fit * app.zoom;
     let screen = |p| rect.center() + pan0 + (proj(p).0 - bounds.center().to_vec2()) * scale;
     let selected = app.selected_id();
+    let selected_all = app.selected_ids();
     let blue = ui.visuals().hyperlink_color;
     let axes: Vec<_> = app.document.elements().flat_map(|el| match el.geometry {
         Some(Geometry::Grid { start, end } | Geometry::Linear { start, end, .. }) => vec![start, end],
@@ -126,7 +127,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let back = axes.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
     let mut datum_hits = Vec::new();
     for el in app.document.elements() {
-        let active = selected == Some(el.id);
+        let active = selected_all.contains(&el.id);
         let stroke = Stroke::new(if active { 2.5 } else { 1.0 }, if active { blue } else { Color32::from_gray(135) });
         match el.geometry {
             Some(Geometry::Grid { start, end }) => {
@@ -175,8 +176,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     faces.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (_, id, points, color) in &faces {
         painter.add(egui::Shape::convex_polygon(points.clone(), *color,
-            Stroke::new(if selected == Some(*id) { 2.0 } else { 0.8 },
-                if selected == Some(*id) { blue } else { Color32::from_gray(80) })));
+            Stroke::new(if selected_all.contains(id) { 2.0 } else { 0.8 },
+                if selected_all.contains(id) { blue } else { Color32::from_gray(80) })));
     }
     if !three_d {
         let report = app.compute.report.as_ref().map(|(_, r)| r);
@@ -351,7 +352,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if !app.edit_pts.is_empty() { for c in typed.chars() { if c.is_ascii_digit() || c == '.' || (c == '-' && app.edit_num.is_empty()) { app.edit_num.push(c); } } }
         let hover = response.hover_pos();
         // the ghost: the selected element's outline after the change the next pick would make
-        if let (Some(sel), Some(h)) = (app.edit_src.or(selected), hover) {
+        let moving: Vec<ElementId> = if app.edit_src.is_empty() { selected_all.clone() } else { app.edit_src.clone() };
+        if let (false, Some(h)) = (moving.is_empty(), hover) {
             let next = snap_to(h);
             let xf = match app.edit_num.parse::<f64>() {
                 Ok(v) if app.tool == crate::Tool::Rotate => app.edit_pts.first().map(|c| openbim_document::Xf::Rotate(*c, v.to_radians())),
@@ -360,7 +362,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             };
             let ghost = Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
             if let Some(xf) = xf {
-                for (_, id, points, _) in faces.iter().filter(|f| f.1 == sel) {
+                for (_, id, points, _) in faces.iter().filter(|f| moving.contains(&f.1)) {
                     let moved: Vec<Pos2> = points.iter().map(|q| { let m = xf.point(raw(*q)); screen([m[0], m[1], level_z]) }).collect();
                     painter.add(egui::Shape::convex_polygon(moved, Color32::from_rgba_unmultiplied(220, 140, 0, 40), ghost));
                     let _ = id;
@@ -536,7 +538,12 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id)
                 .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0
                     || p.distance(*a) < 12.0 || p.distance(*b) < 12.0).map(|(id, _, _)| *id));
-            app.select_element(hit);
+            let mods = ui.input(|i| i.modifiers);
+            match hit {
+                Some(id) if mods.command || mods.ctrl => app.change_selection(id, true),
+                Some(id) if mods.shift => app.change_selection(id, false),
+                _ => if hit.is_some() || !(mods.command || mods.ctrl || mods.shift) { app.select_element(hit); },
+            }
         }
     }
     if app.tool == crate::Tool::Select && !three_d {
@@ -571,9 +578,37 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 if let Some((id, a, b)) = wall_ends.filter(|(_, a, b)| grip_at(*a).distance(p) < 10.0 || grip_at(*b).distance(p) < 10.0) {
                     app.drag = Some(crate::Drag::Grip { id, at_start: grip_at(a).distance(p) <= grip_at(b).distance(p) });
                 } else if let Some(hit) = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id) {
-                    app.select_element(Some(hit));
+                    if !selected_all.contains(&hit) { app.select_element(Some(hit)); }
                     app.drag = Some(crate::Drag::Move { id: hit, from: snap_to(p, None) });
+                } else {
+                    app.marquee = Some(p);
                 }
+            }
+        }
+        if let Some(start) = app.marquee {
+            // a box dragged on empty ground selects what it holds (left to right) or touches (right to left, dashed)
+            let here = response.interact_pointer_pos().or(response.hover_pos()).unwrap_or(start);
+            let r = Rect::from_two_pos(start, here);
+            let crossing = here.x < start.x;
+            let colour = if crossing { Color32::from_rgb(60, 160, 80) } else { blue };
+            if crossing { for (a, b) in [(r.left_top(), r.right_top()), (r.right_top(), r.right_bottom()), (r.right_bottom(), r.left_bottom()), (r.left_bottom(), r.left_top())] { dashed(&painter, a, b, Stroke::new(1.0, colour)); } }
+            else { painter.rect_stroke(r, 0.0, Stroke::new(1.0, colour), egui::StrokeKind::Middle); }
+            painter.rect_filled(r, 0.0, colour.gamma_multiply(0.08));
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.marquee = None; }
+            else if response.drag_stopped_by(egui::PointerButton::Primary) {
+                app.marquee = None;
+                let mut boxes: Vec<(ElementId, Rect)> = Vec::new();
+                for (_, id, points, _) in faces.iter() {
+                    let b = Rect::from_points(points);
+                    match boxes.iter_mut().find(|x| x.0 == *id) { Some(x) => x.1 = x.1.union(b), None => boxes.push((*id, b)) }
+                }
+                for (id, a, b) in &datum_hits { if app.document.get(*id).is_some_and(|e| e.category == Category::Grid) { boxes.push((*id, Rect::from_two_pos(*a, *b))); } }
+                let hits: Vec<ElementId> = boxes.iter().filter(|(_, b)| if crossing { r.intersects(*b) } else { r.contains_rect(*b) }).map(|(id, _)| *id).collect();
+                let mods = ui.input(|i| i.modifiers);
+                let mut all = if mods.command || mods.shift { selected_all.clone() } else { Vec::new() };
+                for h in hits { if !all.contains(&h) { all.push(h); } }
+                app.select_many(all);
+                if app.selected_ids().is_empty() { app.message = "Nothing in the box".into(); }
             }
         }
         if let Some(d) = app.drag {
@@ -586,12 +621,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     crate::Drag::Move { id, from } => {
                         let to = snap_to(h, Some(from));
                         let xf = openbim_document::Xf::Move([to[0] - from[0], to[1] - from[1]]);
-                        for (_, _, points, _) in faces.iter().filter(|f| f.1 == id) {
+                        let group = if selected_all.contains(&id) { selected_all.clone() } else { vec![id] };
+                        for (_, _, points, _) in faces.iter().filter(|f| group.contains(&f.1)) {
                             let moved: Vec<Pos2> = points.iter().map(|q| { let m = xf.point(raw(*q)); screen([m[0], m[1], level_z]) }).collect();
                             painter.add(egui::Shape::convex_polygon(moved, fill, ghost));
                         }
                         painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", (to[0] - from[0]).hypot(to[1] - from[1]) * 1000.0), egui::FontId::proportional(13.0), blue);
-                        if (to[0] - from[0]).hypot(to[1] - from[1]) > 1e-6 { done = Some(app.document.transform_commands(&[id], xf)); }
+                        if (to[0] - from[0]).hypot(to[1] - from[1]) > 1e-6 { done = Some(app.document.transform_commands(&group, xf)); }
                     }
                     crate::Drag::Grip { id, at_start } => if let Some((_, a, b)) = wall_ends {
                         let (fixed, moving) = if at_start { (b, a) } else { (a, b) };
@@ -1016,10 +1052,10 @@ mod tests {
     /// The screen row and the left and right ends of where a click selects wall 20 in the plan.
     fn wall_span(ctx: &egui::Context, screen: Rect, app: &Desktop) -> (f32, f32, f32) {
         let mut found = Vec::new();
-        for y in (100..600).step_by(4) { for x in (60..940).step_by(2) {
-            let mut probe = Desktop::sample();
-            probe.view = app.view;
-            probe.document = app.document.clone();
+        let mut probe = Desktop::sample();
+        probe.view = app.view;
+        probe.document = app.document.clone();
+        for y in (100..600).step_by(6) { for x in (60..940).step_by(2) {
             probe.select_element(None);
             let at = Pos2::new(x as f32, y as f32);
             frame(ctx, screen, &mut probe, vec![egui::Event::PointerMoved(at)]);
@@ -1213,5 +1249,100 @@ mod tests {
         assert_eq!(wall_line(&app, ElementId(20)), ([8.0, 0.0], [0.0, 0.0]), "{}", app.message);
         app.document.undo().unwrap();
         assert_eq!(wall_line(&app, ElementId(20)), ([0.0, 0.0], [8.0, 0.0]));
+    }
+
+    fn frame_mod(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        let events: Vec<egui::Event> = std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect();
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() },
+            |ui| { egui::CentralPanel::default().show(ui, |ui| show(app, ui)); });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn several_elements_are_selected_by_ctrl_click_by_a_box_and_edited_together() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
+        let b = app.document.place_wall(level, [0.0, 4.0], [8.0, 4.0], 0.2, 3.0, 0.0).unwrap();
+        // API: the selection grows and shrinks, the first is the primary one
+        app.select_element(Some(ElementId(20)));
+        app.change_selection(b, true);
+        assert_eq!(app.selected_ids(), vec![ElementId(20), b]);
+        app.change_selection(ElementId(20), false);
+        assert_eq!(app.selected_ids(), vec![b]);
+        app.select_many(vec![ElementId(20), b]);
+        // Move and Copy act on all of them
+        app.run_command("move", "Move");
+        app.edit_click([0.0, 0.0]);
+        app.edit_click([0.0, -10.0]);
+        assert!(near(wall_line(&app, ElementId(20)).0, [0.0, -10.0]) && near(wall_line(&app, b).0, [0.0, -6.0]), "{}", app.message);
+        app.document.undo().unwrap();
+        assert!(app.selected_ids().len() == 2);
+        let n = walls(&app);
+        app.run_command("copy", "Copy");
+        app.edit_click([0.0, 0.0]);
+        app.edit_click([20.0, 0.0]);
+        assert_eq!(walls(&app), n + 2, "{}", app.message);
+        assert_eq!(app.selected_ids().len(), 2, "the copies are selected");
+        app.document.undo().unwrap();
+        // Delete removes both, with one undo
+        app.choose_tool(crate::Tool::Select);
+        app.select_many(vec![ElementId(20), b]);
+        app.delete_selected();
+        assert!(app.document.get(ElementId(20)).is_none() && app.document.get(b).is_none(), "{}", app.message);
+        app.document.undo().unwrap();
+        assert!(app.document.get(ElementId(20)).is_some() && app.document.get(b).is_some());
+        // Ctrl or Cmd click adds the clicked wall, Shift click takes it away
+        app.select_element(None);
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        let mid = Pos2::new((left + right) / 2.0, y);
+        let click = |app: &mut Desktop, at: Pos2, m: egui::Modifiers| {
+            frame_mod(&ctx, screen, app, vec![egui::Event::PointerMoved(at)], m);
+            frame_mod(&ctx, screen, app, vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: m }], m);
+            frame_mod(&ctx, screen, app, vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: m }], m);
+        };
+        click(&mut app, mid, egui::Modifiers::NONE);
+        assert_eq!(app.selected_ids(), vec![ElementId(20)]);
+        app.select_many(vec![b]);
+        click(&mut app, mid, egui::Modifiers::COMMAND);
+        assert!(app.selected_ids().contains(&b) && app.selected_ids().contains(&ElementId(20)), "{:?}", app.selected_ids());
+        click(&mut app, mid, egui::Modifiers::SHIFT);
+        assert_eq!(app.selected_ids(), vec![b]);
+    }
+
+    #[test]
+    fn a_box_selects_what_it_holds_left_to_right_and_what_it_touches_right_to_left() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.select_element(None);
+        let drag = |app: &mut Desktop, a: Pos2, b: Pos2| {
+            frame(&ctx, screen, app, vec![egui::Event::PointerMoved(a)]);
+            frame(&ctx, screen, app, vec![button(a, true)]);
+            frame(&ctx, screen, app, vec![egui::Event::PointerMoved(a + (b - a) * 0.5)]);
+            frame(&ctx, screen, app, vec![egui::Event::PointerMoved(b)]);
+            frame(&ctx, screen, app, vec![button(b, false)]);
+        };
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        // a small box left to right around the middle of the wall holds nothing whole
+        drag(&mut app, Pos2::new(15.0, 130.0), Pos2::new(left + 20.0, y + 25.0));
+        assert!(!app.selected_ids().contains(&ElementId(20)), "{:?}", app.selected_ids());
+        // right to left, touching the wall only at its left part
+        let _ = right;
+        drag(&mut app, Pos2::new(left + 20.0, y + 25.0), Pos2::new(15.0, 130.0));
+        assert!(app.selected_ids().contains(&ElementId(20)), "{:?} {}", app.selected_ids(), app.message);
+        // everything inside a big box, left to right
+        app.select_element(None);
+        drag(&mut app, Pos2::new(8.0, 125.0), Pos2::new(990.0, 695.0));
+        let all = app.selected_ids();
+        assert!(all.len() > 1 && all.contains(&ElementId(20)), "{all:?} {}", app.message);
+        // Delete takes them all, one undo brings them back
+        let n = app.document.elements().count();
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert!(app.document.elements().count() < n);
+        app.document.undo().unwrap();
+        assert_eq!(app.document.elements().count(), n);
     }
 }

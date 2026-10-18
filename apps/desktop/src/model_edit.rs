@@ -119,7 +119,32 @@ impl Desktop {
         }
     }
 
+    /// Everything selected: the primary element first, then the others.
+    pub(crate) fn selected_ids(&self) -> Vec<ElementId> {
+        let mut v: Vec<ElementId> = self.selected_id().into_iter().collect();
+        for i in &self.multi { if !v.contains(i) { v.push(*i); } }
+        v.retain(|i| self.document.get(*i).is_some());
+        v
+    }
+
+    /// Selects exactly `ids` (the first becomes the primary one, whose values the panels show).
+    pub(crate) fn select_many(&mut self, ids: Vec<ElementId>) {
+        let mut ids = ids;
+        ids.dedup();
+        self.select_element(ids.first().copied());
+        self.multi = ids.into_iter().skip(1).collect();
+        if !self.multi.is_empty() { self.message = format!("{} elements selected", self.multi.len() + 1); }
+    }
+
+    /// Ctrl or Cmd click adds `id` to the selection, Shift click takes it away.
+    pub(crate) fn change_selection(&mut self, id: ElementId, add: bool) {
+        let mut ids = self.selected_ids();
+        if add { if !ids.contains(&id) { ids.push(id); } } else { ids.retain(|i| *i != id); }
+        self.select_many(ids);
+    }
+
     pub(crate) fn select_element(&mut self, id: Option<ElementId>) {
+        self.multi.clear();
         if id == self.selected_id() { return; }
         let pending = self.has_pending_edit();
         self.selected = id.map(|id| if id == ElementId(1) { SampleElement::Duct } else { SampleElement::Model(id) });
@@ -537,7 +562,7 @@ impl Desktop {
         if self.selected_id().is_none() { self.message = "Select an element first (click it), then pick the points".into(); return; }
         let need = if self.tool == Tool::Rotate { 3 } else { 2 };
         if self.edit_pts.len() + 1 < need {
-            if self.edit_pts.is_empty() { self.edit_src = self.selected_id(); }
+            if self.edit_pts.is_empty() { self.edit_src = self.selected_ids(); }
             self.edit_pts.push(point);
             self.message = match (self.tool, self.edit_pts.len()) {
                 (Tool::Move | Tool::Copy, _) => "Pick the point to move to (type a distance in mm and Enter, Shift keeps it square, Esc cancels)".into(),
@@ -571,18 +596,19 @@ impl Desktop {
     /// Makes the change on the selected element in one undoable step. A copy can go on (the base stays); the
     /// others end, leaving the element selected.
     fn edit_finish(&mut self, xf: Xf) {
-        let Some(id) = self.edit_src.or(self.selected_id()) else { return };
+        let ids = if self.edit_src.is_empty() { self.selected_ids() } else { self.edit_src.clone() };
+        if ids.is_empty() { return; }
         let copying = self.tool == Tool::Copy || (self.tool == Tool::Mirror && self.mirror_copy);
-        let made = if copying { self.document.copy_commands(&[id], xf).map(|(ops, firsts)| (ops, firsts.first().copied())) }
-            else { self.document.transform_commands(&[id], xf).map(|ops| (ops, None)) };
+        let made = if copying { self.document.copy_commands(&ids, xf).map(|(ops, firsts)| (ops, Some(firsts))) }
+            else { self.document.transform_commands(&ids, xf).map(|ops| (ops, None)) };
         let result = made.and_then(|(ops, new)| self.document.transact(self.document.revision(), &ops).map(|_| new).map_err(|e| format!("{e:?}")));
         match result {
             Ok(new) => {
-                if let Some(n) = new { self.select_element(Some(n)); }
+                if let Some(n) = new { self.select_many(n); }
                 self.message = format!("{} done; undo takes it back", match self.tool { Tool::Move => "Move", Tool::Copy => "Copy", Tool::Rotate => "Rotate", _ => "Mirror" });
-                if self.tool == Tool::Copy { self.edit_pts.truncate(1); self.edit_src = Some(id); } else { self.choose_tool(Tool::Select); }
+                if self.tool == Tool::Copy { self.edit_pts.truncate(1); self.edit_src = ids; } else { self.choose_tool(Tool::Select); }
             }
-            Err(e) => { self.message = format!("Cannot do that: {e}"); self.edit_pts.clear(); self.edit_src = None; }
+            Err(e) => { self.message = format!("Cannot do that: {e}"); self.edit_pts.clear(); self.edit_src.clear(); }
         }
     }
 
@@ -624,10 +650,11 @@ impl Desktop {
 
     /// Delete: the selected element with what is hosted by it or tagged on it, in one undoable step.
     pub(crate) fn delete_selected(&mut self) {
-        let Some(id) = self.selected_id() else { self.message = "Delete: select an element first".into(); return };
-        if self.document.get(id).is_some_and(|e| e.category == Category::Level) { self.message = "A level cannot be deleted here".into(); return; }
+        let ids = self.selected_ids();
+        if ids.is_empty() { self.message = "Delete: select an element first".into(); return; }
+        if ids.iter().any(|id| self.document.get(*id).is_some_and(|e| e.category == Category::Level)) { self.message = "A level cannot be deleted here".into(); return; }
         let before = self.document.elements().count();
-        match self.document.delete_commands(&[id]).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
+        match self.document.delete_commands(&ids).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
             Ok(_) => {
                 self.select_element(None);
                 self.message = format!("Deleted {} element(s); undo brings them back", before - self.document.elements().count());

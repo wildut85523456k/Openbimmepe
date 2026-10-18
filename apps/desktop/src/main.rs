@@ -83,7 +83,11 @@ struct Desktop {
     offset_mm: f64,
     offset_copy: bool,
     /// the element the points picked so far are about: a Copy goes on making copies of it
-    edit_src: Option<ElementId>,
+    edit_src: Vec<ElementId>,
+    /// the elements selected besides the primary one (Ctrl or Cmd click adds, Shift click takes away, a box selects)
+    multi: Vec<ElementId>,
+    /// where a selection box was started in the plan
+    marquee: Option<eframe::egui::Pos2>,
     mirror_copy: bool,
     /// the Level tool: the elevation (mm) and the name of the next level, empty for the next number
     level_elev_mm: f64,
@@ -190,7 +194,7 @@ impl Desktop {
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
-            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, edit_ref: None, offset_mm: 1000.0, offset_copy: false, edit_src: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
+            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, edit_ref: None, offset_mm: 1000.0, offset_copy: false, edit_src: Vec::new(), multi: Vec::new(), marquee: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
@@ -210,7 +214,8 @@ impl Desktop {
         self.wall_len.clear();
         self.edit_pts.clear();
         self.edit_num.clear();
-        self.edit_src = None;
+        self.edit_src.clear();
+        self.marquee = None;
         self.edit_ref = None;
         self.drag = None;
         self.slab_points.clear();
