@@ -2,7 +2,7 @@
 use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_geom::WallChain;
-use openbim_ifc::{BeamItem, ColumnItem, FamilyItem, FamilyRef, FramingUsage, Frame, Scene, SlabItem, SlabRole, WallItem};
+use openbim_ifc::{MemberInfo, TypeClass, TypeItem, TypeProp, BeamItem, ColumnItem, FamilyItem, FamilyRef, FramingUsage, Frame, Scene, SlabItem, SlabRole, WallItem};
 
 pub struct Exported {
     pub text: String,
@@ -184,15 +184,59 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         }
         items.push(FamilyItem { id: el.id.0, name: el.name.clone(), family: fam_index, type_name: type_name.map(str::to_string), frame, instance, host });
     }
+    let (types, member_info) = types_of(doc, &beams, &columns, &slabs);
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, columns: columns.clone(), shafts: vec![],
         floor_penetrations: vec![], networks: vec![], families, items, rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
-        room_lighting: Default::default(), pset_map: Default::default(),
+        room_lighting: Default::default(), pset_map: Default::default(), types, member_info,
     };
     Ok((scene, skipped))
+}
+
+/// 16 hex digits over the values of an element that the file carries (FNV-1a, so the same on every machine).
+fn fingerprint(el: &openbim_document::Element) -> String {
+    let text = format!("{:?}", (&el.name, el.width_m, el.height_m, el.elevation_m, el.section, el.material, el.usage, el.geometry, &el.outline));
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.bytes() { h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3); }
+    format!("{h:016x}")
+}
+
+/// The IFC type objects of the document's types, and the `OpenBIM_Element` data of the members that were written.
+fn types_of(doc: &Document, beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
+    let written: std::collections::BTreeSet<u64> = beams.iter().map(|b| b.id).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).collect();
+    let mut info = std::collections::BTreeMap::new();
+    for el in doc.elements().filter(|e| written.contains(&e.id.0)) {
+        let type_name = el.type_id.and_then(|t| doc.get(t)).map(|t| t.name.clone()).unwrap_or_default();
+        info.insert(el.id.0, MemberInfo { category: format!("{:?}", el.category), type_name, fingerprint: fingerprint(el) });
+    }
+    let mut types = Vec::new();
+    for t in doc.elements().filter(|e| e.category == Category::Type) {
+        let Some(kind) = t.type_for else { continue };
+        let class = match kind {
+            Category::Beam => TypeClass::Beam(match t.usage { Usage::Joist => "JOIST", Usage::Girder => "BEAM", _ => "NOTDEFINED" }),
+            Category::Column => TypeClass::Column,
+            Category::Slab => TypeClass::Slab("FLOOR"),
+            Category::WallFooting => TypeClass::StripFooting,
+            _ => continue, // rebar types have no IFC type object
+        };
+        let instances: Vec<u64> = doc.elements().filter(|e| e.type_id == Some(t.id)).map(|e| e.id.0).collect();
+        let v = openbim_document::TypeValues::of(t);
+        let mut props = vec![("Category".to_string(), TypeProp::Text(format!("{kind:?}"))), ("Width".into(), TypeProp::Len(v.width_m)), ("Height".into(), TypeProp::Len(v.height_m))];
+        if matches!(kind, Category::Beam | Category::Column) {
+            props.push(("Section".into(), TypeProp::Text(match v.section {
+                openbim_document::Section::Rectangle => "Rectangle".into(),
+                openbim_document::Section::Circle => "Circle".into(),
+                openbim_document::Section::IShape { web_m, flange_m } => format!("I web {web_m} flange {flange_m}"),
+            })));
+        }
+        if v.material != Material::Unspecified { props.push(("Material".into(), TypeProp::Text(v.material.name().into()))); }
+        if kind == Category::Beam { props.push(("Usage".into(), TypeProp::Text(format!("{:?}", v.usage)))); }
+        types.push(TypeItem { id: t.id.0, name: t.name.clone(), class, props, instances });
+    }
+    (types, info)
 }
 
 /// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
@@ -252,6 +296,35 @@ mod tests {
         assert!(out.warnings.iter().any(|w| w.contains("1 ducts")) && out.warnings.iter().any(|w| w.contains("1 pipes")), "{:?}", out.warnings);
         // the upper wall stands on Level 2 (3 m): the export is stable and the same twice
         assert_eq!(out.text, export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap().text);
+    }
+
+    #[test]
+    fn types_and_the_element_set_are_in_the_file_and_the_file_is_repeatable() {
+        let mut d = Document::spatial_sample();
+        let level = BeamSpec::level;
+        let a = d.place_beam(ElementId(10), &BeamSpec { material: Material::Concrete, ..level([1.0, 1.0], [5.0, 1.0], 0.3, 0.5, 2.8) }).unwrap();
+        let b = d.place_beam(ElementId(10), &BeamSpec { material: Material::Concrete, ..level([1.0, 2.0], [5.0, 2.0], 0.3, 0.5, 2.8) }).unwrap();
+        let free = d.place_beam(ElementId(10), &level([1.0, 3.0], [5.0, 3.0], 0.2, 0.4, 2.8)).unwrap();
+        let t = d.create_type(a, "Beam 300 x 500").unwrap();
+        d.assign_type(&[b], t).unwrap();
+        let out = export_ifc(&d, "P", 1, "2026-10-18T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCBEAMTYPE(").count(), 1);
+        let line = |needle: &str| out.text.lines().find(|l| l.contains(needle)).unwrap().to_string();
+        assert!(line("IFCBEAMTYPE(").contains("'Beam 300 x 500'") && line("IFCBEAMTYPE(").ends_with(".BEAM.);"));
+        // one relationship names both typed beams and not the free one
+        assert_eq!(out.text.matches("IFCRELDEFINESBYTYPE(").count(), 1);
+        assert_eq!(line("IFCRELDEFINESBYTYPE(").matches('#').count(), 4, "its own number, two beams and the type");
+        // every beam carries the element set, with the type name only on the typed ones
+        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 3);
+        assert_eq!(out.text.matches("IFCLABEL('Beam 300 x 500')").count(), 2, "on the two typed beams");
+        assert!(out.text.contains(&format!("IFCINTEGER({})", free.0)));
+        assert!(out.text.contains("'OpenBIM_Type'") && out.text.contains("IFCLABEL('Concrete')"));
+        assert_eq!(out.text, export_ifc(&d, "P", 1, "2026-10-18T00:00:00").unwrap().text);
+        // a value changed outside the type changes the fingerprint of that element only
+        let before = fingerprint(d.get(free).unwrap());
+        d.edit_type(t, &openbim_document::TypeValues { width_m: 0.4, ..openbim_document::TypeValues::of(d.get(t).unwrap()) }).unwrap();
+        assert_eq!(before, fingerprint(d.get(free).unwrap()));
+        assert_ne!(fingerprint(d.get(a).unwrap()), fingerprint(d.get(free).unwrap()));
     }
 
     #[test]

@@ -251,6 +251,60 @@ pub struct RoomItem {
     pub room: Room,
 }
 
+/// A value of a type, written as a property of the type's property set.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TypeProp {
+    Text(String),
+    /// a length in metres
+    Len(f64),
+    Int(i64),
+}
+
+/// A type of beams, columns, slabs or footings: a name, the values it governs and the elements that follow it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeItem {
+    /// the element number of the type in the document (its GlobalId comes from it)
+    pub id: u64,
+    pub name: String,
+    pub class: TypeClass,
+    pub props: Vec<(String, TypeProp)>,
+    /// element numbers of the instances; instances that are not in the file are left out
+    pub instances: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TypeClass {
+    /// IfcBeamType with its IFC4 predefined type, e.g. `BEAM`
+    Beam(&'static str),
+    Column,
+    /// IfcSlabType with its predefined type, e.g. `FLOOR`
+    Slab(&'static str),
+    StripFooting,
+    PadFooting,
+}
+
+impl TypeClass {
+    fn entity(self) -> (&'static str, &'static str) {
+        match self {
+            TypeClass::Beam(p) => ("IFCBEAMTYPE", p),
+            TypeClass::Column => ("IFCCOLUMNTYPE", "COLUMN"),
+            TypeClass::Slab(p) => ("IFCSLABTYPE", p),
+            TypeClass::StripFooting => ("IFCFOOTINGTYPE", "STRIP_FOOTING"),
+            TypeClass::PadFooting => ("IFCFOOTINGTYPE", "PAD_FOOTING"),
+        }
+    }
+}
+
+/// The `OpenBIM_Element` property set of a member: what a companion file or a later import matches on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberInfo {
+    pub category: String,
+    /// the name of its type, empty for none
+    pub type_name: String,
+    /// 16 hex digits over the values exported for it; an import that finds another value knows the file was edited elsewhere
+    pub fingerprint: String,
+}
+
 pub struct Scene {
     pub project_name: String,
     /// 48-bit key that makes the GlobalIds of this project different from every other project's
@@ -280,6 +334,10 @@ pub struct Scene {
     /// lighting inputs of rooms, by the room's element number
     pub room_lighting: std::collections::BTreeMap<u64, lighting::RoomLighting>,
     pub wall_types: Vec<walls::WallType>,
+    /// types of beams, columns, slabs and footings: one IFC type object each, linked to its instances
+    pub types: Vec<TypeItem>,
+    /// what the exchange needs to know of each beam, column, slab and footing, by element number (see `MemberInfo`)
+    pub member_info: BTreeMap<u64, MemberInfo>,
     /// where one wall element meets another (see `walls::find_joins`)
     pub wall_joins: Vec<walls::WallJoin>,
     /// where the project is on the earth; without it the file has no map and the site has no position
@@ -828,6 +886,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     write_columns(&mut o)?;
     write_beams(&mut o)?;
     write_member_materials(&mut o);
+    write_member_types(&mut o)?;
     write_spaces(&mut o)?;
     if v2 {
         if !scene.networks.is_empty() {
@@ -1092,6 +1151,42 @@ fn write_member_materials(o: &mut Out) {
         let g = o.gen_gid();
         o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,({}),#{m})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
     }
+}
+
+/// The type objects and the `OpenBIM_Element` set of every beam, column, slab and footing written.
+fn write_member_types(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    let entity_of: BTreeMap<u64, u32> = o.member_entities.iter().copied().collect();
+    for (id, e) in &entity_of {
+        let Some(info) = scene.member_info.get(id) else { continue };
+        o.pset(*e, "OpenBIM_Element", vec![
+            ("ElementNumber", Val::Int(*id as i64)), ("Category", Val::Label(info.category.clone())),
+            ("TypeName", Val::Label(info.type_name.clone())), ("Fingerprint", Val::Ident(info.fingerprint.clone())),
+        ]);
+    }
+    if scene.types.is_empty() { return Ok(()); }
+    if o.v2 {
+        o.report.warnings.push("IFC2X3: member types are not written (the elements keep their values and the OpenBIM_Element set names the type)".into());
+        return Ok(());
+    }
+    for t in &scene.types {
+        let props: Vec<(&str, Val)> = t.props.iter().map(|(n, v)| (n.as_str(), match v {
+            TypeProp::Text(s) => Val::Label(s.clone()),
+            TypeProp::Len(x) => Val::LenAny(*x),
+            TypeProp::Int(i) => Val::Int(*i),
+        })).collect();
+        let ps = o.pset_entity("OpenBIM_Type", props);
+        let (class, predefined) = t.class.entity();
+        let g = o.gid(t.id, 0);
+        let ty = o.s.add(format!("{class}({g},$,{},$,$,(#{ps}),$,$,$,.{predefined}.)", string(&t.name)));
+        let users: Vec<String> = t.instances.iter().filter_map(|i| entity_of.get(i)).map(|e| format!("#{e}")).collect();
+        if !users.is_empty() {
+            let g = o.gen_gid();
+            o.s.add(format!("IFCRELDEFINESBYTYPE({g},$,$,$,({}),#{ty})", users.join(",")));
+        }
+        o.report.types += 1;
+    }
+    Ok(())
 }
 
 fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
