@@ -1,4 +1,4 @@
-use crate::friction::friction_per_metre;
+use crate::friction::{friction_per_metre, hazen_williams_per_metre};
 use crate::{flow_from_power, Fluid, LoadingCurve, Size};
 use rayon::prelude::*;
 
@@ -13,6 +13,9 @@ pub enum Demand {
     Power { watts: f64, delta_t: f64 },
     /// loading units of a fixture (plumbing): the flow of a branch comes from the sum downstream, by the loading curve
     LoadingUnits(f64),
+    /// a sprinkler or nozzle: flow = k sqrt(pressure), never below `min_flow`; `k` in m3/s per sqrt(Pa).
+    /// Here it flows at its own minimum pressure; `solve_sprinklers` finds what it flows at the pressure it gets.
+    Sprinkler { k: f64, min_flow: f64 },
 }
 
 /// The branch that leads to a node from its parent.
@@ -62,6 +65,8 @@ pub struct Settings {
     pub count_static: bool,
     /// loading units to flow; needed when any end point gives loading units
     pub loading: Option<LoadingCurve>,
+    /// Hazen-Williams C, for fire water; when set it replaces Darcy-Weisbach and the roughness
+    pub hazen_williams: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -76,6 +81,8 @@ pub enum TreeError {
     BadSettings(&'static str),
     /// the loading units downstream of this node are more than the loading curve covers
     OutsideCurve(usize),
+    /// the sprinkler flows did not settle
+    NotConverged,
     /// no size in the catalogue meets the limits for this node's branch
     NoSize(usize),
 }
@@ -127,6 +134,7 @@ fn check(tree: &Tree, s: &Settings) -> Result<Vec<usize>, TreeError> {
     for lim in [s.criteria.max_velocity, s.criteria.max_friction].into_iter().flatten() {
         if !(lim.is_finite() && lim > 0.0) { return Err(TreeError::BadSettings("a limit")); }
     }
+    if s.hazen_williams.is_some_and(|c| !(c.is_finite() && c > 0.0)) { return Err(TreeError::BadSettings("the Hazen-Williams C")); }
     if s.catalogue.iter().any(|z| !z.valid()) { return Err(TreeError::BadSettings("a size")); }
     let n = tree.nodes.len();
     let sources: Vec<usize> = (0..n).filter(|i| tree.nodes[*i].parent.is_none()).collect();
@@ -148,6 +156,7 @@ fn check(tree: &Tree, s: &Settings) -> Result<Vec<usize>, TreeError> {
         match nd.demand {
             Demand::None => {}
             Demand::Flow(q) => if !ok(q) { return Err(TreeError::BadValue(i, "flow")); },
+            Demand::Sprinkler { k, min_flow } => if !(k.is_finite() && k > 0.0 && ok(min_flow)) { return Err(TreeError::BadValue(i, "sprinkler")); },
             Demand::LoadingUnits(u) => {
                 if !ok(u) { return Err(TreeError::BadValue(i, "loading units")); }
                 if s.loading.is_none() { return Err(TreeError::BadSettings("no loading curve for loading units")); }
@@ -166,8 +175,20 @@ fn check(tree: &Tree, s: &Settings) -> Result<Vec<usize>, TreeError> {
     Ok(order)
 }
 
-fn demand_flow(d: Demand, fluid: &Fluid) -> f64 {
-    match d { Demand::None => 0.0, Demand::Flow(q) => q, Demand::Power { watts, delta_t } => flow_from_power(watts, delta_t, fluid).unwrap_or(0.0), Demand::LoadingUnits(_) => 0.0 }
+fn demand_flow(nd: &Node, fluid: &Fluid) -> f64 {
+    match nd.demand { Demand::None => 0.0, Demand::Flow(q) => q, Demand::Power { watts, delta_t } => flow_from_power(watts, delta_t, fluid).unwrap_or(0.0), Demand::LoadingUnits(_) => 0.0, Demand::Sprinkler { k, min_flow } => sprinkler_min_flow(k, min_flow, nd.required_pressure) }
+}
+
+/// The flow of a sprinkler at the least pressure it can work at: that of its own rating, or the one its minimum flow needs.
+pub(crate) fn sprinkler_min_flow(k: f64, min_flow: f64, min_pressure: f64) -> f64 {
+    (k * min_pressure.sqrt()).max(min_flow)
+}
+
+pub(crate) fn friction_of(q: f64, z: &Size, s: &Settings) -> (f64, f64, f64) {
+    match s.hazen_williams {
+        Some(c) => hazen_williams_per_metre(q, z, c, &s.fluid),
+        None => friction_per_metre(q, z, s.roughness, &s.fluid),
+    }
 }
 
 /// Sizes and losses of the whole tree: see the crate's description for the method.
@@ -176,7 +197,7 @@ pub fn compute(tree: &Tree, s: &Settings) -> Result<Results, TreeError> {
     let n = tree.nodes.len();
     // 1 and 2: the flow in every branch, from the end points back to the source
     // flows that are given add up as they are; loading units add up as units and then become a flow by the curve
-    let mut flow: Vec<f64> = tree.nodes.iter().map(|nd| demand_flow(nd.demand, &s.fluid)).collect();
+    let mut flow: Vec<f64> = tree.nodes.iter().map(|nd| demand_flow(nd, &s.fluid)).collect();
     let mut units: Vec<f64> = tree.nodes.iter().map(|nd| if let Demand::LoadingUnits(u) = nd.demand { u } else { 0.0 }).collect();
     for &i in order.iter().rev() {
         if let Some(p) = tree.nodes[i].parent { let (q, u) = (flow[i], units[i]); flow[p] += q; units[p] += u; }
@@ -197,7 +218,7 @@ pub fn compute(tree: &Tree, s: &Settings) -> Result<Results, TreeError> {
         };
         let q = flow[i];
         let meets = |z: &Size| {
-            let (per_m, v, _) = friction_per_metre(q, z, s.roughness, &s.fluid);
+            let (per_m, v, _) = friction_of(q, z, s);
             s.criteria.max_velocity.is_none_or(|m| v <= m * (1.0 + 1e-12)) && s.criteria.max_friction.is_none_or(|m| per_m <= m * (1.0 + 1e-12))
         };
         let (size, exceeds) = match &nd.branch.locked {
@@ -207,7 +228,7 @@ pub fn compute(tree: &Tree, s: &Settings) -> Result<Results, TreeError> {
                 (catalogue.iter().find(|z| meets(z)).ok_or(TreeError::NoSize(i))?.clone(), false)
             }
         };
-        let (per_m, v, re) = friction_per_metre(q, &size, s.roughness, &s.fluid);
+        let (per_m, v, re) = friction_of(q, &size, s);
         let dp_friction = per_m * nd.branch.length;
         let dp_fittings = nd.branch.fitting_k * rho * v * v / 2.0;
         let dp_static = if s.count_static { rho * GRAVITY * (nd.elevation - tree.nodes[p].elevation) } else { 0.0 };
@@ -260,7 +281,7 @@ mod tests {
     }
 
     fn settings() -> Settings {
-        Settings { fluid: Fluid::WATER, roughness: 0.045e-3, criteria: Criteria { max_velocity: Some(1.5), max_friction: None }, catalogue: catalogue(), count_static: false, loading: None }
+        Settings { fluid: Fluid::WATER, roughness: 0.045e-3, criteria: Criteria { max_velocity: Some(1.5), max_friction: None }, catalogue: catalogue(), count_static: false, loading: None, hazen_williams: None }
     }
 
     fn node(parent: Option<usize>, demand: Demand, required: f64, length: f64, k: f64) -> Node {
@@ -353,7 +374,7 @@ mod tests {
             node(Some(0), Demand::Flow(1.0), 50.0, 30.0, 1.0),
         ] };
         let cat = vec![Size::rect("400 x 300", 0.4, 0.3), Size::rect("800 x 400", 0.8, 0.4), Size::rect("1000 x 500", 1.0, 0.5), Size::rect("1200 x 600", 1.2, 0.6)];
-        let s = Settings { fluid: Fluid::AIR, roughness: 0.09e-3, criteria: Criteria { max_velocity: Some(8.0), max_friction: Some(1.0) }, catalogue: cat, count_static: false, loading: None };
+        let s = Settings { fluid: Fluid::AIR, roughness: 0.09e-3, criteria: Criteria { max_velocity: Some(8.0), max_friction: Some(1.0) }, catalogue: cat, count_static: false, loading: None, hazen_williams: None };
         let r = compute(&t, &s).unwrap();
         let b = &r.branches[1];
         assert!(b.friction_per_metre <= 1.0 && b.velocity <= 8.0);

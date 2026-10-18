@@ -87,9 +87,26 @@ pub(crate) fn friction_per_metre(flow: f64, size: &Size, roughness: f64, fluid: 
     (per_m, v, re)
 }
 
+/// Hazen-Williams friction (Pa/m) and velocity (m/s) of `flow` in `size`, for sprinkler and fire-main hydraulics:
+/// dp/L = rho g 10.67 Q^1.852 / (C^1.852 d^4.8704), SI units. Reynolds is not used, so 0 is returned for it.
+pub(crate) fn hazen_williams_per_metre(flow: f64, size: &Size, c: f64, fluid: &Fluid) -> (f64, f64, f64) {
+    let d = size.friction_diameter();
+    let head_per_m = 10.67 * flow.powf(1.852) / (c.powf(1.852) * d.powf(4.8704));
+    (head_per_m * fluid.density * 9.80665, flow / size.area(), 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hazen_williams_matches_a_hand_calculation() {
+        // 10 l/s in 100 mm, C 120: about 0.0221 m/m (Darcy at f 0.02 gives 0.0164 for a smoother pipe, C 120 is rougher)
+        let (pa, v, _) = hazen_williams_per_metre(0.01, &Size::round("100", 0.1), 120.0, &Fluid::WATER);
+        let head = 10.67 * 0.01f64.powf(1.852) / (120f64.powf(1.852) * 0.1f64.powf(4.8704));
+        assert!((head - 0.0221).abs() < 0.0002, "{head}");
+        assert!((pa - head * 998.0 * 9.80665).abs() < 1e-9 && (v - 1.2732).abs() < 1e-3);
+    }
 
     #[test]
     fn laminar_flow_is_sixty_four_over_reynolds() {
