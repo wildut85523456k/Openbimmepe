@@ -2386,6 +2386,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-calc"
+version = "0.0.1"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
 name = "openbim-desktop"
 version = "0.0.1"
 dependencies = [
