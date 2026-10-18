@@ -48,13 +48,32 @@ pub fn library() -> &'static [openbim_family::Compiled] {
 /// The instance values of a family (its numbers and yes/no inputs of instance scope, `wall_t` left out because the
 /// wall sets it) as solved for `type_name` with `overrides`; None for an unknown family or values that do not solve.
 pub fn instance_values(family: &str, type_name: &str, overrides: &[(String, f64)]) -> Option<Vec<(String, f64)>> {
+    instance_values_with(family, type_name, overrides, &[])
+}
+
+/// `instance_values` with choices and texts set as well.
+pub fn instance_values_with(family: &str, type_name: &str, overrides: &[(String, f64)], texts: &[(String, String)]) -> Option<Vec<(String, f64)>> {
     let f = library().iter().find(|f| f.name() == family)?;
     let inst = f.solve(&openbim_family::Request {
         type_name: (!type_name.is_empty()).then_some(type_name),
-        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: vec![] }).ok()?;
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }).ok()?;
     Some(f.input_values(&inst).into_iter()
         .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Instance))
         .map(|(n, v)| (n.to_string(), v)).collect())
+}
+
+/// An instance-scope choice, text or material input: its name, current value and, for a choice, the options.
+pub type TextInput = (String, String, Vec<String>);
+
+/// The choices, texts and materials of a family instance that its instance can set, as solved for `type_name`,
+/// `overrides` and `texts`.
+pub fn instance_texts(family: &str, type_name: &str, overrides: &[(String, f64)], texts: &[(String, String)]) -> Option<Vec<TextInput>> {
+    let f = library().iter().find(|f| f.name() == family)?;
+    let inst = f.solve(&openbim_family::Request {
+        type_name: (!type_name.is_empty()).then_some(type_name),
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }).ok()?;
+    Some(f.input_texts(&inst).into_iter().filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Instance))
+        .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect())
 }
 
 /// The scene of the document, and what could not be put in it. `timestamp` is written into the header of a file,
@@ -147,10 +166,10 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         let instance = match wall_t {
             Some(t) if !overrides.iter().any(|(n, _)| *n == "wall_t") => {
                 overrides.push(("wall_t", t));
-                lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: vec![] })
-                    .or_else(|_| { overrides.pop(); lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: vec![] }) })
+                lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
+                    .or_else(|_| { overrides.pop(); lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }) })
             }
-            _ => lib[fi].solve(&openbim_family::Request { type_name, overrides, texts: vec![] }),
+            _ => lib[fi].solve(&openbim_family::Request { type_name, overrides, texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }),
         }.map_err(|e| format!("{}: {e:?}", el.name))?;
         // a door or window opens its wall
         if let (Some((wi, _, along)), Some([w, h, sill])) = (host, instance.opening) {

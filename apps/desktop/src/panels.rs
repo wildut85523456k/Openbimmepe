@@ -428,6 +428,21 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     if el.category == openbim_document::Category::Family {
                         read_only_group(ui, "Identity Data", &query, &[("Family", &el.family)]);
                         family_type_combo(app, ui, &el.family);
+                        if !app.family_texts.is_empty() {
+                            egui::CollapsingHeader::new(RichText::new("Instance Choices and Texts").strong()).id_salt("family_texts").default_open(true).show(ui, |ui| {
+                                egui::Grid::new("family_text_rows").num_columns(2).striped(true).show(ui, |ui| {
+                                    for (name, value, options) in app.family_texts.iter_mut() {
+                                        ui.label(name.replace('_', " "));
+                                        if options.is_empty() { ui.text_edit_singleline(value); } else {
+                                            egui::ComboBox::from_id_salt(("family_text", name.as_str())).selected_text(value.clone()).show_ui(ui, |ui| {
+                                                for o in options.iter() { ui.selectable_value(value, o.clone(), o); }
+                                            });
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                            });
+                        }
                         if !app.family_values.is_empty() {
                             egui::CollapsingHeader::new(RichText::new("Instance Parameters").strong()).id_salt("family_values").default_open(true).show(ui, |ui| {
                                 egui::Grid::new("family_value_rows").num_columns(2).striped(true).show(ui, |ui| {

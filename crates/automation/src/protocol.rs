@@ -100,6 +100,8 @@ pub struct SnapshotElement {
     pub type_name:String,
     #[serde(default,skip_serializing_if="Vec::is_empty")]
     pub overrides:Vec<(String,f64)>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub texts:Vec<(String,String)>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -176,6 +178,7 @@ impl Snapshot {
             family: (e.category == Category::Family).then(|| e.family.clone()),
             type_name: e.type_name.clone(),
             overrides: e.overrides.clone(),
+            texts: e.texts.clone(),
         }).collect() }
     }
     /// Rebuild a temporary document through host validation. Its local revision
@@ -223,6 +226,9 @@ impl Snapshot {
             }
             if let Some(count) = el.count {
                 ops.push(Command::SetCount { id: ElementId(el.id), count });
+            }
+            if !el.texts.is_empty() {
+                ops.push(Command::SetFamilyTexts { id: ElementId(el.id), texts: el.texts.clone() });
             }
             if let Some(p) = el.parent {
                 ops.push(Command::SetParent { id: ElementId(el.id), parent: Some(ElementId(p)) });

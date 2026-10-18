@@ -425,7 +425,7 @@ fn a_beam_exports_as_an_ifcbeam_along_its_own_axis_and_a_bad_one_is_refused() {
     assert!(a.text.contains(&format!("IFCBEAM('{}'", global_id(1, 0, 9))), "{}", a.text);
     assert!(a.text.contains("'B1'") && a.text.contains(".BEAM."));
     assert!(a.text.contains("IFCRECTANGLEPROFILEDEF(.AREA.,$,#"), "a rectangular section");
-    let solid = a.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).last().unwrap();
+    let solid = a.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).next_back().unwrap();
     assert!(solid.ends_with(",4.);") || solid.ends_with(",4.0);"), "extruded over its 4 m: {solid}");
     assert_eq!(a.text, export(&s).unwrap().text, "stable");
     s.beams[0].b = [0.0, 1.0, 4.0];

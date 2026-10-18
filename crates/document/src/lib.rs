@@ -280,6 +280,8 @@ pub struct Element {
     pub family: String,
     pub type_name: String,
     pub overrides: Vec<(String, f64)>,
+    /// Family instance: choices, texts and materials set on this instance, by input name.
+    pub texts: Vec<(String, String)>,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -308,7 +310,8 @@ impl Element {
             && (self.category != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category == Category::Beam || self.parent.is_none())
             && (self.category == Category::Rebar || self.count == 0)
-            && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty()))
+            && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
+            && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
             && self.overrides.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.is_finite())
             && (self.category != Category::Family || (self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
@@ -392,6 +395,7 @@ pub enum Command {
     /// The number of bars along the bottom of a rebar.
     SetCount { id: ElementId, count: u32 },
     /// The family, type and instance values of a family instance, and its turn in degrees.
+    SetFamilyTexts { id: ElementId, texts: Vec<(String, String)> },
     SetFamily { id: ElementId, family: String, type_name: String, overrides: Vec<(String, f64)>, angle_deg: f64 },
     /// The structural material of a beam.
     SetMaterial { id: ElementId, material: Material },
@@ -707,7 +711,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(),
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(),
                     };
                     if !element.valid() { return Err(EditError::InvalidElement); }
                     trial.insert(*id, element);
@@ -753,6 +757,12 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if !matches!(el.category, Category::BeamSystem | Category::Truss | Category::Rebar) { return Err(EditError::UnsupportedProperty(*id)); }
                     (el.spacing_m, el.angle_deg) = (*spacing_m, *angle_deg);
+                    el.revision = revision;
+                }
+                Command::SetFamilyTexts { id, texts } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Family { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.texts = texts.clone();
                     el.revision = revision;
                 }
                 Command::SetFamily { id, family, type_name, overrides, angle_deg } => {

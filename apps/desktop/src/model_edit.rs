@@ -28,7 +28,8 @@ impl Desktop {
             if el.category == Category::Truss { self.material_pick = el.material; }
             if el.category == Category::Family {
                 (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone());
-                self.family_values = crate::export::instance_values(&el.family, &el.type_name, &el.overrides).unwrap_or_default();
+                self.family_values = crate::export::instance_values_with(&el.family, &el.type_name, &el.overrides, &el.texts).unwrap_or_default();
+                self.family_texts = crate::export::instance_texts(&el.family, &el.type_name, &el.overrides, &el.texts).unwrap_or_default();
             }
             if el.category == Category::Rebar { (self.spacing_mm, self.bar_count) = (el.spacing_m * 1000.0, f64::from(el.count)); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
@@ -213,7 +214,9 @@ impl Desktop {
 
     /// Whether the instance values in the Properties differ from those of the selected family instance.
     fn family_values_changed(&self, el: &openbim_document::Element) -> bool {
-        let Some(now) = crate::export::instance_values(&el.family, &el.type_name, &el.overrides) else { return false };
+        let Some(now) = crate::export::instance_values_with(&el.family, &el.type_name, &el.overrides, &el.texts) else { return false };
+        let Some(texts) = crate::export::instance_texts(&el.family, &el.type_name, &el.overrides, &el.texts) else { return false };
+        if el.type_name == self.family_type && (texts.len() != self.family_texts.len() || texts.iter().zip(&self.family_texts).any(|(a, b)| a.0 != b.0 || a.1 != b.1)) { return true; }
         // a changed type brings its own values, so only a same-type edit counts
         el.type_name == self.family_type && now.len() == self.family_values.len()
             && now.iter().zip(&self.family_values).any(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() > 1e-9 || !b.1.is_finite())
@@ -297,11 +300,15 @@ impl Desktop {
             let turn = if matches!(el.geometry, Some(Geometry::InWall { .. })) { 0.0 } else { self.angle_deg };
             // a changed type starts from its own values; the same type keeps the edited ones
             let overrides = if el.type_name == self.family_type { self.family_overrides(&el.family, &self.family_type, &self.family_values) } else { Vec::new() };
-            if crate::export::instance_values(&el.family, &self.family_type, &overrides).is_none() {
+            let texts: Vec<(String, String)> = if el.type_name == self.family_type {
+                let base = crate::export::instance_texts(&el.family, &self.family_type, &[], &[]).unwrap_or_default();
+                self.family_texts.iter().filter(|t| base.iter().find(|b| b.0 == t.0).is_none_or(|b| b.1 != t.1)).map(|t| (t.0.clone(), t.1.clone())).collect()
+            } else { Vec::new() };
+            if crate::export::instance_values_with(&el.family, &self.family_type, &overrides, &texts).is_none() {
                 self.message = "Those values do not fit the family (out of range?)".into();
                 return;
             }
-            commands.extend([Command::SetFamily { id, family: el.family.clone(), type_name: self.family_type.clone(), overrides, angle_deg: turn },
+            commands.extend([Command::SetFamily { id, family: el.family.clone(), type_name: self.family_type.clone(), overrides, angle_deg: turn }, Command::SetFamilyTexts { id, texts },
                 Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }]);
             match self.document.transact(self.document.revision(), &commands) {
                 Ok(_) => { self.sync_duct_controls(); self.message = format!("Element {} updated", id.0); }
@@ -896,5 +903,32 @@ mod tests {
         assert!(app.message.contains("do not fit") && app.document.revision() == rev, "{}", app.message);
         app.undo_document();
         assert!(app.document.get(door).unwrap().overrides.is_empty());
+    }
+
+    #[test]
+    fn the_swing_of_a_door_is_a_choice_in_the_properties_that_is_checked_and_stored() {
+        let mut app = Desktop::sample();
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
+        app.run_command("door", "Door");
+        app.family_click(ElementId(10), [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], Some(wall));
+        let door = app.document.elements().find(|e| e.category == Category::Family).unwrap().id;
+        app.select_element(Some(door));
+        let swing = app.family_texts.iter().find(|t| t.0 == "swing").expect("a choice").clone();
+        assert_eq!((swing.1.as_str(), swing.2.len()), ("right", 2));
+        assert!(!app.has_pending_edit());
+        app.family_texts.iter_mut().find(|t| t.0 == "swing").unwrap().1 = "left".into();
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        assert_eq!(app.document.get(door).unwrap().texts, vec![("swing".to_string(), "left".to_string())]);
+        assert_eq!(app.family_texts.iter().find(|t| t.0 == "swing").unwrap().1, "left");
+        assert!(!app.has_pending_edit());
+        // an option the family does not have is refused
+        app.family_texts.iter_mut().find(|t| t.0 == "swing").unwrap().1 = "up".into();
+        let rev = app.document.revision();
+        app.apply_selected_edit();
+        assert!(app.message.contains("do not fit") && app.document.revision() == rev, "{}", app.message);
+        // the file still exports
+        assert!(crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap().text.contains("IFCDOOR("));
     }
 }

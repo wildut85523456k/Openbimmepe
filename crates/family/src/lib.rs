@@ -1641,6 +1641,14 @@ impl Inner {
             _ => None,
         }
     }
+    /// The options of a choice input.
+    pub fn choice_options(&self, name: &str) -> Option<&[String]> {
+        let i = self.slot(name)?;
+        match &self.inputs.get(i)?.as_ref()?.spec {
+            Spec::Choice { options, .. } => Some(options),
+            _ => None,
+        }
+    }
     /// Scope of an input value, or None if `name` is unknown or calculated.
     pub fn input_scope(&self, name: &str) -> Option<Scope> {
         self.slot(name)
