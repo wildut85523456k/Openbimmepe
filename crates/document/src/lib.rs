@@ -131,12 +131,15 @@ pub enum SlabKind {
     Foundation,
     /// a roof by footprint (Revit's Roof): the outline at the eaves, a slope, and which edges slope
     Roof,
+    /// a ceiling (Revit's Ceiling): its `elevation_m` is the height of its underside above the level, and it is
+    /// `height_m` thick above that
+    Ceiling,
 }
 
 impl SlabKind {
-    pub const ALL: [SlabKind; 3] = [SlabKind::Floor, SlabKind::Foundation, SlabKind::Roof];
+    pub const ALL: [SlabKind; 4] = [SlabKind::Floor, SlabKind::Foundation, SlabKind::Roof, SlabKind::Ceiling];
     pub fn name(self) -> &'static str {
-        match self { SlabKind::Floor => "Floor", SlabKind::Foundation => "Foundation", SlabKind::Roof => "Roof" }
+        match self { SlabKind::Floor => "Floor", SlabKind::Foundation => "Foundation", SlabKind::Roof => "Roof", SlabKind::Ceiling => "Ceiling" }
     }
 }
 
@@ -695,6 +698,19 @@ impl Document {
             Command::SetSlabKind { id, kind: slab.kind },
             Command::SetMaterial { id, material: slab.material },
             Command::SetOutline { id, outline: slab.outline.clone() },
+            Command::SetGeometry { id, geometry: Geometry::Area { level } },
+        ])?;
+        Ok(id)
+    }
+    /// Hangs a ceiling on `level`: `outline` in plan, `height_m` above the level to its underside, `thickness_m` thick.
+    pub fn place_ceiling(&mut self, level: ElementId, outline: Vec<[f64; 2]>, height_m: f64, thickness_m: f64, material: Material) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Slab && e.slab_kind == SlabKind::Ceiling).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Slab, name: format!("Ceiling {n}"), width_m: thickness_m, height_m: thickness_m, elevation_m: height_m },
+            Command::SetSlabKind { id, kind: SlabKind::Ceiling },
+            Command::SetMaterial { id, material },
+            Command::SetOutline { id, outline },
             Command::SetGeometry { id, geometry: Geometry::Area { level } },
         ])?;
         Ok(id)

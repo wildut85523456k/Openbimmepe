@@ -446,7 +446,8 @@ impl Document {
             // the slab hangs from its top, which is `elevation_m` above the level
             let ring = &el.outline;
             let n = ring.len();
-            let top = self.get(level)?.elevation_m + el.elevation_m;
+            // a ceiling is placed by its underside, a slab by its top
+            let top = self.get(level)?.elevation_m + el.elevation_m + if el.slab_kind == crate::SlabKind::Ceiling { el.height_m } else { 0.0 };
             let bottom = top - el.height_m;
             let mut vertices: Vec<[f64; 3]> = ring.iter().map(|p| [p[0], p[1], bottom]).collect();
             vertices.extend(ring.iter().map(|p| [p[0], p[1], top]));

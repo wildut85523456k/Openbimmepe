@@ -488,8 +488,10 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.label("Thickness (mm)");
             ui.add(egui::DragValue::new(&mut app.slab_thickness_mm).speed(1.0).range(1.0..=5000.0));
             let roof = app.slab_kind_pick == openbim_document::SlabKind::Roof;
-            ui.label(if roof { "Base Offset (mm)" } else { "Top Offset (mm)" });
+            let ceiling = app.slab_kind_pick == openbim_document::SlabKind::Ceiling;
+            ui.label(if roof { "Base Offset (mm)" } else if ceiling { "Height Offset from Level (mm)" } else { "Top Offset (mm)" });
             ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0));
+            if ceiling { ui.checkbox(&mut app.ceiling_auto, "Automatic"); }
             if roof {
                 ui.label("Slope (°)");
                 ui.add(egui::DragValue::new(&mut app.roof_slope_deg).speed(0.5).range(0.0..=78.0));

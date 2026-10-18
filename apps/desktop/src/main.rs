@@ -131,6 +131,8 @@ struct Desktop {
     slab_offset_mm: f64,
     /// the slope of the roof to draw, in degrees from the horizontal
     roof_slope_deg: f64,
+    /// Automatic Ceiling: a click in a closed space hangs a ceiling in it; off, the ceiling is sketched by its corners
+    ceiling_auto: bool,
     slab_kind_pick: openbim_document::SlabKind,
     /// footing: the thickness of a new pad, or of the selected one
     footing_thickness_mm: f64,
@@ -210,7 +212,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, temp_edit: None, temp_text: String::new(), temp_labels: Vec::new(), measured: None, edit_ref: None, offset_mm: 1000.0, offset_copy: false, edit_src: Vec::new(), multi: Vec::new(), marquee: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
-            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -249,6 +251,7 @@ impl Desktop {
             Tool::Cable => "Cable: click the source or a board, then the points on the way, then the node it feeds. Esc cancels.".into(),
             Tool::Beam => "Beam: click the start and the end in a plan view (Esc ends), or type the ends in the options bar and press Place Beam.".into(),
             Tool::Column => "Column: click its place in a plan view; it stands from that level to the next one up (Esc ends).".into(),
+            Tool::Slab if self.slab_kind_pick == openbim_document::SlabKind::Ceiling => "Ceiling: Automatic Ceiling hangs a ceiling in the closed space you click (its outline shows as you move); untick Automatic in the options bar to sketch the corners instead (Enter, a click on the first corner or Finish closes it). Esc ends.".into(),
             Tool::Slab if self.slab_kind_pick == openbim_document::SlabKind::Roof => "Roof by Footprint: click the corners of the roof at the eaves in a plan view, then Enter, a click on the first corner or Finish closes it. Every edge slopes by the Slope in the options bar; select the roof afterwards to choose which edges define a slope (two opposite ones make a gable, one a shed). Backspace takes the last corner back, Esc cancels.".into(),
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
             Tool::Footing => "Isolated footing: click its place in a plan view; it is as wide and long as the options bar says, under the level (Esc ends).".into(),
@@ -345,6 +348,7 @@ impl Desktop {
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
+            "ceiling" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm, self.material_pick) = (openbim_document::SlabKind::Ceiling, 20.0, 2700.0, openbim_document::Material::Unspecified); self.choose_tool(Tool::Slab) }
             "roof" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm) = (openbim_document::SlabKind::Roof, 200.0, 0.0); self.choose_tool(Tool::Slab) }
             "footing" => self.choose_tool(Tool::WallFooting),
             "truss" => self.choose_tool(Tool::Truss),
@@ -399,8 +403,8 @@ impl Desktop {
                 for group in groups {
                     ribbon::panel(ui, group.title, |ui| {
                         for cmd in group.commands {
-                            let roofing = self.tool == Tool::Slab && self.slab_kind_pick == openbim_document::SlabKind::Roof;
-                            let active = (cmd.id == "roof" && roofing) || (cmd.id != "roof" && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
+                            let roofing = self.tool == Tool::Slab && matches!(self.slab_kind_pick, openbim_document::SlabKind::Roof | openbim_document::SlabKind::Ceiling);
+                            let active = (cmd.id == "roof" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Roof) || (cmd.id == "ceiling" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Ceiling) || (!matches!(cmd.id, "roof" | "ceiling") && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
                                 ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));

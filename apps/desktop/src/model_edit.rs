@@ -394,10 +394,28 @@ impl Desktop {
     /// A click of the Slab tool in the plan of `level`: a corner, or the closing of the outline when it lands on the
     /// first corner of a polygon that has three or more.
     pub(crate) fn slab_click(&mut self, level: ElementId, at: [f64; 2], closing: bool) {
+        if self.tool == crate::Tool::Slab && self.slab_kind_pick == openbim_document::SlabKind::Ceiling && self.ceiling_auto { return self.ceiling_auto_click(level, at); }
         if closing && self.slab_points.len() >= 3 { return self.finish_slab(level); }
         if self.slab_points.last() == Some(&at) { return; }
         self.slab_points.push(at);
         self.message = format!("Slab: {} corners; Enter closes the outline", self.slab_points.len());
+    }
+
+    /// Automatic Ceiling: a ceiling in the closed space that holds `at`, at the height and thickness of the options bar.
+    pub(crate) fn ceiling_auto_click(&mut self, level: ElementId, at: [f64; 2]) {
+        let shape = match self.document.room_region_at(level, at) {
+            Ok(s) => s,
+            Err(e) => { self.message = format!("Ceiling: {e}"); return; }
+        };
+        let height = self.slab_offset_mm / 1000.0;
+        let has = self.document.elements().any(|e| e.slab_kind == openbim_document::SlabKind::Ceiling && e.category == Category::Slab
+            && matches!(e.geometry, Some(Geometry::Area { level: l }) if l == level) && (e.elevation_m - height).abs() < 1e-6
+            && openbim_document::RoomShape { outline: e.outline.clone(), holes: Vec::new() }.contains(at));
+        if has { self.message = "Ceiling: there is a ceiling at this height in this space already".into(); return; }
+        match self.document.place_ceiling(level, shape.outline, height, self.slab_thickness_mm / 1000.0, self.material_pick) {
+            Ok(id) => self.message = format!("Ceiling {} placed at {:.0} mm; undo removes it", id.0, self.slab_offset_mm),
+            Err(e) => self.message = format!("Ceiling rejected ({e:?})"),
+        }
     }
 
     /// Lays the slab drawn so far on `level` with the thickness, top offset, kind and material of the options bar.
@@ -410,6 +428,13 @@ impl Desktop {
             match self.document.place_beam_system(level, &spec) {
                 Ok(id) => { let n = self.document.system_beams(id).len(); self.slab_points.clear(); self.message = format!("Beam system {} placed with {n} beams; undo removes it", id.0); }
                 Err(error) => self.message = format!("Beam system rejected ({error:?}); Backspace takes a corner back"),
+            }
+            return;
+        }
+        if self.slab_kind_pick == openbim_document::SlabKind::Ceiling {
+            match self.document.place_ceiling(level, self.slab_points.clone(), m(self.slab_offset_mm), m(self.slab_thickness_mm), self.material_pick) {
+                Ok(id) => { self.slab_points.clear(); self.message = format!("Ceiling {} placed; undo removes it", id.0); }
+                Err(error) => self.message = format!("Ceiling rejected ({error:?}); Backspace takes a corner back"),
             }
             return;
         }
@@ -1197,6 +1222,45 @@ mod tests {
         // undo takes the gable back to the hip, and the next undo removes the roof
         app.document.undo().unwrap();
         assert_eq!(app.document.get(id).unwrap().slope_edges, [true; 4]);
+    }
+
+    #[test]
+    fn a_ceiling_is_hung_in_the_space_under_the_click_or_sketched_and_is_placed_by_its_underside() {
+        let mut app = Desktop::sample();
+        let level = ElementId(10);
+        let ceilings = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Slab && e.slab_kind == openbim_document::SlabKind::Ceiling).count();
+        app.run_command("ceiling", "Ceiling");
+        assert!(app.tool == Tool::Slab && app.slab_kind_pick == openbim_document::SlabKind::Ceiling && app.ceiling_auto && app.slab_offset_mm == 2700.0, "{}", app.message);
+        assert!(app.message.contains("Automatic Ceiling"), "{}", app.message);
+        // a click in a space of the sample hangs one in it
+        app.slab_click(level, [2.0, 3.0], false);
+        assert_eq!(ceilings(&app), 1, "{}", app.message);
+        let c = app.document.elements().find(|e| e.slab_kind == openbim_document::SlabKind::Ceiling).unwrap().clone();
+        assert!((openbim_geom::profile::polygon_area(&c.outline).abs() - 3.8 * 5.8).abs() < 1e-6);
+        assert_eq!((c.elevation_m, c.height_m), (2.7, 0.02));
+        // the same height in the same space is refused; a click outside every space too
+        app.slab_click(level, [2.5, 3.5], false);
+        assert_eq!(ceilings(&app), 1);
+        assert!(app.message.contains("already"), "{}", app.message);
+        app.slab_click(level, [-5.0, -5.0], false);
+        assert_eq!(ceilings(&app), 1);
+        assert!(app.message.contains("closed"), "{}", app.message);
+        // its underside is at 2.7 m above the level, its top 20 mm higher
+        let z0 = app.document.get(level).unwrap().elevation_m;
+        let m = app.document.mesh(c.id).unwrap();
+        let (lo, hi) = (m.vertices.iter().map(|v| v[2]).fold(f64::MAX, f64::min), m.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max));
+        assert!((lo - (z0 + 2.7)).abs() < 1e-9 && (hi - (z0 + 2.72)).abs() < 1e-9, "{lo} {hi}");
+        // sketched: Automatic off, four corners, Enter
+        app.ceiling_auto = false;
+        app.slab_offset_mm = 2400.0;
+        for p in [[4.2, 0.2], [7.8, 0.2], [7.8, 5.8], [4.2, 5.8]] { app.slab_click(level, p, false); }
+        assert_eq!(app.slab_points.len(), 4);
+        app.finish_slab(level);
+        assert_eq!(ceilings(&app), 2, "{}", app.message);
+        // exported as IfcCovering CEILING
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCCOVERING(").count(), 2);
+        assert!(out.text.contains(".CEILING."));
     }
 
     #[test]

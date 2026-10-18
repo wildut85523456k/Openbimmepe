@@ -159,6 +159,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Beam | Category::BeamSystem | Category::Truss => Color32::from_rgb(176, 140, 104),
             Category::Column => Color32::from_rgb(150, 150, 160),
             Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
+            Category::Slab if app.document.get(id).is_some_and(|e| e.slab_kind == openbim_document::SlabKind::Ceiling) => if three_d { Color32::from_rgb(232, 230, 220) } else { Color32::from_rgba_unmultiplied(232, 230, 220, 70) },
             Category::Slab if app.document.get(id).is_some_and(|e| e.is_roof()) => if three_d { Color32::from_rgb(178, 96, 78) } else { Color32::from_rgba_unmultiplied(178, 96, 78, 90) },
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
             Category::Duct => Color32::from_rgb(70, 157, 194),
@@ -166,7 +167,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             _ => Color32::GRAY,
         };
         // in a plan a roof is under everything else: it is drawn first and picked last
-        let under = !three_d && app.document.get(id).is_some_and(|e| e.is_roof());
+        let under = !three_d && app.document.get(id).is_some_and(|e| e.is_roof() || (e.category == Category::Slab && e.slab_kind == openbim_document::SlabKind::Ceiling));
         for (i, face) in mesh.faces.iter().enumerate() {
             let points: Vec<_> = face.iter().map(|&v| screen(mesh.vertices[v])).collect();
             let area = points.iter().zip(points.iter().cycle().skip(1)).take(points.len())
@@ -622,6 +623,15 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
         let pts: Vec<Pos2> = app.slab_points.iter().map(|p| screen([p[0], p[1], level_z])).collect();
         let stroke = Stroke::new(2.0, Color32::from_rgb(70, 130, 200));
+        if app.tool == crate::Tool::Slab && app.slab_kind_pick == openbim_document::SlabKind::Ceiling && app.ceiling_auto {
+            // Automatic Ceiling: the space under the pointer is outlined
+            if let Some(h) = response.hover_pos() {
+                if let Ok(shape) = app.document.room_region_at(level_id, to_model(h)) {
+                    let ring: Vec<Pos2> = shape.outline.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                    painter.add(egui::Shape::closed_line(ring, stroke));
+                }
+            }
+        }
         if let (Some(last), Some(h)) = (pts.last(), response.hover_pos()) {
             painter.line_segment([*last, h], Stroke::new(1.0, stroke.color.gamma_multiply(0.6)));
         }

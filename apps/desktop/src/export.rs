@@ -114,9 +114,11 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
             (Category::Slab, Some(Geometry::Area { level })) => {
-                let top = level_of(level).ok_or("a slab lies on a level that is gone")? + el.elevation_m;
+                let ceiling = el.slab_kind == openbim_document::SlabKind::Ceiling;
+                // a ceiling is placed by its underside, a slab by its top
+                let top = level_of(level).ok_or("a slab lies on a level that is gone")? + el.elevation_m + if ceiling { el.height_m } else { 0.0 };
                 let slab = openbim_place::floors::Slab { name: el.name.clone(), top, thickness: el.height_m, outline: el.outline.clone(), fire_rating_min: None };
-                let role = if el.slab_kind == openbim_document::SlabKind::Foundation { SlabRole::Foundation } else { SlabRole::Structure };
+                let role = match el.slab_kind { openbim_document::SlabKind::Foundation => SlabRole::Foundation, openbim_document::SlabKind::Ceiling => SlabRole::Ceiling, _ => SlabRole::Structure };
                 slabs.push(SlabItem { id: el.id.0, slab, role, room_bounding: true });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }

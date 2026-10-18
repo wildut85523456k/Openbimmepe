@@ -1256,6 +1256,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             let cov = o.s.add(format!("IFCCOVERING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));
             o.contain(st, cov);
             o.slab_entities.push(cov);
+            o.member_entities.push((item.id, cov));
             o.report.slabs += 1;
             continue;
         }

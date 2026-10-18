@@ -182,6 +182,8 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
             "IFCBEAM" | "IFCMEMBER" => Category::Beam,
             "IFCCOLUMN" => Category::Column,
             "IFCSLAB" => Category::Slab,
+            "IFCCOVERING" if m.predefined == "CEILING" => Category::Slab,
+            "IFCCOVERING" => { skip(&mut report, "IFCCOVERING that is not a ceiling (no such element in the app)"); continue }
             "IFCROOF" => { skip(&mut report, "IFCROOF (a roof written by another program is not read yet)"); continue }
             "IFCFOOTING" => if m.predefined == "STRIP_FOOTING" { Category::WallFooting } else { Category::Footing },
             "IFCWALL" | "IFCWALLSTANDARDCASE" => Category::Wall,
@@ -250,7 +252,9 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
                     Category::Slab => {
                         (p.width, p.height, p.elevation) = (thickness, thickness, r6(z_hi - lz));
                         p.outline = pts2.clone();
-                        p.slab_kind = if m.predefined == "BASESLAB" { SlabKind::Foundation } else { SlabKind::Floor };
+                        p.slab_kind = if class == "IFCCOVERING" { SlabKind::Ceiling } else if m.predefined == "BASESLAB" { SlabKind::Foundation } else { SlabKind::Floor };
+                        // a ceiling is placed by its underside
+                        if p.slab_kind == SlabKind::Ceiling { p.elevation = r6(z_lo - lz); }
                         p.geometry = Geometry::Area { level: lid };
                     }
                     Category::Footing => {
@@ -611,6 +615,7 @@ mod tests {
         d.place_truss(ElementId(11), &TrussSpec { start: [1.0, 5.8], end: [7.0, 5.8], spacing_m: 1.5, depth_m: 1.0, member_m: 0.1, elevation_m: 0.1, material: Material::Steel }).unwrap();
         let door = FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("rise".into(), 0.0)], angle_deg: 0.0, elevation_m: 0.0 };
         d.place_roof(ElementId(11), &openbim_document::RoofSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true, false, true, false], material: Material::Timber }).unwrap();
+        d.place_ceiling(ElementId(10), vec![[0.2, 0.2], [3.8, 0.2], [3.8, 5.8], [0.2, 5.8]], 2.7, 0.02, Material::Unspecified).unwrap();
         d.place_family_in_wall(ElementId(20), 3.0, &FamilySpec { overrides: vec![], ..door.clone() }).unwrap();
         d.place_family_in_wall(ElementId(21), 2.0, &FamilySpec { family: "Window, fixed with mullions".into(), overrides: vec![], elevation_m: 0.9, ..door.clone() }).unwrap();
         d.place_family(ElementId(10), [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), overrides: vec![], angle_deg: 90.0, elevation_m: 2.2, ..door }).unwrap();
@@ -717,6 +722,8 @@ mod tests {
         assert!(kinds.len() >= 15, "the model should use every kind: {kinds:?}");
         for schema in crate::export::Schema::ALL {
             let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", schema).unwrap();
+            assert_eq!(out.text.matches("IFCCOVERING(").count(), 1, "{schema:?}: the ceiling");
+            assert!(out.text.contains(".CEILING."), "{schema:?}");
             assert_eq!(out.text.matches("IFCROOF(").count(), 1, "{schema:?}");
             assert!(out.text.contains(".GABLE_ROOF.") && out.text.contains("IFCFACETEDBREP"), "{schema:?}: the roof is a gable solid");
             let mut back = Document::new();

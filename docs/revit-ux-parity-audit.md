@@ -78,14 +78,24 @@ Wall, Wall Joins, Door, Window, Component, Column, Beam, Brace, Floor/Slab, Foun
 | IFC: IfcRoof with HIP/GABLE/SHED/FLAT_ROOF and a closed faceted solid in IFC2X3, IFC4 and IFC4.3; the app's own file brings it back unchanged | done; a roof from another program is not read (reported as skipped); no layers, material layers or roof types |
 | Roof by Extrusion, Roof Soffit, Fascia, Gutter, Join/Cut Roof, Attach Walls to Roof, Dormer, slope arrows, ridge/hip/valley editing, roof openings | missing |
 
+## Ceiling
+| Revit behaviour | State |
+|---|---|
+| Automatic Ceiling: click in a closed space, the ceiling takes its outline; the outline shows under the pointer | done (the outline is copied when placed: it does not follow the walls afterwards, as Revit's does; columns in the space are not cut out) |
+| Sketch Ceiling: untick Automatic in the options bar, click the corners, Enter / first corner / Finish | done |
+| Height Offset from Level (default 2700 mm) is the underside; thickness (default 20 mm) goes up from it | done (defaults are mine, not checked against Revit's template) |
+| One ceiling per space and height | done (a second click says so) |
+| Ceiling type with layers/materials, Ceiling Plan view (reflected ceiling plan), ceiling grid, slope, openings | missing; in a plan the ceiling is drawn faint under everything and picked last |
+| IFC: IfcCovering CEILING (a room's ceiling for space boundaries), back from the app's own file unchanged | done; a covering that is not a ceiling is skipped on import |
+
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level: not drawn in an elevation view (no elevation or section views). Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all (80 ribbon buttons)
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, ceiling, curtain wall, stair, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, stair, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Ceiling, Stair, Opening (Room and Roof are done).
+1. Stair, Opening (Room, Roof and Ceiling are done).
 2. Elevation/section views and levels drawn in them.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
