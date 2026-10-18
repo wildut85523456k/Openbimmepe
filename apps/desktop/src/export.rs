@@ -236,6 +236,8 @@ fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamIt
             Category::Column => TypeClass::Column,
             Category::Slab => TypeClass::Slab("FLOOR"),
             Category::WallFooting => TypeClass::StripFooting,
+            Category::Footing => TypeClass::PadFooting,
+            Category::Wall => TypeClass::Wall,
             _ => continue, // rebar types have no IFC type object
         };
         let instances: Vec<u64> = doc.elements().filter(|e| e.type_id == Some(t.id)).map(|e| e.id.0).collect();
@@ -248,6 +250,7 @@ fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamIt
                 openbim_document::Section::IShape { web_m, flange_m } => format!("I web {web_m} flange {flange_m}"),
             })));
         }
+        if kind == Category::Footing { props.push(("Thickness".into(), TypeProp::Len(v.thickness_m))); }
         if v.material != Material::Unspecified { props.push(("Material".into(), TypeProp::Text(v.material.name().into()))); }
         if kind == Category::Beam { props.push(("Usage".into(), TypeProp::Text(format!("{:?}", v.usage)))); }
         types.push(TypeItem { id: t.id.0, name: t.name.clone(), class, props, instances });

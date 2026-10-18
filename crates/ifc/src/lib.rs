@@ -283,6 +283,7 @@ pub enum TypeClass {
     Slab(&'static str),
     StripFooting,
     PadFooting,
+    Wall,
 }
 
 impl TypeClass {
@@ -293,6 +294,7 @@ impl TypeClass {
             TypeClass::Slab(p) => ("IFCSLABTYPE", p),
             TypeClass::StripFooting => ("IFCFOOTINGTYPE", "STRIP_FOOTING"),
             TypeClass::PadFooting => ("IFCFOOTINGTYPE", "PAD_FOOTING"),
+            TypeClass::Wall => ("IFCWALLTYPE", "STANDARD"),
         }
     }
 }

@@ -18,14 +18,21 @@ pub struct TypeValues {
     pub spacing_m: f64,
     /// rebar: the bars along the bottom
     pub count: u32,
+    /// pad footing: the thickness (a type keeps it in its `elevation_m`)
+    pub thickness_m: f64,
 }
 
 impl TypeValues {
     /// The values of `el` that a type of its kind governs.
     pub fn of(el: &Element) -> Self {
+        let thickness_m = match el.geometry {
+            Some(crate::Geometry::Pad { thickness_m, .. }) => thickness_m,
+            _ if el.category == Category::Type => el.elevation_m,
+            _ => 0.0,
+        };
         let all = Self {
             width_m: el.width_m, height_m: el.height_m, elevation_m: el.elevation_m, section: el.section,
-            material: el.material, usage: el.usage, spacing_m: el.spacing_m, count: el.count,
+            material: el.material, usage: el.usage, spacing_m: el.spacing_m, count: el.count, thickness_m,
         };
         all.governed(el.kind())
     }
@@ -37,6 +44,7 @@ impl TypeValues {
             Category::Beam => Self { section: self.section, material: self.material, usage: self.usage, ..own },
             Category::Column => Self { section: self.section, material: self.material, ..own },
             Category::WallFooting | Category::Slab => Self { material: self.material, ..own },
+            Category::Footing => Self { material: self.material, thickness_m: self.thickness_m, ..own },
             Category::Rebar => Self { elevation_m: self.elevation_m, spacing_m: self.spacing_m, count: self.count, ..own },
             _ => own,
         }
@@ -49,6 +57,8 @@ impl TypeValues {
             Category::Beam => ops.extend([Command::SetSection { id, section: self.section }, Command::SetMaterial { id, material: self.material }, Command::SetUsage { id, usage: self.usage }]),
             Category::Column => ops.extend([Command::SetSection { id, section: self.section }, Command::SetMaterial { id, material: self.material }]),
             Category::WallFooting | Category::Slab => ops.push(Command::SetMaterial { id, material: self.material }),
+            // for a type; `Document::values_ops` turns this into a change of the pad for an element
+            Category::Footing => ops.extend([Command::SetMaterial { id, material: self.material }, Command::MoveElevation { id, elevation_m: self.thickness_m }]),
             Category::Rebar => ops.extend([Command::MoveElevation { id, elevation_m: self.elevation_m }, Command::SetBeamSystem { id, spacing_m: self.spacing_m, angle_deg: 0.0 }, Command::SetCount { id, count: self.count }]),
             _ => {}
         }
@@ -61,7 +71,7 @@ impl Command {
     pub fn retarget(&self, kind: Category, to: ElementId) -> Option<Command> {
         let size = matches!(self, Command::Resize { .. });
         let section = matches!(self, Command::SetSection { .. }) && matches!(kind, Category::Beam | Category::Column);
-        let material = matches!(self, Command::SetMaterial { .. }) && matches!(kind, Category::Beam | Category::Column | Category::WallFooting | Category::Slab);
+        let material = matches!(self, Command::SetMaterial { .. }) && matches!(kind, Category::Beam | Category::Column | Category::WallFooting | Category::Slab | Category::Footing);
         let usage = matches!(self, Command::SetUsage { .. }) && kind == Category::Beam;
         let bars = matches!(self, Command::MoveElevation { .. } | Command::SetBeamSystem { .. } | Command::SetCount { .. }) && kind == Category::Rebar;
         if !(size || section || material || usage || bars) { return None; }
@@ -82,8 +92,33 @@ impl Document {
         let Some(el) = self.get(id) else { return Vec::new() };
         let Some(t) = el.type_id else { return Vec::new() };
         let others: Vec<ElementId> = std::iter::once(t).chain(self.instances_of(t).into_iter().filter(|i| *i != id)).collect();
+        let pad = |o: ElementId, t: f64| -> Option<Command> {
+            let e = self.get(o)?;
+            match e.geometry {
+                Some(crate::Geometry::Pad { at, level, .. }) => Some(Command::SetGeometry { id: o, geometry: crate::Geometry::Pad { at, level, thickness_m: t } }),
+                _ if e.category == Category::Type => Some(Command::MoveElevation { id: o, elevation_m: t }),
+                _ => None,
+            }
+        };
+        let thickness = commands.iter().filter_map(|c| match c {
+            Command::SetGeometry { id: x, geometry: crate::Geometry::Pad { thickness_m, .. } } if *x == id && el.category == Category::Footing => Some(*thickness_m),
+            _ => None,
+        }).flat_map(|t| others.iter().filter_map(move |o| pad(*o, t)).collect::<Vec<_>>()).collect::<Vec<_>>();
         commands.iter().filter(|c| matches!(c, Command::Resize { id: x, .. } | Command::SetSection { id: x, .. } | Command::SetMaterial { id: x, .. } | Command::SetUsage { id: x, .. } | Command::MoveElevation { id: x, .. } | Command::SetBeamSystem { id: x, .. } | Command::SetCount { id: x, .. } if *x == id))
-            .flat_map(|c| others.iter().filter_map(move |o| c.retarget(el.category, *o))).collect()
+            .flat_map(|c| others.iter().filter_map(move |o| c.retarget(el.category, *o))).chain(thickness).collect()
+    }
+
+    /// The commands that give `id`, an element or a type of `kind`, the values `v`. A pad's thickness is part of its
+    /// geometry, so for a pad it is set there.
+    fn values_ops(&self, id: ElementId, kind: Category, v: &TypeValues) -> Vec<Command> {
+        let mut ops = v.commands(id, kind);
+        if kind == Category::Footing {
+            if let Some(crate::Geometry::Pad { at, level, .. }) = self.get(id).and_then(|e| e.geometry) {
+                ops.retain(|c| !matches!(c, Command::MoveElevation { .. }));
+                ops.push(Command::SetGeometry { id, geometry: crate::Geometry::Pad { at, level, thickness_m: v.thickness_m } });
+            }
+        }
+        ops
     }
 
     /// The types of `category`, by name.
@@ -108,7 +143,7 @@ impl Document {
             Command::Create { id, category: Category::Type, name: name.trim().into(), width_m: values.width_m, height_m: values.height_m, elevation_m: 0.0 },
             Command::SetTypeFor { id, category },
         ];
-        ops.extend(values.commands(id, category));
+        ops.extend(self.values_ops(id, category, &values));
         ops.push(Command::SetType { id: from, type_id: Some(id) });
         self.transact(self.revision, &ops)?;
         Ok(id)
@@ -121,7 +156,7 @@ impl Document {
         let mut ops = Vec::new();
         for id in ids {
             if self.get(*id).ok_or(EditError::NotFound(*id))?.category != kind { return Err(EditError::UnsupportedProperty(*id)); }
-            ops.extend(values.commands(*id, kind));
+            ops.extend(self.values_ops(*id, kind, &values));
             ops.push(Command::SetType { id: *id, type_id: Some(type_id) });
         }
         if ops.is_empty() { return Err(EditError::EmptyTransaction); }
@@ -142,8 +177,8 @@ impl Document {
         let ty = self.get(type_id).filter(|t| t.category == Category::Type).ok_or(EditError::NotFound(type_id))?;
         let kind = ty.kind();
         let values = values.governed(kind);
-        let mut ops = values.commands(type_id, kind);
-        for id in self.instances_of(type_id) { ops.extend(values.commands(id, kind)); }
+        let mut ops = self.values_ops(type_id, kind, &values);
+        for id in self.instances_of(type_id) { ops.extend(self.values_ops(id, kind, &values)); }
         self.transact(self.revision, &ops)?;
         Ok(())
     }
@@ -165,7 +200,7 @@ impl Document {
             Command::Create { id, category: Category::Type, name: name.trim().into(), width_m: values.width_m, height_m: values.height_m, elevation_m: 0.0 },
             Command::SetTypeFor { id, category: kind },
         ];
-        ops.extend(values.commands(id, kind));
+        ops.extend(self.values_ops(id, kind, &values));
         self.transact(self.revision, &ops)?;
         Ok(id)
     }
@@ -208,6 +243,50 @@ mod tests {
         assert_eq!(d.revision(), revision + 1, "one transaction");
         assert!(d.undo().unwrap());
         assert_eq!((d.get(a).unwrap().width_m, d.get(b).unwrap().width_m, d.get(t).unwrap().width_m), (0.3, 0.3, 0.3));
+    }
+
+    #[test]
+    fn walls_share_a_thickness_and_height_and_pads_share_size_thickness_and_material_in_one_undo() {
+        use crate::FootingSpec;
+        let mut d = Document::spatial_sample();
+        let (w1, w2) = (ElementId(20), ElementId(21));
+        let wt = d.create_type(w1, "Wall 200").unwrap();
+        d.assign_type(&[w2], wt).unwrap();
+        let mut v = TypeValues::of(d.get(wt).unwrap());
+        assert_eq!((v.width_m, v.height_m), (0.2, 3.0));
+        (v.width_m, v.height_m) = (0.25, 3.2);
+        d.edit_type(wt, &v).unwrap();
+        for id in [w1, w2] { assert_eq!((d.get(id).unwrap().width_m, d.get(id).unwrap().height_m), (0.25, 3.2)); }
+        assert_eq!(d.get(ElementId(30)).unwrap().width_m, 0.2, "a wall without the type is left alone");
+
+        let spec = FootingSpec { width_m: 1.2, length_m: 1.0, thickness_m: 0.4, top_offset_m: -0.1, material: Material::Concrete };
+        let p1 = d.place_footing(ElementId(10), [2.0, 2.0], &spec).unwrap();
+        let p2 = d.place_footing(ElementId(10), [6.0, 2.0], &spec).unwrap();
+        let p3 = d.place_footing(ElementId(10), [6.0, 5.0], &FootingSpec { thickness_m: 0.3, ..spec.clone() }).unwrap();
+        let pt = d.create_type(p1, "Pad 1200").unwrap();
+        assert_eq!(d.get(pt).unwrap().elevation_m, 0.4, "the type keeps the thickness");
+        d.assign_type(&[p2, p3], pt).unwrap();
+        let pad = |d: &Document, id| match d.get(id).unwrap().geometry { Some(crate::Geometry::Pad { thickness_m, at, .. }) => (thickness_m, at), _ => panic!() };
+        assert_eq!(pad(&d, p3), (0.4, [6.0, 5.0]), "assigning the type gives its thickness and keeps the place");
+        let mut v = TypeValues::of(d.get(pt).unwrap());
+        (v.width_m, v.thickness_m, v.material) = (1.5, 0.6, Material::Steel);
+        let revision = d.revision();
+        d.edit_type(pt, &v).unwrap();
+        assert_eq!(d.revision(), revision + 1);
+        for id in [p1, p2, p3] {
+            assert_eq!((d.get(id).unwrap().width_m, d.get(id).unwrap().material, pad(&d, id).0), (1.5, Material::Steel, 0.6));
+        }
+        assert_eq!(pad(&d, p2).1, [6.0, 2.0]);
+        // a thickness edit made on one pad is carried to the others by follow_type
+        let edit = [Command::SetGeometry { id: p1, geometry: crate::Geometry::Pad { at: [2.0, 2.0], level: ElementId(10), thickness_m: 0.5 } }];
+        let mut all = edit.to_vec();
+        all.extend(d.follow_type(p1, &edit));
+        d.transact(d.revision(), &all).unwrap();
+        for id in [p2, p3] { assert_eq!(pad(&d, id).0, 0.5); }
+        assert_eq!(d.get(pt).unwrap().elevation_m, 0.5);
+        assert_eq!(pad(&d, p3).1, [6.0, 5.0], "their places are untouched");
+        assert!(d.undo().unwrap() && d.undo().unwrap());
+        assert_eq!(pad(&d, p1).0, 0.4);
     }
 
     #[test]

@@ -311,7 +311,7 @@ impl Element {
     /// The category whose rules apply to the values of this element: a type is held to those of what it is a type of.
     pub fn kind(&self) -> Category { if self.category == Category::Type { self.type_for.unwrap_or(Category::Type) } else { self.category } }
     /// Whether elements of `category` can have a type.
-    pub fn can_have_type(category: Category) -> bool { matches!(category, Category::Beam | Category::Column | Category::WallFooting | Category::Slab | Category::Rebar) }
+    pub fn can_have_type(category: Category) -> bool { matches!(category, Category::Beam | Category::Column | Category::WallFooting | Category::Slab | Category::Rebar | Category::Wall | Category::Footing) }
     /// A section that is as wide as it is deep: a pipe, or a round beam.
     pub fn is_round(&self) -> bool { self.category == Category::Pipe || (matches!(self.category, Category::Beam | Category::Column) && self.section == Section::Circle) }
 

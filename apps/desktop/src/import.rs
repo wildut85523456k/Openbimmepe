@@ -277,7 +277,10 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
     }
 
     // types: instances of one type that agree on the values a type governs follow it; the rest keep their values
-    let governed = |p: &Planned| TypeValues { width_m: p.width, height_m: p.height, section: p.section, material: p.material, usage: p.usage, ..Default::default() }.governed(p.category);
+    let governed = |p: &Planned| TypeValues {
+        width_m: p.width, height_m: p.height, section: p.section, material: p.material, usage: p.usage,
+        thickness_m: if let Geometry::Pad { thickness_m, .. } = p.geometry { thickness_m } else { 0.0 }, ..Default::default()
+    }.governed(p.category);
     let mut taken_names: BTreeSet<String> = doc.elements().filter(|e| e.category == Category::Type).map(|e| e.name.clone()).collect();
     let mut type_ids: BTreeMap<usize, ElementId> = BTreeMap::new();
     let mut follows: BTreeMap<usize, usize> = BTreeMap::new(); // planned index -> type object
@@ -519,7 +522,13 @@ mod tests {
         d.place_column(ElementId(10), ElementId(11), [4.0, 3.0], &ColumnSpec { width_m: 0.4, depth_m: 0.3, base_offset_m: 0.0, section: Section::Rectangle, material: Material::Concrete }).unwrap();
         d.place_column(ElementId(10), ElementId(11), [6.0, 5.0], &ColumnSpec { width_m: 0.35, depth_m: 0.35, base_offset_m: 0.0, section: Section::Circle, material: Material::Steel }).unwrap();
         d.place_slab(ElementId(11), &SlabSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, top_offset_m: 0.0, kind: SlabKind::Floor, material: Material::Concrete }).unwrap();
-        d.place_footing(ElementId(10), [2.0, 2.0], &FootingSpec { width_m: 1.2, length_m: 1.0, thickness_m: 0.4, top_offset_m: -0.1, material: Material::Concrete }).unwrap();
+        let pad = FootingSpec { width_m: 1.2, length_m: 1.0, thickness_m: 0.4, top_offset_m: -0.1, material: Material::Concrete };
+        let p1 = d.place_footing(ElementId(10), [2.0, 2.0], &pad).unwrap();
+        let p2 = d.place_footing(ElementId(10), [6.0, 2.0], &pad).unwrap();
+        let pt = d.create_type(p1, "Pad 1200 x 1000 x 400").unwrap();
+        d.assign_type(&[p2], pt).unwrap();
+        let wt = d.create_type(ElementId(20), "Wall 200 x 3000").unwrap();
+        d.assign_type(&[ElementId(21)], wt).unwrap();
         d.place_wall_footing(ElementId(20), &WallFootingSpec { width_m: 0.6, depth_m: 0.3, top_offset_m: -0.05, material: Material::Concrete }).unwrap();
         d
     }
