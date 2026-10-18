@@ -11,11 +11,15 @@ What exists
 - Sheets, viewports (view at 1:n), revisions (issued flag) and clouds, sheet set, project and sheet parameters.
 - Discipline display: category -> discipline, per view a discipline and a Show/Halftone/Hide mode per discipline, per-category overrides, rule filters, view templates, linked-model display.
 - Printing: vector PDF 1.4 (true-size MediaBox), DXF R12 (weights in layer names `{D}-{CATEGORY}_W{n}`).
+  Custom paper dimensions preserve the supplied width and height, including portrait.
+  ISO/ANSI presets remain landscape by default. DXF header extents describe the full sheet.
 - Excel import (calamine): header names matched to intrinsic fields or title block fields; atomic; create-only or create-or-update; row numbers in errors.
 - No standard values are built in: line weights, templates and margins are data.
 
 Verification
 - `cargo test -p openbim-sheets` (unit, integration, proptest on clipping).
+- Portrait regression: `cargo run -p openbim-sheets --release --example portrait_scene -- OUTDIR`,
+  then `python spikes/s13_sheets_check/check_portrait.py OUTDIR` (pypdf and ezdxf).
 - `python -I spikes/s13_sheets_check/check_sheets.py`: qpdf, pdftotext, pypdf, pdfium raster, ezdxf, reportlab width tables, strokes re-derived without the Rust code.
 - Mutation checks done by hand (halftone maths, clip bounds, weight index, layer naming, mode table, revision lookup, number validation, header matching): each caught by a test.
 

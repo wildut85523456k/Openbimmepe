@@ -211,3 +211,36 @@ fn rendering_is_deterministic() {
     let b = write_pdf(&all(), "t").bytes;
     assert_eq!(a, b);
 }
+
+#[test]
+fn custom_orientation_reaches_titleblock_pdf_and_dxf() {
+    use openbim_sheets::model::SheetSet;
+    use openbim_sheets::paper::{Margins, PaperSize};
+    use openbim_sheets::titleblock::TitleBlockDef;
+
+    // All ISO sizes in both orientations, including the reported A0 portrait case.
+    for (short, long) in [(841.0, 1189.0), (594.0, 841.0), (420.0, 594.0), (297.0, 420.0), (210.0, 297.0)] {
+        for (width, height) in [(short, long), (long, short)] {
+            let paper = PaperSize::custom("Custom", width, height).unwrap();
+            let tb = TitleBlockDef::generic("Custom block", paper, Margins::all(10.0)).unwrap();
+            assert_eq!((tb.page().width(), tb.page().height()), (width, height));
+            tb.validate().unwrap();
+            let mut set = SheetSet::default();
+            set.add_titleblock(tb).unwrap();
+            set.add_sheet(Sheet::new("P-001", "Orientation", "Custom block")).unwrap();
+            let s = render_sheet(&set, &views(), &contents(), &lw(), "P-001", &ctx()).unwrap();
+            assert_eq!((s.size.width_mm, s.size.height_mm), (width, height));
+            // The rendered border must follow the same dimensions, not just page metadata.
+            assert!(s.prims.iter().any(|p| matches!(p, Prim::Line { a, b, .. }
+                if a[0] == width - 10.0 && b[0] == width - 10.0
+                    && a[1].max(b[1]) == height - 10.0)));
+            let pdf = write_pdf(std::slice::from_ref(&s), "Orientation");
+            let pdf = String::from_utf8_lossy(&pdf.bytes);
+            let pt = |mm: f64| format!("{:.3}", mm * 72.0 / 25.4).trim_end_matches('0').trim_end_matches('.').to_string();
+            assert!(pdf.contains(&format!("/MediaBox [0 0 {} {}]", pt(width), pt(height))));
+            let dxf = write_dxf(&s);
+            assert!(dxf.contains(&format!("9\n$EXTMAX\n10\n{width:.4}\n20\n{height:.4}\n30\n0.0\n")));
+            assert!(dxf.contains(&format!("10\n{:.4}\n20\n{:.4}\n", width - 10.0, height - 10.0)));
+        }
+    }
+}

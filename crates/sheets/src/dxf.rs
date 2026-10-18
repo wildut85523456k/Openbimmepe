@@ -46,7 +46,9 @@ pub fn write_dxf(s: &RenderedSheet) -> String {
     }
     let mut o = String::new();
     let w = &mut o;
-    let _ = write!(w, "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n");
+    let _ = write!(w, "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n");
+    // The sheet footprint, independent of title-block margins and content bounds.
+    let _ = write!(w, "9\n$EXTMIN\n10\n0.0\n20\n0.0\n30\n0.0\n9\n$EXTMAX\n10\n{}\n20\n{}\n30\n0.0\n0\nENDSEC\n", n(s.size.width_mm), n(s.size.height_mm));
     let _ = write!(w, "0\nSECTION\n2\nTABLES\n");
     let _ = write!(w, "0\nTABLE\n2\nLTYPE\n70\n1\n0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0.0\n0\nENDTAB\n");
     let _ = write!(w, "0\nTABLE\n2\nLAYER\n70\n{}\n", layers.len());

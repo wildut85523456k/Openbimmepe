@@ -1,4 +1,5 @@
-//! Paper sizes. Sizes are stored landscape (width is the longer side); `portrait` turns one.
+//! Paper sizes in millimetres. Custom sizes preserve the supplied orientation;
+//! ISO and ANSI presets default to landscape.
 
 use crate::{finite, SheetError};
 
@@ -39,6 +40,7 @@ impl PaperSize {
         Some(PaperSize { name: format!("ANSI {}", letter.to_ascii_uppercase()), width_mm: w * 25.4, height_mm: h * 25.4 })
     }
 
+    /// Custom width and height in millimetres, preserved in the supplied order.
     pub fn custom(name: &str, w: f64, h: f64) -> Result<Self, SheetError> {
         crate::clean_name(name, "paper name")?;
         finite(w, "paper width")?;
@@ -46,7 +48,7 @@ impl PaperSize {
         if !(MIN_PAPER_MM..=MAX_PAPER_MM).contains(&w) || !(MIN_PAPER_MM..=MAX_PAPER_MM).contains(&h) {
             return Err(SheetError::BadPaper(format!("{w} x {h} mm is outside {MIN_PAPER_MM} to {MAX_PAPER_MM} mm")));
         }
-        Ok(PaperSize { name: name.to_string(), width_mm: w.max(h), height_mm: w.min(h) })
+        Ok(PaperSize { name: name.to_string(), width_mm: w, height_mm: h })
     }
 
     /// "A1", "a3", "ISO A2", "ANSI D".
@@ -68,9 +70,9 @@ impl PaperSize {
         None
     }
 
-    /// Width and height swapped (a tall sheet).
+    /// Portrait dimensions (shorter side first), including for an already tall sheet.
     pub fn portrait(&self) -> (f64, f64) {
-        (self.height_mm, self.width_mm)
+        (self.width_mm.min(self.height_mm), self.width_mm.max(self.height_mm))
     }
 }
 

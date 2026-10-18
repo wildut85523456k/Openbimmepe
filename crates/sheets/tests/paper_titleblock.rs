@@ -27,9 +27,14 @@ fn paper_names_parse() {
 }
 
 #[test]
-fn custom_sizes_are_checked_and_made_landscape() {
+fn custom_sizes_are_checked_and_keep_orientation() {
     let p = PaperSize::custom("Roll", 500.0, 900.0).unwrap();
-    assert_eq!((p.width_mm, p.height_mm), (900.0, 500.0));
+    assert_eq!((p.width_mm, p.height_mm), (500.0, 900.0));
+    assert_eq!(p.portrait(), (500.0, 900.0));
+    for (w, h) in [(900.0, 500.0), (500.0, 500.0), (50.0, 5000.0), (5000.0, 50.0)] {
+        let p = PaperSize::custom("Custom", w, h).unwrap();
+        assert_eq!((p.width_mm, p.height_mm), (w, h));
+    }
     assert!(PaperSize::custom("x", 10.0, 900.0).is_err());
     assert!(PaperSize::custom("x", f64::NAN, 900.0).is_err());
     assert!(PaperSize::custom("", 500.0, 900.0).is_err());
