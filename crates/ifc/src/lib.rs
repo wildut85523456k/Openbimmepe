@@ -776,17 +776,23 @@ fn size_props(size: RunSize) -> Vec<(&'static str, Val)> {
 
 /// Write the scene as IFC4.
 pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
-    export_as(scene, false)
+    export_as(scene, false, false)
+}
+
+/// Write the scene as IFC 4.3 (`IFC4X3_ADD2`), the newest schema. The entities written are the same as in IFC4; the
+/// files of the tests are checked against both schemas with IfcOpenShell.
+pub fn export_ifc4x3(scene: &Scene) -> Result<Exported, ExportError> {
+    export_as(scene, false, true)
 }
 
 /// Write the scene as IFC2X3, the schema DIALux evo reads best: the building shell, rooms, doors and windows.
 /// What 2x3 cannot carry (service networks, wall types, joins, space boundaries, map conversion, luminaires)
 /// is left out and named in the report's warnings.
 pub fn export_ifc2x3(scene: &Scene) -> Result<Exported, ExportError> {
-    export_as(scene, true)
+    export_as(scene, true, false)
 }
 
-fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
+fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError> {
     if scene.project_key > guid::MAX_PROJECT_KEY {
         return Err(ExportError::BadKey);
     }
@@ -909,7 +915,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     if let Some(id) = o.dup {
         return Err(ExportError::DuplicateId(id));
     }
-    let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp) };
+    let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp, x43) };
     Ok(Exported { text, report: o.report })
 }
 

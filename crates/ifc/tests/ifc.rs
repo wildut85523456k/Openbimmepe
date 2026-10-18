@@ -72,6 +72,10 @@ fn a_plain_wall_exports_and_exports_again_identically() {
     assert_eq!(a.report.walls, 1);
     assert!(a.text.starts_with("ISO-10303-21;\nHEADER;"));
     assert!(a.text.contains("FILE_SCHEMA(('IFC4'))"));
+    // IFC 4.3 is the same entities under the newer schema name, and as repeatable
+    let n = openbim_ifc::export_ifc4x3(&scene(vec![wall(5)])).unwrap();
+    assert!(n.text.contains("FILE_SCHEMA(('IFC4X3_ADD2'))") && !n.text.contains("FILE_SCHEMA(('IFC4'))"));
+    assert_eq!(n.text.replace("IFC4X3_ADD2", "IFC4").lines().skip(3).collect::<Vec<_>>(), a.text.lines().skip(3).collect::<Vec<_>>());
     assert!(a.text.contains(&format!("IFCWALL('{}'", global_id(1, 0, 5))));
     assert!(a.text.trim_end().ends_with("END-ISO-10303-21;"));
 }

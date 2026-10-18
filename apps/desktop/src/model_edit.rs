@@ -143,7 +143,7 @@ impl Desktop {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         match crate::export::export_ifc(&self.document, "Project1", 1, &crate::export::iso_time(secs)) {
             Ok(out) => match std::fs::write("openbim-export.ifc", &out.text) {
-                Ok(()) => self.message = format!("Exported openbim-export.ifc: {} walls, {} beams, {} columns, {} slabs. {}", out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
+                Ok(()) => self.message = format!("Exported openbim-export.ifc (IFC 4.3): {} walls, {} beams, {} columns, {} slabs. {}", out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
                 Err(e) => self.message = format!("Could not write openbim-export.ifc: {e}"),
             },
             Err(e) => self.message = format!("IFC export failed: {e}"),

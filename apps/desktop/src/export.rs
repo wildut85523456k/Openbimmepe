@@ -1,4 +1,4 @@
-//! The document as an IFC4 file: levels, walls and beams. The document's other elements are named in the warnings.
+//! The document as an IFC 4.3 file (IFC4 on request): levels, walls and beams. The document's other elements are named in the warnings.
 use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
 use openbim_family::mep::{Domain, System};
@@ -256,9 +256,22 @@ fn types_of(doc: &Document, mep_ids: &[u64], beams: &[BeamItem], columns: &[Colu
 }
 
 /// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
+/// The newest schema, IFC 4.3, which is what the app writes unless told otherwise.
 pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<Exported, String> {
+    export_ifc_as(doc, project_name, project_key, timestamp, Schema::Ifc4x3)
+}
+
+/// The schema of an exported file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Schema { Ifc4x3, Ifc4 }
+
+impl Schema {
+    pub fn name(self) -> &'static str { match self { Schema::Ifc4x3 => "IFC 4.3", Schema::Ifc4 => "IFC4" } }
+}
+
+pub fn export_ifc_as(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, schema: Schema) -> Result<Exported, String> {
     let (scene, skipped) = scene_of(doc, project_name, project_key, timestamp)?;
-    let out = openbim_ifc::export(&scene).map_err(|e| format!("{e:?}"))?;
+    let out = match schema { Schema::Ifc4x3 => openbim_ifc::export_ifc4x3(&scene), Schema::Ifc4 => openbim_ifc::export(&scene) }.map_err(|e| format!("{e:?}"))?;
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
     if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
