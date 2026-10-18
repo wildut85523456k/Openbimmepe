@@ -196,13 +196,22 @@ fn colour_index_mapping() {
     assert_eq!(aci([0, 0, 0]), 7);
     assert_eq!(aci([127, 127, 127]), 8);
     assert_eq!(aci([128, 128, 128]), 8);
-    assert_eq!(aci([200, 200, 200]), 9);
+    assert_eq!(aci([200, 200, 200]), 254);
     assert_eq!(aci([255, 0, 0]), 1);
     assert_eq!(aci([250, 240, 10]), 2);
     assert_eq!(aci([10, 250, 10]), 3);
-    assert_eq!(aci([0, 200, 200]), 4);
+    assert_eq!(aci([0, 200, 200]), 132);
     assert_eq!(aci([10, 10, 250]), 5);
     assert_eq!(aci([250, 10, 250]), 6);
+}
+
+#[test]
+fn dxf_team_colours_use_the_full_palette() {
+    assert_eq!(aci([122, 122, 0]), 54, "olive must remain olive");
+    assert_eq!(aci([112, 0, 223]), 190, "purple must remain purple");
+    assert_eq!(aci([183, 0, 183]), 212, "dark magenta must retain its shade");
+    assert_eq!(aci([255, 255, 255]), 255, "white must not use adaptive foreground index 7");
+    assert_eq!(aci([255, 0, 0]), 1, "equal palette colours prefer the lowest index");
 }
 
 #[test]

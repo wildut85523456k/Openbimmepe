@@ -13,6 +13,9 @@ What exists
 - Printing: vector PDF 1.4 (true-size MediaBox), DXF R12 (weights in layer names `{D}-{CATEGORY}_W{n}`).
   Custom paper dimensions preserve the supplied width and height, including portrait.
   ISO/ANSI presets remain landscape by default. DXF header extents describe the full sheet.
+  DXF RGB matching uses the full fixed ACI reference palette (ezdxf 1.4.4 modelspace),
+  with black exported as adaptive foreground 7 and stable lowest-index tie breaking.
+  Indexed colour remains approximate; CAD background/palette settings can change appearance.
 - Excel import (calamine): header names matched to intrinsic fields or title block fields; atomic; create-only or create-or-update; row numbers in errors.
 - No standard values are built in: line weights, templates and margins are data.
 
@@ -20,6 +23,10 @@ Verification
 - `cargo test -p openbim-sheets` (unit, integration, proptest on clipping).
 - Portrait regression: `cargo run -p openbim-sheets --release --example portrait_scene -- OUTDIR`,
   then `python spikes/s13_sheets_check/check_portrait.py OUTDIR` (pypdf and ezdxf).
+- Colour regression: `python spikes/s13_sheets_check/check_dxf_colours.py make-input OUTDIR`,
+  `cargo run -p openbim-sheets --release --example colour_scene -- OUTDIR/input.csv OUTDIR`,
+  then `python spikes/s13_sheets_check/check_dxf_colours.py check OUTDIR`
+  (ezdxf==1.4.4 and pypdf).
 - `python -I spikes/s13_sheets_check/check_sheets.py`: qpdf, pdftotext, pypdf, pdfium raster, ezdxf, reportlab width tables, strokes re-derived without the Rust code.
 - Mutation checks done by hand (halftone maths, clip bounds, weight index, layer naming, mode table, revision lookup, number validation, header matching): each caught by a test.
 
