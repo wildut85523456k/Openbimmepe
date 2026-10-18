@@ -20,6 +20,7 @@ pub enum SnapshotGeometry {
     InWall { host:u64,along_m:f64 },
     Tag { host:u64,at:[f64;2],anchor:[f64;2] },
     Dimension { a:[f64;2],b:[f64;2],at:[f64;2],level:u64 },
+    Room { at:[f64;2],level:u64 },
 }
 impl From<Geometry> for SnapshotGeometry {
     fn from(value:Geometry)->Self {
@@ -36,6 +37,7 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::InWall { host,along_m }=>Self::InWall { host:host.0,along_m },
             Geometry::Tag { host,at,anchor }=>Self::Tag { host:host.0,at,anchor },
             Geometry::Dimension { a,b,at,level }=>Self::Dimension { a,b,at,level:level.0 },
+            Geometry::Room { at,level }=>Self::Room { at,level:level.0 },
         }
     }
 }
@@ -54,6 +56,7 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::InWall { host,along_m }=>Self::InWall { host:ElementId(host),along_m },
             SnapshotGeometry::Tag { host,at,anchor }=>Self::Tag { host:ElementId(host),at,anchor },
             SnapshotGeometry::Dimension { a,b,at,level }=>Self::Dimension { a,b,at,level:ElementId(level) },
+            SnapshotGeometry::Room { at,level }=>Self::Room { at,level:ElementId(level) },
         }
     }
 }
@@ -210,7 +213,7 @@ impl Snapshot {
             let category = match el.category.as_str() {
                 "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Family" => Category::Family, "Type" => Category::Type, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
-                "Level" => Category::Level, "Grid" => Category::Grid, "Tag" => Category::Tag, "Dimension" => Category::Dimension,
+                "Level" => Category::Level, "Grid" => Category::Grid, "Tag" => Category::Tag, "Dimension" => Category::Dimension, "Room" => Category::Room,
                 _ => return Err(format!("Unsupported category {}",el.category)),
             };
             let type_for = match &el.type_for {

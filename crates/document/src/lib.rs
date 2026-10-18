@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 mod spatial;
 mod edit;
+mod rooms;
+pub use rooms::RoomShape;
 pub mod native;
 mod rebar;
 mod types;
@@ -38,6 +40,9 @@ pub enum Category {
     /// An annotation: an aligned dimension between two points of the plan of a level (`Geometry::Dimension`). Not part
     /// of the building, so it is not exported as a product.
     Dimension,
+    /// A space: a point in a closed region of a level (`Geometry::Room`). Its floor is bounded by the faces of the walls
+    /// and columns around it, worked out when asked for.
+    Room,
     /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
     /// `height_m` deep, `elevation_m` the height of its centre line above the level.
     Beam,
@@ -617,7 +622,7 @@ impl Document {
     /// The level an element stands on: its own, or its host's.
     pub fn level_of(&self, id: ElementId) -> Option<ElementId> {
         match self.get(id)?.geometry? {
-            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } | Geometry::Dimension { level, .. } => Some(level),
+            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } | Geometry::Dimension { level, .. } | Geometry::Room { level, .. } => Some(level),
             Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } => self.level_of(host),
             Geometry::Level | Geometry::Grid { .. } => None,
         }

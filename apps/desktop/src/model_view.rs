@@ -173,6 +173,31 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             faces.push((depth, id, points, color.gamma_multiply(if three_d { 0.72 + (i % 3) as f32 * 0.12 } else { 1.0 })));
         }
     }
+    // rooms of this level (plan only): a tinted floor under everything, picked last; a room without a closed space shows a warning
+    let mut room_labels: Vec<(ElementId, Pos2, String, bool)> = Vec::new();
+    if !three_d {
+        let rooms: Vec<(ElementId, [f64; 2], String)> = app.document.elements().filter_map(|e| match e.geometry {
+            Some(Geometry::Room { at, level }) if level == level_id => Some((e.id, at, e.name.clone())),
+            _ => None,
+        }).collect();
+        for (id, at, name) in rooms {
+            let shape = app.document.room_shape(id);
+            if let Ok(shape) = &shape {
+                let tint = Color32::from_rgba_unmultiplied(110, 170, 220, if app.dark { 60 } else { 70 });
+                if let Some(tris) = openbim_geom::profile::triangulate(&shape.outline) {
+                    let mut mesh = egui::epaint::Mesh::default();
+                    for p in &shape.outline { mesh.colored_vertex(screen([p[0], p[1], level_z]), tint); }
+                    for t in tris { mesh.add_triangle(t[0] as u32, t[1] as u32, t[2] as u32); }
+                    painter.add(egui::Shape::mesh(mesh));
+                }
+                let pts: Vec<Pos2> = shape.outline.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                faces.push((f32::MIN, id, pts, Color32::TRANSPARENT));
+                room_labels.push((id, screen([at[0], at[1], level_z]), format!("{}\n{:.1} m²", name, shape.area()), true));
+            } else {
+                room_labels.push((id, screen([at[0], at[1], level_z]), format!("{name}\nNot Enclosed"), false));
+            }
+        }
+    }
     faces.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (_, id, points, color) in &faces {
         painter.add(egui::Shape::convex_polygon(points.clone(), *color,
@@ -204,6 +229,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             draw_dimension(&painter, screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]), q1, q2, &format!("{:.0}", l * 1000.0), if shown { blue } else { ink });
             datum_hits.push((id, q1, q2));
         }
+    }
+    for (id, at, text, closed) in &room_labels {
+        let ink = if *closed { ui.visuals().text_color() } else { Color32::from_rgb(200, 60, 60) };
+        let shown = selected_all.contains(id);
+        painter.line_segment([*at - Vec2::new(5.0, 0.0), *at + Vec2::new(5.0, 0.0)], Stroke::new(1.0, if shown { blue } else { ink }));
+        painter.line_segment([*at - Vec2::new(0.0, 5.0), *at + Vec2::new(0.0, 5.0)], Stroke::new(1.0, if shown { blue } else { ink }));
+        painter.text(*at + Vec2::new(0.0, 8.0), egui::Align2::CENTER_TOP, text, egui::FontId::proportional(12.0), if shown { blue } else { ink });
     }
     if !three_d {
         // tags: the label of an element, boxed, at a constant size, on a leader to the place that was clicked
@@ -343,6 +375,25 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0).map(|(id, _, _)| *id));
                 match hit { Some(h) => app.wall_pick_line(level_id, h, to_model(p)), None => app.message = "Pick Lines: click a grid, a wall or a beam".into() }
             } else { app.wall_click(level_id, to_model(p)); }
+        }
+    } else if app.tool == crate::Tool::Room && !three_d {
+        // the space under the pointer is previewed; a click places a room in it
+        if let Some(h) = response.hover_pos() {
+            let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+            let at = { let v = (h - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+            match app.document.room_region_at(level_id, at) {
+                Ok(shape) => {
+                    let pts: Vec<Pos2> = shape.outline.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                    painter.add(egui::Shape::closed_line(pts, Stroke::new(2.0, blue)));
+                    painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{:.1} m²", shape.area()), egui::FontId::proportional(13.0), blue);
+                }
+                Err(_) => { painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, "not enclosed", egui::FontId::proportional(13.0), Color32::from_rgb(200, 60, 60)); }
+            }
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if let Some(p) = pick {
+            let at = { let v = (p - rect.center() - app.pan) / scale + bounds.center().to_vec2(); [v.x as f64, -v.y as f64] };
+            app.room_click(level_id, at);
         }
     } else if app.tool == crate::Tool::WallJoins && !three_d {
         // The ends of the walls of this level are marked: green where the join is allowed, red where it is not.
@@ -1613,5 +1664,62 @@ mod tests {
         assert_eq!(app.document.get(ids[0]).unwrap().join_ends, [true, false]);
         frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
         assert!(app.tool == crate::Tool::Select);
+    }
+
+    #[test]
+    fn room_tool_places_a_room_in_a_closed_space_shows_its_area_and_follows_the_walls() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let rooms = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Room).count();
+        app.run_command("room", "Room");
+        assert!(app.tool == crate::Tool::Room);
+        // find a spot on screen inside a closed space by trying clicks on a copy
+        let mut probe = Desktop::sample();
+        probe.view = View::Plan;
+        probe.run_command("room", "Room");
+        let mut spot = None;
+        'scan: for y in (120..560).step_by(25) { for x in (80..920).step_by(25) {
+            let at = Pos2::new(x as f32, y as f32);
+            frame(&ctx, screen, &mut probe, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut probe, vec![button(at, true)]);
+            frame(&ctx, screen, &mut probe, vec![button(at, false)]);
+            if rooms(&probe) == 1 { spot = Some(at); break 'scan; }
+        } }
+        let at = spot.expect("a click inside a closed space of the sample places a room");
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(rooms(&app), 1, "{}", app.message);
+        assert!(app.message.contains("Room 1") && app.message.contains("m²"), "{}", app.message);
+        let room = app.document.elements().find(|e| e.category == Category::Room).unwrap().id;
+        let area = app.document.room_shape(room).unwrap().area();
+        assert!((area - 3.8 * 5.8).abs() < 1e-6, "{area}");
+        // a second click in the same space adds nothing
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(rooms(&app), 1);
+        assert!(app.message.contains("already"), "{}", app.message);
+        // outside every space: nothing
+        let outside = Pos2::new(40.0, 130.0);
+        frame(&ctx, screen, &mut app, vec![button(outside, true)]);
+        frame(&ctx, screen, &mut app, vec![button(outside, false)]);
+        assert_eq!(rooms(&app), 1);
+        // Esc ends the tool; a click in the room then selects it
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(app.selected_id(), Some(room), "{}", app.message);
+        // the room follows its walls: the wall that divides the sample is moved by 1 m
+        let divider = app.document.elements().find(|e| matches!(e.geometry, Some(Geometry::Linear { start, end, .. }) if e.category == Category::Wall && start[0] == 4.0 && end[0] == 4.0)).expect("the sample has a wall at x = 4").id;
+        let ops = app.document.transform_commands(&[divider], openbim_document::Xf::Move([-1.0, 0.0])).unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
+        frame(&ctx, screen, &mut app, vec![]);
+        let moved = app.document.room_shape(room).unwrap().area();
+        assert!((moved - area).abs() > 1.0, "{moved} {area}");
+        // delete the selected room with the key
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert_eq!(rooms(&app), 0);
     }
 }

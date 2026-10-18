@@ -621,6 +621,17 @@ impl Desktop {
         }
     }
 
+    /// A click of the Room tool: a room in the closed space under the point.
+    pub(crate) fn room_click(&mut self, level: ElementId, at: [f64; 2]) {
+        match self.document.place_room(level, at) {
+            Ok(id) => {
+                let (name, area) = (self.document.get(id).map(|e| e.name.clone()).unwrap_or_default(), self.document.room_shape(id).map(|s| s.area()).unwrap_or(0.0));
+                self.message = format!("{name} placed, {area:.1} m²; undo removes it");
+            }
+            Err(e) => self.message = format!("Room: {e}"),
+        }
+    }
+
     /// A pick of the Dimension tool: the two points, then the place of the dimension line.
     pub(crate) fn dimension_click(&mut self, level: ElementId, point: [f64; 2]) {
         match self.edit_pts.as_slice() {

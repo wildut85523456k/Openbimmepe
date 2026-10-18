@@ -26,6 +26,8 @@ pub enum Geometry {
     Tag { host: ElementId, at: [f64; 2], anchor: [f64; 2] },
     /// an aligned dimension on `level`: the distance between the points `a` and `b`, its line through `at`
     Dimension { a: [f64; 2], b: [f64; 2], at: [f64; 2], level: ElementId },
+    /// a room: its point `at` on `level`
+    Room { at: [f64; 2], level: ElementId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -172,6 +174,10 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             }
             Some(Geometry::Dimension { a, b, at, level }) => {
                 el.category == Category::Dimension && valid_axis(*a, *b) && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::Room { at, level }) => {
+                el.category == Category::Room && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Placed { at, level }) => {

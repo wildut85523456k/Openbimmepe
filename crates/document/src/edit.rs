@@ -113,6 +113,7 @@ impl Document {
             }
             Some(Geometry::Tag { host, at, anchor }) => e.geometry = Some(Geometry::Tag { host, at: p(at), anchor: p(anchor) }),
             Some(Geometry::Dimension { a, b, at, level }) => e.geometry = Some(Geometry::Dimension { a: p(a), b: p(b), at: p(at), level }),
+            Some(Geometry::Room { at, level }) => e.geometry = Some(Geometry::Room { at: p(at), level }),
             // hosted by something else: it goes where its host goes
             Some(Geometry::InWall { .. } | Geometry::OnWall { .. } | Geometry::OnMember { .. }) => {}
             Some(Geometry::Level) | None => return Err(format!("{} cannot be moved in the plan", e.name)),

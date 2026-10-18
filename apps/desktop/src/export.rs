@@ -133,7 +133,7 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
             }
             // the beams, members or bars they make are exported in their place
             (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
-            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
+            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct | Category::Pipe, Some(Geometry::Linear { start, end, level })) => {
                 let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
                 let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);

@@ -55,14 +55,25 @@ Wall, Wall Joins, Door, Window, Component, Column, Beam, Brace, Floor/Slab, Foun
 | Wall Joins configuration Butt / Miter / Square off per end | missing (the join is chosen automatically: miter for two walls, butt for a T) |
 | Join Geometry / Unjoin Geometry (solids cut by each other) | missing |
 
+## Room
+| Revit behaviour | State |
+|---|---|
+| Room tool: hover shows the closed space under the pointer with its area, click places a room there | done (outline preview in blue, "not enclosed" in red) |
+| Boundary = faces of walls (and columns as holes), worked out from the walls each time, so the room follows moved, edited or deleted walls | done (mitred and T corners, split edges, opposite edges cancelled) |
+| One room per space; a second click says so | done |
+| Room not enclosed warning | done: the room shows "Not Enclosed" in red when its walls no longer close |
+| Name and area shown at the room point; tinted floor; selectable, movable, deletable, undoable | done (label is drawn with the room; no separate Room Tag, no editable name/number/Department yet) |
+| Saved in OpenBIM records and the automation snapshot | done; not exported to IFC (no IfcSpace yet) |
+| Room separation lines, Area/Room schedules, Place Room Automatically, room bounding of floors, ceilings, doors | missing |
+
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level: not drawn in an elevation view (no elevation or section views). Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all (80 ribbon buttons)
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, roof, ceiling, curtain wall, stair, railing, ramp, room, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, roof, ceiling, curtain wall, stair, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Room, Roof, Ceiling, Stair, Opening.
+1. Roof, Ceiling, Stair, Opening (Room is done).
 2. Elevation/section views and levels drawn in them.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
