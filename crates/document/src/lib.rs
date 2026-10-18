@@ -499,6 +499,7 @@ impl Document {
     }
     /// Like `place_wall`, and in the same undoable step moves the axes of other walls (`(wall, start, end)`): the
     /// walls of a chain meet at the corners of their offset lines, so drawing the next wall moves the end of the last.
+    #[allow(clippy::too_many_arguments)]
     pub fn place_wall_moving(&mut self, level: ElementId, start: [f64; 2], end: [f64; 2], thickness_m: f64, height_m: f64, base_offset_m: f64, moves: &[(ElementId, [f64; 2], [f64; 2])]) -> Result<ElementId, EditError> {
         let id = self.next_id();
         if (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01 { return Err(EditError::InvalidGeometry(id)); }
