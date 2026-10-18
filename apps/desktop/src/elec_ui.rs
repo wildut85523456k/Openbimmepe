@@ -1,0 +1,480 @@
+//! The electrical network in the drawing: place a source, boards and loads, draw the cables between them, then
+//! compute (cable, protective device, voltage drop, fault checks per IEC 60364 with the owner's tables as CSV).
+use crate::Desktop;
+use eframe::egui::{self, Color32, Pos2, Stroke};
+use openbim_calc as calc;
+use openbim_document::compute_elec::{self, ElecComputeError, ElecComputeSettings, ElecReport};
+use openbim_document::{Command, ElecCable, ElecKind, ElecNode, Document, ElementId};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode { Place, Remove }
+
+/// What the node tool places and the cable tool draws.
+#[derive(Clone)]
+pub(crate) struct ElecDraft {
+    pub mode: Mode,
+    pub kind: ElecKind,
+    pub name: String,
+    pub kw: f64,
+    pub power_factor: f64,
+    pub efficiency: f64,
+    pub motor: bool,
+    pub start_multiple: f64,
+    pub start_pf: f64,
+    pub three_phase: bool,
+    pub extra_m: f64,
+    pub grouped: u32,
+    pub ambient: Option<f64>,
+    pub demand_factor: f64,
+    pub rcd_ma: Option<f64>,
+}
+
+impl Default for ElecDraft {
+    fn default() -> Self {
+        Self { mode: Mode::Place, kind: ElecKind::Load, name: String::new(), kw: 10.0, power_factor: 0.9, efficiency: 1.0, motor: false, start_multiple: 6.0, start_pf: 0.35,
+            three_phase: true, extra_m: 0.0, grouped: 1, ambient: None, demand_factor: 1.0, rcd_ma: None }
+    }
+}
+
+pub(crate) struct ElecDialog {
+    pub open: bool,
+    pub line_voltage: f64,
+    pub max_total_drop: f64,
+    pub max_branch_drop: f64,
+    pub max_start_drop: f64,
+    pub max_parallel: u32,
+    /// 0 TN, 1 TT, 2 IT
+    pub earthing: usize,
+    pub electrode_ohm: f64,
+    pub neutral_distributed: bool,
+    pub use_fault: bool,
+    pub isc_ka: f64,
+    pub x_over_r: f64,
+    pub clearing_s: f64,
+    pub c_min: f64,
+    pub hot_factor: f64,
+    pub trip_multiple: f64,
+    pub touch_v: f64,
+    pub source_kva: f64,
+    pub k: f64,
+    pub table: String,
+    pub grouping: String,
+    pub temperature: String,
+    pub harmonics: String,
+    pub devices: String,
+    pub pe_rule: String,
+    pub report: Option<(u64, ElecReport)>,
+    pub error: String,
+}
+
+impl Default for ElecDialog {
+    fn default() -> Self {
+        Self {
+            open: false, line_voltage: 400.0, max_total_drop: 5.0, max_branch_drop: 0.0, max_start_drop: 0.0, max_parallel: 1, earthing: 0, electrode_ohm: 10.0,
+            neutral_distributed: false, use_fault: false, isc_ka: 25.0, x_over_r: 2.0, clearing_s: 0.4, c_min: 0.95, hot_factor: 1.2, trip_multiple: 10.0, touch_v: 50.0,
+            source_kva: 0.0, k: 115.0, table: String::new(), grouping: String::new(), temperature: String::new(), harmonics: String::new(), devices: String::new(), pe_rule: String::new(),
+            report: None, error: String::new(),
+        }
+    }
+}
+
+fn table_err(what: &str, e: calc::TableError) -> String {
+    match e { calc::TableError::TooShort => format!("{what}: no usable row"), calc::TableError::Line(n, w) => format!("{what}, line {n}: {w}") }
+}
+
+fn describe(e: &ElecComputeError, doc: &Document) -> String {
+    let name = |id: &u64| doc.mep().elec_nodes.iter().find(|n| n.id == *id).map_or("a node".into(), |n| format!("\"{}\"", n.name));
+    match e {
+        ElecComputeError::NoSource => "No source. Place one with the Electrical Node tool (kind Source), then draw cables from it.".into(),
+        ElecComputeError::MoreThanOneSource => "More than one source; compute one supply at a time (remove the other).".into(),
+        ElecComputeError::NoLoad => "No load with a power. Place loads with the Electrical Node tool.".into(),
+        ElecComputeError::NotFed(id) => format!("{} is not fed by any cable. Draw a cable to it, or remove it.", name(id)),
+        ElecComputeError::Loop(id) => format!("The cables form a loop at {}; the network must be a tree.", name(id)),
+        ElecComputeError::Calc(err, node) => {
+            let at = node.map_or(String::new(), |id| format!(" at {}", name(&id)));
+            match err {
+                calc::EError::NoCable(_) => format!("No cable in the table is enough{at}: add larger sizes, or allow parallel cables."),
+                calc::EError::NoRating(_) => format!("The design current{at} is above the largest device rating in the list."),
+                calc::EError::DropNotMet(_) => format!("The voltage drop limit cannot be met{at}, even with the largest cables."),
+                calc::EError::BadSettings(w) => format!("Check the settings: {w}."),
+                calc::EError::BadValue(_, w) => format!("A value is not usable{at}: {w}."),
+                other => format!("{other:?}"),
+            }
+        }
+    }
+}
+
+impl Desktop {
+    fn nearest_node(&self, level: ElementId, at: [f64; 2], tol: f64) -> Option<u64> {
+        self.document.mep().elec_nodes.iter().filter(|n| n.level == level).map(|n| ((n.at[0] - at[0]).hypot(n.at[1] - at[1]), n.id)).filter(|(d, _)| *d <= tol).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, id)| id)
+    }
+
+    fn set_elec(&mut self, data: openbim_document::MepData, ok: String) {
+        self.message = match self.document.transact(self.document.revision(), &[Command::SetMep(Box::new(data))]) { Ok(_) => ok, Err(e) => format!("Rejected ({e:?})") };
+    }
+
+    /// A click of the Electrical Node tool.
+    pub(crate) fn elec_node_click(&mut self, level: ElementId, at: [f64; 2]) {
+        let mut data = self.document.mep().clone();
+        let hit = self.nearest_node(level, at, 0.4);
+        if self.elec_draft.mode == Mode::Remove {
+            let Some(id) = hit else { self.message = "Nothing to remove there".into(); return };
+            data.elec_nodes.retain(|n| n.id != id);
+            data.elec_cables.retain(|c| c.from != id && c.to != id);
+            return self.set_elec(data, "Node and its cables removed; undo brings them back".into());
+        }
+        if hit.is_some() { self.message = "There is a node there already".into(); return; }
+        let d = self.elec_draft.clone();
+        if d.kind == ElecKind::Source && data.elec_nodes.iter().any(|n| n.kind == ElecKind::Source) { self.message = "There is a source already; compute one supply at a time".into(); return; }
+        let n = data.elec_nodes.iter().filter(|n| n.kind == d.kind).count() + 1;
+        let name = if d.name.trim().is_empty() { format!("{} {n}", match d.kind { ElecKind::Source => "Source", ElecKind::Board => "Board", ElecKind::Load => "Load" }) } else { d.name.trim().to_string() };
+        let mut node = ElecNode::new(data.next_node_id(), &name, d.kind, [(at[0] / 0.05).round() * 0.05, (at[1] / 0.05).round() * 0.05], level);
+        if d.kind == ElecKind::Load {
+            (node.watts, node.power_factor, node.efficiency) = (d.kw * 1000.0, d.power_factor, d.efficiency);
+            node.motor = d.motor.then_some((d.start_multiple, d.start_pf));
+        }
+        data.elec_nodes.push(node);
+        self.set_elec(data, format!("{name} placed; undo removes it"));
+    }
+
+    /// A click of the Cable tool: the feeding node, the points on the way, the fed node.
+    pub(crate) fn cable_click(&mut self, level: ElementId, at: [f64; 2]) {
+        let hit = self.nearest_node(level, at, 0.4);
+        let mut data = self.document.mep().clone();
+        if self.elec_draft.mode == Mode::Remove {
+            let find = |id: u64| data.elec_nodes.iter().find(|n| n.id == id).map(|n| n.at);
+            let best = data.elec_cables.iter().enumerate().filter_map(|(i, c)| {
+                let mut pts = vec![find(c.from)?];
+                pts.extend(c.via.iter().copied());
+                pts.push(find(c.to)?);
+                let d = pts.windows(2).map(|w| seg_dist(at, w[0], w[1])).fold(f64::MAX, f64::min);
+                (d <= 0.3).then_some((d, i))
+            }).min_by(|a, b| a.0.total_cmp(&b.0));
+            let Some((_, i)) = best else { self.message = "No cable there".into(); return };
+            data.elec_cables.remove(i);
+            return self.set_elec(data, "Cable removed; undo brings it back".into());
+        }
+        match (self.cable_from, hit) {
+            (None, Some(id)) => {
+                if data.elec_nodes.iter().find(|n| n.id == id).is_some_and(|n| n.kind == ElecKind::Load) { self.message = "A load does not feed anything: start the cable at the source or a board".into(); return; }
+                self.cable_from = Some(id);
+                self.cable_via.clear();
+                self.message = "Cable: click the points on the way, then the node it feeds (Esc cancels)".into();
+            }
+            (None, None) => self.message = "Cable: start by clicking the source or a board".into(),
+            (Some(_), None) => self.cable_via.push([(at[0] / 0.05).round() * 0.05, (at[1] / 0.05).round() * 0.05]),
+            (Some(from), Some(to)) => {
+                if from == to { self.message = "A cable needs two different nodes".into(); return; }
+                if data.elec_cables.iter().any(|c| c.to == to) { self.message = "That node is fed by a cable already; remove it first".into(); return; }
+                if data.elec_nodes.iter().find(|n| n.id == to).is_some_and(|n| n.kind == ElecKind::Source) { self.message = "A source is not fed by a cable".into(); return; }
+                let d = self.elec_draft.clone();
+                let mut c = ElecCable::new(from, to, d.three_phase);
+                c.via = std::mem::take(&mut self.cable_via);
+                (c.extra_m, c.grouped_circuits, c.ambient_c, c.demand_factor, c.rcd_ma) = (d.extra_m, d.grouped.max(1), d.ambient, d.demand_factor, d.rcd_ma);
+                data.elec_cables.push(c);
+                self.cable_from = None;
+                self.set_elec(data, "Cable placed; undo removes it".into());
+            }
+        }
+    }
+
+    pub(crate) fn elec_options(&mut self, ui: &mut egui::Ui) {
+        let node_tool = self.tool == crate::Tool::ElecNode;
+        let d = &mut self.elec_draft;
+        ui.strong(if node_tool { "Electrical Node" } else { "Cable" });
+        ui.separator();
+        ui.selectable_value(&mut d.mode, Mode::Place, "Place");
+        ui.selectable_value(&mut d.mode, Mode::Remove, "Remove");
+        if d.mode == Mode::Remove { return; }
+        if node_tool {
+            ui.selectable_value(&mut d.kind, ElecKind::Source, "Source");
+            ui.selectable_value(&mut d.kind, ElecKind::Board, "Board");
+            ui.selectable_value(&mut d.kind, ElecKind::Load, "Load");
+            ui.label("Name");
+            ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(90.0));
+            if d.kind == ElecKind::Load {
+                ui.label("kW");
+                ui.add(egui::DragValue::new(&mut d.kw).speed(0.1).range(0.0..=1.0e5));
+                ui.label("pf");
+                ui.add(egui::DragValue::new(&mut d.power_factor).speed(0.01).range(0.05..=1.0));
+                ui.label("efficiency");
+                ui.add(egui::DragValue::new(&mut d.efficiency).speed(0.01).range(0.05..=1.0));
+            }
+            if d.kind == ElecKind::Load {
+                ui.checkbox(&mut d.motor, "Motor started direct");
+                if d.motor {
+                    ui.add(egui::DragValue::new(&mut d.start_multiple).speed(0.1).range(1.0..=20.0).suffix(" x In"));
+                    ui.add(egui::DragValue::new(&mut d.start_pf).speed(0.01).range(0.05..=1.0).suffix(" pf start"));
+                }
+            }
+        } else {
+            ui.checkbox(&mut d.three_phase, "Three-phase");
+            ui.label("Extra length (m)");
+            ui.add(egui::DragValue::new(&mut d.extra_m).speed(0.1).range(0.0..=1000.0));
+            ui.label("Circuits grouped");
+            ui.add(egui::DragValue::new(&mut d.grouped).range(1..=50));
+            let mut amb = d.ambient.is_some();
+            ui.checkbox(&mut amb, "Ambient");
+            if amb { let t = d.ambient.get_or_insert(30.0); ui.add(egui::DragValue::new(t).speed(0.5).range(-20.0..=90.0).suffix(" C")); } else { d.ambient = None; }
+            ui.label("Demand factor");
+            ui.add(egui::DragValue::new(&mut d.demand_factor).speed(0.01).range(0.05..=1.0));
+            let mut rcd = d.rcd_ma.is_some();
+            ui.checkbox(&mut rcd, "RCD");
+            if rcd { let m = d.rcd_ma.get_or_insert(30.0); ui.add(egui::DragValue::new(m).range(1.0..=1000.0).suffix(" mA")); } else { d.rcd_ma = None; }
+        }
+    }
+
+    fn elec_settings(&self) -> Result<ElecComputeSettings, String> {
+        let d = &self.elec;
+        let mut table = calc::CableTable::from_csv("cables", d.k, &d.table).map_err(|e| table_err("cable table", e))?;
+        if !d.grouping.trim().is_empty() { table = table.with_grouping(calc::FactorTable::from_csv(calc::Lookup::Step, &d.grouping).map_err(|e| table_err("grouping factors", e))?); }
+        if !d.temperature.trim().is_empty() { table = table.with_temperature(calc::FactorTable::from_csv(calc::Lookup::Interpolate, &d.temperature).map_err(|e| table_err("temperature factors", e))?); }
+        if !d.harmonics.trim().is_empty() { table = table.with_harmonics(calc::FactorTable::from_csv(calc::Lookup::Step, &d.harmonics).map_err(|e| table_err("harmonic factors", e))?); }
+        let mut s = calc::ESettings::new(d.line_voltage, vec![table], d.max_total_drop);
+        if !d.devices.trim().is_empty() { s.devices = calc::parse_devices(&d.devices).map_err(|e| table_err("devices", e))?; }
+        if !d.pe_rule.trim().is_empty() { s.pe_rule = Some(calc::parse_pe_rule(&d.pe_rule).map_err(|e| table_err("protective conductor rule", e))?); }
+        s.max_branch_drop_pct = (d.max_branch_drop > 0.0).then_some(d.max_branch_drop);
+        s.max_start_drop_pct = (d.max_start_drop > 0.0).then_some(d.max_start_drop);
+        s.max_parallel = d.max_parallel.max(1);
+        s.earthing = match d.earthing { 1 => calc::Earthing::Tt { electrode_ohm: d.electrode_ohm }, 2 => calc::Earthing::It { neutral_distributed: d.neutral_distributed }, _ => calc::Earthing::Tn };
+        s.touch_voltage_v = d.touch_v;
+        s.source_va = (d.source_kva > 0.0).then_some(d.source_kva * 1000.0);
+        if d.use_fault { s.fault = Some(calc::Fault { isc_a: d.isc_ka * 1000.0, x_over_r: d.x_over_r, clearing_time_s: d.clearing_s, c_min: d.c_min, hot_resistance_factor: d.hot_factor, trip_multiple: d.trip_multiple }); }
+        Ok(ElecComputeSettings { calc: s })
+    }
+
+    pub(crate) fn run_elec_compute(&mut self) {
+        self.elec.error.clear();
+        let settings = match self.elec_settings() { Ok(s) => s, Err(e) => { self.elec.error = e; return } };
+        match compute_elec::compute_electrical(&self.document, &settings) {
+            Ok(r) => {
+                self.message = format!("Electrical computed: {} cables, {:.1} kW, {:.1} kVA", r.cables.len(), r.total_kw, r.total_kva);
+                self.elec.report = Some((self.document.revision(), r));
+            }
+            Err(e) => { self.elec.report = None; self.elec.error = describe(&e, &self.document); }
+        }
+    }
+
+    pub(crate) fn elec_window(&mut self, ctx: &egui::Context) {
+        if !self.elec.open { return; }
+        let mut open = true;
+        let mut run = false;
+        egui::Window::new("Compute electrical").open(&mut open).default_width(640.0).show(ctx, |ui| {
+            let d = &mut self.elec;
+            egui::CollapsingHeader::new("Settings").default_open(true).show(ui, |ui| {
+                egui::Grid::new("elec_grid").num_columns(4).show(ui, |ui| {
+                    ui.label("Line voltage (V)"); ui.add(egui::DragValue::new(&mut d.line_voltage).speed(1.0).range(50.0..=100000.0));
+                    ui.label("Max drop, whole path (%)"); ui.add(egui::DragValue::new(&mut d.max_total_drop).speed(0.1).range(0.1..=50.0)); ui.end_row();
+                    ui.label("Max drop, one cable (%, 0 = none)"); ui.add(egui::DragValue::new(&mut d.max_branch_drop).speed(0.1).range(0.0..=50.0));
+                    ui.label("Max motor start drop (%, 0 = none)"); ui.add(egui::DragValue::new(&mut d.max_start_drop).speed(0.1).range(0.0..=50.0)); ui.end_row();
+                    ui.label("Cables in parallel, at most"); ui.add(egui::DragValue::new(&mut d.max_parallel).range(1..=12));
+                    ui.label("Adiabatic constant k"); ui.add(egui::DragValue::new(&mut d.k).speed(1.0).range(1.0..=400.0)); ui.end_row();
+                    ui.label("Source rating (kVA, 0 = unknown)"); ui.add(egui::DragValue::new(&mut d.source_kva).speed(10.0).range(0.0..=1.0e6));
+                    ui.label("Touch voltage limit (V)"); ui.add(egui::DragValue::new(&mut d.touch_v).speed(1.0).range(10.0..=120.0)); ui.end_row();
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Earthing");
+                    ui.selectable_value(&mut d.earthing, 0, "TN");
+                    ui.selectable_value(&mut d.earthing, 1, "TT");
+                    ui.selectable_value(&mut d.earthing, 2, "IT");
+                    if d.earthing == 1 { ui.add(egui::DragValue::new(&mut d.electrode_ohm).speed(0.5).range(0.1..=1000.0).suffix(" ohm electrode")); }
+                    if d.earthing == 2 { ui.checkbox(&mut d.neutral_distributed, "Neutral distributed"); }
+                });
+                ui.checkbox(&mut d.use_fault, "Check short circuit and fault protection");
+                if d.use_fault {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(egui::DragValue::new(&mut d.isc_ka).speed(0.5).range(0.1..=500.0).suffix(" kA at source"));
+                        ui.add(egui::DragValue::new(&mut d.x_over_r).speed(0.1).range(0.0..=50.0).suffix(" X/R"));
+                        ui.add(egui::DragValue::new(&mut d.clearing_s).speed(0.01).range(0.001..=5.0).suffix(" s clearing"));
+                        ui.add(egui::DragValue::new(&mut d.c_min).speed(0.01).range(0.5..=1.2).suffix(" c min"));
+                        ui.add(egui::DragValue::new(&mut d.hot_factor).speed(0.01).range(1.0..=2.0).suffix(" hot R factor"));
+                        ui.add(egui::DragValue::new(&mut d.trip_multiple).speed(0.5).range(1.0..=50.0).suffix(" x In trip"));
+                    });
+                }
+                for (label, text, hint) in [
+                    ("Cable table: label, area mm2, R ohm/km, X ohm/km, ampacity A", &mut d.table, true),
+                    ("Grouping factors: circuits, factor", &mut d.grouping, false),
+                    ("Temperature factors: degrees C, factor", &mut d.temperature, false),
+                    ("Harmonic factors: third harmonic %, factor", &mut d.harmonics, false),
+                    ("Device ratings: rating A, breaking kA", &mut d.devices, false),
+                    ("Protective conductor rule: phase mm2, PE mm2", &mut d.pe_rule, false),
+                ] {
+                    ui.label(label);
+                    ui.add(egui::TextEdit::multiline(text).desired_rows(if hint { 4 } else { 2 }).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
+                }
+                if ui.small_button("Load the cable table from a CSV file...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("Cable table").add_filter("CSV", &["csv", "txt"]).pick_file() {
+                        match std::fs::read_to_string(&p) { Ok(t) => d.table = t, Err(e) => d.error = format!("{}: {e}", p.display()) }
+                    }
+                }
+            });
+            if ui.button("Compute").clicked() { run = true; }
+            if !self.elec.error.is_empty() { ui.colored_label(Color32::from_rgb(200, 60, 40), &self.elec.error); }
+            let now = self.document.revision();
+            if let Some((rev, r)) = &self.elec.report {
+                if *rev != now { ui.colored_label(Color32::from_rgb(190, 120, 20), "The drawing has changed since this was computed; compute again."); }
+                ui.separator();
+                ui.label(format!("{:.1} kW, {:.1} kVA at the source, power factor {:.2}{}. The most loaded path is in red.", r.total_kw, r.total_kva, r.source_power_factor, r.source_loading_pct.map_or(String::new(), |p| format!(", source loaded {p:.0} %"))));
+                let name = |id: u64| self.document.mep().elec_nodes.iter().find(|n| n.id == id).map_or("?".to_string(), |n| n.name.clone());
+                egui::ScrollArea::both().max_height(280.0).show(ui, |ui| {
+                    egui::Grid::new("elec_cables").striped(true).num_columns(11).show(ui, |ui| {
+                        for h in ["From", "To", "m", "Ib A", "Device A", "Cable", "Capacity A", "Drop %", "Path %", "PE mm2", "Checks"] { ui.strong(h); }
+                        ui.end_row();
+                        for c in &r.cables {
+                            ui.label(name(c.from)); ui.label(name(c.to));
+                            ui.label(format!("{:.1}", c.length_m)); ui.label(format!("{:.1}", c.design_current)); ui.label(format!("{:.0}", c.device_a));
+                            ui.label(if c.parallel > 1 { format!("{} x {}", c.parallel, c.cable) } else { c.cable.clone() });
+                            ui.label(format!("{:.0}", c.capacity_a)); ui.label(format!("{:.2}", c.drop_pct)); ui.label(format!("{:.2}", c.path_drop_pct)); ui.label(format!("{:.1}", c.pe_area));
+                            let mut flags = Vec::new();
+                            if c.critical { flags.push("critical"); }
+                            if !c.trip_ok { flags.push("trip too slow"); }
+                            if !c.breaking_ok { flags.push("breaking capacity"); }
+                            if c.rcd_ok == Some(false) { flags.push("RCD"); }
+                            if c.fails { flags.push("FAILS"); }
+                            ui.label(flags.join(", "));
+                            ui.end_row();
+                        }
+                    });
+                    ui.separator();
+                    egui::Grid::new("elec_ends").striped(true).num_columns(4).show(ui, |ui| {
+                        for h in ["End", "Drop to it %", "Margin %", "Motor start drop %"] { ui.strong(h); }
+                        ui.end_row();
+                        for (id, drop, margin, start) in &r.ends {
+                            ui.label(name(*id)); ui.label(format!("{drop:.2}")); ui.label(format!("{margin:.2}")); ui.label(start.map_or("-".into(), |s| format!("{s:.2}")));
+                            ui.end_row();
+                        }
+                    });
+                });
+            }
+        });
+        if run { self.run_elec_compute(); }
+        self.elec.open = open;
+    }
+}
+
+fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 < 1e-12 { 0.0 } else { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) };
+    (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
+}
+
+/// Draws the nodes and cables of the level, the most loaded path in red, and the cable being drawn.
+pub(crate) fn draw_overlay(doc: &Document, report: Option<&ElecReport>, painter: &egui::Painter, screen: &dyn Fn([f64; 3]) -> Pos2, level: ElementId, z: f64, pending: Option<(u64, &[[f64; 2]])>) {
+    let m = doc.mep();
+    let at = |p: [f64; 2]| screen([p[0], p[1], z]);
+    let node = |id: u64| m.elec_nodes.iter().find(|n| n.id == id);
+    for c in &m.elec_cables {
+        let (Some(a), Some(b)) = (node(c.from), node(c.to)) else { continue };
+        if a.level != level && b.level != level { continue; }
+        let mut pts = vec![at(a.at)];
+        pts.extend(c.via.iter().map(|p| at(*p)));
+        pts.push(at(b.at));
+        let crit = report.is_some_and(|r| r.cables.iter().any(|x| x.to == c.to && x.critical));
+        let stroke = if crit { Stroke::new(3.5, Color32::from_rgba_unmultiplied(220, 50, 40, 200)) } else { Stroke::new(1.8, Color32::from_rgb(150, 90, 20)) };
+        for w in pts.windows(2) { painter.line_segment([w[0], w[1]], stroke); }
+        if let Some(x) = report.and_then(|r| r.cables.iter().find(|x| x.to == c.to)) {
+            let mid = pts[pts.len() / 2];
+            let label = format!("{}{} {:.0}A", if x.parallel > 1 { format!("{}x", x.parallel) } else { String::new() }, x.cable, x.device_a);
+            painter.text(mid + egui::Vec2::new(4.0, -4.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(10.0), if x.fails { Color32::from_rgb(200, 40, 40) } else { Color32::from_rgb(110, 70, 20) });
+        }
+    }
+    if let Some((from, via)) = pending {
+        if let Some(n) = node(from) {
+            let mut pts = vec![at(n.at)];
+            pts.extend(via.iter().map(|p| at(*p)));
+            for w in pts.windows(2) { painter.line_segment([w[0], w[1]], Stroke::new(1.5, Color32::from_rgb(230, 150, 40))); }
+        }
+    }
+    for n in m.elec_nodes.iter().filter(|n| n.level == level) {
+        let p = at(n.at);
+        let col = match n.kind { ElecKind::Source => Color32::from_rgb(200, 40, 40), ElecKind::Board => Color32::from_rgb(40, 90, 200), ElecKind::Load => Color32::from_rgb(40, 150, 80) };
+        match n.kind {
+            ElecKind::Source => { painter.add(egui::Shape::convex_polygon(vec![p + egui::Vec2::new(0.0, -8.0), p + egui::Vec2::new(8.0, 0.0), p + egui::Vec2::new(0.0, 8.0), p + egui::Vec2::new(-8.0, 0.0)], col, Stroke::NONE)); }
+            ElecKind::Board => { painter.rect_filled(egui::Rect::from_center_size(p, egui::Vec2::splat(12.0)), 1.0, col); }
+            ElecKind::Load => { painter.circle_filled(p, 6.0, col); }
+        }
+        let text = if n.watts > 0.0 { format!("{} {:.1} kW", n.name, n.watts / 1000.0) } else { n.name.clone() };
+        painter.text(p + egui::Vec2::new(9.0, -9.0), egui::Align2::LEFT_BOTTOM, text, egui::FontId::proportional(11.0), col);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Tool;
+
+    const TABLE: &str = "1.5mm2,1.5,12.1,0.1,19\n2.5mm2,2.5,7.41,0.1,26\n4mm2,4,4.61,0.1,35\n6mm2,6,3.08,0.1,44\n10mm2,10,1.83,0.08,60\n16mm2,16,1.15,0.08,80\n25mm2,25,0.727,0.08,105\n35mm2,35,0.524,0.08,128\n50mm2,50,0.387,0.08,155\n";
+
+    #[test]
+    fn nodes_and_cables_are_drawn_by_clicks_computed_in_the_window_and_undone() {
+        let mut app = Desktop::sample();
+        let lv = ElementId(10);
+        app.choose_tool(Tool::ElecNode);
+        app.elec_draft.kind = ElecKind::Source;
+        app.elec_node_click(lv, [0.0, 0.0]);
+        app.elec_node_click(lv, [0.1, 0.0]);
+        assert_eq!(app.document.mep().elec_nodes.len(), 1, "a node is there already: {}", app.message);
+        app.elec_draft.kind = ElecKind::Source;
+        app.elec_node_click(lv, [5.0, 5.0]);
+        assert!(app.message.contains("source already"), "{}", app.message);
+        app.elec_draft.kind = ElecKind::Board;
+        app.elec_node_click(lv, [10.0, 0.0]);
+        app.elec_draft.kind = ElecKind::Load;
+        (app.elec_draft.kw, app.elec_draft.power_factor, app.elec_draft.name) = (30.0, 0.85, "Chiller".into());
+        app.elec_node_click(lv, [20.0, 0.0]);
+        app.elec_draft.kw = 7.5;
+        app.elec_draft.motor = true;
+        app.elec_draft.name = "Pump".into();
+        app.elec_node_click(lv, [10.0, 8.0]);
+        assert_eq!(app.document.mep().elec_nodes.len(), 4);
+        // cables: a load cannot feed, the points on the way are kept, a node is fed once
+        app.choose_tool(Tool::Cable);
+        app.cable_click(lv, [20.0, 0.0]);
+        assert!(app.cable_from.is_none() && app.message.contains("does not feed"), "{}", app.message);
+        for p in [[0.0, 0.0], [10.0, 0.0]] { app.cable_click(lv, p); }
+        assert_eq!(app.document.mep().elec_cables.len(), 1);
+        app.cable_click(lv, [10.0, 0.0]);
+        app.cable_click(lv, [20.0, 3.0]);
+        app.cable_click(lv, [20.0, 0.0]);
+        let long = app.document.mep().elec_cables.iter().find(|c| c.via.len() == 1).expect("with a point on the way");
+        assert_eq!(long.via, vec![[20.0, 3.0]]);
+        app.cable_click(lv, [10.0, 0.0]);
+        app.cable_click(lv, [10.0, 8.0]);
+        assert_eq!(app.document.mep().elec_cables.len(), 3, "{}", app.message);
+        app.cable_click(lv, [10.0, 0.0]);
+        app.cable_click(lv, [20.0, 0.0]);
+        assert!(app.message.contains("fed by a cable already"), "{}", app.message);
+        app.cable_from = None;
+        // compute through the window
+        app.elec.table = TABLE.into();
+        app.elec.max_start_drop = 15.0;
+        app.run_elec_compute();
+        assert!(app.elec.error.is_empty(), "{}", app.elec.error);
+        let (_, r) = app.elec.report.as_ref().unwrap();
+        assert_eq!(r.cables.len(), 3);
+        assert!((r.total_kw - 37.5).abs() < 1e-9, "{}", r.total_kw);
+        assert!(r.cables.iter().any(|c| c.critical) && r.cables.iter().any(|c| !c.critical));
+        app.elec.open = true;
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| app.elec_window(ui.ctx()));
+        out.textures_delta.clear();
+        // a bad table is explained by line
+        app.elec.table = "a,1,2,3,4\n10,x\n".into();
+        app.run_elec_compute();
+        assert!(app.elec.error.contains("cable table, line 2"), "{}", app.elec.error);
+        // remove a cable and a node; undo
+        app.elec.table = TABLE.into();
+        app.elec_draft.mode = Mode::Remove;
+        app.cable_click(lv, [5.0, 0.0]);
+        assert_eq!(app.document.mep().elec_cables.len(), 2, "{}", app.message);
+        app.run_elec_compute();
+        assert!(app.elec.error.contains("not fed"), "{}", app.elec.error);
+        app.choose_tool(Tool::ElecNode);
+        app.elec_draft.mode = Mode::Remove;
+        app.elec_node_click(lv, [10.0, 8.0]);
+        assert_eq!((app.document.mep().elec_nodes.len(), app.document.mep().elec_cables.len()), (3, 1));
+        app.undo_document();
+        assert_eq!((app.document.mep().elec_nodes.len(), app.document.mep().elec_cables.len()), (4, 2));
+    }
+}

@@ -83,10 +83,14 @@ pub struct MepData {
     /// the system each duct or pipe belongs to, where the designer has said so (otherwise it takes its fittings')
     pub run_systems: Vec<(ElementId, System)>,
     pub endpoints: Vec<MepEndpoint>,
+    /// the electrical network: a source, boards and loads
+    pub elec_nodes: Vec<crate::elec::ElecNode>,
+    /// the cables between them
+    pub elec_cables: Vec<crate::elec::ElecCable>,
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -113,6 +117,8 @@ impl MepData {
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
             run_systems: self.run_systems.iter().filter(|(r, _)| is_run(elements.get(r))).copied().collect(),
             endpoints: self.endpoints.iter().filter(|e| alive(&e.port.node)).copied().collect(),
+            elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().collect(),
+            elec_cables: { let keep: std::collections::BTreeSet<u64> = self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).map(|n| n.id).collect(); self.elec_cables.iter().filter(|c| keep.contains(&c.from) && keep.contains(&c.to)).cloned().collect() },
         }
     }
 
@@ -163,8 +169,13 @@ impl MepData {
                 return Err(EditError::InvalidMep);
             }
         }
+        let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
+        if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }
         Ok(())
     }
+
+    /// The first electrical node number that no node has.
+    pub fn next_node_id(&self) -> u64 { self.elec_nodes.iter().map(|n| n.id + 1).max().unwrap_or(crate::elec::NODE_BASE).max(crate::elec::NODE_BASE) }
 }
 
 fn is_run(e: Option<&Element>) -> bool {
@@ -453,5 +464,49 @@ mod tests {
             assert!(d.mep().fittings.len() == 0 && d.get(main).is_some() && d.get(new[0]).is_none());
             assert_eq!(d.mep().links.len(), 0);
         }
+    }
+
+    #[test]
+    fn the_electrical_network_is_checked_kept_with_the_model_and_comes_back_from_the_records() {
+        use crate::elec::{ElecCable, ElecKind, ElecNode, NODE_BASE};
+        let mut d = Document::spatial_sample();
+        let (a, b, c) = (NODE_BASE, NODE_BASE + 1, NODE_BASE + 2);
+        let mut load = ElecNode::new(c, "Chiller | 1; a=b", ElecKind::Load, [6.0, 2.0], ElementId(10));
+        (load.watts, load.power_factor, load.efficiency, load.motor) = (45000.5, 0.85, 0.93, Some((6.0, 0.35)));
+        let mut cable = ElecCable::new(b, c, true);
+        cable.via = vec![[3.0, 0.1], [3.0, 2.0]];
+        (cable.extra_m, cable.grouped_circuits, cable.ambient_c, cable.demand_factor, cable.rcd_ma) = (3.5, 3, Some(35.0), 0.8, Some(30.0));
+        let data = MepData {
+            elec_nodes: vec![ElecNode::new(a, "TX1", ElecKind::Source, [0.0, 0.0], ElementId(10)), ElecNode::new(b, "MSB", ElecKind::Board, [3.0, 0.0], ElementId(10)), load],
+            elec_cables: vec![ElecCable::new(a, b, true), cable],
+            ..Default::default()
+        };
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data.clone()))]).unwrap();
+        assert_eq!(d.mep().elec_nodes.len(), 3);
+        assert_eq!(d.mep().next_node_id(), NODE_BASE + 3);
+        let lines = crate::native::records(&d);
+        assert_eq!(crate::native::parse_mep(&lines).unwrap(), *d.mep());
+        // refused: a load that feeds, a node fed twice, a second feed, a bad factor, a missing level
+        let bad = |f: &dyn Fn(&mut MepData)| { let mut x = data.clone(); f(&mut x); d.clone().transact(d.revision(), &[Command::SetMep(Box::new(x))]) };
+        assert_eq!(bad(&|x| x.elec_cables.push(ElecCable::new(c, a, true))), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.elec_cables.push(ElecCable::new(a, c, true))), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.elec_nodes[2].power_factor = 1.5), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.elec_cables[0].demand_factor = 0.0), Err(EditError::InvalidMep));
+        assert_eq!(bad(&|x| x.elec_nodes[0].watts = 5.0), Err(EditError::InvalidMep));
+        // a node on a level that is not there is dropped with its cables, as when the level is deleted
+        let mut gone = data.clone();
+        gone.elec_nodes[2].level = ElementId(999);
+        let mut e = d.clone();
+        e.transact(e.revision(), &[Command::SetMep(Box::new(gone))]).unwrap();
+        assert_eq!((e.mep().elec_nodes.len(), e.mep().elec_cables.len()), (2, 1));
+        // deleting the level takes its nodes and their cables away; undo brings them back
+        d.transact(d.revision(), &[Command::Create { id: ElementId(700), category: Category::Level, name: "L9".into(), width_m: 1.0, height_m: 1.0, elevation_m: 9.0 }, Command::SetGeometry { id: ElementId(700), geometry: Geometry::Level }]).unwrap();
+        let mut up = d.mep().clone();
+        up.elec_nodes[2].level = ElementId(700);
+        d.transact(d.revision(), &[Command::SetMep(Box::new(up))]).unwrap();
+        d.transact(d.revision(), &[Command::Delete { id: ElementId(700) }]).unwrap();
+        assert_eq!((d.mep().elec_nodes.len(), d.mep().elec_cables.len()), (2, 1));
+        assert!(d.undo().unwrap());
+        assert_eq!((d.mep().elec_nodes.len(), d.mep().elec_cables.len()), (3, 2));
     }
 }

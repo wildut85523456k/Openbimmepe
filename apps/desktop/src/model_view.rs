@@ -174,7 +174,19 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let report = app.compute.report.as_ref().map(|(_, r)| r);
         crate::compute_ui::draw_overlay(&app.document, report, &painter, &screen, level_z, app.tool == crate::Tool::EndPoint);
     }
-    if app.tool == crate::Tool::EndPoint && !three_d {
+    if !three_d {
+        let report = app.elec.report.as_ref().map(|(_, r)| r);
+        let pending = app.cable_from.map(|f| (f, app.cable_via.as_slice()));
+        crate::elec_ui::draw_overlay(&app.document, report, &painter, &screen, level_id, level_z, pending);
+    }
+    if matches!(app.tool, crate::Tool::ElecNode | crate::Tool::Cable) && !three_d {
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.cable_from.is_some() { app.cable_from = None; app.cable_via.clear(); } else { app.choose_tool(crate::Tool::Select); } }
+        else if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() { if app.tool == crate::Tool::ElecNode { app.elec_node_click(level_id, to_model(p)); } else { app.cable_click(level_id, to_model(p)); } }
+        }
+    } else if app.tool == crate::Tool::EndPoint && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }

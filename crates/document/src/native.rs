@@ -158,6 +158,15 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
         };
         out.push(format!("N|p={}|role={}|dem={dem}|rp={:?}", port_text(&e.port), if e.role == super::EndRole::Source { "S" } else { "T" }, e.required_pressure_pa));
     }
+    for n in &m.elec_nodes {
+        let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
+        let motor = n.motor.map_or("N".to_string(), |(m, p)| format!("{m:?}:{p:?}"));
+        out.push(format!("B|id={}|name={}|kind={kind}|at={:?},{:?}|lv={}|w={:?}|pf={:?}|eff={:?}|mot={motor}", n.id, esc(&n.name), n.at[0], n.at[1], n.level.0, n.watts, n.power_factor, n.efficiency));
+    }
+    for c in &m.elec_cables {
+        let via: Vec<String> = c.via.iter().map(|p| format!("{:?},{:?}", p[0], p[1])).collect();
+        out.push(format!("C|a={}|b={}|via={}|ph={}|ex={:?}|gc={}|amb={}|df={:?}|rcd={}", c.from, c.to, via.join(";"), if c.three_phase { 3 } else { 1 }, c.extra_m, c.grouped_circuits, c.ambient_c.map_or("N".into(), |t| format!("{t:?}")), c.demand_factor, c.rcd_ma.map_or("N".into(), |m| format!("{m:?}"))));
+    }
     out
 }
 
@@ -167,9 +176,22 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
+        let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
+        let opt = |t: &str| -> Result<Option<f64>, String> { if t == "N" { Ok(None) } else { num(t).map(Some) } };
+        if line.starts_with("B|") {
+            let kind = match get("kind")? { "S" => super::ElecKind::Source, "B" => super::ElecKind::Board, "L" => super::ElecKind::Load, _ => return Err("an unknown electrical node kind".into()) };
+            let motor = match get("mot")? { "N" => None, t => { let (a, b) = t.split_once(':').ok_or("a motor without ':'")?; Some((num(a)?, num(b)?)) } };
+            m.elec_nodes.push(super::ElecNode { id: int(get("id")?)?, name: unesc(get("name")?)?, kind, at: pt(get("at")?)?, level: ElementId(int(get("lv")?)?), watts: num(get("w")?)?, power_factor: num(get("pf")?)?, efficiency: num(get("eff")?)?, motor });
+            continue;
+        }
+        if line.starts_with("C|") {
+            let via = if get("via")?.is_empty() { Vec::new() } else { get("via")?.split(';').map(pt).collect::<Result<Vec<_>, _>>()? };
+            m.elec_cables.push(super::ElecCable { from: int(get("a")?)?, to: int(get("b")?)?, via, three_phase: get("ph")? == "3", extra_m: num(get("ex")?)?, grouped_circuits: int(get("gc")?)? as u32, ambient_c: opt(get("amb")?)?, demand_factor: num(get("df")?)?, rcd_ma: opt(get("rcd")?)? });
+            continue;
+        }
         if line.starts_with("L|") { m.links.push((parse_port(get("a")?)?, parse_port(get("b")?)?)); continue; }
         if line.starts_with("Z|") {
             m.run_systems.push((ElementId(int(get("r")?)?), System::from_code(int(get("sys")?)? as u8).ok_or("an unknown system")?));
@@ -224,7 +246,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

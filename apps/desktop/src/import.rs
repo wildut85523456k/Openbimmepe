@@ -432,6 +432,12 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
     for e in incoming.endpoints {
         if !involves(&e.port) && out.endpoint_at(e.port).is_none() && out.partner(e.port).is_none() { out.endpoints.push(e); }
     }
+    for n in incoming.elec_nodes {
+        if !out.elec_nodes.iter().any(|x| x.id == n.id) { out.elec_nodes.push(n); }
+    }
+    for c in incoming.elec_cables {
+        if out.elec_nodes.iter().any(|n| n.id == c.from) && out.elec_nodes.iter().any(|n| n.id == c.to) && !out.elec_cables.iter().any(|x| x.to == c.to) { out.elec_cables.push(c); }
+    }
     out
 }
 
@@ -668,6 +674,28 @@ mod tests {
             let mut back = Document::new();
             import_ifc(&mut back, &out.text).unwrap();
             assert_eq!(back.mep(), d.mep(), "{schema:?}: joins, taps, systems and end points come back");
+        }
+    }
+
+    #[test]
+    fn the_electrical_network_comes_back_from_a_file_in_every_schema() {
+        use openbim_document::{ElecCable, ElecKind, ElecNode};
+        let mut d = model();
+        let lv = ElementId(10);
+        let mut data = d.mep().clone();
+        let base = data.next_node_id();
+        let mut load = ElecNode::new(base + 2, "Pump \u{b5} | 1; x=2", ElecKind::Load, [6.5, 2.25], lv);
+        (load.watts, load.power_factor, load.efficiency, load.motor) = (7500.0, 0.82, 0.9, Some((6.5, 0.3)));
+        data.elec_nodes = vec![ElecNode::new(base, "TX", ElecKind::Source, [0.0, 0.0], lv), ElecNode::new(base + 1, "MSB", ElecKind::Board, [3.0, 0.0], lv), load];
+        let mut c = ElecCable::new(base + 1, base + 2, false);
+        (c.via, c.extra_m, c.grouped_circuits, c.ambient_c, c.demand_factor, c.rcd_ma) = (vec![[3.0, 2.25]], 2.5, 4, Some(40.0), 0.7, Some(30.0));
+        data.elec_cables = vec![ElecCable::new(base, base + 1, true), c];
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))]).unwrap();
+        for schema in crate::export::Schema::ALL {
+            let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", schema).unwrap();
+            let mut back = Document::new();
+            import_ifc(&mut back, &out.text).unwrap();
+            assert_eq!(back.mep(), d.mep(), "{schema:?}: nodes and cables come back");
         }
     }
 

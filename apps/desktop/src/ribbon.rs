@@ -99,6 +99,7 @@ const ELECTRICAL: &[Group] = &[
         c("panel", "Panel Board"), c("transformer", "Transformer"), c("generator", "Generator"),
         c("disconnect", "Disconnect"),
     ]},
+    Group { title: "Power Distribution", commands: &[c("elec_node", "Electrical Node"), c("elec_cable", "Cable"), c("elec_compute", "Compute")] },
 ];
 
 const ARCHITECTURE: &[Group] = &[

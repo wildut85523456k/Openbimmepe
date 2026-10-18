@@ -336,6 +336,9 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
     if app.tool == crate::Tool::EndPoint {
         ui.horizontal_wrapped(|ui| app.end_point_options(ui));
     }
+    if matches!(app.tool, crate::Tool::ElecNode | crate::Tool::Cable) {
+        ui.horizontal_wrapped(|ui| app.elec_options(ui));
+    }
     if matches!(app.tool, crate::Tool::Duct | crate::Tool::Pipe) {
         ui.horizontal_wrapped(|ui| app.run_options(ui));
         return;
