@@ -257,6 +257,7 @@ fn types_of(doc: &Document, mep_ids: &[u64], beams: &[BeamItem], columns: &[Colu
 
 /// `timestamp` is written into the header, `project_key` makes the GlobalIds of this project its own.
 /// The newest schema, IFC 4.3, which is what the app writes unless told otherwise.
+#[cfg(test)]
 pub fn export_ifc(doc: &Document, project_name: &str, project_key: u64, timestamp: &str) -> Result<Exported, String> {
     export_ifc_as(doc, project_name, project_key, timestamp, Schema::Ifc4x3)
 }
