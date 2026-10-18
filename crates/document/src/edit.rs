@@ -20,7 +20,7 @@ pub enum Xf {
 fn half_turns(a: f64) -> bool { let r = (a / std::f64::consts::PI).rem_euclid(1.0); r < 1e-9 || 1.0 - r < 1e-9 }
 
 impl Xf {
-    fn point(self, p: P) -> P {
+    pub fn point(self, p: P) -> P {
         match self {
             Xf::Move(d) => [p[0] + d[0], p[1] + d[1]],
             Xf::Rotate(c, a) => {

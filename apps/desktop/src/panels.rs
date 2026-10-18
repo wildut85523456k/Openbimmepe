@@ -300,6 +300,17 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         });
         return;
     }
+    if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong(match app.tool { crate::Tool::Move => "Modify | Move", crate::Tool::Copy => "Modify | Copy", crate::Tool::Rotate => "Modify | Rotate", _ => "Modify | Mirror" });
+            ui.separator();
+            if app.tool == crate::Tool::Mirror { ui.checkbox(&mut app.mirror_copy, "Copy"); }
+            let what = match app.selected_id().and_then(|id| app.document.get(id)) { Some(e) => e.name.clone(), None => "nothing selected: click an element".to_string() };
+            ui.label(what);
+            if !app.edit_num.is_empty() { ui.label(format!("typed: {}", app.edit_num)); }
+        });
+        return;
+    }
     if app.tool == crate::Tool::Wall {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Wall");

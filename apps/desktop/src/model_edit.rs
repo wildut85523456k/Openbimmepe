@@ -1,6 +1,6 @@
 use crate::{Desktop, ElementId, SampleElement, Tool};
 use eframe::egui;
-use openbim_document::{FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
+use openbim_document::{Xf, FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
 
 /// The state of the export window.
 pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Schema, pub own_data: bool }
@@ -507,6 +507,89 @@ impl Desktop {
                 else { self.wall_pts.push(point); self.wall_ids.push(id); self.message = format!("Wall {} placed; pick the next point, Esc ends the chain; undo removes it", id.0); }
             }
             Err(error) => self.message = format!("Wall rejected: {error:?}"),
+        }
+    }
+
+    /// The change a Move, Copy, Rotate or Mirror makes when `next` is picked after the points in `edit_pts`; none
+    /// while the points are too few or too close.
+    pub(crate) fn edit_xf(&self, tool: Tool, next: [f64; 2]) -> Option<Xf> {
+        let far = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) > 1e-6;
+        match (tool, self.edit_pts.as_slice()) {
+            (Tool::Move | Tool::Copy, [a]) if far(*a, next) => Some(Xf::Move([next[0] - a[0], next[1] - a[1]])),
+            (Tool::Mirror, [a]) if far(*a, next) => Some(Xf::Mirror(*a, next)),
+            (Tool::Rotate, [c, r]) if far(*c, *r) && far(*c, next) => {
+                let ang = |p: [f64; 2]| (p[1] - c[1]).atan2(p[0] - c[0]);
+                Some(Xf::Rotate(*c, ang(next) - ang(*r)))
+            }
+            _ => None,
+        }
+    }
+
+    /// A pick of Move, Copy, Rotate or Mirror: the points are collected, and the last one makes the change.
+    pub(crate) fn edit_click(&mut self, point: [f64; 2]) {
+        if self.selected_id().is_none() { self.message = "Select an element first (click it), then pick the points".into(); return; }
+        let need = if self.tool == Tool::Rotate { 3 } else { 2 };
+        if self.edit_pts.len() + 1 < need {
+            if self.edit_pts.is_empty() { self.edit_src = self.selected_id(); }
+            self.edit_pts.push(point);
+            self.message = match (self.tool, self.edit_pts.len()) {
+                (Tool::Move | Tool::Copy, _) => "Pick the point to move to (type a distance in mm and Enter, Shift keeps it square, Esc cancels)".into(),
+                (Tool::Mirror, _) => "Pick the second point of the axis (Esc cancels)".into(),
+                (_, 1) => "Pick the start of the turn, or type an angle in degrees and Enter".into(),
+                _ => "Pick the end of the turn (Esc cancels)".into(),
+            };
+            return;
+        }
+        match self.edit_xf(self.tool, point) {
+            Some(xf) => self.edit_finish(xf),
+            None => self.message = "Pick a different point".into(),
+        }
+    }
+
+    /// Enter after a typed number: a distance for Move and Copy (towards `towards`), an angle in degrees for Rotate.
+    pub(crate) fn edit_enter(&mut self, towards: [f64; 2]) {
+        let Ok(v) = self.edit_num.parse::<f64>() else { return };
+        self.edit_num.clear();
+        match (self.tool, self.edit_pts.first().copied()) {
+            (Tool::Move | Tool::Copy, Some(a)) if self.edit_pts.len() == 1 => {
+                let (dx, dy) = (towards[0] - a[0], towards[1] - a[1]);
+                let l = dx.hypot(dy);
+                if l > 1e-9 && v > 0.0 { self.edit_finish(Xf::Move([dx / l * v / 1000.0, dy / l * v / 1000.0])); }
+            }
+            (Tool::Rotate, Some(c)) => self.edit_finish(Xf::Rotate(c, v.to_radians())),
+            _ => {}
+        }
+    }
+
+    /// Makes the change on the selected element in one undoable step. A copy can go on (the base stays); the
+    /// others end, leaving the element selected.
+    fn edit_finish(&mut self, xf: Xf) {
+        let Some(id) = self.edit_src.or(self.selected_id()) else { return };
+        let copying = self.tool == Tool::Copy || (self.tool == Tool::Mirror && self.mirror_copy);
+        let made = if copying { self.document.copy_commands(&[id], xf).map(|(ops, firsts)| (ops, firsts.first().copied())) }
+            else { self.document.transform_commands(&[id], xf).map(|ops| (ops, None)) };
+        let result = made.and_then(|(ops, new)| self.document.transact(self.document.revision(), &ops).map(|_| new).map_err(|e| format!("{e:?}")));
+        match result {
+            Ok(new) => {
+                if let Some(n) = new { self.select_element(Some(n)); }
+                self.message = format!("{} done; undo takes it back", match self.tool { Tool::Move => "Move", Tool::Copy => "Copy", Tool::Rotate => "Rotate", _ => "Mirror" });
+                if self.tool == Tool::Copy { self.edit_pts.truncate(1); self.edit_src = Some(id); } else { self.choose_tool(Tool::Select); }
+            }
+            Err(e) => { self.message = format!("Cannot do that: {e}"); self.edit_pts.clear(); self.edit_src = None; }
+        }
+    }
+
+    /// Delete: the selected element with what is hosted by it or tagged on it, in one undoable step.
+    pub(crate) fn delete_selected(&mut self) {
+        let Some(id) = self.selected_id() else { self.message = "Delete: select an element first".into(); return };
+        if self.document.get(id).is_some_and(|e| e.category == Category::Level) { self.message = "A level cannot be deleted here".into(); return; }
+        let before = self.document.elements().count();
+        match self.document.delete_commands(&[id]).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
+            Ok(_) => {
+                self.select_element(None);
+                self.message = format!("Deleted {} element(s); undo brings them back", before - self.document.elements().count());
+            }
+            Err(e) => self.message = format!("Cannot delete: {e}"),
         }
     }
 

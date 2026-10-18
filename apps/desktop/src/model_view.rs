@@ -45,6 +45,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
+    // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
+    if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) { app.delete_selected(); }
     if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
     let level_id = app.plan_level();
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);
@@ -204,8 +206,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable);
-            let pending = app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror);
+            let pending = !app.edit_pts.is_empty() || app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
         else if response.drag_stopped_by(egui::PointerButton::Primary) { response.interact_pointer_pos().or(response.hover_pos()) }
@@ -301,6 +303,62 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
         else if let Some(p) = pick { app.wall_click(level_id, to_model(p)); }
+    } else if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) && !three_d {
+        // As in Revit: the element is selected first (a click selects one when none is), then the tool picks its points:
+        // a base point and where to, a centre and the two rays of a turn, the two points of a mirror axis. The pointer
+        // snaps to the corners of walls and the ends of grids, else to 50 mm; Shift keeps a move square; a ghost shows the result.
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let raw = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
+        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
+            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => { let mut v = vec![start, end]; if let Some(r) = app.document.wall_plan(el.id) { v.extend(r); } v }
+            Some(Geometry::Grid { start, end }) => vec![start, end],
+            _ => vec![],
+        }).collect();
+        let ortho = ui.input(|i| i.modifiers.shift);
+        let first = app.edit_pts.first().copied();
+        let snap_to = |p: Pos2| -> [f64; 2] {
+            if let Some(c) = corners.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
+                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return *c; }
+            let r = raw(p);
+            let mut m = [(r[0] / 0.05).round() * 0.05, (r[1] / 0.05).round() * 0.05];
+            if let (true, Some(s)) = (ortho, first) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
+            m
+        };
+        let typed: String = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }).collect());
+        if !app.edit_pts.is_empty() { for c in typed.chars() { if c.is_ascii_digit() || c == '.' || (c == '-' && app.edit_num.is_empty()) { app.edit_num.push(c); } } }
+        let hover = response.hover_pos();
+        // the ghost: the selected element's outline after the change the next pick would make
+        if let (Some(sel), Some(h)) = (app.edit_src.or(selected), hover) {
+            let next = snap_to(h);
+            let xf = match app.edit_num.parse::<f64>() {
+                Ok(v) if app.tool == crate::Tool::Rotate => app.edit_pts.first().map(|c| openbim_document::Xf::Rotate(*c, v.to_radians())),
+                Ok(v) => first.and_then(|a| { let (dx, dy) = (next[0] - a[0], next[1] - a[1]); let l = dx.hypot(dy); (l > 1e-9).then(|| openbim_document::Xf::Move([dx / l * v / 1000.0, dy / l * v / 1000.0])) }),
+                Err(_) => app.edit_xf(app.tool, next),
+            };
+            let ghost = Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
+            if let Some(xf) = xf {
+                for (_, id, points, _) in faces.iter().filter(|f| f.1 == sel) {
+                    let moved: Vec<Pos2> = points.iter().map(|q| { let m = xf.point(raw(*q)); screen([m[0], m[1], level_z]) }).collect();
+                    painter.add(egui::Shape::convex_polygon(moved, Color32::from_rgba_unmultiplied(220, 140, 0, 40), ghost));
+                    let _ = id;
+                }
+            }
+            if let Some(a) = first { painter.line_segment([screen([a[0], a[1], level_z]), screen([next[0], next[1], level_z])], Stroke::new(1.0, blue)); }
+            if let (crate::Tool::Rotate, [c, r]) = (app.tool, app.edit_pts.as_slice()) { painter.line_segment([screen([c[0], c[1], level_z]), screen([r[0], r[1], level_z])], Stroke::new(1.0, blue)); }
+            if !app.edit_num.is_empty() { painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{}_", app.edit_num), egui::FontId::proportional(13.0), blue); }
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.edit_pts.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.edit_pts.clear(); app.edit_num.clear(); } }
+        else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) && !app.edit_num.is_empty() { app.edit_num.pop(); }
+        else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !app.edit_num.is_empty() { if let Some(h) = hover { let t = snap_to(h); app.edit_enter(t); } }
+        else if let Some(p) = pick {
+            if selected.is_none() {
+                let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id);
+                app.select_element(hit);
+                app.message = if hit.is_some() { "Now pick the points".into() } else { "Click an element to work on".into() };
+            } else { app.edit_click(snap_to(p)); }
+        } else if selected.is_none() && response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() { let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id); app.select_element(hit); }
+        }
     } else if app.tool == crate::Tool::Tag && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
@@ -707,5 +765,131 @@ mod tests {
         assert_eq!(tags(&app), 2);
         app.document.undo().unwrap();
         assert_eq!(tags(&app), 1);
+    }
+
+    fn key(k: egui::Key) -> egui::Event { egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() } }
+    fn wall_line(app: &Desktop, id: ElementId) -> ([f64; 2], [f64; 2]) { match app.document.get(id).and_then(|e| e.geometry) { Some(Geometry::Linear { start, end, .. }) => (start, end), g => panic!("{g:?}") } }
+
+    #[test]
+    fn delete_takes_the_element_with_its_door_and_tag_and_undo_brings_them_back() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let spec = openbim_document::FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 0.0 };
+        app.document.place_family_in_wall(ElementId(20), 3.0, &spec).unwrap();
+        app.document.place_tag(ElementId(20), [2.0, 1.0], [2.0, 0.0]).unwrap();
+        let n = app.document.elements().count();
+        app.select_element(Some(ElementId(20)));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert!(app.document.get(ElementId(20)).is_none() && app.document.elements().count() == n - 3, "{}", app.message);
+        assert!(app.selected_id().is_none());
+        app.document.undo().unwrap();
+        assert_eq!(app.document.elements().count(), n);
+        // a level is not deleted
+        app.select_element(Some(ElementId(10)));
+        app.delete_selected();
+        assert!(app.document.get(ElementId(10)).is_some(), "{}", app.message);
+    }
+
+    #[test]
+    fn move_copy_rotate_and_mirror_work_on_the_selected_element_by_picked_points() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.select_element(Some(ElementId(20)));
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6;
+        // Move: base point, then where to; the tool ends
+        app.run_command("move", "Move");
+        assert!(app.tool == crate::Tool::Move);
+        app.edit_click([0.0, 0.0]);
+        app.edit_click([0.0, 3.0]);
+        assert!(near(wall_line(&app, ElementId(20)).0, [0.0, 3.0]), "{}", app.message);
+        assert!(app.tool == crate::Tool::Select);
+        app.document.undo().unwrap();
+        // Move by a typed distance towards the pointer
+        app.run_command("move", "Move");
+        app.edit_click([0.0, 0.0]);
+        app.edit_num = "2500".into();
+        app.edit_enter([0.0, 5.0]);
+        assert!(near(wall_line(&app, ElementId(20)).0, [0.0, 2.5]), "{}", app.message);
+        app.document.undo().unwrap();
+        // Copy goes on until Esc, and selects the newest copy
+        let n = walls(&app);
+        app.run_command("copy", "Copy");
+        app.edit_click([0.0, 0.0]);
+        app.edit_click([0.0, 4.0]);
+        app.edit_click([0.0, 8.0]);
+        assert_eq!(walls(&app), n + 2, "{}", app.message);
+        assert!(app.tool == crate::Tool::Copy && near(wall_line(&app, app.selected_id().unwrap()).0, [0.0, 8.0]));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        // Rotate: centre, start ray, end ray (a quarter turn), and by a typed angle
+        app.select_element(Some(ElementId(20)));
+        app.run_command("rotate", "Rotate");
+        app.edit_click([0.0, 0.0]);
+        app.edit_click([1.0, 0.0]);
+        app.edit_click([0.0, 1.0]);
+        assert!(near(wall_line(&app, ElementId(20)).1, [0.0, 8.0]), "{:?} {}", wall_line(&app, ElementId(20)), app.message);
+        app.document.undo().unwrap();
+        app.run_command("rotate", "Rotate");
+        app.edit_click([0.0, 0.0]);
+        app.edit_num = "180".into();
+        app.edit_enter([0.0, 0.0]);
+        assert!(near(wall_line(&app, ElementId(20)).1, [-8.0, 0.0]), "{:?} {}", wall_line(&app, ElementId(20)), app.message);
+        app.document.undo().unwrap();
+        // Mirror with Copy (the default) leaves the original; without it the element itself turns over
+        let n = walls(&app);
+        app.run_command("mirror", "Mirror");
+        app.edit_click([0.0, 1.0]);
+        app.edit_click([1.0, 1.0]);
+        assert_eq!(walls(&app), n + 1, "{}", app.message);
+        assert!(near(wall_line(&app, ElementId(20)).0, [0.0, 0.0]));
+        assert!(app.selected_id() != Some(ElementId(20)));
+        app.select_element(Some(ElementId(20)));
+        app.run_command("mirror", "Mirror");
+        app.mirror_copy = false;
+        app.edit_click([0.0, 1.0]);
+        app.edit_click([1.0, 1.0]);
+        assert_eq!(walls(&app), n + 1);
+        assert!(near(wall_line(&app, ElementId(20)).1, [0.0, 2.0]), "{:?}", wall_line(&app, ElementId(20)));
+    }
+
+    #[test]
+    fn move_by_press_drag_release_and_a_click_picks_the_element_when_none_is_selected() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("move", "Move");
+        app.select_element(None);
+        let before = wall_line(&app, ElementId(20));
+        // nothing is selected: a click on the wall selects it, and does not move anything
+        let mut hit = None;
+        'find: for y in (100..600).step_by(10) { for x in (100..900).step_by(10) {
+            let mut probe = Desktop::sample();
+            probe.view = View::Plan;
+            probe.run_command("move", "Move");
+            probe.select_element(None);
+            let at = Pos2::new(x as f32, y as f32);
+            frame(&ctx, screen, &mut probe, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut probe, vec![button(at, true)]);
+            frame(&ctx, screen, &mut probe, vec![button(at, false)]);
+            if probe.selected_id() == Some(ElementId(20)) { hit = Some(at); break 'find; }
+        } }
+        let at = hit.expect("the wall is somewhere in the view");
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(app.selected_id(), Some(ElementId(20)), "{}", app.message);
+        assert_eq!(wall_line(&app, ElementId(20)), before);
+        // press, drag and release moves it by the drag
+        let to = at + Vec2::new(0.0, 80.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at + Vec2::new(0.0, 40.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let after = wall_line(&app, ElementId(20));
+        assert!((after.0[0] - before.0[0]).abs() < 0.2 && after.0[1] < before.0[1] - 0.1, "{before:?} {after:?} {}", app.message);
     }
 }
