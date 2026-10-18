@@ -10,6 +10,7 @@ mod view3d;
 mod model_edit;
 mod export;
 mod import;
+mod file;
 mod automation;
 mod automation_canvas;
 mod automation_groups;
@@ -89,6 +90,8 @@ struct Desktop {
     show_browser: bool,
     /// the warnings window is open; the list is worked out again only when the document has a new revision
     show_warnings: bool,
+    /// the file the model is saved in, and the questions about unsaved changes
+    file: file::FileState,
     /// the types window, while it is open
     types_dialog: Option<model_edit::TypesDialog>,
     /// the export window, while it is open
@@ -130,6 +133,7 @@ impl Desktop {
             ("Family", &["C M"]),
         ]).expect("static shortcuts");
         let document = Document::spatial_sample();
+        let document_revision = document.revision();
         Self {
             automation: automation::Automation::default(),
             document,
@@ -143,8 +147,8 @@ impl Desktop {
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
-            message: "Sample scene - no BIM edits are saved".into(),
-            show_properties: true, show_browser: true, show_warnings: false, types_dialog: None, export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            message: "Sample scene - use Save to keep your edits".into(),
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -233,6 +237,10 @@ impl Desktop {
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
             "ifc_import" => self.import_ifc_file(),
+            "new" => self.new_model(),
+            "open" => self.open_file(),
+            "save" => self.save_file(false),
+            "save_as" => self.save_file(true),
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
@@ -324,7 +332,8 @@ impl eframe::App for Desktop {
                 ui.separator();
                 ui.label("Workset: Mechanical (sample)");
                 ui.separator();
-                ui.label(format!("In-memory BIM revision {} | NOT saved / synchronized", self.document.revision()));
+                let name = self.file.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("not saved yet");
+                ui.label(format!("BIM revision {} | {name}{}", self.document.revision(), if self.is_dirty() { " | unsaved changes" } else { "" }));
                 ui.separator();
                 let n = self.warnings().len();
                 let label = if n == 0 { "No warnings".to_string() } else { format!("⚠ {n} warning{}", if n == 1 { "" } else { "s" }) };
@@ -338,6 +347,7 @@ impl eframe::App for Desktop {
         self.export_window(&ctx);
         self.import_window(&ctx);
         self.types_window(&ctx);
+        self.file_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));
