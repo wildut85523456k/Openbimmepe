@@ -579,6 +579,7 @@ pub(crate) fn slab_holes(
     }) {
         holes.push(vec![[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]]);
     }
+    holes.extend(scene.slab_voids.iter().filter(|v| v.slab == index).map(|v| v.outline.clone()));
     holes
 }
 

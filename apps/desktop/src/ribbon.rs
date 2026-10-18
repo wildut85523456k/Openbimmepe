@@ -111,7 +111,7 @@ const ARCHITECTURE: &[Group] = &[
     Group { title: "Circulation", commands: &[c("stair", "Stair"), c("railing", "Railing"), c("ramp", "Ramp")] },
     Group { title: "Model", commands: &[c("model_line", "Model Line")] },
     Group { title: "Room & Area", commands: &[c("room", "Room"), c("area", "Area")] },
-    Group { title: "Opening", commands: &[c("opening", "Opening")] },
+    Group { title: "Opening", commands: &[c("opening_face", "By Face"), c("shaft", "Shaft"), c("opening_wall", "Wall"), c("opening_vertical", "Vertical"), c("opening_dormer", "Dormer")] },
     Group { title: "Datum", commands: &[c("level", "Level"), c("grid", "Grid")] },
 ];
 

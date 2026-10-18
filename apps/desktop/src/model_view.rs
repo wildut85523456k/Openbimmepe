@@ -202,7 +202,53 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
     }
+    // openings (plan only): a wall opening is two dashed jambs across its wall, a shaft a dashed outline crossed by two
+    // lines on every level it passes through; each can be picked on its symbol
+    let mut opening_marks: Vec<(ElementId, Vec<Pos2>, bool)> = Vec::new();
+    if !three_d {
+        for el in app.document.elements().filter(|e| e.category == Category::Opening) {
+            match el.geometry {
+                Some(Geometry::InWall { host, along_m }) => {
+                    let Some(w) = app.document.get(host) else { continue };
+                    let Some(Geometry::Linear { start, end, level }) = w.geometry else { continue };
+                    if level != level_id { continue; }
+                    let len = (end[0] - start[0]).hypot(end[1] - start[1]);
+                    let (d, n) = ([(end[0] - start[0]) / len, (end[1] - start[1]) / len], [-(end[1] - start[1]) / len, (end[0] - start[0]) / len]);
+                    let t = w.width_m / 2.0;
+                    let at = |a: f64, side: f64| screen([start[0] + d[0] * a + n[0] * side * t, start[1] + d[1] * a + n[1] * side * t, level_z]);
+                    let (a, b) = (along_m - el.width_m / 2.0, along_m + el.width_m / 2.0);
+                    let quad = vec![at(a, -1.0), at(b, -1.0), at(b, 1.0), at(a, 1.0)];
+                    faces.push((f32::MAX / 2.0, el.id, quad.clone(), Color32::TRANSPARENT));
+                    opening_marks.push((el.id, quad, false));
+                }
+                Some(Geometry::Shaft { .. }) => {
+                    let Some((lo, hi)) = app.document.shaft_range(el.id) else { continue };
+                    if level_z < lo - 1e-6 || level_z > hi + 1e-6 { continue; }
+                    let ring: Vec<Pos2> = el.outline.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                    faces.push((f32::MIN / 2.0, el.id, ring.clone(), Color32::TRANSPARENT));
+                    opening_marks.push((el.id, ring, true));
+                }
+                _ => {}
+            }
+        }
+    }
     faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (id, ring, shaft) in &opening_marks {
+        let shown = selected_all.contains(id);
+        let c = if shown { blue } else { ui.visuals().text_color() };
+        let stroke = Stroke::new(if shown { 2.0 } else { 1.0 }, c);
+        if *shaft {
+            for i in 0..ring.len() { dashed(&painter, ring[i], ring[(i + 1) % ring.len()], stroke); }
+            if ring.len() >= 3 {
+                let r = ring.iter().fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p)));
+                painter.line_segment([r.left_top(), r.right_bottom()], Stroke::new(0.8, c.gamma_multiply(0.7)));
+                painter.line_segment([r.right_top(), r.left_bottom()], Stroke::new(0.8, c.gamma_multiply(0.7)));
+            }
+        } else {
+            dashed(&painter, ring[0], ring[3], stroke);
+            dashed(&painter, ring[1], ring[2], stroke);
+        }
+    }
     for (_, id, points, color) in &faces {
         painter.add(egui::Shape::convex_polygon(points.clone(), *color,
             Stroke::new(if selected_all.contains(id) { 2.0 } else { 0.8 },
@@ -283,7 +329,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair);
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::Shaft | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair);
             let pending = !app.edit_pts.is_empty() || app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
@@ -650,6 +696,25 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 app.family_click(level_id, to_model(p), wall);
             }
         }
+    } else if app.tool == crate::Tool::WallOpening && !three_d {
+        // the two ends of the opening are picked on a wall; the distance along the wall is that of the click
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.opening_from.is_some() { app.opening_from = None; } else { app.choose_tool(crate::Tool::Select); } }
+        else if pick.is_some() {
+            if let Some(p) = pick {
+                let wall = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some_and(|e| e.category == Category::Wall)).map(|(_, id, _, _)| *id);
+                let at = to_model(p);
+                let along = wall.and_then(|w| match app.document.get(w).and_then(|e| e.geometry) {
+                    Some(Geometry::Linear { start, end, .. }) => {
+                        let len = (end[0] - start[0]).hypot(end[1] - start[1]);
+                        Some((((at[0] - start[0]) * (end[0] - start[0]) + (at[1] - start[1]) * (end[1] - start[1])) / len).clamp(0.0, len))
+                    }
+                    _ => None,
+                });
+                app.wall_opening_click(wall, along.unwrap_or(0.0));
+            }
+        }
     } else if app.tool == crate::Tool::Rebar && !three_d {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if pick.is_some() {
@@ -671,7 +736,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if pick.is_some() { if let Some(p) = pick { app.footing_click(level_id, to_model(p)); } }
-    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem) && !three_d {
+    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Shaft) && !three_d {
         // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
@@ -1849,4 +1914,62 @@ mod tests {
         app.select_element(Some(id));
         frame(&ctx, screen, &mut app, vec![]);
     }
+    #[test]
+    fn shaft_tool_sketches_an_outline_cuts_the_floor_above_and_shows_its_symbol_and_wall_opening_tool_picks_two_ends() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let upper = app.document.level_above(level).expect("the sample has a second level");
+        // a floor on the level above, for the shaft to go through
+        let floor = app.document.place_slab(upper, &openbim_document::SlabSpec { outline: vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], thickness_m: 0.2, top_offset_m: 0.0, kind: openbim_document::SlabKind::Floor, material: openbim_document::Material::Concrete }).unwrap();
+        let area = |a: &Desktop| a.document.cut_shapes(floor).iter().map(|s| s.area()).sum::<f64>();
+        assert!((area(&app) - 80.0).abs() < 1e-9);
+        // the Shaft button in the ribbon
+        app.run_command("shaft", "Shaft");
+        assert!(app.tool == crate::Tool::Shaft && app.message.contains("Shaft Opening"), "{}", app.message);
+        for at in [Pos2::new(300.0, 300.0), Pos2::new(380.0, 300.0), Pos2::new(380.0, 380.0), Pos2::new(300.0, 380.0)] {
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(app.slab_points.len(), 4, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        let shafts: Vec<ElementId> = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Shaft { .. }))).map(|e| e.id).collect();
+        assert_eq!(shafts.len(), 1, "{}", app.message);
+        assert!(app.message.contains("cuts 1 floor"), "{}", app.message);
+        // it goes from the level it was drawn on up to the next one, and the floor there has a hole
+        let Some(Geometry::Shaft { level: base, top, .. }) = app.document.get(shafts[0]).unwrap().geometry else { panic!() };
+        assert_eq!((base, top), (level, upper));
+        assert!(area(&app) < 80.0 - 0.1, "{}", area(&app));
+        // its symbol can be picked in the plan: select the tool, press Esc, click on its middle
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        let mid = Pos2::new(340.0, 340.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(mid)]);
+        frame(&ctx, screen, &mut app, vec![button(mid, true)]);
+        frame(&ctx, screen, &mut app, vec![button(mid, false)]);
+        assert_eq!(app.selected_id(), Some(shafts[0]), "{}", app.message);
+        // undo gives the floor back
+        let undone = app.document.undo();
+        assert_eq!(undone, Ok(true));
+        assert!((area(&app) - 80.0).abs() < 1e-9);
+
+        // Wall Opening: two clicks along the first wall
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        app.run_command("opening_wall", "Wall");
+        assert!(app.tool == crate::Tool::WallOpening, "{}", app.message);
+        let (a, b) = (Pos2::new(left + (right - left) * 0.3, y), Pos2::new(left + (right - left) * 0.6, y));
+        for at in [a, b] {
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        let openings: Vec<ElementId> = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::InWall { .. }))).filter(|e| e.category == Category::Opening).map(|e| e.id).collect();
+        assert_eq!(openings.len(), 1, "{}", app.message);
+        let o = app.document.get(openings[0]).unwrap();
+        assert!(o.width_m > 0.5, "{}", o.width_m);
+        assert_eq!((o.elevation_m, o.height_m), (0.9, 1.2000000000000002));
+    }
+
 }

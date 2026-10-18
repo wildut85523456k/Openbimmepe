@@ -29,7 +29,7 @@ enum Workspace { Design, Coordination, Automation }
 enum View { Plan, UpperPlan, ThreeD, Mechanical, /// the plan of a level added with the Level tool
     Level(u64) }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Stair, Room, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+enum Tool { Select, Stair, Room, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TempDim { Length(ElementId), Distance(ElementId, ElementId) }
@@ -138,6 +138,14 @@ struct Desktop {
     stair_riser_mm: f64,
     stair_tread_mm: f64,
     stair_rise_mm: f64,
+    /// Shaft: how far above the base level it starts, the level it goes up to (None: the level above) and how far above that it ends
+    shaft_base_mm: f64,
+    shaft_top: Option<ElementId>,
+    shaft_top_mm: f64,
+    /// Wall Opening: the sill and the head above the base of the wall, and the first end picked (wall and distance along it)
+    opening_sill_mm: f64,
+    opening_head_mm: f64,
+    opening_from: Option<(ElementId, f64)>,
     slab_kind_pick: openbim_document::SlabKind,
     /// footing: the thickness of a new pad, or of the selected one
     footing_thickness_mm: f64,
@@ -217,7 +225,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, temp_edit: None, temp_text: String::new(), temp_labels: Vec::new(), measured: None, edit_ref: None, offset_mm: 1000.0, offset_copy: false, edit_src: Vec::new(), multi: Vec::new(), marquee: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
-            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, shaft_base_mm: 0.0, shaft_top: None, shaft_top_mm: 0.0, opening_sill_mm: 900.0, opening_head_mm: 2100.0, opening_from: None, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -242,6 +250,7 @@ impl Desktop {
         self.edit_ref = None;
         self.drag = None;
         self.slab_points.clear();
+        self.opening_from = None;
         self.run_points.clear();
         self.branch_main = None;
         self.cable_from = None;
@@ -259,6 +268,8 @@ impl Desktop {
             Tool::Slab if self.slab_kind_pick == openbim_document::SlabKind::Ceiling => "Ceiling: Automatic Ceiling hangs a ceiling in the closed space you click (its outline shows as you move); untick Automatic in the options bar to sketch the corners instead (Enter, a click on the first corner or Finish closes it). Esc ends.".into(),
             Tool::Slab if self.slab_kind_pick == openbim_document::SlabKind::Roof => "Roof by Footprint: click the corners of the roof at the eaves in a plan view, then Enter, a click on the first corner or Finish closes it. Every edge slopes by the Slope in the options bar; select the roof afterwards to choose which edges define a slope (two opposite ones make a gable, one a shed). Backspace takes the last corner back, Esc cancels.".into(),
             Tool::Slab => "Slab: click the corners in a plan view, then Enter, a click on the first corner or Finish closes it (Backspace takes the last corner back, Esc cancels).".into(),
+            Tool::Shaft => "Shaft Opening: click the corners of the shaft in a plan view, then Enter, a click on the first corner or Finish closes it. It cuts every floor, foundation slab and ceiling between its base and its top level (set in the options bar). Esc cancels.".into(),
+            Tool::WallOpening => "Wall Opening: click a wall at one end of the opening, then at the other end; the sill and head heights are in the options bar. Esc ends.".into(),
             Tool::Footing => "Isolated footing: click its place in a plan view; it is as wide and long as the options bar says, under the level (Esc ends).".into(),
             Tool::WallFooting => "Wall footing: click a wall in a plan view; the footing runs under it and follows it (Esc ends).".into(),
             Tool::BeamSystem => "Beam system: click the corners of the area in a plan view, then Enter, a click on the first corner or Finish lays parallel beams at the spacing and angle of the options bar (Esc cancels).".into(),
@@ -354,6 +365,8 @@ impl Desktop {
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
+            "shaft" => { (self.shaft_base_mm, self.shaft_top_mm, self.shaft_top) = (0.0, 0.0, None); self.choose_tool(Tool::Shaft) }
+            "opening_wall" => self.choose_tool(Tool::WallOpening),
             "stair" => { self.elevation_mm = 0.0; self.edit_pts.clear(); self.choose_tool(Tool::Stair) }
             "ceiling" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm, self.material_pick) = (openbim_document::SlabKind::Ceiling, 20.0, 2700.0, openbim_document::Material::Unspecified); self.choose_tool(Tool::Slab) }
             "roof" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm) = (openbim_document::SlabKind::Roof, 200.0, 0.0); self.choose_tool(Tool::Slab) }
@@ -412,7 +425,7 @@ impl Desktop {
                         for cmd in group.commands {
                             let roofing = self.tool == Tool::Slab && matches!(self.slab_kind_pick, openbim_document::SlabKind::Roof | openbim_document::SlabKind::Ceiling);
                             let active = (cmd.id == "roof" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Roof) || (cmd.id == "ceiling" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Ceiling) || (!matches!(cmd.id, "roof" | "ceiling") && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("shaft", Tool::Shaft) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }

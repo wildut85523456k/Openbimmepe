@@ -74,7 +74,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
     use openbim_document::Category as C;
     match category {
         C::Slab => &[Field::Width, Field::Elevation],
-        C::Stair => &[Field::Width, Field::Height, Field::Elevation],
+        C::Stair | C::Opening => &[Field::Width, Field::Height, Field::Elevation],
         C::Family => &[Field::Angle, Field::Elevation],
         C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
@@ -147,7 +147,9 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Height if category == C::Footing => "Length (mm)",
         Field::Height if category == C::WallFooting => "Depth (mm)",
         Field::Elevation if category == C::Footing || category == C::WallFooting => "Top Offset (mm)",
-        Field::Width if category == C::Stair => "Width (mm)",
+        Field::Width if category == C::Stair || category == C::Opening => "Width (mm)",
+        Field::Height if category == C::Opening => "Height (mm)",
+        Field::Elevation if category == C::Opening => "Sill Height (mm)",
         Field::Height if category == C::Stair => "Total Rise (mm)",
         Field::Elevation if category == C::Stair => "Base Offset (mm)",
         Field::Width if category == C::Wall || category == C::Slab => "Thickness (mm)",
@@ -212,7 +214,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
-        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"),
+        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
@@ -292,6 +294,31 @@ fn roof_group(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Eleme
         let (s, p, r) = (format!("{:.2}", f.surface_m2), format!("{:.2}", f.plan_m2), format!("{:.3}", f.rise_m));
         read_only_group(ui, "Derived Geometry", "", &[("Surface Area (m²)", &s), ("Plan Area (m²)", &p), ("Rise above Eaves (m)", &r)]);
     }
+}
+
+/// A selected shaft: its base and top levels and offsets (Revit's Base Constraint, Base Offset, Top Constraint, Top Offset).
+fn shaft_group(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
+    let Some(openbim_document::Geometry::Shaft { level, top, base_offset_m, top_offset_m }) = el.geometry else { return };
+    ui.separator();
+    ui.strong("Constraints");
+    let name = |id| app.document.get(id).map_or("Missing level".to_string(), |l| l.name.clone());
+    let (base_name, top_name) = (name(level), name(top));
+    let (mut base, mut up) = (base_offset_m * 1000.0, top_offset_m * 1000.0);
+    let mut changed = false;
+    ui.label(format!("Base Constraint: {base_name}"));
+    ui.horizontal(|ui| { ui.label("Base Offset (mm)"); changed |= ui.add(egui::DragValue::new(&mut base).speed(5.0)).changed(); });
+    ui.label(format!("Top Constraint: {top_name}"));
+    ui.horizontal(|ui| { ui.label("Top Offset (mm)"); changed |= ui.add(egui::DragValue::new(&mut up).speed(5.0)).changed(); });
+    if changed {
+        let ops = [openbim_document::Command::SetGeometry { id: el.id, geometry: openbim_document::Geometry::Shaft { level, top, base_offset_m: base / 1000.0, top_offset_m: up / 1000.0 } }];
+        match app.document.transact(app.document.revision(), &ops) {
+            Ok(_) => app.message = "Shaft changed; undo takes it back".into(),
+            Err(_) => app.message = "The top of a shaft must be above its base".into(),
+        }
+    }
+    let cut = app.document.elements().filter(|e| e.category == openbim_document::Category::Slab && app.document.shafts_through(e.id).contains(&el.id)).count().to_string();
+    let area = format!("{:.3}", openbim_geom::profile::polygon_area(&el.outline).abs());
+    read_only_group(ui, "Derived Geometry", "", &[("Area (m²)", &area), ("Floors and Ceilings Cut", &cut)]);
 }
 
 fn slab_combos(app: &mut Desktop, ui: &mut egui::Ui) {
@@ -484,6 +511,42 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         });
         return;
     }
+    if app.tool == crate::Tool::Shaft {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Create Shaft Opening");
+            ui.separator();
+            let level = app.plan_level();
+            ui.label(format!("Base Constraint: {}", app.document.get(level).map_or("-", |l| l.name.as_str())));
+            ui.label("Base Offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.shaft_base_mm).speed(5.0));
+            let base_z = app.document.get(level).map_or(0.0, |l| l.elevation_m);
+            let above: Vec<(openbim_document::ElementId, String)> = app.document.elements().filter(|e| e.geometry == Some(openbim_document::Geometry::Level) && e.elevation_m > base_z + 1e-6)
+                .map(|e| (e.id, e.name.clone())).collect();
+            let chosen = app.shaft_top.filter(|t| above.iter().any(|a| a.0 == *t)).or_else(|| app.document.level_above(level));
+            ui.label("Top Constraint");
+            egui::ComboBox::from_id_salt("shaft_top").selected_text(chosen.and_then(|c| above.iter().find(|a| a.0 == c)).map_or("No level above", |a| a.1.as_str())).show_ui(ui, |ui| {
+                for (id, name) in &above { if ui.selectable_label(chosen == Some(*id), format!("Up to level: {name}")).clicked() { app.shaft_top = Some(*id); } }
+            });
+            ui.label("Top Offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.shaft_top_mm).speed(5.0));
+            ui.label(format!("{} corners", app.slab_points.len()));
+            if ui.add_enabled(app.slab_points.len() >= 3, egui::Button::new("Finish")).clicked() { app.finish_slab(level); }
+            if ui.add_enabled(!app.slab_points.is_empty(), egui::Button::new("Clear")).clicked() { app.slab_points.clear(); }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::WallOpening {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Wall Opening");
+            ui.separator();
+            ui.label("Sill Height (mm)");
+            ui.add(egui::DragValue::new(&mut app.opening_sill_mm).speed(5.0).range(0.0..=20000.0));
+            ui.label("Head Height (mm)");
+            ui.add(egui::DragValue::new(&mut app.opening_head_mm).speed(5.0).range(50.0..=20000.0));
+            ui.label(if app.opening_from.is_some() { "Click the other end on the same wall" } else { "Click one end on a wall" });
+        });
+        return;
+    }
     if app.tool == crate::Tool::Stair {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Stair");
@@ -574,7 +637,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         ui.separator();
         let fields = if el.category == openbim_document::Category::Grid {
             &[Field::X1, Field::Y1, Field::X2, Field::Y2][..]
-        } else { dimensions(el.category, app.section_pick) };
+        } else if matches!(el.geometry, Some(openbim_document::Geometry::Shaft { .. })) { &[][..] } else { dimensions(el.category, app.section_pick) };
         for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
         let pending = app.has_pending_edit();
         if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() {
@@ -702,7 +765,9 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Constraints", &query, &[("Beam System", name)]);
                         if ui.button("Select system").clicked() { app.select_element(Some(p)); }
                     }
-                    edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
+                    if matches!(el.geometry, Some(Geometry::Shaft { .. })) { shaft_group(app, ui, el); } else {
+                        edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
+                    }
                     if el.category == openbim_document::Category::Beam {
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut app.join_pick[0], "Join at start");

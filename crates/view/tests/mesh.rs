@@ -54,7 +54,7 @@ fn scene() -> Scene {
             room_bounding: false,
         }],
         shafts: vec![],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: vec![],
         items: vec![],

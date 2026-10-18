@@ -13,11 +13,11 @@ use std::sync::Arc;
 pub fn scene_meshes(doc: &Document) -> Option<Arc<Vec<openbim_view::ElementMesh>>> {
     type Cached = Option<((u64, usize, u64), Option<Arc<Vec<openbim_view::ElementMesh>>>)>;
     thread_local! { static CACHE: std::cell::RefCell<Cached> = const { std::cell::RefCell::new(None) }; }
-    if doc.elements().all(|e| e.category != Category::Family) { return None; }
+    if doc.elements().all(|e| e.category != Category::Family && e.category != Category::Opening) { return None; }
     let key = (doc.revision(), doc.elements().count(), doc.elements().map(|e| e.id.0.wrapping_mul(31).wrapping_add(e.revision)).fold(0u64, u64::wrapping_add));
     CACHE.with(|c| {
         if let Some((k, v)) = c.borrow().as_ref() { if *k == key { return v.clone(); } }
-        let meshes = crate::export::scene_of(doc, "view", 1, "t", false).ok().and_then(|(scene, _)| openbim_view::scene_meshes(&scene).ok()).map(Arc::new);
+        let meshes = crate::export::scene_for_view(doc).ok().and_then(|(scene, _)| openbim_view::scene_meshes(&scene).ok()).map(Arc::new);
         *c.borrow_mut() = Some((key, meshes.clone()));
         meshes
     })

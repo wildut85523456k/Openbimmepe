@@ -38,7 +38,7 @@ fn scene(walls: Vec<WallChain>) -> Scene {
         slabs: vec![],
         columns: vec![],
         shafts: vec![],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: vec![],
         items: vec![],

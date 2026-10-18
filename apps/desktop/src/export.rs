@@ -81,6 +81,16 @@ pub fn instance_texts(family: &str, type_name: &str, overrides: &[(String, f64)]
 /// The scene of the document, and what could not be put in it. `timestamp` is written into the header of a file,
 /// `project_key` makes the GlobalIds of this project its own.
 pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, own_data: bool) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
+    scene_with(doc, project_name, project_key, timestamp, own_data, false)
+}
+
+/// The scene as the 3D view and the plan mesh it: a slab cut by a shaft has the outline that is left of it and the holes
+/// inside it (a file keeps its whole outline and has the shaft as an opening that voids it).
+pub fn scene_for_view(doc: &Document) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
+    scene_with(doc, "view", 1, "t", false, true)
+}
+
+fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, own_data: bool, for_view: bool) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
@@ -153,7 +163,7 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
             }
             // the beams, members or bars they make are exported in their place
             (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
-            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
+            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::Opening | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct | Category::Pipe, Some(Geometry::Linear { start, end, level })) => {
                 let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
                 let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);
@@ -220,13 +230,33 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         }
         items.push(FamilyItem { id: el.id.0, name: el.name.clone(), family: fam_index, type_name: type_name.map(str::to_string), frame, instance, host });
     }
+    // the openings cut in walls, and the shafts that cut slabs
+    for (_, host, [offset, width, sill, height]) in doc.wall_openings() {
+        let Some(&wi) = wall_index.get(&host.0) else { *skipped.entry("openings in missing walls").or_default() += 1; continue };
+        let c = &mut walls[wi].chain;
+        if c.openings.is_empty() { c.openings.resize(1, Vec::new()); }
+        c.openings[0].push(openbim_geom::Opening { offset, width, sill, height });
+    }
+    let mut slab_voids = Vec::new();
+    for (si, item) in slabs.iter_mut().enumerate() {
+        let id = openbim_document::ElementId(item.id);
+        if doc.get(id).is_none_or(|e| e.category != Category::Slab) { continue; }
+        if doc.shafts_through(id).is_empty() { continue; }
+        if for_view {
+            let Some(shape) = doc.cut_shapes(id).into_iter().next() else { continue };
+            item.slab.outline = shape.outline;
+            slab_voids.extend(shape.holes.into_iter().map(|outline| openbim_place::floors::SlabVoid { slab: si, name: "Shaft".into(), outline }));
+        } else {
+            slab_voids.extend(doc.shaft_cuts(id).into_iter().map(|(name, outline)| openbim_place::floors::SlabVoid { slab: si, name, outline }));
+        }
+    }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
     let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs, &stairs);
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, roofs, stairs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations: vec![], networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: vec![],
+        floor_penetrations: vec![], slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };

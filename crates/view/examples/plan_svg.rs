@@ -149,7 +149,7 @@ fn main() {
             z_bottom: -3.0,
             z_top: 3.0,
         }],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: fams
             .into_iter()

@@ -18,7 +18,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true, role: Default::default() }).collect(),
         columns: vec![],
         shafts: vec![],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: vec![],
         items: vec![],

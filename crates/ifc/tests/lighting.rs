@@ -48,7 +48,7 @@ fn luminaires_of_different_types_carry_their_own_lighting_in_the_schedule_and_th
     let inst = |t: &str| c.solve(&Request { type_name: Some(t), ..Default::default() }).unwrap();
     let item = |id: u64, t: &str, x: f64| FamilyItem { id, name: format!("L{id}"), family: 0, type_name: Some(t.into()), frame: Frame { origin: [x, 0.0, 2.5], x: [1.0, 0.0] }, instance: inst(t), host: None };
     let scene = Scene {
-        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(), levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(), walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
+        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(), levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(), walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![],
         families: vec![FamilyRef { id: 1, family: c.clone() }], items: vec![item(10, "Lo", 0.0), item(11, "Hi", 1.0), item(12, "Hi", 2.0)], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], stairs: vec![], native: vec![],
     };
     let (csv, warns) = luminaire_schedule(&scene);
@@ -81,7 +81,7 @@ fn the_luminaire_catalogue_page_embeds_checked_pictures_and_escapes_text() {
         let inst = c.solve(&Request::default()).unwrap();
         let item = |id: u64| FamilyItem { id, name: format!("L{id}"), family: 0, type_name: None, frame: Frame { origin: [0.0, 0.0, 2.5], x: [1.0, 0.0] }, instance: inst.clone(), host: None };
         Scene {
-            project_name: "P&Q".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(), levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(), walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
+            project_name: "P&Q".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(), levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(), walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![],
             families: vec![FamilyRef { id: 1, family: c }], items: vec![item(1), item(2)], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], stairs: vec![], native: vec![],
         }
     };

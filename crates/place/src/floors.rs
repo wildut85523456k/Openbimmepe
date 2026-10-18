@@ -48,6 +48,15 @@ impl ShaftVoid {
     }
 }
 
+/// A void cut in one slab of a scene (`slab` indexes the scene's slabs): an outline in plan that goes through its whole
+/// thickness. It may reach the outline of the slab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SlabVoid {
+    pub slab: usize,
+    pub name: String,
+    pub outline: Vec<P>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlabError {
     Name,

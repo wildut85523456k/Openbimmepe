@@ -196,7 +196,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Stair)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Stair | Category::Opening)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && {
@@ -401,6 +401,23 @@ impl Desktop {
         self.message = format!("Slab: {} corners; Enter closes the outline", self.slab_points.len());
     }
 
+    /// A click of the Wall Opening tool on `wall`, `along_m` from its start: the first click is one end of the opening, the
+    /// second the other end. The sill and the head are those of the options bar.
+    pub(crate) fn wall_opening_click(&mut self, wall: Option<ElementId>, along_m: f64) {
+        let Some(wall) = wall else { self.message = "Wall Opening: click a wall".into(); return };
+        let Some((host, from)) = self.opening_from else {
+            self.opening_from = Some((wall, along_m));
+            self.message = "Wall Opening: click the other end of the opening on the same wall".into();
+            return;
+        };
+        if host != wall { self.message = "Wall Opening: the other end must be on the same wall".into(); return; }
+        let (sill, head) = (self.opening_sill_mm / 1000.0, self.opening_head_mm / 1000.0);
+        match self.document.place_wall_opening(wall, from, along_m, sill, head) {
+            Ok(id) => { self.opening_from = None; self.message = format!("Wall opening {} placed, {:.0} mm wide; undo removes it", id.0, (along_m - from).abs() * 1000.0); }
+            Err(e) => { self.opening_from = None; self.message = format!("Wall opening rejected ({e:?}): it must be at least 50 mm each way and inside the wall"); }
+        }
+    }
+
     /// Automatic Ceiling: a ceiling in the closed space that holds `at`, at the height and thickness of the options bar.
     pub(crate) fn ceiling_auto_click(&mut self, level: ElementId, at: [f64; 2]) {
         let shape = match self.document.room_region_at(level, at) {
@@ -421,6 +438,22 @@ impl Desktop {
     /// Lays the slab drawn so far on `level` with the thickness, top offset, kind and material of the options bar.
     pub(crate) fn finish_slab(&mut self, level: ElementId) {
         let m = |v: f64| v / 1000.0;
+        if self.tool == crate::Tool::Shaft {
+            let Some(top) = self.shaft_top.filter(|t| self.document.get(*t).is_some()).or_else(|| self.document.level_above(level)) else {
+                self.message = "Shaft: there is no level above to go up to; add a level first".into();
+                return;
+            };
+            let spec = openbim_document::ShaftSpec { outline: self.slab_points.clone(), top, base_offset_m: m(self.shaft_base_mm), top_offset_m: m(self.shaft_top_mm) };
+            match self.document.place_shaft(level, &spec) {
+                Ok(id) => {
+                    self.slab_points.clear();
+                    let cut = self.document.elements().filter(|e| e.category == Category::Slab && self.document.shafts_through(e.id).contains(&id)).count();
+                    self.message = format!("Shaft {} placed; it cuts {cut} floor{} and ceilings; undo removes it", id.0, if cut == 1 { "" } else { "s" });
+                }
+                Err(error) => self.message = format!("Shaft rejected ({error:?}): it must go up from its base; Backspace takes a corner back"),
+            }
+            return;
+        }
         if self.tool == crate::Tool::BeamSystem {
             let spec = BeamSystemSpec { outline: self.slab_points.clone(), spacing_m: m(self.spacing_mm), angle_deg: self.angle_deg, width_m: m(self.width_mm),
                 depth_m: if self.section_pick == 1 { m(self.width_mm) } else { m(self.height_mm) }, elevation_m: m(self.elevation_mm), section: self.section_from_controls(),
@@ -948,7 +981,7 @@ impl Desktop {
             commands.push(Command::SetSlabKind { id, kind: self.slab_kind_pick });
             commands.push(Command::SetMaterial { id, material: self.material_pick });
         }
-        if matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Stair) {
+        if matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Stair) || (el.category == Category::Opening && matches!(el.geometry, Some(Geometry::InWall { .. }))) {
             let round = el.category == Category::Pipe || (matches!(el.category, Category::Beam | Category::Column) && self.section_pick == 1);
             commands.push(Command::Resize { id, width_m: self.width_mm / 1000.0,
                 height_m: if round { self.width_mm } else { self.height_mm } / 1000.0 });
@@ -1839,4 +1872,43 @@ mod tests {
         assert_eq!(app.document.elements().count(), want);
         std::fs::remove_dir_all(&dir).unwrap();
     }
+    #[test]
+    fn a_wall_opening_and_a_shaft_cut_the_3d_model_and_are_exported_as_openings_of_what_they_cut() {
+        let mut app = Desktop::sample();
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
+        let level = ElementId(10);
+        let upper = app.document.level_above(level).unwrap();
+        let floor = app.document.place_slab(upper, &SlabSpec { outline: vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], thickness_m: 0.2, top_offset_m: 0.0, kind: openbim_document::SlabKind::Floor, material: openbim_document::Material::Concrete }).unwrap();
+        let volume = |app: &Desktop, id: ElementId| -> f64 {
+            let batch = crate::view3d::batch(&app.document);
+            let Some(ei) = batch.elements.iter().position(|e| e.id == id.0) else { return 0.0 };
+            batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei as u32).map(|(t, _)| {
+                let p = t.map(|i| batch.verts[i as usize].map(f64::from));
+                (p[0][0] * (p[1][1] * p[2][2] - p[1][2] * p[2][1]) - p[0][1] * (p[1][0] * p[2][2] - p[1][2] * p[2][0]) + p[0][2] * (p[1][0] * p[2][1] - p[1][1] * p[2][0])) / 6.0
+            }).sum()
+        };
+        let (wall_before, floor_before) = (volume(&app, wall), volume(&app, floor));
+        assert!((floor_before - 80.0 * 0.2).abs() < 1e-3, "{floor_before}");
+        // a wall opening 1.2 m wide, 1.2 m high, takes 1.2 x 1.2 x thickness out of the wall
+        let t = app.document.get(wall).unwrap().width_m;
+        let op = app.document.place_wall_opening(wall, 1.0, 2.2, 0.9, 2.1).unwrap();
+        let wall_after = volume(&app, wall);
+        assert!((wall_before - wall_after - 1.2 * 1.2 * t).abs() < 1e-3, "{wall_before} -> {wall_after}");
+        // a shaft 1 m x 1 m takes 1 x 1 x 0.2 out of the floor above, and one over its edge notches it
+        app.document.place_shaft(level, &openbim_document::ShaftSpec { outline: vec![[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 3.0]], top: upper, base_offset_m: 0.0, top_offset_m: 0.0 }).unwrap();
+        assert!((floor_before - volume(&app, floor) - 0.2).abs() < 1e-3, "{}", volume(&app, floor));
+        app.document.place_shaft(level, &openbim_document::ShaftSpec { outline: vec![[8.5, 0.0], [9.5, 0.0], [9.5, 1.0], [8.5, 1.0]], top: upper, base_offset_m: 0.0, top_offset_m: 0.0 }).unwrap();
+        assert!((floor_before - volume(&app, floor) - 0.2 - 0.5 * 0.2).abs() < 1e-3, "{}", volume(&app, floor));
+        // the file keeps the whole floor and says what voids it: both shafts, and the wall opening in the wall
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
+        let line = |name: &str| out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains(name)).count();
+        assert_eq!((line("Shaft Opening 1"), line("Shaft Opening 2")), (1, 1));
+        assert_eq!(out.text.matches("IFCRELVOIDSELEMENT(").count(), 3, "two shafts in the floor and the wall opening in the wall");
+        assert!(out.text.contains("Qto_SlabBaseQuantities"));
+        // moving the wall moves its opening with it, and deleting the wall deletes the opening
+        let ops = app.document.delete_commands(&[wall]).unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
+        assert!(app.document.get(op).is_none());
+    }
+
 }

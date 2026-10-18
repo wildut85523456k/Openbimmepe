@@ -28,6 +28,9 @@ pub enum Geometry {
     Dimension { a: [f64; 2], b: [f64; 2], at: [f64; 2], level: ElementId },
     /// a room: its point `at` on `level`
     Room { at: [f64; 2], level: ElementId },
+    /// a shaft (an opening cut through floors): its outline is the element's, from `level` plus `base_offset_m` up to the
+    /// level `top` plus `top_offset_m`
+    Shaft { level: ElementId, top: ElementId, base_offset_m: f64, top_offset_m: f64 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -188,9 +191,30 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
                 el.category == Category::Room && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
+            Some(Geometry::Shaft { level, top, base_offset_m, top_offset_m }) => {
+                let lv = |id: &ElementId| elements.get(id).filter(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level));
+                el.category == Category::Opening && valid_ring(&el.outline) && base_offset_m.is_finite() && top_offset_m.is_finite()
+                    && base_offset_m.abs() <= 1e4 && top_offset_m.abs() <= 1e4
+                    && match (lv(level), lv(top)) {
+                        (Some(a), Some(b)) => b.elevation_m + top_offset_m - (a.elevation_m + base_offset_m) > 1e-6,
+                        _ => false,
+                    }
+            }
             Some(Geometry::Placed { at, level }) => {
                 el.category == Category::Family && !el.family.is_empty() && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6) && el.elevation_m.abs() <= 1e6
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::InWall { host, along_m }) if el.category == Category::Opening => {
+                let along_m = *along_m;
+                // a rectangle inside the wall: along it and up it
+                elements.get(host).is_some_and(|w| w.category == Category::Wall && match w.geometry {
+                    Some(Geometry::Linear { start, end, .. }) => {
+                        let len = (end[0] - start[0]).hypot(end[1] - start[1]);
+                        el.width_m >= 0.05 && el.height_m >= 0.05 && el.elevation_m >= -1e-9 && along_m - el.width_m / 2.0 >= -1e-9 && along_m + el.width_m / 2.0 <= len + 1e-9
+                            && el.elevation_m + el.height_m <= w.height_m + 1e-9
+                    }
+                    _ => false,
+                })
             }
             Some(Geometry::InWall { host, along_m }) => {
                 el.category == Category::Family && !el.family.is_empty() && el.elevation_m.abs() <= 1e6
@@ -462,6 +486,17 @@ impl Document {
             // a ceiling is placed by its underside, a slab by its top
             let top = self.get(level)?.elevation_m + el.elevation_m + if el.slab_kind == crate::SlabKind::Ceiling { el.height_m } else { 0.0 };
             let bottom = top - el.height_m;
+            // shafts cut it: the pieces that are left, with their holes
+            if el.category == Category::Slab && !self.shafts_through(id).is_empty() {
+                let mut mesh = Mesh { vertices: Vec::new(), faces: Vec::new() };
+                for shape in self.cut_shapes(id) {
+                    let m = openbim_family::meshing::prism(&shape.outline, &shape.holes, bottom, top)?;
+                    let base = mesh.vertices.len();
+                    mesh.vertices.extend(m.verts);
+                    mesh.faces.extend(m.tris.iter().map(|t| t.iter().map(|&i| base + i as usize).collect::<Vec<_>>()));
+                }
+                return Some(mesh);
+            }
             let mut vertices: Vec<[f64; 3]> = ring.iter().map(|p| [p[0], p[1], bottom]).collect();
             vertices.extend(ring.iter().map(|p| [p[0], p[1], top]));
             let ccw = openbim_geom::profile::polygon_area(ring) > 0.0;

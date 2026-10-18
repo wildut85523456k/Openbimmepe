@@ -142,6 +142,7 @@ fn build(scene: &Scene, sec: Section, faces: bool) -> Result<SectionView, ViewEr
         }) {
             voids.push(vec![[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]]);
         }
+        voids.extend(scene.slab_voids.iter().filter(|v| v.slab == k).map(|v| v.outline.clone()));
         for v in &voids {
             for (a, b) in ring_spans(v, &fr) {
                 spans = subtract(spans, a, b);

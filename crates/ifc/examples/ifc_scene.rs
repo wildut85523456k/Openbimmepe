@@ -224,7 +224,7 @@ pub fn build_scene(edit: bool) -> Scene {
             SlabItem { id: A | 6, slab: Slab { name: "L1 false ceiling".into(), top: 5.57, thickness: 0.02, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None }, room_bounding: true, role: SlabRole::Ceiling },
         ],
         shafts: vec![void],
-        floor_penetrations: floor_pens,
+        floor_penetrations: floor_pens, slab_voids: vec![],
         networks: vec![net],
         families: fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect(),
         items,

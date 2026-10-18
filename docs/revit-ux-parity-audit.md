@@ -2,8 +2,8 @@
 
 Standing rule: every tool mimics Revit's user experience. Verified by automated event tests (simulated mouse and keys) and by reading the code. Not verified side by side with Revit, and not clicked by hand.
 
-## Working tools (47 of 127 ribbon commands)
-Wall, Wall Joins, Door, Window, Component, Column, Beam, Brace, Floor/Slab, Foundation, Wall Footing, Beam System, Truss, Rebar, Level, Grid, Tag, Aligned Dimension, Measure, Duct, Pipe, End Point, Electrical Node, Cable, Compute, Move, Copy, Rotate, Mirror, Align, Offset, Trim/Extend, Delete, IFC import/export, Select, Zoom in/out, Project Parameters, Automation items.
+## Working tools
+Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, Shaft Opening, Wall Opening, Beam, Brace, Floor/Slab, Foundation, Wall Footing, Beam System, Truss, Rebar, Level, Grid, Tag, Aligned Dimension, Measure, Duct, Pipe, End Point, Electrical Node, Cable, Compute, Move, Copy, Rotate, Mirror, Align, Offset, Trim/Extend, Delete, IFC import/export, Select, Zoom in/out, Project Parameters, Automation items.
 
 ## Select-mode editing (done 2026-10-18)
 | Revit behaviour | State |
@@ -100,14 +100,29 @@ Wall, Wall Joins, Door, Window, Component, Column, Beam, Brace, Floor/Slab, Foun
 | IFC: IfcStair STRAIGHT_RUN_STAIR with the side profile extruded across the width and Pset_StairCommon, in all three schemas; the app's own file brings it back unchanged | done; a stair written by another program is not read (skipped) |
 | Winder, L and U shapes, landings, runs from sketch, stair by sketch, railings, top/base level choice, ramps | missing |
 
+## Opening (Wall, Shaft; done 2026-10-19)
+| Revit | This app |
+|---|---|
+| Architecture > Opening panel: By Face, Shaft, Wall, Vertical, Dormer | the five buttons are there; Shaft and Wall work, By Face, Vertical and Dormer say they are not implemented. All five use my placeholder copy of the opening icon (the approved set has one icon) |
+| Wall Opening: pick a wall, sketch a rectangle (in an elevation or section view) | done in a plan view only, as there are no elevation views yet: click one end on a wall, then the other end on the same wall; the sill and head heights are in the options bar (900 / 2100 are my defaults). The opening is a rectangle and follows its wall; deleting the wall deletes it |
+| Wall Opening in 3D | done: the wall is cut (same cut as a door or window) |
+| Wall Opening in plan | dashed jambs across the wall; it can be picked on them; the wall's own plan lines are not broken |
+| Shaft Opening: sketch a boundary, Base Constraint / Base Offset / Top Constraint / Top Offset, Finish | done: click the corners (snapped to 50 mm), Enter / first corner / Finish closes; Base is the plan's level, Top defaults to the level above and is chosen in the options bar ("Up to level"), both offsets are editable there and in Properties afterwards |
+| A shaft cuts every floor, foundation slab and ceiling it passes through | done, by height: a slab is cut when its thickness overlaps the shaft's range (so a shaft from Level 1 to Level 2 cuts the floor of Level 2, not the floor of Level 1). A shaft that overlaps only a corner of a slab notches it. Roofs are not cut yet |
+| Shaft in plan | dashed outline crossed by two lines on every level it passes through; picked on its symbol |
+| Shaft in 3D | the slabs have the hole or the notch; the shaft itself is not drawn |
+| Move / rotate / mirror / copy / delete / undo, saved | done |
+| IFC: IfcOpeningElement + IfcRelVoidsElement for the wall opening (in its wall) and for each shaft in each slab it cuts (the file keeps the whole slab outline and the opening is the part of the shaft over the slab, so Revit does the cut), all three schemas; slab quantities take the voids off; the app's own file brings every opening back unchanged | done; an opening written by another program is not read |
+| Vertical opening (cuts one floor, roof or ceiling you pick), By Face, Dormer, openings in curved walls, arc / polygon / circle sketch of a shaft, shaft symbol options, a roof cut by a shaft, a slab split in two by a shaft (only the larger piece is drawn in 3D; the file is right) | missing |
+
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level: not drawn in an elevation view (no elevation or section views). Level 1 and Level 2 are fixed tabs.
 
-## Not working at all (80 ribbon buttons)
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
+## Not working at all
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, section, elevation, view, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Opening (Room, Roof, Ceiling and Stair are done); railings and L/U stairs follow.
-2. Elevation/section views and levels drawn in them.
+1. Elevation/section views and levels drawn in them (Room, Roof, Ceiling, Stair and Opening are done); wall openings should then be drawn in elevation as Revit does.
+2. Railings, L/U stairs, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.

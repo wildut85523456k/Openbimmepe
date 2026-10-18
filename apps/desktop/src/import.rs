@@ -617,6 +617,8 @@ mod tests {
         let door = FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("rise".into(), 0.0)], angle_deg: 0.0, elevation_m: 0.0 };
         d.place_roof(ElementId(11), &openbim_document::RoofSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true, false, true, false], material: Material::Timber }).unwrap();
         d.place_stair(ElementId(10), &openbim_document::StairSpec { start: [1.0, 1.0], toward: [1.0, 9.0], width_m: 1.0, rise_m: 3.0, risers: 18, tread_m: 0.28, base_offset_m: 0.0 }).unwrap();
+        d.place_wall_opening(ElementId(22), 5.0, 6.0, 0.5, 2.0).unwrap();
+        d.place_shaft(ElementId(10), &openbim_document::ShaftSpec { outline: vec![[6.5, 0.5], [7.1, 0.5], [7.1, 1.1], [6.5, 1.1]], top: ElementId(11), base_offset_m: 0.0, top_offset_m: 0.0 }).unwrap();
         d.place_ceiling(ElementId(10), vec![[0.2, 0.2], [3.8, 0.2], [3.8, 5.8], [0.2, 5.8]], 2.7, 0.02, Material::Unspecified).unwrap();
         d.place_family_in_wall(ElementId(20), 3.0, &FamilySpec { overrides: vec![], ..door.clone() }).unwrap();
         d.place_family_in_wall(ElementId(21), 2.0, &FamilySpec { family: "Window, fixed with mullions".into(), overrides: vec![], elevation_m: 0.9, ..door.clone() }).unwrap();
@@ -727,6 +729,9 @@ mod tests {
             assert_eq!(out.text.matches("IFCCOVERING(").count(), 1, "{schema:?}: the ceiling");
             assert!(out.text.contains(".CEILING."), "{schema:?}");
             assert_eq!(out.text.matches("IFCSTAIR(").count(), 1, "{schema:?}: the stair");
+            // the shaft voids the floor above it; the wall opening voids its wall; the door and the window void theirs
+            assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Shaft Opening 1")).count(), 1, "{schema:?}: the shaft is an opening of the floor");
+            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 4, "{schema:?}: door, window, wall opening and shaft");
             assert!(out.text.contains("Pset_StairCommon") && out.text.contains(".STRAIGHT_RUN_STAIR."), "{schema:?}");
             assert_eq!(out.text.matches("IFCROOF(").count(), 1, "{schema:?}");
             assert!(out.text.contains(".GABLE_ROOF.") && out.text.contains("IFCFACETEDBREP"), "{schema:?}: the roof is a gable solid");

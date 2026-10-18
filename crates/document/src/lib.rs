@@ -11,6 +11,8 @@ mod edit;
 mod rooms;
 mod roof;
 mod stair;
+mod opening;
+pub use opening::ShaftSpec;
 pub use stair::{StairSpec, StairFigures, risers_for, MAX_RISER_M as MAX_STAIR_RISER_M, TREAD_M as STAIR_TREAD_M, WIDTH_M as STAIR_WIDTH_M, mesh as stair_mesh, profile as stair_profile};
 pub use roof::{is_convex as roof_is_convex, RoofFigures, mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
 pub use rooms::RoomShape;
@@ -50,6 +52,9 @@ pub enum Category {
     /// A straight stair (`Geometry::Linear` along its run from the foot of the first riser): `width_m` wide, climbing
     /// `height_m` from `elevation_m` above its level in `count` risers over `count - 1` treads.
     Stair,
+    /// An opening: a rectangle cut in a wall (`Geometry::InWall`: `width_m` wide and `height_m` high, its sill `elevation_m`
+    /// above the base of the wall) or a shaft cut through floors (`Geometry::Shaft`, with an `outline`).
+    Opening,
     /// A straight structural framing member, a rectangular section along a line on a level: `width_m` across,
     /// `height_m` deep, `elevation_m` the height of its centre line above the level.
     Beam,
@@ -355,7 +360,7 @@ impl Element {
         (matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || self.section == Section::Rectangle)
             && (matches!(k, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
             && (matches!(k, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
-            && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor))
+            && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor) || (k == Category::Opening && self.slab_kind == SlabKind::Floor))
             && (matches!(k, Category::Beam | Category::Wall) || self.join_ends == [true; 2])
             && (matches!(k, Category::BeamSystem | Category::Truss | Category::Rebar) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || k == Category::Family)))
             && (k != Category::Truss || self.angle_deg == 0.0)
@@ -644,7 +649,7 @@ impl Document {
     /// The level an element stands on: its own, or its host's.
     pub fn level_of(&self, id: ElementId) -> Option<ElementId> {
         match self.get(id)?.geometry? {
-            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } | Geometry::Dimension { level, .. } | Geometry::Room { level, .. } => Some(level),
+            Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } | Geometry::Dimension { level, .. } | Geometry::Room { level, .. } | Geometry::Shaft { level, .. } => Some(level),
             Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } => self.level_of(host),
             Geometry::Level | Geometry::Grid { .. } => None,
         }
@@ -1015,7 +1020,7 @@ impl Document {
                 }
                 Command::SetOutline { id, outline } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss | Category::Opening) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.outline = outline.clone();
                     if el.slab_kind == SlabKind::Roof && el.slope_edges.len() != el.outline.len() { el.slope_edges = vec![true; el.outline.len()]; }
                     el.revision = revision;

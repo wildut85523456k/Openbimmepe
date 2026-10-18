@@ -106,6 +106,11 @@ pub static ICONS: &[Icon] = &[
     icon!("new"),
     icon!("open"),
     icon!("opening"),
+    icon!("opening_dormer"), // placeholders: the opening artwork until the approved package has its own
+    icon!("opening_face"),
+    icon!("opening_vertical"),
+    icon!("opening_wall"),
+    icon!("shaft"),
     icon!("orbit"),
     icon!("pan"),
     icon!("panel"),

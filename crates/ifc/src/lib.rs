@@ -30,7 +30,7 @@ use openbim_arch::{Levels, Room};
 use openbim_family::mep::{up_for, Domain, FlowDir, System};
 use openbim_family::{Compiled, Instance};
 use openbim_geom::{profile::Profile, WallChain};
-use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab};
+use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab, SlabVoid};
 use openbim_place::penetrations::{Firestops, OpeningShape, Penetration, RunSize};
 use openbim_route::graph::{Network, NodeRef, PortRef};
 use openbim_route::{Fitting, FittingKind};
@@ -363,6 +363,8 @@ pub struct Scene {
     pub shafts: Vec<ShaftVoid>,
     /// register of openings in slabs, by slab index into `slabs`
     pub floor_penetrations: Vec<FloorPenetration>,
+    /// voids of any outline cut in a slab, by index into `slabs` (the openings of the document's shafts)
+    pub slab_voids: Vec<SlabVoid>,
     pub networks: Vec<Network>,
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
@@ -1295,6 +1297,9 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == si && p.kind == FloorOpeningKind::Cut && p.fits) {
             void_area += p.size_x() * p.size_y();
         }
+        for v in scene.slab_voids.iter().filter(|v| v.slab == si) {
+            void_area += (0..v.outline.len()).map(|i| { let (a, b) = (v.outline[i], v.outline[(i + 1) % v.outline.len()]); a[0] * b[1] - b[0] * a[1] }).sum::<f64>().abs() / 2.0;
+        }
         o.qto(slab, "Qto_SlabBaseQuantities", &quantities::slab(s, void_area));
         if let Some(m) = s.fire_rating_min {
             o.pset(slab, "Pset_SlabCommon", vec![("FireRating", Val::Label(fire_label(m)))]);
@@ -1315,6 +1320,19 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
                 o.report.openings += 1;
             }
+        }
+        // voids of any outline (the document's shafts)
+        for v in scene.slab_voids.iter().filter(|v| v.slab == si) {
+            k += 1;
+            let prof = o.poly_profile(&v.outline);
+            let solid = o.extrusion(prof, [0.0, 0.0, bottom - ov], None, None, s.thickness + 2.0 * ov);
+            let opl = o.place(Some(pl), [0.0; 3], None, None);
+            let shape = o.shape(&[solid]);
+            let g = o.gid(item.id, k);
+            let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&v.name), o.tail4(".OPENING.")));
+            let g = o.gen_gid();
+            o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
+            o.report.openings += 1;
         }
         for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == si) {
             if p.kind != FloorOpeningKind::Cut {
