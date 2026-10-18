@@ -886,7 +886,6 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     write_columns(&mut o)?;
     write_beams(&mut o)?;
     write_member_materials(&mut o);
-    write_member_types(&mut o)?;
     write_spaces(&mut o)?;
     if v2 {
         if !scene.networks.is_empty() {
@@ -895,6 +894,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     } else {
         write_networks(&mut o)?;
     }
+    write_member_types(&mut o)?;
 
     // containment, per storey
     let contained = std::mem::take(&mut o.contained);
@@ -1520,6 +1520,7 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             let g = o.gid(sg.id, 0);
             let e = o.s.add(format!("{class}({g},$,{},$,$,#{pl},#{shape},$,{pre})", string(&r.label)));
             o.contain(st, e);
+            o.member_entities.push((sg.id, e));
             o.report.segments += 1;
             let mut props = size_props(r.size);
             props.push(("System", Val::Label(r.system.ifc_system().into())));

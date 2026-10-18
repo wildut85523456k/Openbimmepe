@@ -1,7 +1,9 @@
 //! The document as an IFC4 file: levels, walls and beams. The document's other elements are named in the warnings.
 use openbim_arch::{Level, Levels};
 use openbim_document::{Category, Document, Geometry, Material, Usage};
+use openbim_family::mep::{Domain, System};
 use openbim_geom::WallChain;
+use openbim_route::graph::{NetSegment, Network};
 use openbim_ifc::{MemberInfo, TypeClass, TypeItem, TypeProp, BeamItem, ColumnItem, FamilyItem, FamilyRef, FramingUsage, Frame, Scene, SlabItem, SlabRole, WallItem};
 
 pub struct Exported {
@@ -86,6 +88,7 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
     let mut instances = Vec::new();
+    let mut mep = Network::new(1);
     for el in doc.elements() {
         match (el.category, el.geometry) {
             (Category::Wall, Some(Geometry::Linear { start, end, level })) => {
@@ -131,8 +134,20 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
             // the beams, members or bars they make are exported in their place
             (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
             (Category::Level | Category::Grid | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
-            (Category::Duct, _) => *skipped.entry("ducts").or_default() += 1,
-            (Category::Pipe, _) => *skipped.entry("pipes").or_default() += 1,
+            (Category::Duct | Category::Pipe, Some(Geometry::Linear { start, end, level })) => {
+                let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
+                let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);
+                let (a, b) = ([start[0], start[1], z], [end[0], end[1], z + rise]);
+                // the document does not say which system a run belongs to yet
+                let run = if el.category == Category::Pipe {
+                    openbim_place::penetrations::Run::round(&el.name, Domain::Pipe, System::Other, a, b, el.width_m)
+                } else {
+                    openbim_place::penetrations::Run::rect(&el.name, Domain::Duct, System::Other, a, b, el.width_m, el.height_m)
+                };
+                mep.segments.push(NetSegment { id: el.id.0, run });
+            }
+            (Category::Duct, _) => *skipped.entry("ducts without a line").or_default() += 1,
+            (Category::Pipe, _) => *skipped.entry("pipes without a line").or_default() += 1,
             (Category::Equipment, _) => *skipped.entry("equipment").or_default() += 1,
             _ => *skipped.entry("elements without geometry").or_default() += 1,
         }
@@ -184,12 +199,13 @@ pub fn scene_of(doc: &Document, project_name: &str, project_key: u64, timestamp:
         }
         items.push(FamilyItem { id: el.id.0, name: el.name.clone(), family: fam_index, type_name: type_name.map(str::to_string), frame, instance, host });
     }
-    let (types, member_info) = types_of(doc, &beams, &columns, &slabs);
+    let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
+    let (types, member_info) = types_of(doc, &mep_ids, &beams, &columns, &slabs);
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations: vec![], networks: vec![], families, items, rooms: vec![], wall_types: vec![],
+        floor_penetrations: vec![], networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(), types, member_info,
     };
@@ -205,8 +221,8 @@ fn fingerprint(el: &openbim_document::Element) -> String {
 }
 
 /// The IFC type objects of the document's types, and the `OpenBIM_Element` data of the members that were written.
-fn types_of(doc: &Document, beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
-    let written: std::collections::BTreeSet<u64> = beams.iter().map(|b| b.id).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).collect();
+fn types_of(doc: &Document, mep_ids: &[u64], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
+    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).collect();
     let mut info = std::collections::BTreeMap::new();
     for el in doc.elements().filter(|e| written.contains(&e.id.0)) {
         let type_name = el.type_id.and_then(|t| doc.get(t)).map(|t| t.name.clone()).unwrap_or_default();
@@ -293,7 +309,11 @@ mod tests {
         assert!(out.text.contains("4.242640"), "{}", out.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).collect::<Vec<_>>().join("\n"));
         assert!(out.text.contains("IFCCIRCLEPROFILEDEF") && out.text.contains("IFCISHAPEPROFILEDEF"));
         assert_eq!(out.text.matches("IFCBUILDINGSTOREY(").count(), 2);
-        assert!(out.warnings.iter().any(|w| w.contains("1 ducts")) && out.warnings.iter().any(|w| w.contains("1 pipes")), "{:?}", out.warnings);
+        // the sample's duct and pipe leave as MEP segments, each with its element set
+        assert_eq!(out.text.matches("IFCDUCTSEGMENT(").count(), 1);
+        assert_eq!(out.text.matches("IFCPIPESEGMENT(").count(), 1);
+        assert!(out.text.contains("IFCCIRCLEPROFILEDEF") && out.text.contains("'Supply Air Duct'") && out.text.contains("'Drainage Pipe'"));
+        assert!(!out.warnings.iter().any(|w| w.contains("ducts") || w.contains("pipes")), "{:?}", out.warnings);
         // the upper wall stands on Level 2 (3 m): the export is stable and the same twice
         assert_eq!(out.text, export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap().text);
     }
@@ -315,7 +335,7 @@ mod tests {
         assert_eq!(out.text.matches("IFCRELDEFINESBYTYPE(").count(), 1);
         assert_eq!(line("IFCRELDEFINESBYTYPE(").matches('#').count(), 4, "its own number, two beams and the type");
         // every beam carries the element set, with the type name only on the typed ones
-        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 3);
+        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 5, "three beams, the sample's duct and pipe");
         assert_eq!(out.text.matches("IFCLABEL('Beam 300 x 500')").count(), 2, "on the two typed beams");
         assert!(out.text.contains(&format!("IFCINTEGER({})", free.0)));
         assert!(out.text.contains("'OpenBIM_Type'") && out.text.contains("IFCLABEL('Concrete')"));
@@ -325,6 +345,19 @@ mod tests {
         d.edit_type(t, &openbim_document::TypeValues { width_m: 0.4, ..openbim_document::TypeValues::of(d.get(t).unwrap()) }).unwrap();
         assert_eq!(before, fingerprint(d.get(free).unwrap()));
         assert_ne!(fingerprint(d.get(a).unwrap()), fingerprint(d.get(free).unwrap()));
+    }
+
+    #[test]
+    fn a_sloping_pipe_and_a_duct_are_exported_with_their_height_size_and_element_set() {
+        let mut d = Document::spatial_sample();
+        d.transact(d.revision(), &[openbim_document::Command::SetSlope { id: ElementId(2), slope_ratio: -0.02 }]).unwrap();
+        let out = export_ifc(&d, "P", 1, "2026-10-18T00:00:00").unwrap();
+        // a 6 m pipe falling 2%: the extrusion is 6.0 * sqrt(1 + 0.02^2) = 6.0012 m long
+        assert!(out.text.contains("6.001199"), "{}", out.text.lines().filter(|l| l.contains("IFCEXTRUDEDAREASOLID")).collect::<Vec<_>>().join("\n"));
+        assert_eq!(out.text.matches("'OpenBIM_Element'").count(), 2, "one for the duct, one for the pipe");
+        assert!(out.text.contains("IFCLABEL('Pipe')") && out.text.contains("IFCLABEL('Duct')"));
+        assert!(out.text.contains("IFCDISTRIBUTIONPORT("));
+        assert_eq!(out.text, export_ifc(&d, "P", 1, "2026-10-18T00:00:00").unwrap().text);
     }
 
     #[test]
