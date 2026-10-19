@@ -872,6 +872,29 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let end_text = format!("{:.1}", (start_z + length * el.slope_ratio.unwrap_or(0.0)) * 1000.0);
                         read_only_group(ui, "Derived Geometry", &query,
                             &[("Run Length (mm)", &length_text), ("End Elevation (mm)", &end_text)]);
+                        if matches!(el.category, openbim_document::Category::Duct | openbim_document::Category::Pipe) && (query.is_empty() || "constraints offset start end".contains(&query)) {
+                            let level_z = app.document.get(level).map_or(0.0, |l| l.elevation_m);
+                            let ends = [("Start Offset (mm)", true, (start_z - level_z) * 1000.0), ("End Offset (mm)", false, (start_z - level_z + length * el.slope_ratio.unwrap_or(0.0)) * 1000.0)];
+                            egui::CollapsingHeader::new(RichText::new("Run Ends").strong()).id_salt("run_ends").default_open(true).show(ui, |ui| {
+                                for (label, at_start, cur) in ends {
+                                    ui.horizontal(|ui| {
+                                        ui.label(label);
+                                        // edited on a copy; one change is made when the drag ends or Enter is pressed
+                                        let key = ui.id().with(("run_end", el.id.0, at_start));
+                                        let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(cur);
+                                        let r = ui.add(egui::DragValue::new(&mut v).speed(1.0).max_decimals(1)).on_hover_text("Height of the middle of the run at this end, above its level. A joined end cannot be changed here: move what it is joined to");
+                                        if r.drag_stopped() || r.lost_focus() {
+                                            ui.data_mut(|d| d.remove::<f64>(key));
+                                            if (v - cur).abs() > 0.05 { app.set_run_end_offset(el.id, at_start, v); }
+                                        } else if r.dragged() || r.has_focus() || r.changed() {
+                                            ui.data_mut(|d| d.insert_temp(key, v));
+                                        } else {
+                                            ui.data_mut(|d| d.remove::<f64>(key));
+                                        }
+                                    });
+                                }
+                            });
+                        }
                     }
                     if matches!(el.geometry, Some(Geometry::Linear { .. } | Geometry::Grid { .. })) {
                         edit_group(app, ui, "Location", &query, el.category, &[Field::X1, Field::Y1, Field::X2, Field::Y2]);

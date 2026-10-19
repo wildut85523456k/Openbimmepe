@@ -978,6 +978,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if let (Some(last), Some(h)) = (pts.last(), response.hover_pos()) {
             let m = to_model(h);
             painter.line_segment([*last, screen([m[0], m[1], level_z])], Stroke::new(1.0, colour));
+            if let Some(tip) = app.run_points.last().and_then(|f| app.run_slope_tip(*f, m)) {
+                painter.text(h + Vec2::new(14.0, 14.0), egui::Align2::LEFT_TOP, tip, egui::FontId::proportional(12.0), colour.to_opaque());
+            }
         }
         for p in &pts { painter.circle_filled(*p, 3.5, colour); }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1339,6 +1342,43 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(e)]);
         frame(&ctx, screen, &mut app, vec![button(e, false)]);
         assert_eq!(app.run_points.len(), 2, "{}", app.message);
+    }
+
+    #[test]
+    fn a_pipe_drawn_with_clicks_and_a_slope_falls_and_its_free_end_is_edited_in_properties() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("pipe", "Pipe");
+        (app.run_opts.slope, app.run_opts.slope_pct) = (crate::mep_tool::SlopeMode::Down, 2.0);
+        let pipes = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Pipe).map(|e| e.id).collect::<Vec<_>>();
+        let n = pipes(&app).len();
+        let (d, e) = (Pos2::new(200.0, 500.0), Pos2::new(420.0, 500.0));
+        click(&ctx, screen, &mut app, d);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(e)]);
+        // the tooltip follows the pointer while the options bar and the view draw
+        assert!(app.run_slope_tip(app.run_points[0], [app.run_points[0][0] + 2.0, app.run_points[0][1]]).is_some());
+        click(&ctx, screen, &mut app, e);
+        assert_eq!(app.run_points.len(), 2, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        let ids = pipes(&app);
+        assert_eq!(ids.len(), n + 1, "{}", app.message);
+        let id = *ids.iter().max().unwrap();
+        let run = app.document.mep_run(id).unwrap();
+        let plan = (run.b[0] - run.a[0]).hypot(run.b[1] - run.a[1]);
+        assert!(plan > 1.0 && ((run.a[2] - run.b[2]) / plan - 0.02).abs() < 1e-9, "falls 2 % along the drawing: {run:?}");
+        // Properties: the end offsets of the selected pipe; its free end goes 100 mm lower, the start stays
+        let level_z = app.document.get(ElementId(10)).unwrap().elevation_m;
+        let end_now = (run.b[2] - level_z) * 1000.0;
+        app.select_element(Some(id));
+        frame(&ctx, screen, &mut app, vec![]);
+        app.set_run_end_offset(id, false, end_now - 100.0);
+        let after = app.document.mep_run(id).unwrap();
+        assert!((after.a[2] - run.a[2]).abs() < 1e-9 && (after.b[2] - (run.b[2] - 0.1)).abs() < 1e-9, "{after:?}");
+        assert!(app.message.starts_with("End of the run"), "{}", app.message);
+        app.undo_document();
+        assert!((app.document.mep_run(id).unwrap().b[2] - run.b[2]).abs() < 1e-9);
+        frame(&ctx, screen, &mut app, vec![]);
     }
 
     #[test]

@@ -363,6 +363,23 @@ mod tests {
     }
 
     #[test]
+    fn the_end_of_a_run_joined_to_an_elbow_keeps_its_height_and_the_free_ends_can_be_changed() {
+        let mut d = Document::spatial_sample();
+        let route = duct_route(&[[1.0, 1.0, 2.7], [5.0, 1.0, 2.7], [5.0, 4.0, 2.7]]);
+        let ids = d.place_mep_route(ElementId(10), &route).unwrap();
+        let (a, b) = (ids[0], ids[1]);
+        // run a: free start, joined end; run b: joined start, free end
+        assert!(d.run_end_offset_commands(a, false, 3.0).is_err_and(|e| e.contains("joined")));
+        assert!(d.run_end_offset_commands(b, true, 3.0).is_err_and(|e| e.contains("joined")));
+        let ops = d.run_end_offset_commands(a, true, 3.0).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!((d.mep_run(a).unwrap().a[2] - 3.0).abs() < 1e-9);
+        let ops = d.run_end_offset_commands(b, false, 2.5).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!((d.mep_run(b).unwrap().b[2] - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
     fn a_routed_duct_with_its_elbow_is_held_by_the_model_linked_and_undone_in_one_step() {
         let mut d = Document::spatial_sample();
         let route = duct_route(&[[1.0, 1.0, 2.7], [5.0, 1.0, 2.7], [5.0, 4.0, 2.7]]);

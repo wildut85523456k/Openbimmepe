@@ -550,7 +550,7 @@ pub fn branch_from_run(main: &Run, branch_points: &[[f64; 3]], branch_sizes: &[R
 // ---------- equipment ----------
 
 /// The run section a connector takes, rolled so a rectangular section's height lies along the connector's own up.
-fn conn_run_size(conn: &Connector) -> Result<RunSize, RouteError> {
+pub fn conn_run_size(conn: &Connector) -> Result<RunSize, RouteError> {
     Ok(match conn.size {
         Size::Round { diameter } => RunSize::Round { diameter },
         Size::Rect { width, height } => {
@@ -624,4 +624,62 @@ pub fn route_fall_between(plan: &[[f64; 2]], z_start: f64, z_end: f64, sizes: &[
     }
     let g = (z_start - z_end) / total;
     route_graded(plan, z_start, &vec![g; plan.len() - 1], sizes, prefs, snaps)
+}
+
+// ---------- justification ----------
+
+/// Moves a path sideways, leg by leg: `shifts[i]` is how far leg `i` (from `points[i]` to `points[i + 1]`) moves to
+/// the left of the way it is drawn (negative moves it to the right). The moved legs meet at the corners of their
+/// moved lines, so a path with legs of different shifts stays connected. This is how a duct or pipe is placed when
+/// its horizontal justification is Left or Right: the line drawn stays on that side of the duct and the duct's centre
+/// goes half its width the other way.
+pub fn shift_path(points: &[[f64; 2]], shifts: &[f64]) -> Vec<[f64; 2]> {
+    let n = points.len();
+    if n < 2 || shifts.len() != n - 1 { return points.to_vec(); }
+    let dir = |i: usize| -> Option<[f64; 2]> {
+        let (dx, dy) = (points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]);
+        let l = dx.hypot(dy);
+        (l > 1e-12).then(|| [dx / l, dy / l])
+    };
+    let moved = |i: usize, p: [f64; 2]| -> [f64; 2] { let d = dir(i).unwrap_or([1.0, 0.0]); [p[0] - d[1] * shifts[i], p[1] + d[0] * shifts[i]] };
+    let mut out = vec![moved(0, points[0])];
+    for i in 1..n - 1 {
+        let (a, b) = (moved(i - 1, points[i]), moved(i, points[i]));
+        let (Some(da), Some(db)) = (dir(i - 1), dir(i)) else { out.push(a); continue };
+        let cross = da[0] * db[1] - da[1] * db[0];
+        if cross.abs() < 1e-9 { out.push(a); continue; }
+        // the lines a + s*da and b + t*db meet where s = ((b - a) x db) / (da x db)
+        let s = ((b[0] - a[0]) * db[1] - (b[1] - a[1]) * db[0]) / cross;
+        let v = [a[0] + da[0] * s, a[1] + da[1] * s];
+        let limit = 20.0 * shifts[i - 1].abs().max(shifts[i].abs()).max(1e-6);
+        out.push(if (v[0] - points[i][0]).hypot(v[1] - points[i][1]) <= limit { v } else { a });
+    }
+    out.push(moved(n - 2, points[n - 1]));
+    out
+}
+
+#[cfg(test)]
+mod shift_tests {
+    use super::*;
+    fn near(a: [f64; 2], b: [f64; 2]) -> bool { (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9 }
+
+    #[test]
+    fn a_path_moves_to_the_left_of_the_way_it_is_drawn_and_its_corners_follow() {
+        // east then north: the left of east is north, the left of north is west
+        let p = [[0.0, 0.0], [4.0, 0.0], [4.0, 3.0]];
+        let q = shift_path(&p, &[0.5, 0.5]);
+        assert!(near(q[0], [0.0, 0.5]) && near(q[1], [3.5, 0.5]) && near(q[2], [3.5, 3.0]), "{q:?}");
+        // to the right instead
+        let q = shift_path(&p, &[-0.5, -0.5]);
+        assert!(near(q[0], [0.0, -0.5]) && near(q[1], [4.5, -0.5]) && near(q[2], [4.5, 3.0]), "{q:?}");
+        // different shifts per leg still meet at one corner
+        let q = shift_path(&p, &[0.2, -0.3]);
+        assert!(near(q[1], [4.3, 0.2]), "{q:?}");
+        // nothing to shift
+        assert_eq!(shift_path(&p, &[0.0, 0.0]), p.to_vec());
+        // a straight continuation, and bad input, keep their points
+        let s = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]];
+        assert_eq!(shift_path(&s, &[0.1, 0.1]), vec![[0.0, 0.1], [1.0, 0.1], [2.0, 0.1]]);
+        assert_eq!(shift_path(&s, &[0.1]), s.to_vec());
+    }
 }

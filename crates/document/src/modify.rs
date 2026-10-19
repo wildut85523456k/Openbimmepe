@@ -311,3 +311,65 @@ mod tests {
         assert_eq!(d.select_similar(ElementId(1), None), vec![ElementId(1)]);
     }
 }
+
+impl Document {
+    /// Typing a new offset at one end of a duct or pipe, as Revit lets you click the offset shown at the end: that end
+    /// goes to `z_abs` (an elevation in metres) and the run takes the slope that gives, the other end staying where it
+    /// is. A run whose end is joined to a fitting or to equipment, or that has branches on it, is refused: its
+    /// fittings would be left behind.
+    pub fn run_end_offset_commands(&self, id: ElementId, at_start: bool, z_abs: f64) -> Result<Vec<Command>, String> {
+        use super::mep::{MepNode, MepPort};
+        let e = self.get(id).filter(|e| matches!(e.category, Category::Duct | Category::Pipe)).ok_or("not a duct or a pipe")?;
+        let Some(Geometry::Linear { start, end, level }) = e.geometry else { return Err("not a duct or a pipe".into()) };
+        if !z_abs.is_finite() || z_abs.abs() > 1.0e4 { return Err("that is not an elevation".into()); }
+        if e.pinned { return Err(format!("{} is pinned: unpin it first", e.name)); }
+        let port = MepPort { node: MepNode::Run(id), port: usize::from(!at_start) };
+        let m = self.mep();
+        if m.partner(port).is_some() || m.equip_links.iter().any(|q| q.port == port) || m.endpoints.iter().any(|x| x.port == port) {
+            return Err(format!("the {} of {} is joined to a fitting or to equipment: move the fitting instead", if at_start { "start" } else { "end" }, e.name));
+        }
+        if m.taps.iter().any(|t| t.run == id) { return Err(format!("{} has a branch on it", e.name)); }
+        let plan = (end[0] - start[0]).hypot(end[1] - start[1]);
+        if plan < 0.05 { return Err("this run is too short to slope".into()); }
+        let lz = self.get(level).map_or(0.0, |l| l.elevation_m);
+        let z0 = lz + e.elevation_m;
+        let z1 = z0 + e.slope_ratio.unwrap_or(0.0) * plan;
+        let (nz0, nz1) = if at_start { (z_abs, z1) } else { (z0, z_abs) };
+        if (nz0 - z0).abs() < 1e-9 && (nz1 - z1).abs() < 1e-9 { return Err("nothing changes".into()); }
+        let slope = (nz1 - nz0) / plan;
+        if slope.abs() > 1.0 { return Err("that is steeper than 45 degrees; draw a vertical run instead".into()); }
+        let mut ops = Vec::new();
+        if (nz0 - z0).abs() > 1e-12 { ops.push(Command::MoveElevation { id, elevation_m: nz0 - lz }); }
+        ops.push(Command::SetSlope { id, slope_ratio: slope });
+        Ok(ops)
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    #[test]
+    fn the_offset_at_one_end_of_a_free_run_changes_with_the_slope_and_a_joined_end_is_refused() {
+        let mut d = Document::spatial_sample();
+        let pipe = ElementId(2); // (1,4) to (7,4) at 0.6 m, level
+        let z = |d: &Document, at_start: bool| { let r = d.mep_run(pipe).unwrap(); if at_start { r.a[2] } else { r.b[2] } };
+        // the end goes 0.3 m lower: slope -0.05 over 6 m
+        let ops = d.run_end_offset_commands(pipe, false, 0.3).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!((z(&d, true) - 0.6).abs() < 1e-9 && (z(&d, false) - 0.3).abs() < 1e-9);
+        // the start goes up: the end stays
+        let ops = d.run_end_offset_commands(pipe, true, 0.9).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!((z(&d, true) - 0.9).abs() < 1e-9 && (z(&d, false) - 0.3).abs() < 1e-9, "{} {}", z(&d, true), z(&d, false));
+        assert!(d.run_end_offset_commands(pipe, false, 0.3).is_err_and(|e| e.contains("nothing changes")));
+        assert!(d.run_end_offset_commands(pipe, false, 20.0).is_err_and(|e| e.contains("steeper")));
+        assert!(d.run_end_offset_commands(ElementId(20), false, 1.0).is_err(), "a wall is not a run");
+        // one undo takes the change back
+        d.undo().unwrap();
+        assert!((z(&d, true) - 0.6).abs() < 1e-9);
+        // pinned: refused
+        d.transact(d.revision(), &d.pin_commands(&[pipe], true).unwrap()).unwrap();
+        assert!(d.run_end_offset_commands(pipe, false, 0.3).is_err_and(|e| e.contains("pinned")));
+    }
+}
