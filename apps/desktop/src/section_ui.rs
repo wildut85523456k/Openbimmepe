@@ -201,7 +201,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let built = build(&app.document, app.view);
     ui.horizontal(|ui| {
         ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects / drag moves"));
-        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening) { ui.small("— this tool works in plan views; press Esc"); }
+        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align) { ui.small("— this tool works in plan views; press Esc"); }
         if let Ok(v) = &built {
             if let Some(w) = v.warnings.first() { ui.small(format!("— {w}")); }
         }
@@ -288,50 +288,33 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         painter.rect_stroke(egui::Rect::from_two_pos(screen([r[0], r[1]]), screen([r[2], r[3]])), 0.0, Stroke::new(2.5, blue), egui::StrokeKind::Middle);
     }
     // interaction: Select picks the element under the pointer; Wall Opening sketches a rectangle on a wall
-    let hover = response.hover_pos().map(|h| xf.model(h));
     let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
     match app.tool {
         crate::Tool::Select => {
-            // press on an element and drag: it moves along the view and up or down, 50 mm at a time; a ghost shows where
-            let snap = |m: [f64; 2]| [(m[0] / 0.05).round() * 0.05, (m[1] / 0.05).round() * 0.05];
+            // press on an element and drag: it moves along the view and up or down (Ctrl: a copy), the pointer snapping to
+            // what is drawn; a ghost shows where
+            let edges = crate::view_tools::edges(&app.document, &view);
+            let snap = |p: Pos2| crate::view_tools::snap(&edges, &xf, p, 10.0, None, false);
             if response.drag_started_by(egui::PointerButton::Primary) {
                 if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
                     if let Some(hit) = pick_at(&app.document, &view, xf.model(p)) {
                         if !chosen.contains(&hit) { app.select_element(Some(hit)); }
-                        app.view_drag = Some(snap(xf.model(p)));
+                        app.view_drag = Some(snap(p).at);
                     }
                 }
             }
             if let (Some(from), Some(h)) = (app.view_drag, response.interact_pointer_pos().or(response.hover_pos())) {
                 let ids = app.selected_ids();
-                let to = snap(xf.model(h));
-                let (du, dz) = (to[0] - from[0], to[1] - from[1]);
-                let ghost = Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
-                let shift = |p: &[f64; 2]| screen([p[0] + du, p[1] + dz]);
-                for item in view.items.iter().filter(|i| i.class != Class::Datum && ids.contains(&ElementId(i.element.id)) && i.element.kind != Kind::Level) {
-                    match &item.shape {
-                        Shape::Region { outer, holes } => for r in std::iter::once(outer).chain(holes.iter()) { painter.add(egui::Shape::closed_line(r.iter().map(shift).collect(), ghost)); },
-                        Shape::Fill(r) => { painter.add(egui::Shape::closed_line(r.iter().map(shift).collect(), ghost)); }
-                        Shape::Line(a, b) => { painter.line_segment([shift(a), shift(b)], ghost); }
-                        _ => {}
-                    }
-                }
-                for (_, _, r) in rects.iter().filter(|(id, _, _)| ids.contains(id)) {
-                    painter.rect_stroke(egui::Rect::from_two_pos(shift(&[r[0], r[1]]), shift(&[r[2], r[3]])), 0.0, ghost, egui::StrokeKind::Middle);
-                }
-                painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{:+.0} mm along, {:+.0} mm up", du * 1000.0, dz * 1000.0), egui::FontId::proportional(13.0), blue);
+                let s = snap(h);
+                let (du, dz) = (s.at[0] - from[0], s.at[1] - from[1]);
+                let copy = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                crate::view_tools::draw_ghost(&painter, &view, &app.document, &xf, &ids, du, dz);
+                crate::view_tools::draw_snap(&painter, screen(s.at), s.kind, blue);
+                painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{}{:+.0} mm along, {:+.0} mm up", if copy { "copy: " } else { "" }, du * 1000.0, dz * 1000.0), egui::FontId::proportional(13.0), blue);
                 if esc { app.view_drag = None; app.message = "Move cancelled".into(); }
                 else if response.drag_stopped_by(egui::PointerButton::Primary) {
                     app.view_drag = None;
-                    let (a, b) = (view.section.a, view.section.b);
-                    let len = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-9);
-                    let dir = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
-                    if du != 0.0 || dz != 0.0 {
-                        match app.document.move_in_view_commands(&ids, dir, du, dz).and_then(|ops| app.document.transact(app.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
-                            Ok(_) => app.message = "Moved; undo takes it back".into(),
-                            Err(e) => app.message = format!("Cannot do that: {e}"),
-                        }
-                    }
+                    if let (Some(frame), true) = (openbim_document::ViewFrame::from_line(view.section.a, view.section.b), du != 0.0 || dz != 0.0) { app.view_move(frame, &ids, du, dz, copy); }
                 }
             }
             if !ui.input(|i| i.pointer.primary_down()) { app.view_drag = None; }
@@ -342,13 +325,21 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 }
             }
         }
+        crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align => {
+            let edges = crate::view_tools::edges(&app.document, &view);
+            crate::view_tools::modify(app, ui, &painter, &response, &view, xf, &edges);
+        }
         crate::Tool::WallOpening => {
-            if let (Some((_, c)), Some(h)) = (app.view_corner, hover) {
-                painter.rect_stroke(egui::Rect::from_two_pos(screen(c), screen(h)), 0.0, Stroke::new(1.5, blue), egui::StrokeKind::Middle);
+            // the corners snap to what is drawn, as everywhere else in a view
+            let edges = crate::view_tools::edges(&app.document, &view);
+            let snapped = |p: Pos2| crate::view_tools::snap(&edges, &xf, p, 10.0, None, false);
+            if let Some(h) = response.hover_pos().map(snapped) { crate::view_tools::draw_snap(&painter, screen(h.at), h.kind, blue); }
+            if let (Some((_, c)), Some(h)) = (app.view_corner, response.hover_pos().map(snapped)) {
+                painter.rect_stroke(egui::Rect::from_two_pos(screen(c), screen(h.at)), 0.0, Stroke::new(1.5, blue), egui::StrokeKind::Middle);
             }
             if esc { if app.view_corner.is_some() { app.view_corner = None; } else { app.choose_tool(crate::Tool::Select); } }
             else if response.clicked() {
-                if let Some(h) = response.interact_pointer_pos() { app.view_opening_click(&view, xf.model(h)); }
+                if let Some(h) = response.interact_pointer_pos() { app.view_opening_click(&view, snapped(h).at); }
             }
         }
         _ => { if esc { app.choose_tool(crate::Tool::Select); } }

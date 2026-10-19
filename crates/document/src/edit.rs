@@ -159,41 +159,6 @@ impl Document {
         Ok(ops)
     }
 
-    /// Moves `ids` in an elevation or section: `du` along the view (`dir` is the plan direction in which its u grows,
-    /// a unit vector) and `dz` up. Openings, doors and windows slide along their wall and change their sill; walls,
-    /// beams, slabs and stairs also change their height offset; a column, footing or anything else moves sideways
-    /// only. What stands in a moved wall goes with it.
-    pub fn move_in_view_commands(&self, ids: &[ElementId], dir: P, du: f64, dz: f64) -> Result<Vec<Command>, String> {
-        if !(du.is_finite() && dz.is_finite()) { return Err("not a distance".into()); }
-        let mut ops = Vec::new();
-        let (mut plan, mut stuck) = (Vec::new(), false);
-        for &id in ids {
-            let e = self.get(id).ok_or("an element is gone")?;
-            // what stands in a wall that moves with it follows by itself
-            if matches!(e.geometry, Some(Geometry::InWall { host, .. }) if ids.contains(&host)) { continue; }
-            match e.geometry {
-                Some(Geometry::InWall { host, along_m }) => {
-                    let Some(Geometry::Linear { start, end, .. }) = self.get(host).and_then(|w| w.geometry) else { return Err("its wall is gone".into()) };
-                    let len = (end[0] - start[0]).hypot(end[1] - start[1]);
-                    let w = [(end[0] - start[0]) / len, (end[1] - start[1]) / len];
-                    if (w[0] * dir[1] - w[1] * dir[0]).abs() > 0.02 { return Err("its wall is not parallel to this view; move it in a view that looks square on at the wall".into()); }
-                    if du != 0.0 { ops.push(Command::SetGeometry { id, geometry: Geometry::InWall { host, along_m: along_m + du * (w[0] * dir[0] + w[1] * dir[1]).signum() } }); }
-                    if dz != 0.0 { ops.push(Command::MoveElevation { id, elevation_m: e.elevation_m + dz }); }
-                }
-                _ => {
-                    if du != 0.0 { plan.push(id); }
-                    if dz != 0.0 {
-                        if matches!(e.category, Category::Wall | Category::Beam | Category::Slab | Category::Stair) { ops.push(Command::MoveElevation { id, elevation_m: e.elevation_m + dz }); }
-                        else { stuck = true; }
-                    }
-                }
-            }
-        }
-        if !plan.is_empty() { ops.extend(self.transform_commands(&plan, Xf::Move([dir[0] * du, dir[1] * du]))?); }
-        if ops.is_empty() { return Err(if stuck { "this cannot be moved up or down in a view; change its offset or its levels in Properties".into() } else { "nothing changes".into() }); }
-        Ok(ops)
-    }
-
     /// Drags one end of a wall to `to`, as the grip of a wall does in Revit: the ends of other walls that meet it
     /// there go with it, so that the corner stays joined.
     pub fn wall_end_commands(&self, id: ElementId, at_start: bool, to: P) -> Result<Vec<Command>, String> {
@@ -426,47 +391,6 @@ mod tests {
         let ops = d.delete_commands(&[m]).unwrap();
         d.transact(d.revision(), &ops).unwrap();
         assert!(d.get(m).is_none());
-    }
-
-    #[test]
-    fn things_move_in_a_view_along_it_and_up_and_a_door_slides_in_its_wall() {
-        let (mut d, wall, door, _) = with_door_and_tag();
-        // looking north from the south: u grows with x
-        let dir = [1.0, 0.0];
-        let along = |d: &Document, id| match d.get(id).unwrap().geometry { Some(Geometry::InWall { along_m, .. }) => along_m, g => panic!("{g:?}") };
-        let (a0, sill0) = (along(&d, door), d.get(door).unwrap().elevation_m);
-        let ops = d.move_in_view_commands(&[door], dir, 1.0, 0.2).unwrap();
-        d.transact(d.revision(), &ops).unwrap();
-        assert!((along(&d, door) - a0 - 1.0).abs() < 1e-9 && (d.get(door).unwrap().elevation_m - sill0 - 0.2).abs() < 1e-9);
-        d.undo().unwrap();
-        assert!((along(&d, door) - a0).abs() < 1e-9);
-        // seen from the north (u grows against x) the same drag to the right slides it the other way
-        let ops = d.move_in_view_commands(&[door], [-1.0, 0.0], 1.0, 0.0).unwrap();
-        d.transact(d.revision(), &ops).unwrap();
-        assert!((along(&d, door) - a0 + 1.0).abs() < 1e-9);
-        d.undo().unwrap();
-        // a view across the wall cannot slide what stands in it
-        assert!(d.move_in_view_commands(&[door], [0.0, 1.0], 1.0, 0.0).is_err());
-        // a door pushed out of its wall is refused by the model
-        let ops = d.move_in_view_commands(&[door], dir, 50.0, 0.0).unwrap();
-        assert!(d.transact(d.revision(), &ops).is_err());
-        // the wall moves along the view and up, and its door goes with it
-        let before = line(&d, wall);
-        let ops = d.move_in_view_commands(&[wall], dir, 2.0, 0.3).unwrap();
-        d.transact(d.revision(), &ops).unwrap();
-        assert!(near(line(&d, wall).0, [before.0[0] + 2.0, before.0[1]]));
-        assert!((d.get(wall).unwrap().elevation_m - 0.3).abs() < 1e-9);
-        assert!((along(&d, door) - a0).abs() < 1e-9, "the door keeps its place in the wall");
-        // wall and door chosen together: the door is not moved twice
-        d.undo().unwrap();
-        let ops = d.move_in_view_commands(&[wall, door], dir, 2.0, 0.0).unwrap();
-        d.transact(d.revision(), &ops).unwrap();
-        assert!((along(&d, door) - a0).abs() < 1e-9);
-        d.undo().unwrap();
-        // a column goes sideways only; up and down alone is refused
-        let col = d.place_column(ElementId(10), ElementId(11), [4.0, 4.0], &crate::ColumnSpec { width_m: 0.3, depth_m: 0.3, base_offset_m: 0.0, section: crate::Section::Rectangle, material: crate::Material::Concrete }).unwrap_or_else(|e| panic!("{e:?}"));
-        assert!(d.move_in_view_commands(&[col], dir, 0.0, 0.5).is_err());
-        assert!(d.move_in_view_commands(&[col], dir, 1.0, 0.5).is_ok());
     }
 
     #[test]

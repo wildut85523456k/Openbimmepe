@@ -2186,6 +2186,122 @@ mod tests {
         assert_eq!((along(&app), app.document.get(op).unwrap().elevation_m), (a0, sill0), "the opening keeps its place in the wall");
     }
 
+    /// A view that looks north from the south of the sample, with a window-sized opening in wall 20, and where to click.
+    fn south_view_with_openings(app: &mut Desktop) -> (ElementId, ElementId) {
+        app.view = View::Elevation(2);
+        let a = app.document.place_wall_opening(ElementId(20), 1.0, 2.0, 0.9, 2.1).unwrap();
+        let b = app.document.place_wall_opening(ElementId(20), 4.0, 5.0, 0.5, 1.5).unwrap();
+        (a, b)
+    }
+    fn spot(app: &Desktop, id: ElementId, fx: f64, fy: f64) -> Pos2 {
+        let xf = app.section_xf.expect("drawn");
+        let view = crate::section_ui::build(&app.document, app.view).expect("builds");
+        let r = crate::section_ui::opening_rects(&app.document, &view).into_iter().find(|r| r.0 == id).expect("seen").2;
+        xf.screen([r[0] + (r[2] - r[0]) * fx, r[1] + (r[3] - r[1]) * fy])
+    }
+    fn click(ctx: &egui::Context, screen: Rect, app: &mut Desktop, at: Pos2) {
+        frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+        frame(ctx, screen, app, vec![button(at, true)]);
+        frame(ctx, screen, app, vec![button(at, false)]);
+    }
+    fn sill(app: &Desktop, id: ElementId) -> f64 { app.document.get(id).unwrap().elevation_m }
+    fn along_of(app: &Desktop, id: ElementId) -> f64 { match app.document.get(id).unwrap().geometry { Some(Geometry::InWall { along_m, .. }) => along_m, g => panic!("{g:?}") } }
+
+    #[test]
+    fn move_in_a_view_takes_a_base_point_and_a_typed_distance_and_copy_keeps_the_original() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        let (a, _) = south_view_with_openings(&mut app);
+        frame(&ctx, screen, &mut app, vec![]);
+        app.select_element(None);
+        app.run_command("move", "Move");
+        assert!(app.tool == crate::Tool::Move);
+        // nothing selected: the first click picks the element, the second the base point, then 500 mm and Enter
+        let (c0, a0, s0) = (spot(&app, a, 0.5, 0.5), along_of(&app, a), sill(&app, a));
+        click(&ctx, screen, &mut app, c0);
+        assert_eq!(app.selected_id(), Some(a), "{}", app.message);
+        click(&ctx, screen, &mut app, c0);
+        assert!(app.view_edit.as_ref().is_some_and(|e| e.pts.len() == 1), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(c0 + Vec2::new(150.0, 0.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::Text("500".into())]);
+        assert_eq!(app.edit_num, "500");
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        let (da, dz) = (along_of(&app, a) - a0, sill(&app, a) - s0);
+        assert!(da > 0.3 && (da.hypot(dz) - 0.5).abs() < 1e-6, "moved {da} along and {dz} up: {}", app.message);
+        assert!(app.tool == crate::Tool::Select, "Move ends after one move");
+        app.document.undo().unwrap();
+        // Copy: the base point, then a second point; the original stays and the tool goes on
+        app.view = View::Elevation(2);
+        frame(&ctx, screen, &mut app, vec![]);
+        app.select_element(Some(a));
+        app.run_command("copy", "Copy");
+        let c0 = spot(&app, a, 0.5, 0.5);
+        click(&ctx, screen, &mut app, c0);
+        let count = app.document.wall_openings().len();
+        click(&ctx, screen, &mut app, c0 + Vec2::new(200.0, 0.0));
+        assert_eq!(app.document.wall_openings().len(), count + 1, "{}", app.message);
+        assert_eq!(along_of(&app, a), a0);
+        assert!(app.tool == crate::Tool::Copy);
+        // Esc once drops the base point, again ends the tool
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+    }
+
+    #[test]
+    fn mirror_rotate_and_align_in_a_view() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        let (a, b) = south_view_with_openings(&mut app);
+        frame(&ctx, screen, &mut app, vec![]);
+        // Mirror: a vertical axis by two points; the wall is 8 m, so the axis at 4.5 m turns the opening at 1.5 into 7.5
+        let view = crate::section_ui::build(&app.document, app.view).expect("builds");
+        let f = crate::section_ui::wall_frame(&app.document, &view, ElementId(20)).expect("parallel");
+        let xf = app.section_xf.unwrap();
+        let axis = |z: f64| xf.screen([f.u0 + f.sign * 4.5, z]);
+        app.select_element(Some(a));
+        app.run_command("mirror", "Mirror");
+        assert!(app.mirror_copy, "Copy is on by default, as in Revit");
+        click(&ctx, screen, &mut app, axis(0.5));
+        // a slanted axis is refused with the reason
+        click(&ctx, screen, &mut app, xf.screen([f.u0 + f.sign * 6.5, 2.5]));
+        assert!(app.message.contains("vertical"), "{}", app.message);
+        click(&ctx, screen, &mut app, axis(2.6));
+        let mirrored: Vec<f64> = app.document.wall_openings().iter().map(|o| o.2[0] + o.2[1] / 2.0).collect();
+        assert!(mirrored.iter().any(|m| (m - 7.5).abs() < 1e-6) && mirrored.iter().any(|m| (m - 1.5).abs() < 1e-6), "{mirrored:?} {}", app.message);
+        app.document.undo().unwrap();
+        // Rotate: a wall does not turn in an elevation (Revit's own rule), and a beam tilts about its middle by a typed angle
+        app.select_element(Some(ElementId(20)));
+        app.run_command("rotate", "Rotate");
+        let p = spot(&app, a, 0.5, 0.5);
+        click(&ctx, screen, &mut app, p);
+        frame(&ctx, screen, &mut app, vec![egui::Event::Text("30".into())]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert!(app.message.contains("walls do not rotate"), "{}", app.message);
+        let level = app.plan_level();
+        let beam = app.document.place_beam(level, &openbim_document::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.2, 0.4, 2.5)).unwrap();
+        app.select_element(Some(beam));
+        app.run_command("rotate", "Rotate");
+        click(&ctx, screen, &mut app, p);
+        frame(&ctx, screen, &mut app, vec![egui::Event::Text("30".into())]);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        let slope = app.document.get(beam).unwrap().slope_ratio.unwrap();
+        assert!((slope - 30f64.to_radians().tan()).abs() < 1e-9, "{slope} {}", app.message);
+        assert!((app.document.get(beam).unwrap().elevation_m + slope * 2.0 - 2.5).abs() < 1e-9, "the middle stays");
+        // Align: the top of the second opening (1.5 m) onto the top of the first (2.1 m): it rises 0.6 m, and the reference stays
+        app.select_element(None);
+        app.run_command("align", "Align");
+        let pa = spot(&app, a, 0.5, 1.0);
+        click(&ctx, screen, &mut app, pa);
+        assert!(app.view_edit.as_ref().is_some_and(|e| e.edge.is_some()), "{}", app.message);
+        let pb = spot(&app, b, 0.5, 1.0);
+        click(&ctx, screen, &mut app, pb);
+        assert!((sill(&app, b) - 1.1).abs() < 1e-6, "{} {}", sill(&app, b), app.message);
+        assert!((sill(&app, a) - 0.9).abs() < 1e-9 && app.tool == crate::Tool::Align);
+        app.document.undo().unwrap();
+        assert!((sill(&app, b) - 0.5).abs() < 1e-9);
+    }
+
     #[test]
     fn the_elevation_tool_puts_a_marker_with_views_that_switch_on_and_off_open_and_move() {
         let (ctx, screen) = frames();

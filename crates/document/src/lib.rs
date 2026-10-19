@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 mod spatial;
 mod edit;
+mod viewedit;
+pub use viewedit::{ViewEdge, ViewFrame};
 mod rooms;
 mod roof;
 mod skeleton;
