@@ -4,8 +4,14 @@
 //!
 //! Coordinates: metres, z up, as in the model. Screen: pixels, x right, y down.
 
+mod edges;
+mod pick;
+mod sun;
 mod raster;
-pub use raster::{render, Image, Style};
+pub use sun::{Position, Sun};
+pub use pick::{pick, Hit, SectionBox};
+pub use edges::{crease_edges, intersection_edges, Edge};
+pub use raster::{base_colour, render, Image, Style};
 
 type V = [f64; 3];
 
@@ -97,6 +103,36 @@ impl Camera {
         let r = dot(sub(max, min), sub(max, min)).sqrt() / 2.0;
         let half = (FOV / 2.0).tan().min((FOV / 2.0).tan() * aspect);
         self.distance = (r / half * 1.05).max(1e-3);
+    }
+
+    /// Near and far planes for a scene `radius` metres across that the camera sits `distance` from.
+    pub fn clip_range(&self, radius: f64) -> (f64, f64) {
+        let far = (self.distance + radius * 2.0).max(1.0);
+        ((far * 1e-4).max(self.distance * 0.01).min(self.distance * 0.5).max(1e-3), far)
+    }
+
+    /// View and projection as one column-major matrix for a GPU with clip depth 0..1 and y up (`wgpu`): a model point
+    /// `p` (metres, relative to `origin`) goes to `m * [p, 1]`. The vertical field of view is fixed.
+    pub fn view_proj(&self, aspect: f64, near: f64, far: f64, origin: V) -> [[f32; 4]; 4] {
+        let (r, u, f) = (self.right(), self.up(), self.forward());
+        let eye = sub(self.eye(), origin);
+        // view space: x right, y up, looking down -z
+        let view = [
+            [r[0], u[0], -f[0], 0.0],
+            [r[1], u[1], -f[1], 0.0],
+            [r[2], u[2], -f[2], 0.0],
+            [-dot(r, eye), -dot(u, eye), dot(f, eye), 1.0],
+        ];
+        let t = 1.0 / (FOV / 2.0).tan();
+        let proj = [
+            [t / aspect, 0.0, 0.0, 0.0],
+            [0.0, t, 0.0, 0.0],
+            [0.0, 0.0, far / (near - far), -1.0],
+            [0.0, 0.0, near * far / (near - far), 0.0],
+        ];
+        let mut m = [[0.0f64; 4]; 4];
+        for c in 0..4 { for rr in 0..4 { m[c][rr] = (0..4).map(|k| proj[k][rr] * view[c][k]).sum(); } }
+        m.map(|col| col.map(|x| x as f32))
     }
 
     /// Pixel position and distance along the view direction of a model point; None behind the camera.

@@ -18,8 +18,14 @@
 //! point or the shared coordinates (the model then sits in the surveyor's system, rotated to it).
 //!
 //! The sign of the angle is this program's own: positive when project north is turned counter-clockwise from true
-//! north. It has to be checked against Revit's before files are exchanged. Nothing here is a standard value: the map's
-//! name is text the author gives, and no projection arithmetic is done.
+//! north. A file does not carry the angle: it carries the direction of true north in the project's plan
+//! (`IfcGeometricRepresentationContext.TrueNorth`, "a 2 dimensional direction within the xy-plane of the project
+//! coordinate system"), which is `true_north()` here, (sin a, cos a), and has no sign to get wrong. What is shown to
+//! the author as a signed angle is only this program's way of entering it. Revit's own sign of "Angle from Project
+//! North to True North" (East or West) could not be confirmed from Autodesk's public documentation, so a number typed
+//! from Revit's dialog must be checked on one example: with true north to the East of project north, the direction
+//! here points to the right of project north (positive x), which is a negative angle in this program. Nothing here is
+//! a standard value: the map's name is text the author gives, and no projection arithmetic is done.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Crs {
     /// the name the surveyor gives the map, for example an authority code with its number

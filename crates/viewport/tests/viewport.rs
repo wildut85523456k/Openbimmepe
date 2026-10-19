@@ -190,3 +190,102 @@ fn hidden_line_draws_the_line_where_two_walls_meet() {
     let q = c.project([2.0, -0.1, 1.0], [800.0, 600.0]).unwrap();
     assert_eq!(img.pixel(q[0] as usize, q[1] as usize), [255, 255, 255]);
 }
+
+#[test]
+fn picking_finds_the_front_element_and_respects_the_section_box() {
+    use openbim_viewport::{pick, SectionBox};
+    let b = model();
+    let mut cam = Camera::default_3d([0.0, 1.8, 2.0], 20.0);
+    cam.fit([-1.0, 0.0, 0.0], [1.0, 3.6, 4.0], 4.0 / 3.0);
+    let size = [400.0, 300.0];
+    // scan the picture: something is hit, and the pixel of the hit point finds the same element again
+    let mut hit = None;
+    'scan: for y in (0..300).step_by(10) { for x in (0..400).step_by(10) {
+        if let Some(h) = pick(&b, &cam, [x as f64, y as f64], size, None) { hit = Some((h, [x as f64, y as f64])); break 'scan; }
+    } }
+    let (hit, px) = hit.expect("the building is somewhere in the picture");
+    assert!(hit.distance > 0.0);
+    assert_eq!(pick(&b, &cam, px, size, None).unwrap().element, hit.element);
+    assert!(pick(&b, &cam, [0.0, 0.0], size, None).is_none(), "nothing in the corner");
+    let away = SectionBox { min: [100.0; 3], max: [101.0; 3] };
+    assert!(pick(&b, &cam, px, size, Some(away)).is_none());
+}
+
+#[test]
+fn blending_cameras_turns_the_short_way() {
+    let a = Camera { target: [0.0; 3], distance: 10.0, yaw: 3.0, pitch: 0.2 };
+    let b = Camera { target: [2.0, 0.0, 0.0], distance: 40.0, yaw: -3.0, pitch: 0.6 };
+    let m = Camera::blend(&a, &b, 0.5);
+    assert!((m.distance - 20.0).abs() < 1e-9, "geometric mean");
+    assert!(m.yaw.abs() > 3.0 || (m.yaw.abs() - std::f64::consts::PI).abs() < 0.2, "through the back, not through zero: {}", m.yaw);
+    assert_eq!(Camera::blend(&a, &b, 0.0), a);
+    assert!((Camera::blend(&a, &b, 1.0).pitch - 0.6).abs() < 1e-12);
+}
+
+#[test]
+fn the_sun_is_where_astronomy_puts_it() {
+    use openbim_viewport::Sun;
+    // Phnom Penh on the equinox: noon sun almost overhead, rising in the east and setting in the west
+    let at = |hour: f64| Sun { month: 3, day: 20, hour, ..Sun::default() }.position();
+    let noon = (0..240).map(|i| at(10.0 + i as f64 / 60.0).elevation).fold(f64::MIN, f64::max);
+    assert!((noon - (90.0 - 11.5564)).abs() < 1.5, "noon elevation {noon}");
+    let (dawn, dusk) = (at(6.0), at(18.0));
+    assert!((dawn.azimuth - 90.0).abs() < 8.0 && dawn.elevation.abs() < 8.0, "{dawn:?}");
+    assert!((dusk.azimuth - 270.0).abs() < 8.0 && dusk.elevation.abs() < 8.0, "{dusk:?}");
+    assert!(at(0.0).elevation < -50.0, "night");
+    // London at the summer solstice: 62 degrees at noon, due south; at the winter solstice 15 degrees
+    let london = |m, d| Sun { latitude: 51.5, longitude: 0.0, utc_offset: 0.0, month: m, day: d, hour: 12.0, project_north_deg: 0.0 }.position();
+    let (s, w) = (london(6, 21), london(12, 21));
+    assert!((s.elevation - 62.0).abs() < 1.0 && (s.azimuth - 180.0).abs() < 4.0, "{s:?}");
+    assert!((w.elevation - 15.0).abs() < 1.0, "{w:?}");
+    // southern hemisphere: the noon sun is in the north
+    let sydney = Sun { latitude: -33.9, longitude: 151.2, utc_offset: 10.0, month: 6, day: 21, hour: 12.0, project_north_deg: 0.0 }.position();
+    assert!(sydney.azimuth < 30.0 || sydney.azimuth > 330.0, "{sydney:?}");
+    // the direction vector points the same way: east of south in the morning has positive x
+    let d = Sun { month: 3, day: 20, hour: 9.0, ..Sun::default() }.direction();
+    assert!(d[0] > 0.3 && d[2] > 0.3, "{d:?}");
+    assert!(Sun { hour: 0.0, ..Sun::default() }.strength() == 0.0);
+}
+
+#[test]
+fn project_north_turns_the_sun_with_the_georeference() {
+    use openbim_ifc::georef::{CoordinateBase, Crs, Georef};
+    use openbim_viewport::Sun;
+    // Phnom Penh at dawn on the equinox: the sun is in the east
+    let dawn = Sun { month: 3, day: 20, hour: 6.0, ..Sun::default() };
+    let d = dawn.direction();
+    assert!(d[0] > 0.9, "east is +x when project north is true north: {d:?}");
+    // project north turned 90 degrees counter-clockwise from true north points west, so east is project south
+    let turned = Sun { project_north_deg: 90.0, ..dawn }.direction();
+    assert!(turned[1] < -0.9 && turned[0].abs() < 0.2, "{turned:?}");
+    // a full turn changes nothing
+    let full = Sun { project_north_deg: 360.0, ..dawn }.direction();
+    assert!((0..3).all(|k| (full[k] - d[k]).abs() < 1e-9));
+    // the georeference gives the place and the angle
+    let g = Georef { crs: Crs { name: "site".into(), geodetic_datum: None, vertical_datum: None, map_projection: None, map_zone: None },
+        project_base_point: [0.0; 3], survey_point: [0.0; 3], survey_shared: [0.0; 3], angle_to_true_north_deg: 30.0, scale: 1.0,
+        coordinate_base: CoordinateBase::InternalOrigin, latitude: 51.5, longitude: -0.12, elevation: 0.0 };
+    let s = Sun::default().at_site(&g);
+    assert_eq!((s.latitude, s.longitude, s.project_north_deg), (51.5, -0.12, 30.0));
+    assert_eq!((s.month, s.hour), (Sun::default().month, Sun::default().hour));
+}
+
+#[test]
+fn the_sun_and_the_ifc_true_north_direction_agree_on_the_sign_of_the_angle() {
+    use openbim_ifc::georef::{CoordinateBase, Crs, Georef};
+    use openbim_viewport::Sun;
+    // at the June solstice at noon the sun of Phnom Penh is due north, so its horizontal direction in the model is the
+    // direction of true north in the model's plan, which is what a file carries as TrueNorth
+    for angle in [0.0, 33.0, 90.0, -40.0, 180.0] {
+        let g = Georef { crs: Crs { name: "site".into(), geodetic_datum: None, vertical_datum: None, map_projection: None, map_zone: None },
+            project_base_point: [0.0; 3], survey_point: [0.0; 3], survey_shared: [0.0; 3], angle_to_true_north_deg: angle, scale: 1.0,
+            coordinate_base: CoordinateBase::InternalOrigin, latitude: 11.5564, longitude: 104.9282, elevation: 0.0 };
+        let sun = Sun { month: 6, day: 21, hour: 12.1, utc_offset: 7.0, ..Sun::default() }.at_site(&g);
+        let p = sun.position();
+        assert!(p.azimuth < 5.0 || p.azimuth > 355.0, "due north: {p:?}");
+        let d = sun.direction();
+        let h = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        let (tx, ty) = g.true_north();
+        assert!((d[0] / h - tx).abs() < 0.12 && (d[1] / h - ty).abs() < 0.12, "angle {angle}: sun {:?} against TrueNorth {:?}", (d[0] / h, d[1] / h), (tx, ty));
+    }
+}
