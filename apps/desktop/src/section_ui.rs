@@ -5,6 +5,7 @@ use eframe::egui::{self, Color32, Pos2, Stroke, Vec2};
 use openbim_document::{Category, ElementId, Geometry};
 use openbim_view::{Class, Facing, Kind, SectionView, Shape};
 
+
 /// The four building elevations in the order Revit lists them: East, North, South, West.
 pub const FACINGS: [(Facing, &str); 4] = [(Facing::East, "East"), (Facing::North, "North"), (Facing::South, "South"), (Facing::West, "West")];
 
@@ -75,11 +76,87 @@ fn triangles(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Vec<([f64; 2], [f64
     }).collect()
 }
 
+/// How (u, z) of a view maps to the screen: `centre` is where (cu, cz) is drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Xf { pub centre: Pos2, pub scale: f32, pub cu: f64, pub cz: f64 }
+
+impl Xf {
+    pub fn screen(&self, p: [f64; 2]) -> Pos2 { self.centre + Vec2::new((p[0] - self.cu) as f32 * self.scale, -(p[1] - self.cz) as f32 * self.scale) }
+    pub fn model(&self, p: Pos2) -> [f64; 2] { [self.cu + f64::from((p.x - self.centre.x) / self.scale), self.cz - f64::from((p.y - self.centre.y) / self.scale)] }
+}
+
+/// Where a wall stands in a view that looks square on at it: the u of its start, whether u grows along the wall, its
+/// length, the height of its base and its height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WallFrame { pub u0: f64, pub sign: f64, pub len: f64, pub base: f64, pub height: f64 }
+
+/// The frame of a wall parallel to the view (within about a degree), else None: a wall seen end on or at an angle
+/// has no place for an opening in this view.
+pub fn wall_frame(doc: &openbim_document::Document, view: &SectionView, wall: ElementId) -> Option<WallFrame> {
+    let el = doc.get(wall).filter(|e| e.category == Category::Wall)?;
+    let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
+    let (a, b) = (view.section.a, view.section.b);
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let line = dx.hypot(dy);
+    let (wx, wy) = (end[0] - start[0], end[1] - start[1]);
+    let len = wx.hypot(wy);
+    if line < 1e-9 || len < 1e-6 { return None; }
+    let (d, w) = ([dx / line, dy / line], [wx / len, wy / len]);
+    if (w[0] * d[1] - w[1] * d[0]).abs() > 0.02 { return None; }
+    let sign = if w[0] * d[0] + w[1] * d[1] >= 0.0 { 1.0 } else { -1.0 };
+    let u0 = (start[0] - a[0]) * d[0] + (start[1] - a[1]) * d[1];
+    let base = doc.get(level)?.elevation_m + el.elevation_m;
+    Some(WallFrame { u0, sign, len, base, height: el.height_m })
+}
+
+/// The wall openings seen in the view, each as (opening, wall, [u0, z0, u1, z1]).
+pub fn opening_rects(doc: &openbim_document::Document, view: &SectionView) -> Vec<(ElementId, ElementId, [f64; 4])> {
+    doc.wall_openings().into_iter().filter_map(|(id, host, [off, width, sill, height])| {
+        if !view.items.iter().any(|i| i.element.kind == Kind::Wall && i.element.id == host.0) { return None; }
+        let f = wall_frame(doc, view, host)?;
+        let (ua, ub) = (f.u0 + f.sign * off, f.u0 + f.sign * (off + width));
+        Some((id, host, [ua.min(ub), f.base + sill, ua.max(ub), f.base + sill + height]))
+    }).collect()
+}
+
+fn inside(ring: &[[f64; 2]], p: [f64; 2]) -> bool {
+    let mut c = false;
+    let mut j = ring.len().wrapping_sub(1);
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[j]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] { c = !c; }
+        j = i;
+    }
+    c
+}
+
+/// The element under the point (u, z) of a view: a wall opening first (it is a hole in its wall), then the nearest
+/// item drawn there. Level lines and anything not in the model are not picked.
+pub fn pick_at(doc: &openbim_document::Document, view: &SectionView, p: [f64; 2]) -> Option<ElementId> {
+    if let Some((id, _, _)) = opening_rects(doc, view).into_iter().find(|(_, _, r)| p[0] >= r[0] && p[0] <= r[2] && p[1] >= r[1] && p[1] <= r[3]) { return Some(id); }
+    view.items.iter().rev().filter(|i| i.class != Class::Datum && i.element.kind != Kind::Level).find(|i| match &i.shape {
+        Shape::Region { outer, holes } => inside(outer, p) && !holes.iter().any(|h| inside(h, p)),
+        Shape::Fill(ring) => inside(ring, p),
+        _ => false,
+    }).map(|i| ElementId(i.element.id)).filter(|id| doc.get(*id).is_some())
+}
+
+/// The wall and the rectangle (u0, z0, u1, z1) under a wall opening sketched with two corners, as the wall, the
+/// distances along the wall, and the sill and head heights above the wall's base.
+pub fn opening_of_corners(doc: &openbim_document::Document, view: &SectionView, wall: ElementId, c0: [f64; 2], c1: [f64; 2]) -> Option<(f64, f64, f64, f64)> {
+    let f = wall_frame(doc, view, wall)?;
+    let along = |u: f64| (f.sign * (u - f.u0)).clamp(0.0, f.len);
+    let (a, b) = (along(c0[0]), along(c1[0]));
+    let (sill, head) = ((c0[1].min(c1[1]) - f.base).max(0.0), (c0[1].max(c1[1]) - f.base).min(f.height));
+    Some((a.min(b), a.max(b), sill, head))
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let name = name_of(app, app.view);
     let built = build(&app.document, app.view);
     ui.horizontal(|ui| {
-        ui.small(format!("{name} — middle-drag pan / wheel zoom"));
+        ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects"));
+        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening) { ui.small("— this tool works in plan views; press Esc"); }
         if let Ok(v) = &built {
             if let Some(w) = v.warnings.first() { ui.small(format!("— {w}")); }
         }
@@ -94,14 +171,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     }
     let view = match built {
         Ok(v) => v,
-        Err(e) => { painter.text(rect.center(), egui::Align2::CENTER_CENTER, e, egui::FontId::proportional(14.0), ui.visuals().weak_text_color()); return; }
+        Err(e) => { app.section_xf = None; painter.text(rect.center(), egui::Align2::CENTER_CENTER, e, egui::FontId::proportional(14.0), ui.visuals().weak_text_color()); return; }
     };
     let [u0, z0, u1, z1] = view.bounds();
     let (cw, ch) = ((u1 - u0).max(1.0), (z1 - z0).max(1.0));
     let fit = ((rect.width() - 140.0).max(10.0) / cw as f32).min((rect.height() - 90.0).max(10.0) / ch as f32);
-    let scale = fit * app.zoom;
-    let (cu, cz) = ((u0 + u1) / 2.0, (z0 + z1) / 2.0);
-    let screen = |p: [f64; 2]| rect.center() + app.pan + Vec2::new((p[0] - cu) as f32 * scale, -(p[1] - cz) as f32 * scale);
+    let xf = Xf { centre: rect.center() + app.pan, scale: fit * app.zoom, cu: (u0 + u1) / 2.0, cz: (z0 + z1) / 2.0 };
+    app.section_xf = Some(xf);
+    let (scale, screen) = (xf.scale, |p: [f64; 2]| xf.screen(p));
     let dark = app.dark;
     // fills first, in the order the engine gives them (far to near), each followed by its lines
     for item in &view.items {
@@ -149,9 +226,72 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let at = screen(l.at);
         painter.text(at + Vec2::new(8.0, 0.0), egui::Align2::LEFT_CENTER, format!("{}  {:+.3}", l.text, l.at[1]), egui::FontId::proportional(12.0), Color32::from_rgb(70, 130, 200));
     }
+    // the selected element in the highlight colour
+    let blue = ui.visuals().hyperlink_color;
+    let chosen = app.selected_ids();
+    let rects = opening_rects(&app.document, &view);
+    for item in view.items.iter().filter(|i| i.class != Class::Datum && chosen.contains(&ElementId(i.element.id)) && i.element.kind != Kind::Level) {
+        let ring = |r: &[[f64; 2]]| painter.add(egui::Shape::closed_line(r.iter().map(|p| screen(*p)).collect(), Stroke::new(2.5, blue)));
+        match &item.shape {
+            Shape::Region { outer, holes } => { ring(outer); for h in holes { ring(h); } }
+            Shape::Fill(r) => { ring(r); }
+            Shape::Line(a, b) => { painter.line_segment([screen(*a), screen(*b)], Stroke::new(2.5, blue)); }
+            _ => {}
+        }
+    }
+    for (_, _, r) in rects.iter().filter(|(id, _, _)| chosen.contains(id)) {
+        painter.rect_stroke(egui::Rect::from_two_pos(screen([r[0], r[1]]), screen([r[2], r[3]])), 0.0, Stroke::new(2.5, blue), egui::StrokeKind::Middle);
+    }
+    // interaction: Select picks the element under the pointer; Wall Opening sketches a rectangle on a wall
+    let hover = response.hover_pos().map(|h| xf.model(h));
+    let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    match app.tool {
+        crate::Tool::Select => {
+            if response.clicked() {
+                if let Some(h) = response.interact_pointer_pos() {
+                    let hit = pick_at(&app.document, &view, xf.model(h));
+                    app.select_element(hit);
+                }
+            }
+        }
+        crate::Tool::WallOpening => {
+            if let (Some((_, c)), Some(h)) = (app.view_corner, hover) {
+                painter.rect_stroke(egui::Rect::from_two_pos(screen(c), screen(h)), 0.0, Stroke::new(1.5, blue), egui::StrokeKind::Middle);
+            }
+            if esc { if app.view_corner.is_some() { app.view_corner = None; } else { app.choose_tool(crate::Tool::Select); } }
+            else if response.clicked() {
+                if let Some(h) = response.interact_pointer_pos() { app.view_opening_click(&view, xf.model(h)); }
+            }
+        }
+        _ => { if esc { app.choose_tool(crate::Tool::Select); } }
+    }
 }
 
 impl Desktop {
+    /// A click of the Wall Opening tool in an elevation or section: the first click is a corner on a wall, the second the
+    /// opposite corner (on the same wall); the rectangle between them is the opening, as Revit sketches it in a view.
+    pub(crate) fn view_opening_click(&mut self, view: &SectionView, at: [f64; 2]) {
+        let Some((wall, c0)) = self.view_corner else {
+            let hit = view.items.iter().rev().find(|i| i.element.kind == Kind::Wall && match &i.shape {
+                Shape::Region { outer, holes } => inside(outer, at) && !holes.iter().any(|h| inside(h, at)),
+                Shape::Fill(ring) => inside(ring, at),
+                _ => false,
+            });
+            let Some(hit) = hit else { self.message = "Wall Opening: click a corner of the opening on a wall".into(); return };
+            let wall = ElementId(hit.element.id);
+            if wall_frame(&self.document, view, wall).is_none() { self.message = "Wall Opening: that wall is not parallel to this view; use a view that looks square on at it".into(); return; }
+            self.view_corner = Some((wall, at));
+            self.message = "Wall Opening: click the opposite corner of the opening".into();
+            return;
+        };
+        self.view_corner = None;
+        let Some((from, to, sill, head)) = opening_of_corners(&self.document, view, wall, c0, at) else { self.message = "Wall Opening: the wall is not parallel to this view".into(); return };
+        match self.document.place_wall_opening(wall, from, to, sill, head) {
+            Ok(id) => self.message = format!("Wall opening {} placed, {:.0} mm wide and {:.0} mm high; undo removes it", id.0, (to - from) * 1000.0, (head - sill) * 1000.0),
+            Err(e) => self.message = format!("Wall opening rejected ({e:?}): it must be at least 50 mm each way and inside the wall"),
+        }
+    }
+
     /// A click of the Section tool: one end of the line, then the other. The view looks to the left of the line.
     pub(crate) fn section_click(&mut self, level: ElementId, point: [f64; 2]) {
         let Some(a) = self.edit_pts.first().copied() else {

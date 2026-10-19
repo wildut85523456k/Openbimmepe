@@ -1978,6 +1978,59 @@ mod tests {
         assert!(crate::export::scene_for_view(&app.document).is_ok());
     }
     #[test]
+    fn wall_opening_is_sketched_on_a_wall_in_an_elevation_and_openings_and_walls_are_picked_there() {
+        use crate::section_ui::{build, opening_rects, pick_at, wall_frame};
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        // an elevation that looks square on at a wall of the sample
+        let walls: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).collect();
+        let (k, wall, view) = (0..4u8).find_map(|k| {
+            let v = build(&app.document, View::Elevation(k)).ok()?;
+            walls.iter().copied().find(|w| wall_frame(&app.document, &v, *w).is_some()).map(|w| (k, w, v))
+        }).expect("a wall faces one of the four elevations");
+        let f = wall_frame(&app.document, &view, wall).unwrap();
+        assert!(f.height >= 2.3 && f.len > 2.0, "{f:?}");
+        // a place on the wall where a 1 m by 1.2 m opening is free of anything else
+        let (z0, z1) = (f.base + 0.9, f.base + 2.1);
+        let umid = [0.15, 0.3, 0.5, 0.7, 0.85].iter().map(|t| f.u0 + f.sign * f.len * t)
+            .find(|&u| [(u - 0.5, z0), (u + 0.5, z1), (u, (z0 + z1) / 2.0)].iter().all(|&(a, b)| pick_at(&app.document, &view, [a, b]) == Some(wall)))
+            .expect("a free place on the wall");
+        // the wall is picked under the pointer
+        assert_eq!(pick_at(&app.document, &view, [umid, (z0 + z1) / 2.0]), Some(wall));
+        let before = app.document.wall_openings().len();
+        app.run_command("opening_wall", "Wall");
+        assert!(app.tool == crate::Tool::WallOpening);
+        app.view_opening_click(&view, [umid - 0.5, z0]);
+        assert!(app.view_corner.is_some(), "{}", app.message);
+        app.view_opening_click(&view, [umid + 0.5, z1]);
+        assert_eq!(app.document.wall_openings().len(), before + 1, "{}", app.message);
+        // the opening comes back in the same place in the view, and is what is picked there
+        let view = build(&app.document, View::Elevation(k)).unwrap();
+        let (id, host, r) = opening_rects(&app.document, &view).into_iter().max_by_key(|(id, _, _)| id.0).unwrap();
+        assert_eq!(host, wall);
+        assert!((r[0] - (umid - 0.5)).abs() < 1e-6 && (r[2] - (umid + 0.5)).abs() < 1e-6 && (r[1] - z0).abs() < 1e-6 && (r[3] - z1).abs() < 1e-6, "{r:?}");
+        assert_eq!(pick_at(&app.document, &view, [umid, (z0 + z1) / 2.0]), Some(id));
+        // the opening is a hole in the wall
+        let hole = view.items.iter().any(|i| i.element.kind == openbim_view::Kind::Wall && i.element.id == wall.0 && matches!(&i.shape, openbim_view::Shape::Region { holes, .. } if !holes.is_empty()));
+        assert!(hole, "the wall has no hole for the opening");
+        // a click in the drawn view selects what is under the pointer with the Select tool
+        app.choose_tool(crate::Tool::Select);
+        app.view = View::Elevation(k);
+        frame(&ctx, screen, &mut app, vec![]);
+        let xf = app.section_xf.expect("the view was drawn");
+        for (point, want) in [([umid, (z0 + z1) / 2.0], id), ([umid + 0.8, (z0 + z1) / 2.0], wall)] {
+            let at = xf.screen(point);
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+            assert_eq!(app.selected_id(), Some(want), "{point:?}: {}", app.message);
+        }
+        // Delete removes the selected wall with its opening; the view still draws
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert!(app.document.get(wall).is_none() && app.document.wall_openings().len() == before, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![]);
+    }
+    #[test]
     fn shaft_tool_sketches_an_outline_cuts_the_floor_above_and_shows_its_symbol_and_wall_opening_tool_picks_two_ends() {
         let (ctx, screen) = frames();
         let mut app = Desktop::sample();

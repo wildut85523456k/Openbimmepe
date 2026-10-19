@@ -84,7 +84,10 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Four building elevations (East, North, South, West) under Elevations in the Project Browser, with level lines and names/heights | done: walls, slabs, roofs, stairs, openings in slabs, families; hidden-line order far to near; no elevation markers in plans (the ribbon Elevation button opens East) |
 | Section tool: two picks in a plan (click or press-drag-release), the view looks to the left of the line, tick shows the side; listed in the Project Browser and as a tab; Properties: View Depth, Open view | done; saved, undoable; section heads/bubbles, flipping, split segments, cut-plane offsets and crop regions are missing |
 | Cut elements are filled dark, below/overhead/beyond are lines and tints, levels are dashed lines with labels | done (line weights are fixed, no view templates or detail levels) |
-| Editing in these views (selecting, moving, tags, dimensions, drawing), wall openings drawn in elevation, Elevation tool placing markers, callouts, legends | missing: the views are read-only |
+| Select by click in an elevation or section (walls, slabs, roofs, stairs, columns, beams, doors/windows, wall openings; the element turns blue; Properties edits it; Delete removes it with what it hosts) | done (2026-10-19); picking is by the drawn shapes, so a wall seen through a hole is not picked; level lines are not picked |
+| Wall openings drawn in elevation | done: the opening is a hole in its wall in the view (walls parallel to the view only; a wall seen end on has no opening drawn) |
+| Wall Opening tool in an elevation or section: click one corner on a wall, then the opposite corner; the rectangle becomes the opening (sill and head from its heights, along the wall from its width) | done; the wall must be parallel to the view; the rubber band shows the rectangle; it does not snap to other edges and the options-bar sill/head values are not used in this mode |
+| Move, rotate, copy, mirror, align, tags, dimensions, drawing walls/floors in these views; drag handles; Elevation tool placing markers in plans; callouts; legends | missing: other tools say they work in plan views |
 
 ## Ceiling
 | Revit behaviour | State |
@@ -112,7 +115,7 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Revit | This app |
 |---|---|
 | Architecture > Opening panel: By Face, Shaft, Wall, Vertical, Dormer | the five buttons are there; Shaft and Wall work, By Face, Vertical and Dormer say they are not implemented. All five use my placeholder copy of the opening icon (the approved set has one icon) |
-| Wall Opening: pick a wall, sketch a rectangle (in an elevation or section view) | done in a plan view only, as there are no elevation views yet: click one end on a wall, then the other end on the same wall; the sill and head heights are in the options bar (900 / 2100 are my defaults). The opening is a rectangle and follows its wall; deleting the wall deletes it |
+| Wall Opening: pick a wall, sketch a rectangle (in an elevation or section view) | done in a plan view (click one end on a wall, then the other end on the same wall) and in an elevation or section view (two opposite corners); the sill and head heights are in the options bar (900 / 2100 are my defaults). The opening is a rectangle and follows its wall; deleting the wall deletes it |
 | Wall Opening in 3D | done: the wall is cut (same cut as a door or window) |
 | Wall Opening in plan | dashed jambs across the wall; it can be picked on them; the wall's own plan lines are not broken |
 | Shaft Opening: sketch a boundary, Base Constraint / Base Offset / Top Constraint / Top Offset, Finish | done: click the corners (snapped to 50 mm), Enter / first corner / Finish closes; Base is the plan's level, Top defaults to the level above and is chosen in the options bar ("Up to level"), both offsets are editable there and in Properties afterwards |
@@ -130,7 +133,7 @@ Split Element. The Offset and Wall Joins icons are placeholders I drew (the appr
 All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Wall openings drawn in elevation as Revit does, editing in elevation/section views, elevation markers (Room, Roof, Ceiling, Stair, Opening and read-only elevations/sections are done).
+1. Elevation markers in plans, section heads, moving things in elevation/section views (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting and wall openings in them are done).
 2. Railings, L/U stairs, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
