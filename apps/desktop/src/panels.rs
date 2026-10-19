@@ -926,7 +926,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn view_name(view: View) -> &'static str {
-    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) | View::Marked(..) => "Elevation / section" }
+    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) | View::Marked(..) => "Elevation / section", View::Schedule(_) => "Schedule" }
 }
 
 struct Node {
@@ -973,7 +973,9 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
             .id_salt(&path).default_open(node.name == "Views (all)" || !node.children.is_empty())
             .open(if query.is_empty() { None } else { Some(true) })
             .show(ui, |ui| {
-                if node.children.is_empty() {
+                if node.name == "Schedules/Quantities" {
+                    app.schedule_browser_items(ui, query);
+                } else if node.children.is_empty() {
                     ui.label(RichText::new("No items in sample").weak().italics());
                 } else {
                     // A matching parent reveals its entire subtree.

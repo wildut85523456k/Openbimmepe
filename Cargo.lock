@@ -2468,6 +2468,7 @@ dependencies = [
  "openbim-geom",
  "openbim-place",
  "openbim-route",
+ "rayon",
 ]
 
 [[package]]

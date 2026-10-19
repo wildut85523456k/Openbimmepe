@@ -20,6 +20,7 @@ mod file;
 mod mep_tool;
 mod insulation_ui;
 mod systems_ui;
+mod schedule_ui;
 mod mep_settings_ui;
 mod compute_ui;
 mod elec_ui;
@@ -34,7 +35,7 @@ use eframe::egui::{self, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Workspace { Design, Coordination, Automation }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum View {
     Plan, UpperPlan, ThreeD, Mechanical,
     /// one of the four building elevations: East, North, South, West
@@ -44,7 +45,9 @@ enum View {
     /// one view of an elevation marker: the marker's element number and the direction (0..4 as the four elevations)
     Marked(u64, u8),
     /// the plan of a level added with the Level tool
-    Level(u64) }
+    Level(u64),
+    /// a schedule/quantities view (its number)
+    Schedule(u64) }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
@@ -214,6 +217,7 @@ struct Desktop {
     insulation_dialog: Option<insulation_ui::InsulationDialog>,
     /// systems of equipment, the System Browser and Generate Layout
     systems: systems_ui::SystemsUi,
+    schedules: schedule_ui::ScheduleUi,
     /// Edit Type of a wall type: its layers
     type_editor: Option<type_editor::TypeEditor>,
     /// the End Point tool and the Compute window
@@ -278,7 +282,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -462,6 +466,7 @@ impl Desktop {
             "create_pipe_system" => self.open_create_system(true),
             "generate_layout" => self.open_generate_layout(),
             "system_browser" => self.systems.browser = !self.systems.browser,
+            "schedule" => self.open_new_schedule(),
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
             "redo" => self.redo_document(),
@@ -586,6 +591,9 @@ impl eframe::App for Desktop {
         self.insulation_window(&ctx);
         self.create_system_window(&ctx);
         self.system_browser_window(&ctx);
+        self.new_schedule_window(&ctx);
+        self.schedule_props_window(&ctx);
+        self.rename_schedule_window(&ctx);
         self.layout_window(&ctx);
         self.type_editor_window(&ctx);
         self.compute_window(&ctx);

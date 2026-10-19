@@ -205,6 +205,12 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
         let ids: Vec<String> = d.members.iter().map(|i| i.0.to_string()).collect();
         out.push(format!("G|nm={}|sy={}|b={}|m={}", esc(&d.name), d.system.code(), d.base.map_or("N".to_string(), |b| b.0.to_string()), ids.join(",")));
     }
+    for sc in &m.schedules {
+        let fl: Vec<String> = sc.fields.iter().map(|f| format!("{},{},{},{}", esc(&f.key), esc(&f.heading), u8::from(f.hidden), u8::from(f.totals))).collect();
+        let ft: Vec<String> = sc.filters.iter().map(|f| format!("{},{},{}", esc(&f.field), f.op.code(), esc(&f.value))).collect();
+        let so: Vec<String> = sc.sorts.iter().map(|s| format!("{},{},{},{},{}", esc(&s.field), u8::from(s.descending), u8::from(s.header), u8::from(s.footer), u8::from(s.blank))).collect();
+        out.push(format!("H|id={}|nm={}|k={}|it={}|gt={}|f={}|fl={}|so={}", sc.id, esc(&sc.name), sc.kind.code(), u8::from(sc.itemize), u8::from(sc.grand_totals), fl.join(";"), ft.join(";"), so.join(";")));
+    }
     for q in &m.equip_links { out.push(format!("Q|p={}|el={}|cn={}", port_text(&q.port), q.element.0, esc(&q.connector))); }
     for n in &m.elec_nodes {
         let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
@@ -224,7 +230,7 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
@@ -236,6 +242,22 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
             // a file written before the insulation types existed has the standard ones
             let (it, lt) = (f.get("it").map_or(Ok(have.insulation_types), |t| names(t))?, f.get("lt").map_or(Ok(have.lining_types), |t| names(t))?);
             m.settings = super::MepSettings { pipe_slopes_pct: list(get("sl")?)?, pipe_diameters_mm: list(get("dn")?)?, duct_widths_mm: list(get("dw")?)?, duct_heights_mm: list(get("dh")?)?, insulation_types: it, lining_types: lt };
+            continue;
+        }
+        if line.starts_with("H|") {
+            let rows = |t: &str, n: usize| -> Result<Vec<Vec<String>>, String> {
+                if t.is_empty() { return Ok(Vec::new()); }
+                t.split(';').map(|r| { let c: Vec<&str> = r.split(',').collect(); if c.len() != n { return Err("a schedule record with a part missing".to_string()); } Ok(c.iter().map(|x| x.to_string()).collect()) }).collect()
+            };
+            let flag = |t: &str| -> Result<bool, String> { match t { "0" => Ok(false), "1" => Ok(true), _ => Err("a schedule flag that is not 0 or 1".into()) } };
+            let mut def = crate::schedule::ScheduleDef {
+                id: int(get("id")?)?, name: unesc(get("nm")?)?, kind: crate::schedule::ScheduleKind::from_code(get("k")?).ok_or("an unknown schedule category")?,
+                fields: Vec::new(), filters: Vec::new(), sorts: Vec::new(), itemize: flag(get("it")?)?, grand_totals: flag(get("gt")?)?,
+            };
+            for r in rows(get("f")?, 4)? { def.fields.push(crate::schedule::ScheduleField { key: unesc(&r[0])?, heading: unesc(&r[1])?, hidden: flag(&r[2])?, totals: flag(&r[3])? }); }
+            for r in rows(get("fl")?, 3)? { def.filters.push(crate::schedule::ScheduleFilter { field: unesc(&r[0])?, op: crate::schedule::FilterOp::from_code(&r[1]).ok_or("an unknown filter")?, value: unesc(&r[2])? }); }
+            for r in rows(get("so")?, 5)? { def.sorts.push(crate::schedule::ScheduleSort { field: unesc(&r[0])?, descending: flag(&r[1])?, header: flag(&r[2])?, footer: flag(&r[3])?, blank: flag(&r[4])? }); }
+            m.schedules.push(def);
             continue;
         }
         if line.starts_with("G|") {
@@ -318,7 +340,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

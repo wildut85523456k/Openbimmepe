@@ -176,6 +176,8 @@ pub struct MepData {
     pub insulations: Vec<MepInsulation>,
     /// the named systems of equipment
     pub systems: Vec<MepSystemDef>,
+    /// the schedules/quantities views
+    pub schedules: Vec<crate::schedule::ScheduleDef>,
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
@@ -191,7 +193,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -222,6 +224,7 @@ impl MepData {
                 let members: Vec<ElementId> = d.members.iter().copied().filter(|m| elements.get(m).is_some_and(|x| x.category == Category::Family)).collect();
                 (!members.is_empty()).then(|| MepSystemDef { name: d.name.clone(), system: d.system, base: d.base.filter(|b| members.contains(b)), members })
             }).collect(),
+            schedules: self.schedules.clone(),
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
@@ -309,6 +312,12 @@ impl MepData {
                 && d.base.is_none_or(|b| d.members.contains(&b));
             // a piece of equipment is in one system of each type, as a connector is in one system
             if !ok || !named.insert(d.name.clone()) || d.members.iter().any(|m| !member_of.insert((*m, d.system.code()))) { return Err(EditError::InvalidMep); }
+        }
+        let mut sched_names = std::collections::BTreeSet::new();
+        let mut sched_ids = std::collections::BTreeSet::new();
+        if self.schedules.len() > crate::schedule::MAX_SCHEDULES { return Err(EditError::InvalidMep); }
+        for s in &self.schedules {
+            if s.check().is_err() || !sched_names.insert(s.name.clone()) || !sched_ids.insert(s.id) { return Err(EditError::InvalidMep); }
         }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }

@@ -85,6 +85,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) { app.delete_selected(); }
     if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
+    if let View::Schedule(id) = app.view { return app.show_schedule(ui, id); }
     if matches!(app.view, View::Elevation(_) | View::Section(_) | View::Marked(..)) { return crate::section_ui::show(app, ui); }
     let level_id = app.plan_level();
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);

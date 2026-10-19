@@ -16,3 +16,4 @@ openbim-place = { path = "../place" }
 openbim-calc = { path = "../calc" }
 i_overlay = "4"
 earcutr = "0.5.0"
+rayon = "1.10"

@@ -146,6 +146,7 @@ const ANNOTATE: &[Group] = &[
     Group { title: "Revision", commands: &[c("revision_cloud", "Revision Cloud")] },
 ];
 const ANALYZE: &[Group] = &[
+    Group { title: "Reports & Schedules", commands: &[c("schedule", "Schedules/Quantities")] },
     Group { title: "Systems", commands: &[c("end_point", "End Point"), c("compute", "Compute")] },
     Group { title: "Coordination", commands: &[c("clash", "Clash Detection"), c("interference_check", "Interference Check")] },
 ];
@@ -156,7 +157,7 @@ const COLLABORATE: &[Group] = &[
 ];
 const VIEW: &[Group] = &[
     Group { title: "Create", commands: &[
-        c("view", "View"), c("section", "Section"), c("elevation", "Elevation"), c("level", "Level"),
+        c("view", "View"), c("section", "Section"), c("elevation", "Elevation"), c("level", "Level"), c("schedule", "Schedules/Quantities"),
     ]},
     Group { title: "Windows", commands: &[c("system_browser", "System Browser")] },
     Group { title: "Navigate", commands: &[
