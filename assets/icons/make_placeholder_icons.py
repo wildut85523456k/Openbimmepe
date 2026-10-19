@@ -124,5 +124,26 @@ def view_range():
     d.polygon([(100 * S, 96 * S), (112 * S, 82 * S), (88 * S, 82 * S)], fill=DARK)
     save(im, "view_range")
 
-for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings, create_system, create_piping_system, generate_layout, system_browser, view_range): f()
+def print_icon():
+    # a printer: paper in, paper out
+    im, d = canvas()
+    d.rectangle([14 * S, 44 * S, 114 * S, 92 * S], fill=LIGHT, outline=DARK, width=4 * S)
+    d.rectangle([34 * S, 16 * S, 94 * S, 48 * S], fill=(255, 255, 255, 255), outline=DARK, width=4 * S)
+    d.rectangle([34 * S, 80 * S, 94 * S, 116 * S], fill=(255, 255, 255, 255), outline=DARK, width=4 * S)
+    for y in (90, 98, 106):
+        d.line([42 * S, y * S, 86 * S, y * S], fill=BLUE, width=3 * S)
+    d.ellipse([92 * S, 56 * S, 104 * S, 68 * S], fill=ORANGE)
+    save(im, "print")
+
+def add_view():
+    # a sheet with a view being placed on it
+    im, d = canvas()
+    sheet(d, 14, 14, 100, 100, fill=LIGHT, line=DARK)
+    d.rectangle([28 * S, 28 * S, 78 * S, 70 * S], fill=(255, 255, 255, 255), outline=BLUE, width=4 * S)
+    d.line([40 * S, 56 * S, 52 * S, 40 * S, 66 * S, 56 * S], fill=BLUE, width=4 * S)
+    d.line([90 * S, 72 * S, 90 * S, 108 * S], fill=ORANGE, width=6 * S)
+    d.line([72 * S, 90 * S, 108 * S, 90 * S], fill=ORANGE, width=6 * S)
+    save(im, "add_view")
+
+for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings, create_system, create_piping_system, generate_layout, system_browser, view_range, print_icon, add_view): f()
 pin(slash=True)

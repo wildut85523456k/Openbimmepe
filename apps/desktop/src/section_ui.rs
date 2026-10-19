@@ -96,7 +96,7 @@ fn fill(dark: bool, class: Class, kind: Kind) -> Color32 {
 }
 
 /// The triangles that fill a region with holes.
-fn triangles(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Vec<([f64; 2], [f64; 2], [f64; 2])> {
+pub(crate) fn triangles(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Vec<([f64; 2], [f64; 2], [f64; 2])> {
     let Some(m) = openbim_family::meshing::prism(outer, holes, 0.0, 1.0) else { return Vec::new() };
     m.tris.iter().filter(|t| t.iter().all(|&i| m.verts[i as usize][2] > 0.5)).map(|t| {
         let p = |i: u32| { let v = m.verts[i as usize]; [v[0], v[1]] };

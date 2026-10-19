@@ -926,7 +926,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn view_name(view: View) -> &'static str {
-    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) | View::Marked(..) => "Elevation / section", View::Schedule(_) => "Schedule" }
+    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) | View::Marked(..) => "Elevation / section", View::Schedule(_) => "Schedule", View::Sheet(_) => "Sheet" }
 }
 
 struct Node {
@@ -963,6 +963,7 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
         let response = ui.selectable_label(app.browser_selected == path, label)
             .on_hover_text("Double-click to open view");
         if response.clicked() { app.browser_selected = path; }
+        response.context_menu(|ui| app.add_to_sheet_menu(ui, crate::view_ui::view_key(view)));
         if response.double_clicked() {
             app.view = view;
             app.selected = None;
@@ -975,6 +976,8 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
             .show(ui, |ui| {
                 if node.name == "Schedules/Quantities" {
                     app.schedule_browser_items(ui, query);
+                } else if node.name == "Sheets (all)" {
+                    app.sheet_browser_items(ui, query);
                 } else if node.children.is_empty() {
                     ui.label(RichText::new("No items in sample").weak().italics());
                 } else {

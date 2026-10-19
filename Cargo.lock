@@ -2454,6 +2454,7 @@ dependencies = [
  "openbim-route",
  "openbim-view",
  "openbim-viewport-egui",
+ "rayon",
  "rfd",
 ]
 

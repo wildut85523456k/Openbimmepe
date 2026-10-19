@@ -504,11 +504,25 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
         // a system the model has by that name, or whose equipment is in another of the type, is not taken
         if out.systems.iter().all(|x| x.name != d.name && !(x.system == d.system && x.members.iter().any(|m| d.members.contains(m)))) { out.systems.push(d); }
     }
+    // the number each incoming schedule has in the model, for the sheets that show them
+    let mut schedule_ids: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
     for mut sc in incoming.schedules {
         // a schedule the model has by that name is not taken again; one whose number is in use gets a new one
-        if out.schedules.iter().any(|x| x.name == sc.name) { continue; }
+        if let Some(x) = out.schedules.iter().find(|x| x.name == sc.name) { schedule_ids.insert(sc.id, x.id); continue; }
+        let old = sc.id;
         if out.schedules.iter().any(|x| x.id == sc.id) { sc.id = out.schedules.iter().map(|x| x.id + 1).max().unwrap_or(1); }
+        schedule_ids.insert(old, sc.id);
         out.schedules.push(sc);
+    }
+    for mut sh in incoming.sheets {
+        // a sheet the model has by that number is not taken again; a view is on one sheet only
+        if out.sheets.iter().any(|x| x.number.eq_ignore_ascii_case(&sh.number)) { continue; }
+        if out.sheets.iter().any(|x| x.id == sh.id) { sh.id = out.sheets.iter().map(|x| x.id + 1).max().unwrap_or(1); }
+        for v in &mut sh.viewports {
+            if let Some(id) = openbim_document::schedule_ref(&v.view) { v.view = schedule_ids.get(&id).map_or_else(|| v.view.clone(), |n| openbim_document::schedule_view(*n)); }
+        }
+        sh.viewports.retain(|v| !out.sheets.iter().any(|x| x.viewports.iter().any(|w| w.view == v.view)));
+        out.sheets.push(sh);
     }
     for v in incoming.view_settings {
         if !out.view_settings.iter().any(|x| x.key == v.key) { out.view_settings.push(v); }

@@ -56,6 +56,8 @@ pub static ICONS: &[Icon] = &[
     icon!("generate_layout"),
     icon!("system_browser"),
     icon!("view_range"),
+    icon!("print"),
+    icon!("add_view"),
     icon!("paste"),
     icon!("paste_same_place"),
     icon!("pin"),

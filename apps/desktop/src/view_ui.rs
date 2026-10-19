@@ -18,8 +18,27 @@ pub(crate) fn view_key(v: View) -> Option<String> {
         View::Elevation(k) => format!("e{k}"),
         View::Section(id) => format!("s{id}"),
         View::Marked(id, k) => format!("m{id}_{k}"),
-        View::Schedule(_) => return None,
+        View::Schedule(_) | View::Sheet(_) => return None,
     })
+}
+
+/// The view a key stands for; the inverse of `view_key`. A schedule is `sc` and its number.
+pub(crate) fn view_from_key(key: &str) -> Option<View> {
+    let num = |t: &str| -> Option<u64> { (!t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse().ok()).flatten() };
+    match key {
+        "mech" => return Some(View::Mechanical),
+        "3d" => return Some(View::ThreeD),
+        _ => {}
+    }
+    if let Some(n) = key.strip_prefix("sc") { return num(n).map(View::Schedule); }
+    if let Some(n) = key.strip_prefix('p') { return num(n).map(|n| match n { 10 => View::Plan, 11 => View::UpperPlan, n => View::Level(n) }); }
+    if let Some(n) = key.strip_prefix('e') { return num(n).filter(|k| *k < 4).map(|k| View::Elevation(k as u8)); }
+    if let Some(n) = key.strip_prefix('s') { return num(n).map(View::Section); }
+    if let Some(r) = key.strip_prefix('m') {
+        let (id, k) = r.split_once('_')?;
+        return Some(View::Marked(num(id)?, num(k).filter(|k| *k < 4)? as u8));
+    }
+    None
 }
 
 /// What Temporary Hide/Isolate does.
@@ -119,7 +138,7 @@ pub(crate) fn annotation_px(paper_mm: f32, denominator: u32, px_per_m: f32, min:
     (paper_mm * denominator as f32 / 1000.0 * px_per_m).clamp(min, max)
 }
 
-fn all_meshes(doc: &Document) -> Vec<PlanMesh> {
+pub(crate) fn all_meshes(doc: &Document) -> Vec<PlanMesh> {
     use openbim_document::{Category, Geometry};
     let mut out: Vec<PlanMesh> = Vec::new();
     let put = |id: ElementId, mesh: Mesh, out: &mut Vec<PlanMesh>| {
@@ -463,6 +482,15 @@ mod tests {
         for v in [View::Plan, View::UpperPlan, View::Level(40), View::Mechanical, View::ThreeD, View::Elevation(3), View::Section(7), View::Marked(7, 2)] {
             assert!(ViewSettings::default_for(&view_key(v).unwrap()).check(&Default::default()).is_ok(), "{v:?}");
         }
+    }
+
+    #[test]
+    fn a_key_gives_back_its_view() {
+        for v in [View::Plan, View::UpperPlan, View::Level(40), View::Mechanical, View::ThreeD, View::Elevation(3), View::Section(7), View::Marked(7, 2)] {
+            assert_eq!(view_from_key(&view_key(v).unwrap()), Some(v), "{v:?}");
+        }
+        assert_eq!(view_from_key("sc12"), Some(View::Schedule(12)));
+        for bad in ["", "p", "pp1", "e9", "m7", "m7_9", "s", "sc", "x1", "p-1", "3D"] { assert_eq!(view_from_key(bad), None, "{bad:?}"); }
     }
 
     #[test]

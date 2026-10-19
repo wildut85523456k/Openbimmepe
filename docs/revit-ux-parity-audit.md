@@ -223,6 +223,31 @@ Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". 
 - In a section or an elevation the model is cut again every frame; with many hidden elements that costs a copy of the model each time.
 - The windows and the bar have only been checked by drawing them in tests (no crash, the right numbers); I have not looked at them on a screen.
 
+## Sheets and printing (done 2026-10-19, step 5c of the books review)
+| Revit behaviour | App |
+|---|---|
+| New Sheet with a paper size and a title block | done: A0 to A4, landscape or portrait, a drawn title block (frame, name, number, date, drawn by, checked by, scale) |
+| Sheet number unique in the project | done: refused with a message if used by another sheet |
+| Place View / drag a view from the Project Browser onto the sheet | done: Add to Sheet in the Project Browser and Place View in the ribbon; the view lands in the first free spot of the drawing area, at the view's own scale |
+| A view can be on one sheet only | done: refused with a message |
+| Move a viewport with snap, Esc cancels | done |
+| Activate View, Remove From Sheet, Sheet Properties | done |
+| Title block texts | done: name, number, date, drawn by, checked by (the same fields as the Revit title block) |
+| Viewport title with detail number and scale | done: number in a circle, view name, line, scale |
+| Schedules on a sheet | done: a schedule is placed as a table, drawn with its heading, rows and grand total |
+| Print to PDF, one page per sheet in the order of the sheet numbers, in colour or black lines | done: vector PDF, page size from the sheet |
+| Project Browser has a Sheets folder | done |
+| Part of the model | done: save, undo, the IFC file (the app's own records `R|`); a sheet drops a view or schedule that was deleted |
+
+**Not the same as Revit, said plainly:**
+- The 3D view on a sheet is a **fixed isometric**, not the camera you have in the 3D view.
+- Text in the PDF is standard Helvetica: characters outside Latin-1 print as "?".
+- Not built: revisions and revision clouds, title block families and editing of the title block, guide grid, matchlines, view references, dependent views, crop region (the viewport box is the extent of the content), viewport types, schedule split over several sheets, legends, sheet list schedule, duplicate sheet.
+- A schedule can be on one sheet only. The scale of a viewport is the scale of the view (change it in the View Control Bar).
+- In plans on a sheet, ducts, pipes, beams, stairs and railings are drawn from their meshes; fittings and insulation are not drawn. The compute and cable overlays are not on sheets.
+- On screen the text uses the egui font, so widths differ slightly from the PDF.
+- I looked at the sheet only as a PDF rendered to a picture (plan, 3D, elevation, schedule, title block); I have not looked at the windows on a real screen, and the black-and-white print has not been looked at.
+
 ## Books review (2026-10-19)
 The Revit MEP 2024 and Architecture 2026 books were read against the app: `docs/revit-book-review.md` (project doc `claude/revit-book-review.md`). It adds the rows this audit lacked for the Duct/Pipe placement tab (toggles, justification, slope, insulation), systems and Generate Layout, spaces and zones, electrical circuits, schedules, sheets, view range and Visibility/Graphics, other dimension types, and the modify tools not yet built (Redo, Create Similar, Select All Instances, Copy/Paste, Match Type, Pin, Split, Array). Redo and the Create Similar group were built from it (see Select-mode editing).
 

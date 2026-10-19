@@ -159,6 +159,7 @@ const VIEW: &[Group] = &[
     Group { title: "Create", commands: &[
         c("view", "View"), c("section", "Section"), c("elevation", "Elevation"), c("level", "Level"), c("schedule", "Schedules/Quantities"),
     ]},
+    Group { title: "Sheet Composition", commands: &[c("sheet", "Sheet"), c("add_view", "Place View"), c("print", "Print")] },
     Group { title: "Graphics", commands: &[c("visibility", "Visibility/Graphics"), c("view_range", "View Range")] },
     Group { title: "Windows", commands: &[c("system_browser", "System Browser")] },
     Group { title: "Navigate", commands: &[

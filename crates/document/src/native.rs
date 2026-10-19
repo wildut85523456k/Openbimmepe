@@ -217,6 +217,10 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
         let els: Vec<String> = v.hidden_elements.iter().map(|e| e.0.to_string()).collect();
         out.push(format!("W|k={}|sc={}|dt={}|rg={range}|hc={}|he={}", esc(&v.key), v.scale, v.detail.code(), cats.join(";"), els.join(",")));
     }
+    for s in &m.sheets {
+        let vp: Vec<String> = s.viewports.iter().map(|v| format!("{},{},{:?},{:?},{},{}", v.id, esc(&v.view), v.x_mm, v.y_mm, esc(&v.title), u8::from(v.show_title))).collect();
+        out.push(format!("R|id={}|no={}|nm={}|sz={}|po={}|pr={}|cl={}|dt={}|dr={}|ck={}|vp={}", s.id, esc(&s.number), esc(&s.name), s.size.code(), u8::from(s.portrait), esc(&s.block.project), esc(&s.block.client), esc(&s.block.date), esc(&s.block.drawn_by), esc(&s.block.checked_by), vp.join(";")));
+    }
     for q in &m.equip_links { out.push(format!("Q|p={}|el={}|cn={}", port_text(&q.port), q.element.0, esc(&q.connector))); }
     for n in &m.elec_nodes {
         let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
@@ -236,7 +240,7 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
@@ -258,6 +262,24 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
             let cats = if get("hc")?.is_empty() { Vec::new() } else { get("hc")?.split(';').map(|c| crate::ViewCategory::from_code(&unesc(c)?).ok_or_else(|| "an unknown view category".to_string())).collect::<Result<Vec<_>, _>>()? };
             let els = if get("he")?.is_empty() { Vec::new() } else { get("he")?.split(',').map(|t| int(t).map(ElementId)).collect::<Result<Vec<_>, _>>()? };
             m.view_settings.push(crate::ViewSettings { key: unesc(get("k")?)?, scale: int(get("sc")?)? as u32, detail: crate::Detail::from_code(get("dt")?).ok_or("an unknown detail level")?, range, hidden_categories: cats, hidden_elements: els });
+            continue;
+        }
+        if line.starts_with("R|") {
+            let flag = |t: &str| -> Result<bool, String> { match t { "0" => Ok(false), "1" => Ok(true), _ => Err("a sheet flag that is not 0 or 1".into()) } };
+            let mut viewports = Vec::new();
+            if !get("vp")?.is_empty() {
+                for r in get("vp")?.split(';') {
+                    let c: Vec<&str> = r.split(',').collect();
+                    if c.len() != 6 { return Err("a viewport record with a part missing".into()); }
+                    viewports.push(crate::Viewport { id: int(c[0])?, view: unesc(c[1])?, x_mm: num(c[2])?, y_mm: num(c[3])?, title: unesc(c[4])?, show_title: flag(c[5])? });
+                }
+            }
+            m.sheets.push(crate::SheetDef {
+                id: int(get("id")?)?, number: unesc(get("no")?)?, name: unesc(get("nm")?)?,
+                size: crate::PaperSize::from_code(get("sz")?).ok_or("an unknown paper size")?, portrait: flag(get("po")?)?,
+                block: crate::TitleBlock { project: unesc(get("pr")?)?, client: unesc(get("cl")?)?, date: unesc(get("dt")?)?, drawn_by: unesc(get("dr")?)?, checked_by: unesc(get("ck")?)? },
+                viewports,
+            });
             continue;
         }
         if line.starts_with("H|") {
@@ -356,7 +378,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

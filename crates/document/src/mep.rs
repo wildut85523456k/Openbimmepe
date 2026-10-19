@@ -180,6 +180,8 @@ pub struct MepData {
     pub schedules: Vec<crate::schedule::ScheduleDef>,
     /// the scale, detail level, view range and hidden categories and elements of the views that are not at their defaults
     pub view_settings: Vec<crate::viewsettings::ViewSettings>,
+    /// the sheets, with the views placed on them
+    pub sheets: Vec<crate::sheet::SheetDef>,
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
@@ -195,7 +197,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() && self.sheets.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -228,6 +230,15 @@ impl MepData {
             }).collect(),
             schedules: self.schedules.clone(),
             view_settings: self.view_settings.iter().cloned().map(|mut v| { v.hidden_elements.retain(|id| elements.contains_key(id)); v }).filter(|v| !v.is_default()).collect(),
+            sheets: self.sheets.iter().cloned().map(|mut s| {
+                // a view whose schedule or section line has gone leaves the sheet
+                s.viewports.retain(|v| match (crate::sheet::schedule_ref(&v.view), crate::sheet::view_element(&v.view)) {
+                    (Some(id), _) => self.schedules.iter().any(|d| d.id == id),
+                    (None, Some(e)) => elements.get(&e).is_some_and(|x| matches!(x.category, Category::Section | Category::Elevation)),
+                    (None, None) => true,
+                });
+                s
+            }).collect(),
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
@@ -325,6 +336,16 @@ impl MepData {
         let mut view_keys = std::collections::BTreeSet::new();
         for v in &self.view_settings {
             if v.is_default() || v.check(elements).is_err() || !view_keys.insert(v.key.clone()) { return Err(EditError::InvalidMep); }
+        }
+        if self.sheets.len() > crate::sheet::MAX_SHEETS { return Err(EditError::InvalidMep); }
+        let (mut sheet_ids, mut sheet_numbers, mut sheet_views) = (std::collections::BTreeSet::new(), std::collections::BTreeSet::new(), std::collections::BTreeSet::new());
+        for s in &self.sheets {
+            let refs_ok = s.viewports.iter().all(|v| match (crate::sheet::schedule_ref(&v.view), crate::sheet::view_element(&v.view)) {
+                (Some(id), _) => self.schedules.iter().any(|d| d.id == id),
+                (None, Some(e)) => elements.contains_key(&e),
+                (None, None) => true,
+            });
+            if s.check().is_err() || !refs_ok || !sheet_ids.insert(s.id) || !sheet_numbers.insert(s.number.to_ascii_lowercase()) || !s.viewports.iter().all(|v| sheet_views.insert(v.view.clone())) { return Err(EditError::InvalidMep); }
         }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }

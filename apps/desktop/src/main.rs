@@ -22,6 +22,9 @@ mod insulation_ui;
 mod systems_ui;
 mod schedule_ui;
 mod view_ui;
+mod pdf;
+mod sheet_draw;
+mod sheet_ui;
 mod mep_settings_ui;
 mod compute_ui;
 mod elec_ui;
@@ -48,7 +51,8 @@ enum View {
     /// the plan of a level added with the Level tool
     Level(u64),
     /// a schedule/quantities view (its number)
-    Schedule(u64) }
+    Schedule(u64),
+    Sheet(u64) }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
@@ -220,6 +224,7 @@ struct Desktop {
     systems: systems_ui::SystemsUi,
     schedules: schedule_ui::ScheduleUi,
     views: view_ui::ViewUi,
+    sheets: sheet_ui::SheetUi,
     /// Edit Type of a wall type: its layers
     type_editor: Option<type_editor::TypeEditor>,
     /// the End Point tool and the Compute window
@@ -284,7 +289,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -469,6 +474,9 @@ impl Desktop {
             "generate_layout" => self.open_generate_layout(),
             "system_browser" => self.systems.browser = !self.systems.browser,
             "schedule" => self.open_new_schedule(),
+            "sheet" => self.open_new_sheet(),
+            "add_view" => { let key = crate::view_ui::view_key(self.view).filter(|k| self.placeable_views().iter().any(|v| &v.0 == k)); self.open_add_view(None, key) }
+            "print" => self.open_print(),
             "visibility" => self.open_vis_graphics(),
             "view_range" => self.open_view_range(),
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
@@ -599,6 +607,10 @@ impl eframe::App for Desktop {
         self.schedule_props_window(&ctx);
         self.rename_schedule_window(&ctx);
         self.view_range_window(&ctx);
+        self.new_sheet_window(&ctx);
+        self.sheet_props_window(&ctx);
+        self.add_view_window(&ctx);
+        self.print_window(&ctx);
         self.vis_graphics_window(&ctx);
         self.layout_window(&ctx);
         self.type_editor_window(&ctx);
