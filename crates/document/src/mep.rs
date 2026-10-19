@@ -84,6 +84,24 @@ pub struct MepEndpoint {
     pub required_pressure_pa: f64,
 }
 
+/// What a layer on a duct, pipe or fitting is: insulation all round the outside, or (ducts only) lining on the inside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InsulationKind { Insulation, Lining }
+
+/// Insulation or lining on one duct, pipe or fitting (Revit's Add Insulation / Add Lining): a type from the lists of the
+/// Mechanical Settings and a thickness. One of each kind per piece.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MepInsulation {
+    pub node: MepNode,
+    pub kind: InsulationKind,
+    pub type_name: String,
+    /// metres, 1 mm to 200 mm
+    pub thickness_m: f64,
+}
+
+pub const MIN_INSULATION_M: f64 = 0.001;
+pub const MAX_INSULATION_M: f64 = 0.2;
+
 /// The lists of Revit's Mechanical Settings that this app keeps with the model: the slopes offered for a pipe (percent)
 /// and the sizes offered for pipes (diameters) and ducts (widths and heights), in millimetres. The drawing tools'
 /// options bars offer them; any other size can still be typed.
@@ -93,6 +111,9 @@ pub struct MepSettings {
     pub pipe_diameters_mm: Vec<f64>,
     pub duct_widths_mm: Vec<f64>,
     pub duct_heights_mm: Vec<f64>,
+    /// the names of the insulation types offered, and of the duct lining types
+    pub insulation_types: Vec<String>,
+    pub lining_types: Vec<String>,
 }
 
 impl Default for MepSettings {
@@ -102,6 +123,8 @@ impl Default for MepSettings {
             pipe_diameters_mm: vec![15.0, 20.0, 25.0, 32.0, 40.0, 50.0, 65.0, 80.0, 100.0, 125.0, 150.0, 200.0, 250.0, 300.0],
             duct_widths_mm: vec![100.0, 150.0, 200.0, 250.0, 300.0, 400.0, 500.0, 600.0, 800.0, 1000.0, 1200.0],
             duct_heights_mm: vec![100.0, 150.0, 200.0, 250.0, 300.0, 400.0, 500.0, 600.0],
+            insulation_types: ["Fiberglass", "Mineral wool", "Elastomeric foam", "Polyethylene foam"].map(String::from).to_vec(),
+            lining_types: ["Fiberglass liner", "Foam liner"].map(String::from).to_vec(),
         }
     }
 }
@@ -116,7 +139,14 @@ impl MepSettings {
             out.dedup();
             out
         };
+        let names = |v: &[String]| -> Vec<String> {
+            let mut out: Vec<String> = Vec::new();
+            for n in v { let n = n.trim().to_string(); if !n.is_empty() && n.chars().count() <= 60 && !out.contains(&n) { out.push(n); } }
+            out
+        };
         MepSettings {
+            insulation_types: names(&self.insulation_types),
+            lining_types: names(&self.lining_types),
             pipe_slopes_pct: tidy(&self.pipe_slopes_pct, 0.01, 100.0),
             pipe_diameters_mm: tidy(&self.pipe_diameters_mm, 10.0, 3000.0),
             duct_widths_mm: tidy(&self.duct_widths_mm, 10.0, 3000.0),
@@ -129,6 +159,8 @@ impl MepSettings {
 pub struct MepData {
     /// the Mechanical Settings lists
     pub settings: MepSettings,
+    /// insulation and lining on single ducts, pipes and fittings
+    pub insulations: Vec<MepInsulation>,
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
@@ -144,7 +176,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -157,6 +189,9 @@ impl MepData {
 
     pub fn fitting(&self, id: u64) -> Option<&MepFitting> { self.fittings.iter().find(|f| f.id == id) }
 
+    /// The insulation or lining of a given kind on a duct, pipe or fitting, if it has one.
+    pub fn insulation_of(&self, node: MepNode, kind: InsulationKind) -> Option<&MepInsulation> { self.insulations.iter().find(|i| i.node == node && i.kind == kind) }
+
     /// What a port is joined to.
     pub fn partner(&self, p: MepPort) -> Option<MepPort> {
         self.links.iter().find_map(|(a, b)| if *a == p { Some(*b) } else if *b == p { Some(*a) } else { None })
@@ -167,6 +202,7 @@ impl MepData {
         let alive = |n: &MepNode| match n { MepNode::Run(id) => is_run(elements.get(id)), MepNode::Fitting(_) => true };
         MepData {
             settings: self.settings.clone(),
+            insulations: self.insulations.iter().filter(|i| alive(&i.node)).cloned().collect(),
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
@@ -232,6 +268,17 @@ impl MepData {
             if !open || q.connector.is_empty() || !elements.get(&q.element).is_some_and(|x| x.category == Category::Family) || !linked.insert(q.port) { return Err(EditError::InvalidMep); }
         }
         if self.settings != self.settings.cleaned() { return Err(EditError::InvalidMep); }
+        let mut layered = std::collections::BTreeSet::new();
+        for i in &self.insulations {
+            let domain = match i.node {
+                MepNode::Run(id) => elements.get(&id).filter(|e| is_run(Some(e))).map(|e| if e.category == Category::Pipe { Domain::Pipe } else { Domain::Duct }),
+                MepNode::Fitting(id) => self.fitting(id).map(|f| f.domain),
+            };
+            let ok = domain.is_some_and(|d| i.kind == InsulationKind::Insulation || d == Domain::Duct)
+                && i.thickness_m.is_finite() && (MIN_INSULATION_M..=MAX_INSULATION_M).contains(&i.thickness_m)
+                && !i.type_name.trim().is_empty() && i.type_name.chars().count() <= 60;
+            if !ok || !layered.insert((i.node, i.kind)) { return Err(EditError::InvalidMep); }
+        }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }
         Ok(())
@@ -246,6 +293,39 @@ fn is_run(e: Option<&Element>) -> bool {
 }
 
 impl crate::Document {
+    /// Add / Edit Insulation (or Lining) on the given ducts, pipes and fittings: each gets the type and thickness, replacing
+    /// what it had of that kind. One undoable step. Lining is for ducts and their fittings only.
+    pub fn insulation_commands(&self, nodes: &[MepNode], kind: InsulationKind, type_name: &str, thickness_m: f64) -> Result<Vec<crate::Command>, String> {
+        let name = type_name.trim();
+        if nodes.is_empty() { return Err("nothing to insulate: select ducts or pipes first".into()); }
+        if name.is_empty() { return Err("the insulation needs a type".into()); }
+        if !thickness_m.is_finite() || !(MIN_INSULATION_M..=MAX_INSULATION_M).contains(&thickness_m) { return Err(format!("the thickness must be from {} to {} mm", MIN_INSULATION_M * 1000.0, MAX_INSULATION_M * 1000.0)); }
+        let mut data = self.mep().clone();
+        let mut changed = false;
+        for node in nodes {
+            let pipe = match node {
+                MepNode::Run(id) => { let e = self.get(*id).filter(|e| is_run(Some(e))).ok_or("only ducts, pipes and their fittings can be insulated")?; e.category == Category::Pipe }
+                MepNode::Fitting(id) => self.mep().fitting(*id).ok_or("a fitting is gone")?.domain == Domain::Pipe,
+            };
+            if pipe && kind == InsulationKind::Lining { return Err("lining is for ducts: a pipe can only be insulated".into()); }
+            let new = MepInsulation { node: *node, kind, type_name: name.to_string(), thickness_m };
+            if self.mep().insulation_of(*node, kind) == Some(&new) { continue; }
+            changed = true;
+            data.insulations.retain(|i| !(i.node == *node && i.kind == kind));
+            data.insulations.push(new);
+        }
+        if !changed { return Err("they have that already".into()); }
+        Ok(vec![crate::Command::SetMep(Box::new(data))])
+    }
+
+    /// Remove Insulation (or Lining) from the given pieces. An error when none of them has any.
+    pub fn remove_insulation_commands(&self, nodes: &[MepNode], kind: InsulationKind) -> Result<Vec<crate::Command>, String> {
+        let mut data = self.mep().clone();
+        data.insulations.retain(|i| !(i.kind == kind && nodes.contains(&i.node)));
+        if data.insulations.len() == self.mep().insulations.len() { return Err(format!("none of them has {}", if kind == InsulationKind::Lining { "lining" } else { "insulation" })); }
+        Ok(vec![crate::Command::SetMep(Box::new(data))])
+    }
+
     /// Mechanical Settings > OK: the lists (cleaned: out-of-range values dropped, sorted, each once) replace the model's, in one
     /// undoable step. Nothing happens, and no step is made, when they are the same.
     pub fn set_mep_settings(&mut self, settings: &MepSettings) -> Result<bool, EditError> {
@@ -454,6 +534,80 @@ mod tests {
         let mut bad = d.mep().clone();
         bad.settings.pipe_diameters_mm = vec![-5.0];
         assert_eq!(d.transact(d.revision(), &[crate::Command::SetMep(Box::new(bad))]), Err(EditError::InvalidMep));
+    }
+
+    #[test]
+    fn insulation_and_lining_go_on_runs_and_fittings_are_replaced_removed_saved_and_follow_the_run() {
+        let mut d = Document::spatial_sample();
+        let ids = d.place_mep_route(ElementId(10), &duct_route(&[[1.0, 1.0, 2.7], [5.0, 1.0, 2.7], [5.0, 4.0, 2.7]])).unwrap();
+        let (a, b) = (MepNode::Run(ids[0]), MepNode::Run(ids[1]));
+        let elbow = MepNode::Fitting(d.mep().fittings[0].id);
+        let go = |d: &mut Document, ops: Result<Vec<crate::Command>, String>| { let ops = ops.unwrap(); d.transact(d.revision(), &ops).unwrap(); };
+        // add to both runs and the elbow
+        let ops = d.insulation_commands(&[a, b, elbow], InsulationKind::Insulation, " Fiberglass ", 0.025);
+        go(&mut d, ops);
+        assert_eq!(d.mep().insulations.len(), 3);
+        assert_eq!(d.mep().insulation_of(a, InsulationKind::Insulation).unwrap().type_name, "Fiberglass");
+        // asking for the same again changes nothing and says so
+        assert!(d.insulation_commands(&[a], InsulationKind::Insulation, "Fiberglass", 0.025).is_err_and(|e| e.contains("already")));
+        // lining is a second layer on a duct; a thickness out of range or an empty type is refused
+        let ops = d.insulation_commands(&[a], InsulationKind::Lining, "Foam liner", 0.01);
+        go(&mut d, ops);
+        assert_eq!(d.mep().insulations.len(), 4);
+        for t in [0.0, 0.0005, 0.25, f64::NAN] { assert!(d.insulation_commands(&[a], InsulationKind::Insulation, "X", t).is_err(), "{t}"); }
+        assert!(d.insulation_commands(&[a], InsulationKind::Insulation, "  ", 0.02).is_err());
+        assert!(d.insulation_commands(&[], InsulationKind::Insulation, "X", 0.02).is_err());
+        assert!(d.insulation_commands(&[MepNode::Run(ElementId(10))], InsulationKind::Insulation, "X", 0.02).is_err(), "a level is not a duct");
+        // edit: the run takes the new thickness, once
+        let ops = d.insulation_commands(&[a], InsulationKind::Insulation, "Mineral wool", 0.04);
+        go(&mut d, ops);
+        assert_eq!(d.mep().insulations.len(), 4);
+        let i = d.mep().insulation_of(a, InsulationKind::Insulation).unwrap();
+        assert_eq!((i.type_name.as_str(), i.thickness_m), ("Mineral wool", 0.04));
+        // saved and read back
+        let lines = crate::native::mep_records(d.mep());
+        assert_eq!(lines.iter().filter(|l| l.starts_with("J|")).count(), 4);
+        assert_eq!(crate::native::parse_mep(&lines).unwrap(), *d.mep());
+        // remove the lining; removing what is not there is an error
+        let ops = d.remove_insulation_commands(&[a, b], InsulationKind::Lining);
+        go(&mut d, ops);
+        assert!(d.mep().insulation_of(a, InsulationKind::Lining).is_none());
+        assert!(d.remove_insulation_commands(&[a, b], InsulationKind::Lining).is_err_and(|e| e.contains("none of them")));
+        // a deleted run takes its insulation with it; undo brings it back
+        d.transact(d.revision(), &[crate::Command::Delete { id: ids[1] }]).unwrap();
+        assert!(d.mep().insulation_of(b, InsulationKind::Insulation).is_none() && d.mep().insulation_of(a, InsulationKind::Insulation).is_some());
+        assert!(d.undo().unwrap());
+        assert!(d.mep().insulation_of(b, InsulationKind::Insulation).is_some());
+        // bad data is refused as a whole: two layers of one kind, lining on a pipe, a thickness out of range
+        let mut bad = d.mep().clone();
+        bad.insulations.push(bad.insulations[0].clone());
+        assert_eq!(d.transact(d.revision(), &[crate::Command::SetMep(Box::new(bad))]), Err(EditError::InvalidMep));
+        let mut bad = d.mep().clone();
+        bad.insulations[0].thickness_m = 1.0;
+        assert_eq!(d.transact(d.revision(), &[crate::Command::SetMep(Box::new(bad))]), Err(EditError::InvalidMep));
+    }
+
+    #[test]
+    fn a_pipe_is_insulated_but_not_lined_and_the_insulation_types_are_part_of_the_settings() {
+        let mut d = Document::spatial_sample();
+        let pipe = MepNode::Run(ElementId(2));
+        assert!(d.insulation_commands(&[pipe], InsulationKind::Lining, "Foam liner", 0.01).is_err_and(|e| e.contains("duct")));
+        let ops = d.insulation_commands(&[pipe], InsulationKind::Insulation, "Elastomeric foam", 0.019).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!((d.mep().insulation_of(pipe, InsulationKind::Insulation).unwrap().thickness_m - 0.019).abs() < 1e-12);
+        let mut s = d.mep().settings.clone();
+        s.insulation_types = vec!["  Rockwool ".into(), "Rockwool".into(), "".into(), "PIR".into()];
+        s.lining_types.clear();
+        d.set_mep_settings(&s).unwrap();
+        assert_eq!(d.mep().settings.insulation_types, vec!["Rockwool".to_string(), "PIR".to_string()], "trimmed, once each, empty dropped, order kept");
+        let back = crate::native::parse_mep(&crate::native::mep_records(d.mep())).unwrap();
+        assert_eq!(back, *d.mep());
+        assert!(back.settings.lining_types.is_empty());
+        // a settings record from before the types existed reads with the standard ones
+        let old = vec!["M|sl=1.0|dn=100.0|dw=200.0|dh=200.0".to_string()];
+        let m = crate::native::parse_mep(&old).unwrap();
+        assert_eq!(m.settings.insulation_types, MepSettings::default().insulation_types);
+        assert_eq!(m.settings.pipe_slopes_pct, vec![1.0]);
     }
 
     #[test]

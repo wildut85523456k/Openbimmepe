@@ -955,7 +955,7 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
                 ni as u32,
                 Src::Run(&sg.run),
             ));
-            if let Some(i) = net.insulation_of(sg.run.system) {
+            if let Some(i) = net.insulation_for(sg.id, sg.run.system) {
                 v.push((
                     Element {
                         kind: Kind::Insulation,
@@ -975,7 +975,7 @@ fn sources(scene: &Scene) -> Vec<(Element, u32, Src<'_>)> {
                 ni as u32,
                 Src::Fitting(&nf.fitting, nf.system),
             ));
-            if let Some(i) = net.insulation_of(nf.system) {
+            if let Some(i) = net.insulation_for(nf.id, nf.system) {
                 v.push((
                     Element {
                         kind: Kind::Insulation,

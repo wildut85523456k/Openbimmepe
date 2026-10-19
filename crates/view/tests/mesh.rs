@@ -822,6 +822,19 @@ fn insulation_is_a_layer_round_runs_and_fittings_of_its_system_and_is_its_own_el
     let v = cache.update(&s).unwrap();
     assert_eq!(v.rebuilt.len(), 2);
     assert!(v.rebuilt.iter().all(|e| e.kind == Kind::Insulation));
+    // a single piece can be insulated on its own, and wins over its system's insulation
+    assert!(s.networks[0].insulate_piece(2, 0.0, "Wool").is_err() && s.networks[0].insulate_piece(2, 0.02, "").is_err());
+    s.networks[0].insulate_piece(2, 0.02, "Wool").unwrap();
+    s.networks[0].insulate_piece(1, 0.01, "Tape").unwrap();
+    s.networks[0].insulate_piece(1, 0.01, "Tape").unwrap();
+    assert_eq!(s.networks[0].piece_insulation.len(), 2, "one entry per piece");
+    let w = cache.update(&s).unwrap();
+    let ret = get(&w, Kind::Insulation, 2).expect("the return pipe is insulated on its own");
+    assert!((ret.mesh.volume() - area(0.07) * 4.0).abs() < 1e-9);
+    assert_eq!(ret.parts[0].material.as_deref(), Some("Wool"));
+    let sup = get(&w, Kind::Insulation, 1).unwrap();
+    assert!((sup.mesh.volume() - area(0.06) * 4.0).abs() < 1e-9, "its own 10 mm, not the system's 40 mm");
+    assert!(get(&w, Kind::Insulation, 3).is_some(), "the elbow keeps its system's insulation");
 }
 
 #[test]

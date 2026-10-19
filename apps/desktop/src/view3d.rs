@@ -8,12 +8,12 @@ use openbim_viewport_egui::{Datum, Style};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// The meshes of the scene mesher for a document that has family instances: the instances, and the walls, beams,
+/// The meshes of the scene mesher for a document that has family instances or insulation: the instances, the insulation of ducts and pipes, and the walls, beams,
 /// columns and slabs they cut. Kept for the revision it was made for, because it meshes the whole scene.
 pub fn scene_meshes(doc: &Document) -> Option<Arc<Vec<openbim_view::ElementMesh>>> {
     type Cached = Option<((u64, usize, u64), Option<Arc<Vec<openbim_view::ElementMesh>>>)>;
     thread_local! { static CACHE: std::cell::RefCell<Cached> = const { std::cell::RefCell::new(None) }; }
-    if doc.elements().all(|e| e.category != Category::Family && e.category != Category::Opening) { return None; }
+    if doc.elements().all(|e| e.category != Category::Family && e.category != Category::Opening) && doc.mep().insulations.is_empty() { return None; }
     let key = (doc.revision(), doc.elements().count(), doc.elements().map(|e| e.id.0.wrapping_mul(31).wrapping_add(e.revision)).fold(0u64, u64::wrapping_add));
     CACHE.with(|c| {
         if let Some((k, v)) = c.borrow().as_ref() { if *k == key { return v.clone(); } }
@@ -64,7 +64,8 @@ pub fn batch(doc: &Document) -> Batch {
     if let Some(scene) = scene_meshes(doc) {
         for em in scene.iter().filter(|em| doc.get(ElementId(em.element.id)).is_some()) {
             let entry = (em.element, doc_mesh(em), true);
-            match meshes.iter().position(|(e, _, _)| e.id == em.element.id) { Some(i) => meshes[i] = entry, None => meshes.push(entry) }
+            // the insulation of a duct or pipe has the number of the run, and is a mesh of its own beside the run's
+            match meshes.iter().position(|(e, _, _)| e.id == em.element.id && (em.element.kind == Kind::Insulation) == (e.kind == Kind::Insulation)) { Some(i) => meshes[i] = entry, None => meshes.push(entry) }
         }
     }
     let mut origin = [f64::MAX; 3];

@@ -896,6 +896,13 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                             });
                         }
                     }
+                    if matches!(el.category, openbim_document::Category::Duct | openbim_document::Category::Pipe) {
+                        let rows = app.insulation_rows(el.id);
+                        if !rows.is_empty() {
+                            let rows: Vec<(&str, &str)> = rows.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+                            read_only_group(ui, "Insulation", &query, &rows);
+                        }
+                    }
                     if matches!(el.geometry, Some(Geometry::Linear { .. } | Geometry::Grid { .. })) {
                         edit_group(app, ui, "Location", &query, el.category, &[Field::X1, Field::Y1, Field::X2, Field::Y2]);
                     }

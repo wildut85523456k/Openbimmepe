@@ -435,6 +435,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             painter.circle(p, 4.5, Color32::from_rgb(220, 140, 0), Stroke::new(1.0, Color32::from_rgb(60, 60, 60)));
         }
     }
+    // the insulation round ducts and pipes of this level
+    if !three_d {
+        for o in app.insulation_outlines(level_id) {
+            let pts: Vec<Pos2> = o.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+            painter.add(egui::Shape::closed_line(pts, Stroke::new(1.2, Color32::from_rgb(214, 190, 70))));
+        }
+    }
     if matches!(app.tool, crate::Tool::ElecNode | crate::Tool::Cable) && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };

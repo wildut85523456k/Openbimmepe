@@ -5,10 +5,22 @@ use eframe::egui;
 use openbim_document::MepSettings;
 
 /// The window's state: the lists being edited (they replace the model's at OK), the list shown and the value typed to add.
-pub(crate) struct MepSettingsDialog { pub draft: MepSettings, pub tab: usize, pub new_value: f64 }
+pub(crate) struct MepSettingsDialog { pub draft: MepSettings, pub tab: usize, pub new_value: f64, pub new_text: String }
 
 /// The four lists: name, unit, and the list in the settings.
-const LISTS: [(&str, &str); 4] = [("Pipe Settings: Slopes", "%"), ("Pipe Settings: Sizes (diameters)", "mm"), ("Duct Settings: Widths", "mm"), ("Duct Settings: Heights", "mm")];
+/// The first four are numbers; the last two are names (the types of insulation and of duct lining).
+const LISTS: [(&str, &str); 6] = [("Pipe Settings: Slopes", "%"), ("Pipe Settings: Sizes (diameters)", "mm"), ("Duct Settings: Widths", "mm"), ("Duct Settings: Heights", "mm"), ("Insulation Types", ""), ("Duct Lining Types", "")];
+const NAME_TABS: usize = 4;
+
+fn names_of(s: &mut MepSettings, tab: usize) -> &mut Vec<String> { if tab == NAME_TABS { &mut s.insulation_types } else { &mut s.lining_types } }
+
+/// New, for a name: it joins the list unless it is empty or already there.
+fn add_name(draft: &mut MepSettings, tab: usize, name: &str) {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 60 { return; }
+    let list = names_of(draft, tab);
+    if !list.iter().any(|n| n == name) { list.push(name.to_string()); }
+}
 
 fn list_of(s: &mut MepSettings, tab: usize) -> &mut Vec<f64> {
     match tab { 0 => &mut s.pipe_slopes_pct, 1 => &mut s.pipe_diameters_mm, 2 => &mut s.duct_widths_mm, _ => &mut s.duct_heights_mm }
@@ -25,7 +37,7 @@ fn add_to_list(draft: &mut MepSettings, tab: usize, value: f64) {
 impl Desktop {
     /// Opens the window with the model's lists.
     pub(crate) fn open_mep_settings(&mut self) {
-        self.mep_settings_dialog = Some(MepSettingsDialog { draft: self.document.mep().settings.clone(), tab: 0, new_value: 1.0 });
+        self.mep_settings_dialog = Some(MepSettingsDialog { draft: self.document.mep().settings.clone(), tab: 0, new_value: 1.0, new_text: String::new() });
     }
 
     /// OK: the lists are cleaned and replace the model's in one undoable step.
@@ -48,6 +60,24 @@ impl Desktop {
             let unit = LISTS[d.tab].1;
             let tab = d.tab;
             let mut remove = None;
+            if tab >= NAME_TABS {
+                egui::ScrollArea::vertical().max_height(220.0).id_salt("mep_settings_names").show(ui, |ui| {
+                    let list = names_of(&mut d.draft, tab);
+                    if list.is_empty() { ui.weak("The list is empty: nothing can be added until a type is made."); }
+                    for (i, n) in list.iter().enumerate() {
+                        ui.horizontal(|ui| { ui.label(n); if ui.small_button("Delete").clicked() { remove = Some(i); } });
+                    }
+                });
+                if let Some(i) = remove { names_of(&mut d.draft, tab).remove(i); }
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut d.new_text).desired_width(180.0).hint_text("Type name"));
+                    if ui.button("New").on_hover_text("Add the type to the list").clicked() {
+                        let t = std::mem::take(&mut d.new_text);
+                        add_name(&mut d.draft, tab, &t);
+                    }
+                });
+                ui.small("A type already used on a duct or pipe stays on it when it is deleted here.");
+            } else {
             egui::ScrollArea::vertical().max_height(220.0).id_salt("mep_settings_list").show(ui, |ui| {
                 let list = list_of(&mut d.draft, tab);
                 if list.is_empty() { ui.weak("The list is empty: the tools offer no values, but any value can still be typed."); }
@@ -67,6 +97,7 @@ impl Desktop {
                 }
             });
             ui.small("Values outside the range (slopes 0.01 to 100 %, sizes 10 to 3000 mm) are dropped; the lists are sorted when OK is pressed.");
+            }
             ui.separator();
             ui.horizontal(|ui| {
                 if ui.button("OK").clicked() { ok = true; }
@@ -94,6 +125,19 @@ mod tests {
         add_to_list(&mut s, 2, 450.0);
         assert!(s.duct_widths_mm.contains(&450.0) && s.duct_widths_mm.windows(2).all(|w| w[0] < w[1]));
         assert_eq!(s.pipe_diameters_mm, MepSettings::default().pipe_diameters_mm, "the other lists are untouched");
+    }
+
+    #[test]
+    fn a_new_type_name_joins_its_list_once_and_an_empty_or_long_one_does_not() {
+        let mut s = MepSettings::default();
+        add_name(&mut s, NAME_TABS, "  Rockwool ");
+        add_name(&mut s, NAME_TABS, "Rockwool");
+        add_name(&mut s, NAME_TABS, "   ");
+        add_name(&mut s, NAME_TABS, &"x".repeat(61));
+        add_name(&mut s, NAME_TABS + 1, "Acoustic liner");
+        assert_eq!(s.insulation_types.last().map(String::as_str), Some("Rockwool"));
+        assert_eq!(s.insulation_types.len(), MepSettings::default().insulation_types.len() + 1);
+        assert_eq!(s.lining_types.last().map(String::as_str), Some("Acoustic liner"));
     }
 
     #[test]

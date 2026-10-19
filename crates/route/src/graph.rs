@@ -118,6 +118,8 @@ pub struct Network {
     pub taps: Vec<Tapping>,
     /// insulation laid on every run and fitting of a system, one entry per system
     pub insulation: Vec<(System, Insulation)>,
+    /// insulation laid on single runs and fittings, by their element number; it wins over that of the piece's system
+    pub piece_insulation: Vec<(u64, Insulation)>,
     next_id: u64,
 }
 
@@ -206,6 +208,21 @@ impl Network {
     }
     pub fn insulation_of(&self, system: System) -> Option<&Insulation> {
         self.insulation.iter().find(|(s, _)| *s == system).map(|e| &e.1)
+    }
+    /// Insulate the one run or fitting with element number `id`, replacing any earlier insulation of that piece (Revit's
+    /// Add / Edit Insulation on a selected duct, pipe or fitting).
+    pub fn insulate_piece(&mut self, id: u64, thickness: f64, material: &str) -> Result<(), GraphError> {
+        if thickness.is_nan() || thickness <= 0.0 || thickness >= 1.0 || material.trim().is_empty() { return Err(GraphError::BadInsulation); }
+        let ins = Insulation { thickness, material: material.to_string() };
+        match self.piece_insulation.iter_mut().find(|(i, _)| *i == id) {
+            Some(e) => e.1 = ins,
+            None => self.piece_insulation.push((id, ins)),
+        }
+        Ok(())
+    }
+    /// The insulation of the piece with element number `id` that belongs to `system`: its own, else its system's.
+    pub fn insulation_for(&self, id: u64, system: System) -> Option<&Insulation> {
+        self.piece_insulation.iter().find(|(i, _)| *i == id).map(|e| &e.1).or_else(|| self.insulation_of(system))
     }
     pub fn next_id(&self) -> u64 {
         self.next_id

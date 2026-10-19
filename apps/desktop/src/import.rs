@@ -496,6 +496,10 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
     for q in incoming.equip_links {
         if !out.equip_links.iter().any(|x| x.port == q.port) && out.partner(q.port).is_none() { out.equip_links.push(q); }
     }
+    for i in incoming.insulations {
+        let there = match i.node { openbim_document::MepNode::Run(_) => true, openbim_document::MepNode::Fitting(f) => out.fitting(f).is_some() };
+        if there && out.insulation_of(i.node, i.kind).is_none() { out.insulations.push(i); }
+    }
     for n in incoming.elec_nodes {
         if !out.elec_nodes.iter().any(|x| x.id == n.id) { out.elec_nodes.push(n); }
     }

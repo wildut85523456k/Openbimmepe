@@ -194,7 +194,12 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
     if m.settings != super::MepSettings::default() {
         let list = |v: &[f64]| v.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(",");
         let s = &m.settings;
-        out.push(format!("M|sl={}|dn={}|dw={}|dh={}", list(&s.pipe_slopes_pct), list(&s.pipe_diameters_mm), list(&s.duct_widths_mm), list(&s.duct_heights_mm)));
+        let names = |v: &[String]| v.iter().map(|n| esc(n)).collect::<Vec<_>>().join(";");
+        out.push(format!("M|sl={}|dn={}|dw={}|dh={}|it={}|lt={}", list(&s.pipe_slopes_pct), list(&s.pipe_diameters_mm), list(&s.duct_widths_mm), list(&s.duct_heights_mm), names(&s.insulation_types), names(&s.lining_types)));
+    }
+    for i in &m.insulations {
+        let node = match i.node { super::MepNode::Run(id) => format!("R{}", id.0), super::MepNode::Fitting(id) => format!("F{id}") };
+        out.push(format!("J|n={node}|k={}|ty={}|th={:?}", if i.kind == super::InsulationKind::Lining { "L" } else { "I" }, esc(&i.type_name), i.thickness_m));
     }
     for q in &m.equip_links { out.push(format!("Q|p={}|el={}|cn={}", port_text(&q.port), q.element.0, esc(&q.connector))); }
     for n in &m.elec_nodes {
@@ -215,14 +220,26 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
         let opt = |t: &str| -> Result<Option<f64>, String> { if t == "N" { Ok(None) } else { num(t).map(Some) } };
         if line.starts_with("M|") {
             let list = |t: &str| -> Result<Vec<f64>, String> { if t.is_empty() { Ok(Vec::new()) } else { t.split(',').map(num).collect() } };
-            m.settings = super::MepSettings { pipe_slopes_pct: list(get("sl")?)?, pipe_diameters_mm: list(get("dn")?)?, duct_widths_mm: list(get("dw")?)?, duct_heights_mm: list(get("dh")?)? };
+            let names = |t: &str| -> Result<Vec<String>, String> { if t.is_empty() { Ok(Vec::new()) } else { t.split(';').map(unesc).collect() } };
+            let have = super::MepSettings::default();
+            // a file written before the insulation types existed has the standard ones
+            let (it, lt) = (f.get("it").map_or(Ok(have.insulation_types), |t| names(t))?, f.get("lt").map_or(Ok(have.lining_types), |t| names(t))?);
+            m.settings = super::MepSettings { pipe_slopes_pct: list(get("sl")?)?, pipe_diameters_mm: list(get("dn")?)?, duct_widths_mm: list(get("dw")?)?, duct_heights_mm: list(get("dh")?)?, insulation_types: it, lining_types: lt };
+            continue;
+        }
+        if line.starts_with("J|") {
+            let n = get("n")?;
+            let id = int(n.get(1..).unwrap_or(""))?;
+            let node = match n.as_bytes().first() { Some(b'R') => super::MepNode::Run(ElementId(id)), Some(b'F') => super::MepNode::Fitting(id), _ => return Err("an insulation on an unknown kind of piece".into()) };
+            let kind = match get("k")? { "I" => super::InsulationKind::Insulation, "L" => super::InsulationKind::Lining, _ => return Err("an unknown insulation kind".into()) };
+            m.insulations.push(super::MepInsulation { node, kind, type_name: unesc(get("ty")?)?, thickness_m: num(get("th")?)? });
             continue;
         }
         if line.starts_with("Q|") { m.equip_links.push(super::EquipLink { port: parse_port(get("p")?)?, element: ElementId(int(get("el")?)?), connector: unesc(get("cn")?)? }); continue; }
@@ -291,7 +308,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

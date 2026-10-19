@@ -310,6 +310,12 @@ fn add_connections(doc: &Document, net: &mut Network, skipped: &mut std::collect
         Some(PortRef { node: n, port: p.port })
     };
     for f in &data.fittings { net.fittings.push(NetFitting { id: f.id, fitting: f.fitting.clone(), domain: f.domain, system: f.system }); }
+    // insulation on single runs and fittings (lining is inside and has no outside to draw)
+    for i in data.insulations.iter().filter(|i| i.kind == openbim_document::InsulationKind::Insulation) {
+        let id = match i.node { MepNode::Run(r) => r.0, MepNode::Fitting(f) => f };
+        let there = match i.node { MepNode::Run(r) => seg.contains_key(&r.0), MepNode::Fitting(f) => fit.contains_key(&f) };
+        if there { let _ = net.insulate_piece(id, i.thickness_m, &i.type_name); }
+    }
     for (a, b) in &data.links {
         for (r, f) in [(a, b), (b, a)] {
             if let (MepNode::Run(id), MepNode::Fitting(fid)) = (r.node, f.node) {
