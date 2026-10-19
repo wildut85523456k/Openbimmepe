@@ -201,7 +201,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let built = build(&app.document, app.view);
     ui.horizontal(|ui| {
         ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects / drag moves"));
-        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align | crate::Tool::Tag | crate::Tool::Dimension) { ui.small("— this tool works in plan views; press Esc"); }
+        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align | crate::Tool::Tag | crate::Tool::Dimension) { ui.small("— this tool is not available in an elevation or a section yet; press Esc"); }
         if let Ok(v) = &built {
             if let Some(w) = v.warnings.first() { ui.small(format!("— {w}")); }
         }

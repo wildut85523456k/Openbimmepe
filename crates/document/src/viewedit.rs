@@ -7,6 +7,11 @@ use crate::edit::Xf;
 
 type P = [f64; 2];
 
+/// What a person is told when a hosted element cannot follow a movement in the view they are in.
+fn host_refusal(name: &str) -> String {
+    format!("{name} is in a wall seen nearly end on in this view. This movement is not available in the current view because of the element's host constraints. Use a view facing the host or edit its position in another suitable view.")
+}
+
 /// Where a view stands in the plan: `origin` is the start of its line and `dir` the unit vector along which its u grows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewFrame { pub origin: P, pub dir: P }
@@ -55,8 +60,9 @@ impl Document {
                 Some(Geometry::InWall { host, along_m }) => {
                     // a wall at an angle to the view: the insert slides along the wall, so that its drawing moves by `du`
                     let (_, c, _) = self.host_in_view(host, f)?;
-                    if c.abs() < 0.05 { return Err(format!("{} is in a wall seen nearly end on in this view; use a view that looks at the wall", e.name)); }
-                    let along = along_m + du / c;
+                    // seen end on, only the height can change: sliding along the wall cannot be told from the view
+                    if du != 0.0 && c.abs() < 0.05 { return Err(host_refusal(&e.name)); }
+                    let along = if du == 0.0 { along_m } else { along_m + du / c };
                     if copy {
                         let mut n = e.clone();
                         n.id = ElementId(next); next += 1;
@@ -145,7 +151,7 @@ impl Document {
                 Some(Geometry::InWall { host, along_m }) => {
                     // an insert mirrored on its own stays in its wall, on the other side of the axis
                     let (_, c, u_start) = self.host_in_view(host, f)?;
-                    if c.abs() < 0.05 { return Err(format!("{} is in a wall seen nearly end on in this view", e.name)); }
+                    if c.abs() < 0.05 { return Err(host_refusal(&e.name)); }
                     let s = (u_axis - u_start) / c;
                     let along = 2.0 * s - along_m;
                     if copy {
@@ -305,7 +311,15 @@ mod tests {
         // a wall seen almost end on has no place for a slide
         let n = d.place_wall(level, [20.0, 0.0], [20.0, 6.0], 0.2, 3.0, 0.0).unwrap();
         let door2 = d.place_family_in_wall(n, 3.0, &spec).unwrap();
-        assert!(d.view_move_commands(&[door2], south(), 0.5, 0.0, false).is_err());
+        let err = d.view_move_commands(&[door2], south(), 0.5, 0.0, false).unwrap_err();
+        assert!(err.contains("host constraints") && err.contains("Use a view facing the host"), "{err}");
+        // but the same window moves up and down there: the height does not depend on the angle
+        let (ops, _) = d.view_move_commands(&[door2], south(), 0.0, 0.5, false).unwrap();
+        run(&mut d, ops);
+        assert!(near(d.get(door2).unwrap().elevation_m, 0.5));
+        // and Mirror says the same thing
+        let err = d.view_mirror_commands(&[door2], south(), 20.0, false).unwrap_err();
+        assert!(err.contains("host constraints"), "{err}");
     }
 
     #[test]

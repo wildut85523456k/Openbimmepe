@@ -11,11 +11,11 @@ use openbim_view::{Class, Kind, SectionView, Shape};
 
 /// What a snap caught, in the order Revit prefers them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SnapKind { Endpoint, Intersection, Midpoint, Nearest, Grid }
+pub enum SnapKind { Endpoint, Intersection, Midpoint, Center, Perpendicular, Nearest, Grid }
 
 impl SnapKind {
     pub fn name(self) -> &'static str {
-        match self { SnapKind::Endpoint => "Endpoint", SnapKind::Intersection => "Intersection", SnapKind::Midpoint => "Midpoint", SnapKind::Nearest => "Nearest", SnapKind::Grid => "" }
+        match self { SnapKind::Endpoint => "Endpoint", SnapKind::Intersection => "Intersection", SnapKind::Midpoint => "Midpoint", SnapKind::Center => "Center", SnapKind::Perpendicular => "Perpendicular", SnapKind::Nearest => "Nearest", SnapKind::Grid => "" }
     }
 }
 
@@ -23,8 +23,10 @@ impl SnapKind {
 pub struct Snap { pub at: [f64; 2], pub kind: SnapKind }
 
 /// A straight edge drawn in the view: its two ends, the element it belongs to, and whether it is a level line.
+/// `centre` marks the centre of an arc or a circle instead (then `a` and `b` are both that point): it only offers the
+/// Center snap and is never an edge to align to.
 #[derive(Clone, Copy, Debug)]
-pub struct Edge { pub a: [f64; 2], pub b: [f64; 2], pub id: Option<ElementId>, pub datum: bool }
+pub struct Edge { pub a: [f64; 2], pub b: [f64; 2], pub id: Option<ElementId>, pub datum: bool, pub centre: bool }
 
 /// The state of a Modify tool in a view: the points picked so far, the reference edge of Align, and the elements the
 /// tool works on (kept while Copy goes on).
@@ -40,10 +42,10 @@ pub fn edges(doc: &openbim_document::Document, view: &SectionView) -> Vec<Edge> 
     let mut out = Vec::new();
     for (id, _, r) in opening_rects(doc, view) {
         let c = [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]];
-        for i in 0..4 { out.push(Edge { a: c[i], b: c[(i + 1) % 4], id: Some(id), datum: false }); }
+        for i in 0..4 { out.push(Edge { a: c[i], b: c[(i + 1) % 4], id: Some(id), datum: false, centre: false }); }
     }
     let ring = |out: &mut Vec<Edge>, r: &[[f64; 2]], id: Option<ElementId>, datum: bool| {
-        for i in 0..r.len() { out.push(Edge { a: r[i], b: r[(i + 1) % r.len()], id, datum }); }
+        for i in 0..r.len() { out.push(Edge { a: r[i], b: r[(i + 1) % r.len()], id, datum, centre: false }); }
     };
     for item in &view.items {
         let datum = item.class == Class::Datum || item.element.kind == Kind::Level;
@@ -52,8 +54,8 @@ pub fn edges(doc: &openbim_document::Document, view: &SectionView) -> Vec<Edge> 
         match &item.shape {
             Shape::Region { outer, holes } => { ring(&mut out, outer, id, datum); for h in holes { ring(&mut out, h, id, datum); } }
             Shape::Fill(r) => ring(&mut out, r, id, datum),
-            Shape::Line(a, b) => out.push(Edge { a: *a, b: *b, id, datum }),
-            _ => {}
+            Shape::Line(a, b) => out.push(Edge { a: *a, b: *b, id, datum, centre: false }),
+            Shape::Arc { c, .. } | Shape::Circle { c, .. } => out.push(Edge { a: *c, b: *c, id, datum, centre: true }),
         }
     }
     out
@@ -73,6 +75,16 @@ fn seg_point(p: Pos2, a: Pos2, b: Pos2) -> (Pos2, f32) {
 
 fn cross(a: [f64; 2], b: [f64; 2]) -> f64 { a[0] * b[1] - a[1] * b[0] }
 
+/// The foot of the perpendicular from `p` to the edge, if it lands on the edge itself (and not at an end, where the
+/// Endpoint snap already is).
+fn foot(p: [f64; 2], e: &Edge) -> Option<[f64; 2]> {
+    let r = [e.b[0] - e.a[0], e.b[1] - e.a[1]];
+    let len2 = r[0] * r[0] + r[1] * r[1];
+    if len2 < 1e-12 { return None; }
+    let t = ((p[0] - e.a[0]) * r[0] + (p[1] - e.a[1]) * r[1]) / len2;
+    (t > 1e-6 && t < 1.0 - 1e-6).then(|| [e.a[0] + r[0] * t, e.a[1] + r[1] * t])
+}
+
 /// The point where two edges cross, if they do.
 fn meet(e: &Edge, f: &Edge) -> Option<[f64; 2]> {
     let (r, s) = ([e.b[0] - e.a[0], e.b[1] - e.a[1]], [f.b[0] - f.a[0], f.b[1] - f.a[1]]);
@@ -86,7 +98,12 @@ fn meet(e: &Edge, f: &Edge) -> Option<[f64; 2]> {
 /// Where the pointer at `cursor` snaps: an endpoint, an intersection, a midpoint or the nearest point of an edge within
 /// `reach` pixels, else the increment of the zoom. `base` with `ortho` keeps the point level or plumb with it (Shift).
 pub fn snap(edges: &[Edge], xf: &Xf, cursor: Pos2, reach: f32, base: Option<[f64; 2]>, ortho: bool) -> Snap {
-    let step = grid_step(xf.scale);
+    snap_at(edges, xf, cursor, reach, base, ortho, None)
+}
+
+/// `snap` with a fixed increment (a plan view uses 50 mm) in place of the one that follows the zoom.
+pub fn snap_at(edges: &[Edge], xf: &Xf, cursor: Pos2, reach: f32, base: Option<[f64; 2]>, ortho: bool, increment: Option<f64>) -> Snap {
+    let step = increment.unwrap_or_else(|| grid_step(xf.scale));
     let mut m = xf.model(cursor);
     m = [(m[0] / step).round() * step, (m[1] / step).round() * step];
     if let (true, Some(b)) = (ortho, base) {
@@ -100,12 +117,15 @@ pub fn snap(edges: &[Edge], xf: &Xf, cursor: Pos2, reach: f32, base: Option<[f64
     let mut near: Vec<&Edge> = Vec::new();
     for e in edges {
         let (pa, pb) = (xf.screen(e.a), xf.screen(e.b));
+        if e.centre { offer(1, (cursor - pa).length(), e.a, SnapKind::Center); continue; }
         offer(0, (cursor - pa).length(), e.a, SnapKind::Endpoint);
         offer(0, (cursor - pb).length(), e.b, SnapKind::Endpoint);
         let mid = [(e.a[0] + e.b[0]) / 2.0, (e.a[1] + e.b[1]) / 2.0];
         offer(2, (cursor - xf.screen(mid)).length(), mid, SnapKind::Midpoint);
         let (q, d) = seg_point(cursor, pa, pb);
-        if d <= 6.0 { offer(3, d, xf.model(q), SnapKind::Nearest); }
+        if d <= reach * 0.6 { offer(3, d, xf.model(q), SnapKind::Nearest); }
+        // the foot of the perpendicular from the base point, when it falls on the edge
+        if let Some(f) = base.and_then(|b| foot(b, e)) { offer(2, (cursor - xf.screen(f)).length(), f, SnapKind::Perpendicular); }
         if d <= reach * 3.0 && near.len() < 40 { near.push(e); }
     }
     for i in 0..near.len() {
@@ -124,6 +144,8 @@ pub fn draw_snap(painter: &egui::Painter, p: Pos2, kind: SnapKind, colour: Color
         SnapKind::Midpoint => { painter.add(egui::Shape::closed_line(vec![p + Vec2::new(0.0, -5.0), p + Vec2::new(5.0, 4.0), p + Vec2::new(-5.0, 4.0)], st)); }
         SnapKind::Intersection => { painter.line_segment([p + Vec2::new(-5.0, -5.0), p + Vec2::new(5.0, 5.0)], st); painter.line_segment([p + Vec2::new(-5.0, 5.0), p + Vec2::new(5.0, -5.0)], st); }
         SnapKind::Nearest => { painter.line_segment([p + Vec2::new(-5.0, -5.0), p + Vec2::new(5.0, -5.0)], st); painter.line_segment([p + Vec2::new(5.0, -5.0), p + Vec2::new(-5.0, 5.0)], st); painter.line_segment([p + Vec2::new(-5.0, 5.0), p + Vec2::new(5.0, 5.0)], st); }
+        SnapKind::Center => { painter.circle_stroke(p, 5.0, st); }
+        SnapKind::Perpendicular => { painter.line_segment([p + Vec2::new(-5.0, 5.0), p + Vec2::new(5.0, 5.0)], st); painter.line_segment([p + Vec2::new(-5.0, 5.0), p + Vec2::new(-5.0, -5.0)], st); painter.line_segment([p + Vec2::new(-5.0, 0.0), p + Vec2::new(0.0, 0.0)], st); painter.line_segment([p + Vec2::new(0.0, 0.0), p + Vec2::new(0.0, 5.0)], st); }
         SnapKind::Grid => return,
     }
     painter.text(p + Vec2::new(10.0, 10.0), egui::Align2::LEFT_TOP, kind.name(), egui::FontId::proportional(11.0), colour);
@@ -150,7 +172,7 @@ pub fn draw_ghost(painter: &egui::Painter, view: &SectionView, doc: &openbim_doc
 /// (level lines when picking what to move) are dropped by `want`.
 pub fn pick_edge(edges: &[Edge], xf: &Xf, p: Pos2, reach: f32, want: impl Fn(&Edge) -> bool) -> Option<(Edge, ViewEdge)> {
     let mut best: Option<(f32, Edge)> = None;
-    for e in edges.iter().filter(|e| want(e)) {
+    for e in edges.iter().filter(|e| !e.centre && want(e)) {
         let d = seg_point(p, xf.screen(e.a), xf.screen(e.b)).1;
         if d <= reach && best.as_ref().is_none_or(|b| d < b.0) { best = Some((d, *e)); }
     }
@@ -341,7 +363,7 @@ mod tests {
     use super::*;
 
     fn xf() -> Xf { Xf { centre: Pos2::ZERO, scale: 100.0, cu: 0.0, cz: 0.0 } }
-    fn edge(a: [f64; 2], b: [f64; 2]) -> Edge { Edge { a, b, id: Some(ElementId(1)), datum: false } }
+    fn edge(a: [f64; 2], b: [f64; 2]) -> Edge { Edge { a, b, id: Some(ElementId(1)), datum: false, centre: false } }
     fn near(a: [f64; 2], b: [f64; 2]) -> bool { (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6 }
 
     #[test]
@@ -373,5 +395,30 @@ mod tests {
         let e = [edge([0.0, 0.0], [1.0, 1.0]), edge([2.0, 0.0], [2.0, 1.0])];
         assert!(pick_edge(&e, &x, x.screen([0.5, 0.5]), 7.0, |_| true).is_none());
         assert!(matches!(pick_edge(&e, &x, x.screen([2.0, 0.5]), 7.0, |_| true), Some((_, ViewEdge::Vertical(u))) if (u - 2.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn perpendicular_and_centre_snaps_as_in_revit() {
+        let x = xf();
+        let line = [edge([0.0, 0.0], [2.0, 0.0])];
+        // from a base point above the line, the foot of the perpendicular is offered near where the pointer is
+        let base = Some([0.7, 1.0]);
+        let r = snap(&line, &x, x.screen([0.7, 0.0]) + Vec2::new(2.0, 2.0), 10.0, base, false);
+        assert!(r.kind == SnapKind::Perpendicular && near(r.at, [0.7, 0.0]), "{r:?}");
+        // no base point, no perpendicular: the nearest point instead
+        let r = snap(&line, &x, x.screen([0.7, 0.0]) + Vec2::new(0.0, 2.0), 10.0, None, false);
+        assert!(r.kind == SnapKind::Nearest, "{r:?}");
+        // a foot beyond the end of the edge is not on it
+        let r = snap(&line, &x, x.screen([2.5, 0.0]), 10.0, Some([2.5, 1.0]), false);
+        assert!(r.kind != SnapKind::Perpendicular, "{r:?}");
+        // an endpoint still wins when the foot is at the end
+        let r = snap(&line, &x, x.screen([2.0, 0.0]) + Vec2::new(1.0, 1.0), 10.0, Some([2.0, 1.0]), false);
+        assert!(r.kind == SnapKind::Endpoint, "{r:?}");
+        // the centre of an arc or a circle is a snap of its own and is not an edge to align to
+        let c = Edge { a: [1.0, 1.0], b: [1.0, 1.0], id: Some(ElementId(2)), datum: false, centre: true };
+        let r = snap(&[c], &x, x.screen([1.0, 1.0]) + Vec2::new(3.0, -2.0), 10.0, None, false);
+        assert!(r.kind == SnapKind::Center && near(r.at, [1.0, 1.0]), "{r:?}");
+        assert!(pick_edge(&[c], &x, x.screen([1.0, 1.0]), 7.0, |_| true).is_none());
+        assert_eq!(SnapKind::Perpendicular.name(), "Perpendicular");
     }
 }

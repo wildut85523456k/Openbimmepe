@@ -33,6 +33,36 @@ fn segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     (p - (a + t * ab)).length()
 }
 
+/// The lines of a level a pointer in the plan snaps to: the location line and the edges of each wall, and the grids.
+fn plan_edges(doc: &openbim_document::Document, level: ElementId) -> Vec<crate::view_tools::Edge> {
+    use crate::view_tools::Edge;
+    let mut out = Vec::new();
+    let mut line = |a: [f64; 2], b: [f64; 2]| out.push(Edge { a, b, id: None, datum: false, centre: false });
+    for el in doc.elements() {
+        match el.geometry {
+            Some(Geometry::Linear { start, end, level: l }) if el.category == Category::Wall && l == level => {
+                line(start, end);
+                if let Some(r) = doc.wall_plan(el.id) { for i in 0..4 { line(r[i], r[(i + 1) % 4]); } }
+            }
+            Some(Geometry::Grid { start, end }) => line(start, end),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Where the pointer at `p` snaps in a plan: as in Revit, to the endpoints, intersections, midpoints and nearest points
+/// of the lines (and the foot of the perpendicular from `base`, the last point picked), else to 50 mm. Shift keeps the
+/// point level or plumb with `base` when nothing was caught. `xf` maps the plan to the screen.
+fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: Pos2, base: Option<[f64; 2]>, ortho: bool) -> crate::view_tools::Snap {
+    use crate::view_tools::{snap_at, SnapKind};
+    let mut s = snap_at(edges, xf, p, 12.0, base, false, Some(0.05));
+    if let (true, Some(b), SnapKind::Grid) = (ortho, base, s.kind) {
+        if (s.at[0] - b[0]).abs() >= (s.at[1] - b[1]).abs() { s.at[1] = b[1]; } else { s.at[0] = b[0]; }
+    }
+    s
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
@@ -455,44 +485,11 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         // and to grid lines (a square marks it), else to 50 mm. Shift keeps the wall square, digits type its length in
         // mm and Enter draws it, Backspace takes a digit back, and a pick on the first point closes the loop.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
-        let mut points: Vec<[f64; 2]> = Vec::new();
-        let mut grids: Vec<([f64; 2], [f64; 2])> = Vec::new();
-        for el in app.document.elements() {
-            match el.geometry {
-                Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => {
-                    points.extend([start, end]);
-                    if let Some(r) = app.document.wall_plan(el.id) { points.extend(r); }
-                }
-                Some(Geometry::Grid { start, end }) => { points.extend([start, end]); grids.push((start, end)); }
-                _ => {}
-            }
-        }
-        for (i, (a, b)) in grids.iter().enumerate() { for (c, d) in &grids[i + 1..] {
-            if let Some(p) = openbim_document::line_meet(*a, [b[0] - a[0], b[1] - a[1]], *c, [d[0] - c[0], d[1] - c[1]]) {
-                let on = |s: &([f64; 2], [f64; 2])| { let (dx, dy) = (s.1[0] - s.0[0], s.1[1] - s.0[1]); let t = ((p[0] - s.0[0]) * dx + (p[1] - s.0[1]) * dy) / (dx * dx + dy * dy); (-1e-9..=1.0 + 1e-9).contains(&t) };
-                if on(&(*a, *b)) && on(&(*c, *d)) { points.push(p); }
-            }
-        } }
-        if let Some(&p) = app.wall_pts.first() { points.push(p); }
+        let edges = plan_edges(&app.document, level_id);
+        let xf = crate::section_ui::Xf { centre: centre + pan, scale, cu: f64::from(bc.x), cz: -f64::from(bc.y) };
         let ortho = ui.input(|i| i.modifiers.shift);
         let start = app.wall_pts.last().copied();
-        let snap_to = |p: Pos2| -> ([f64; 2], bool) {
-            let v = (p - centre - pan) / scale + bc;
-            let raw = [v.x as f64, -v.y as f64];
-            if let Some(c) = points.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
-                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return (*c, true); }
-            for (a, b) in &grids {
-                let (sa, sb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
-                if segment_distance(p, sa, sb) < 8.0 {
-                    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-                    let t = (((raw[0] - a[0]) * dx + (raw[1] - a[1]) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-                    return ([a[0] + dx * t, a[1] + dy * t], true);
-                }
-            }
-            let mut m = [(raw[0] / 0.05).round() * 0.05, (raw[1] / 0.05).round() * 0.05];
-            if let (true, Some(s)) = (ortho, start) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
-            (m, false)
-        };
+        let snap_to = |p: Pos2| -> ([f64; 2], crate::view_tools::SnapKind) { let s = plan_snap(&edges, &xf, p, start, ortho); (s.at, s.kind) };
         let to_model = |p: Pos2| snap_to(p).0;
         let hover = response.hover_pos();
         if ui.input(|i| i.key_pressed(egui::Key::Space)) { app.wall_flip = !app.wall_flip; app.message = format!("Wall {}", if app.wall_flip { "flipped: the other face is the reference" } else { "unflipped" }); }
@@ -550,8 +547,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
         if let Some(h) = hover {
-            let (m, snapped) = snap_to(h);
-            if snapped { painter.rect_stroke(Rect::from_center_size(screen([m[0], m[1], level_z]), Vec2::splat(9.0)), 0.0, Stroke::new(1.5, Color32::from_rgb(220, 140, 0)), egui::StrokeKind::Middle); }
+            let (m, kind) = snap_to(h);
+            crate::view_tools::draw_snap(&painter, screen([m[0], m[1], level_z]), kind, Color32::from_rgb(220, 140, 0));
         }
         let typed: String = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }).collect());
         if app.wall_pts.last().is_some() && app.wall_mode == 0 { for c in typed.chars().filter(|c| c.is_ascii_digit() || *c == '.') { app.wall_len.push(c); } }
@@ -693,29 +690,18 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             }
         }
     } else if matches!(app.tool, crate::Tool::Dimension | crate::Tool::Measure) && !three_d {
-        // Two points (a corner of a wall, the end of a grid, else 50 mm); the Dimension tool then takes the place of its line.
+        // Two points (snapped as in Revit: endpoints, midpoints, crossings, perpendicular, nearest, else 50 mm); the Dimension tool then takes the place of its line.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
-        let raw = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
-        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
-            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => { let mut v = vec![start, end]; if let Some(r) = app.document.wall_plan(el.id) { v.extend(r); } v }
-            Some(Geometry::Grid { start, end }) => vec![start, end],
-            _ => vec![],
-        }).collect();
+        let edges = plan_edges(&app.document, level_id);
+        let xf = crate::section_ui::Xf { centre: centre + pan, scale, cu: f64::from(bc.x), cz: -f64::from(bc.y) };
         let ortho = ui.input(|i| i.modifiers.shift);
         let first = app.edit_pts.first().copied();
-        let snap_to = |p: Pos2| -> ([f64; 2], bool) {
-            if let Some(c) = corners.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
-                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return (*c, true); }
-            let r = raw(p);
-            let mut m = [(r[0] / 0.05).round() * 0.05, (r[1] / 0.05).round() * 0.05];
-            if let (true, Some(s)) = (ortho, first) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
-            (m, false)
-        };
+        let snap_to = |p: Pos2| -> ([f64; 2], crate::view_tools::SnapKind) { let s = plan_snap(&edges, &xf, p, first, ortho); (s.at, s.kind) };
         let hover = response.hover_pos();
         let ink = Color32::from_rgb(220, 140, 0);
         if let Some(h) = hover {
-            let (m, snapped) = snap_to(h);
-            if snapped { painter.rect_stroke(Rect::from_center_size(screen([m[0], m[1], level_z]), Vec2::splat(9.0)), 0.0, Stroke::new(1.5, ink), egui::StrokeKind::Middle); }
+            let (m, kind) = snap_to(h);
+            crate::view_tools::draw_snap(&painter, screen([m[0], m[1], level_z]), kind, ink);
             match app.edit_pts.as_slice() {
                 [a] => {
                     let (pa, pb) = (screen([a[0], a[1], level_z]), screen([m[0], m[1], level_z]));
@@ -748,24 +734,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     } else if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) && !three_d {
         // As in Revit: the element is selected first (a click selects one when none is), then the tool picks its points:
         // a base point and where to, a centre and the two rays of a turn, the two points of a mirror axis. The pointer
-        // snaps to the corners of walls and the ends of grids, else to 50 mm; Shift keeps a move square; a ghost shows the result.
+        // snaps as in Revit (endpoint, midpoint, intersection, perpendicular, nearest, else 50 mm); Shift keeps a move square; a ghost shows the result.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let raw = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
-        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
-            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => { let mut v = vec![start, end]; if let Some(r) = app.document.wall_plan(el.id) { v.extend(r); } v }
-            Some(Geometry::Grid { start, end }) => vec![start, end],
-            _ => vec![],
-        }).collect();
+        let edges = plan_edges(&app.document, level_id);
+        let xf = crate::section_ui::Xf { centre: centre + pan, scale, cu: f64::from(bc.x), cz: -f64::from(bc.y) };
         let ortho = ui.input(|i| i.modifiers.shift);
         let first = app.edit_pts.first().copied();
-        let snap_to = |p: Pos2| -> [f64; 2] {
-            if let Some(c) = corners.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
-                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return *c; }
-            let r = raw(p);
-            let mut m = [(r[0] / 0.05).round() * 0.05, (r[1] / 0.05).round() * 0.05];
-            if let (true, Some(s)) = (ortho, first) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
-            m
-        };
+        let snap_to = |p: Pos2| -> [f64; 2] { plan_snap(&edges, &xf, p, first, ortho).at };
         let typed: String = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }).collect());
         if !app.edit_pts.is_empty() { for c in typed.chars() { if c.is_ascii_digit() || c == '.' || (c == '-' && app.edit_num.is_empty()) { app.edit_num.push(c); } } }
         let hover = response.hover_pos();
@@ -1027,20 +1003,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         // there follow); pressing on an element and dragging moves it with what stands on it. A ghost shows the result.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let raw = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
-        let corners: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry {
-            Some(Geometry::Linear { start, end, level }) if el.category == Category::Wall && level == level_id => { let mut v = vec![start, end]; if let Some(r) = app.document.wall_plan(el.id) { v.extend(r); } v }
-            Some(Geometry::Grid { start, end }) => vec![start, end],
-            _ => vec![],
-        }).collect();
+        let edges = plan_edges(&app.document, level_id);
+        let xf = crate::section_ui::Xf { centre: centre + pan, scale, cu: f64::from(bc.x), cz: -f64::from(bc.y) };
         let ortho = ui.input(|i| i.modifiers.shift);
-        let snap_to = |p: Pos2, from: Option<[f64; 2]>| -> [f64; 2] {
-            if let Some(c) = corners.iter().filter(|c| screen([c[0], c[1], level_z]).distance(p) < 12.0)
-                .min_by(|a, b| screen([a[0], a[1], level_z]).distance(p).total_cmp(&screen([b[0], b[1], level_z]).distance(p))) { return *c; }
-            let r = raw(p);
-            let mut m = [(r[0] / 0.05).round() * 0.05, (r[1] / 0.05).round() * 0.05];
-            if let (true, Some(s)) = (ortho, from) { if (m[0] - s[0]).abs() >= (m[1] - s[1]).abs() { m[1] = s[1]; } else { m[0] = s[0]; } }
-            m
-        };
+        let snap_to = |p: Pos2, from: Option<[f64; 2]>| -> [f64; 2] { plan_snap(&edges, &xf, p, from, ortho).at };
         let wall_ends = selected.and_then(|id| match app.document.get(id) {
             Some(e) if matches!(e.category, Category::Wall | Category::Section) && app.document.level_of(id) == Some(level_id) => match e.geometry { Some(Geometry::Linear { start, end, .. }) => Some((id, start, end)), _ => None },
             _ => None,
@@ -1283,6 +1249,44 @@ mod tests {
         assert!(app.tool == crate::Tool::Beam, "the tool stays on");
         frame(&mut app, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
         assert!(app.tool == crate::Tool::Select);
+    }
+
+    #[test]
+    fn the_plan_snaps_to_walls_like_revit_not_only_to_their_corners() {
+        use crate::view_tools::SnapKind;
+        let mut app = Desktop::sample();
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        // a wall of its own, away from everything else in the sample, so that nothing crosses it
+        app.run_command("wall", "Wall");
+        let n = walls(&app);
+        app.wall_click(level, [30.0, 30.0]);
+        app.wall_click(level, [30.0, 36.0]);
+        assert_eq!(walls(&app), n + 1, "{}", app.message);
+        let (start, end): ([f64; 2], [f64; 2]) = ([30.0, 30.0], [30.0, 36.0]);
+        let edges = plan_edges(&app.document, level);
+        assert!(edges.len() >= 5, "the location line and the four edges of the wall");
+        let xf = crate::section_ui::Xf { centre: Pos2::new(500.0, 350.0), scale: 100.0, cu: 30.0, cz: 33.0 };
+        let (lo, hi) = (start[1].min(end[1]), start[1].max(end[1]));
+        let mid = [30.0, (lo + hi) / 2.0];
+        // the middle of the location line, which the old corner snap never offered
+        let s = plan_snap(&edges, &xf, xf.screen(mid), None, false);
+        assert!(s.kind == SnapKind::Midpoint && (s.at[0] - 30.0).abs() < 1e-6 && (s.at[1] - mid[1]).abs() < 1e-6, "{s:?}");
+        // an end of the wall is still an endpoint
+        let s = plan_snap(&edges, &xf, xf.screen([30.0, lo]) + Vec2::new(2.0, 2.0), None, false);
+        assert!(s.kind == SnapKind::Endpoint, "{s:?}");
+        // from a point away from the wall, the foot of the perpendicular on the wall
+        let y = lo + (hi - lo) * 0.25;
+        let s = plan_snap(&edges, &xf, xf.screen([30.0, y]), Some([27.0, y]), false);
+        assert!(s.kind == SnapKind::Perpendicular && (s.at[0] - 30.0).abs() < 1e-6 && (s.at[1] - y).abs() < 1e-6, "{s:?}");
+        // without a base point the same spot is the nearest point of the line
+        let s = plan_snap(&edges, &xf, xf.screen([30.0, y]), None, false);
+        assert!(s.kind == SnapKind::Nearest, "{s:?}");
+        // far from every line: 50 mm, and Shift keeps it level with the base point
+        let far = [34.123, 33.777];
+        let s = plan_snap(&edges, &xf, xf.screen(far), Some([33.0, 33.0]), false);
+        assert!(s.kind == SnapKind::Grid && (s.at[0] - 34.1).abs() < 1e-9 && (s.at[1] - 33.8).abs() < 1e-9, "{s:?}");
+        let s = plan_snap(&edges, &xf, xf.screen(far), Some([33.0, 33.0]), true);
+        assert!(s.kind == SnapKind::Grid && (s.at[1] - 33.0).abs() < 1e-9, "{s:?}");
     }
 
     fn frames() -> (egui::Context, Rect) { (egui::Context::default(), Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 700.0))) }
