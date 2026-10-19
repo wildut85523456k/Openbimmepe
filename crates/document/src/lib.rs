@@ -26,6 +26,8 @@ pub use rooms::RoomShape;
 pub mod native;
 mod rebar;
 mod types;
+mod layers;
+pub use layers::{centre_shift, check as check_layers, core_faces, core_range, thickness as layers_thickness, LayerFunction, LocationLine, WallLayer, MAX_LAYERS};
 pub mod compute;
 pub mod compute_elec;
 pub mod mep;
@@ -351,6 +353,10 @@ pub struct Element {
     pub type_id: Option<ElementId>,
     /// A type element: the category of the elements it serves.
     pub type_for: Option<Category>,
+    /// A wall type: its layers from the exterior face to the interior face (the type is as thick as their sum), and the
+    /// first and last layer of its core (none: the whole wall). Empty for everything else.
+    pub layers: Vec<WallLayer>,
+    pub core: Option<(usize, usize)>,
     /// Document-wide revision at the last successful change.
     pub revision: u64,
 }
@@ -396,6 +402,8 @@ impl Element {
             && (!matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && (self.category != Category::Type || self.type_for.is_some_and(Self::can_have_type))
             && (self.category == Category::Type || self.type_for.is_none())
+            && ((self.layers.is_empty() && self.core.is_none())
+                || (self.category == Category::Type && self.type_for == Some(Category::Wall) && layers::check(&self.layers, self.core).is_ok() && (self.width_m - layers::thickness(&self.layers)).abs() < 1e-9))
             && (self.type_id.is_none() || (self.category != Category::Type && Self::can_have_type(self.category)))
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
@@ -492,6 +500,9 @@ pub enum Command {
     SetType { id: ElementId, type_id: Option<ElementId> },
     /// What a type element is a type of.
     SetTypeFor { id: ElementId, category: Category },
+    /// The layers of a wall type and the first and last layer of its core; the type takes the sum of the layers as its
+    /// thickness. No layers: a plain type.
+    SetLayers { id: ElementId, layers: Vec<WallLayer>, core: Option<(usize, usize)> },
     /// The name of a type.
     Rename { id: ElementId, name: String },
     /// The fittings of the ducts and pipes and which ports are joined, as a whole.
@@ -1047,7 +1058,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None, layers: Vec::new(), core: None,
                     };
                     // a type is made in steps: what it is a type of is set by the next command
                     if *category != Category::Type && !element.valid() { return Err(EditError::InvalidElement); }
@@ -1172,6 +1183,14 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
                     el.type_for = Some(*category);
+                    el.revision = revision;
+                }
+                Command::SetLayers { id, layers, core } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Type || el.type_for != Some(Category::Wall) { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.layers = layers.clone();
+                    el.core = if layers.is_empty() { None } else { *core };
+                    if !layers.is_empty() { el.width_m = layers::thickness(layers); }
                     el.revision = revision;
                 }
                 Command::SetMep(mep) => { trial_mep = (**mep).clone(); }

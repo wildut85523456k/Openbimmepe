@@ -209,12 +209,14 @@ impl Document {
     pub fn duplicate_type(&mut self, type_id: ElementId, name: &str) -> Result<ElementId, EditError> {
         let ty = self.get(type_id).filter(|t| t.category == Category::Type).ok_or(EditError::NotFound(type_id))?;
         let (kind, values) = (ty.kind(), TypeValues::of(ty));
+        let layers = ty.is_layered().then(|| (ty.layers.clone(), ty.core));
         let id = self.next_id();
         let mut ops = vec![
             Command::Create { id, category: Category::Type, name: name.trim().into(), width_m: values.width_m, height_m: values.height_m, elevation_m: 0.0 },
             Command::SetTypeFor { id, category: kind },
         ];
         ops.extend(self.values_ops(id, kind, &values));
+        if let Some((layers, core)) = layers { ops.push(Command::SetLayers { id, layers, core }); }
         self.transact(self.revision, &ops)?;
         Ok(id)
     }

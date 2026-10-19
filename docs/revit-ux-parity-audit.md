@@ -38,18 +38,21 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 |---|---|
 | Click start, click next, chain; Esc ends chain, Esc again leaves tool | done |
 | Press-drag-release draws one wall | done |
-| Location Line list (centerline, core, finish exterior/interior) | done (core = finish: one layer only) |
+| Location Line list (centerline, core, finish exterior/interior) | done: for a layered type the core lines are where the core's faces are (not in the middle when the core is not), a plain type's core is its finish |
 | Exterior on the left when drawn clockwise | done |
 | Mitred corners, T-walls stop at the face | done (plan, 3D, IFC) |
 | Chain meets at offset-line corners; clicking first point closes the loop | done |
 | Shift = orthogonal; typed length + Enter | done |
 | Snap to endpoints, grid ends/crossings, grid lines; marker | done (no midpoint, perpendicular, extension) |
 | Options bar: Height, Base offset, Chain | done; no Offset field, no Level dropdown, no Unconnected/To-level height |
-| Wall type selector | done: list of wall types, Custom, Add type from the thickness and height; a type holds thickness and height only (no layers, no material) and starts empty (no ready-made types) |
+| Wall type selector | done: list of wall types, Custom, Add type from the thickness and height; starts empty (no ready-made types). A type is plain (thickness, height) or layered (next rows) |
+| Compound walls: Edit Type > Structure > layers from exterior to interior with Function (Structure, Substrate, Thermal/Air Layer, Membrane Layer, Finish 1, Finish 2), Material, Thickness, Wraps; Insert, Delete, Up, Down; Core Boundary | done: window opened by Edit Type… in the Wall options bar, in Properties and in the Types window; OK / Apply / Cancel; the type and all its walls change in one undo step and the wall is as thick as its layers; a core with no structure, a membrane in the core, an empty material or no thickness are refused with the reason shown. Material is a name (typed or picked from the names in use), with no material library, colours or patterns; no Variable layer, no Sweeps/Reveals, no Preview/section sample in the window |
+| Layers shown in plan | done: a thin line where each layer ends, heavier at the core boundaries, along every segment and through corners; not cleaned at joins by layer priority, not hidden at coarse detail, no fill patterns |
+| Compound walls in IFC | done: IfcWallType with IfcMaterialLayerSet (functions, core, wraps in OpenBIM_WallType), walls with IfcMaterialLayerSetUsage, read back by this app with or without its own data; an IFC from another program with a layer set on its wall types gives layered types when the layers add up to the wall's thickness (core from the layers marked Core, else first to last structure layer; IFC2X3 files have no function, so every layer is structure) |
 | Draw mode Rectangle: two corners, four joined walls in one undo step, exterior face on the picked rectangle | done |
 | Draw mode Pick Lines: click a grid, wall or beam; the clicked side is the exterior | done (no Pick Faces) |
 | Draw modes polygon, circle, arc | missing |
-| Spacebar flips the wall while drawing | done (moves the axis to the other side of the drawn line) |
+| Spacebar flips the wall while drawing | done as the other face being the reference (Exterior and Interior lines swap); the exterior stays on the left of the direction drawn: use Flip on the placed wall, or draw clockwise |
 | Listening dimensions with angle while drawing | length only |
 | Wall Joins: Allow / Disallow Join at a wall end (the end stays square, and so does the wall that met it); saved, undoable, round-trips through IFC with OpenBIM data | done; markers green (allowed) and red (disallowed) |
 | Wall Joins configuration Butt / Miter / Square off per end | missing (the join is chosen automatically: miter for two walls, butt for a T) |
@@ -170,8 +173,8 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 
 ## Suggested order
 1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
-2. (Railings, L and U stairs, the railing on a stair, vertical opening and roof cuts are done.) Layered wall types, then polygon/arc wall modes, Butt/Miter joins and associative dimensions.
-3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
+2. (Railings, L and U stairs, the railing on a stair, vertical opening, roof cuts and layered wall types are done.) Polygon/arc wall modes, Butt/Miter joins and associative dimensions.
+3. Polygon/arc wall draw modes, Butt/Miter configuration, layer cleanup at wall joins by priority.
 4. Associative dimensions.
 
 The 3D view (editing in 3D, the orbit control at the top right, GPU needs) is its own topic: `docs/3d-view-parity-plan.md` (project doc `claude/3d-view-parity-plan.md`). To be cleared at a later stage, on the owner's request of 2026-10-19.

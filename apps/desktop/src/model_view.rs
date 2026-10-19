@@ -337,6 +337,16 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 if selected_all.contains(id) { blue } else { Color32::from_gray(80) })));
     }
     if !three_d {
+        // the layers of a layered wall: a thin line where each ends, a heavier one at the core boundaries
+        let ink = if app.dark { Color32::from_gray(170) } else { Color32::from_gray(90) };
+        for el in app.document.elements().filter(|e| e.category == Category::Wall && e.type_id.is_some()) {
+            if app.document.level_of(el.id) != Some(level_id) { continue; }
+            for (a, b, core) in app.document.wall_layer_lines(el.id) {
+                painter.line_segment([screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z])], Stroke::new(if core { 1.2 } else { 0.5 }, ink));
+            }
+        }
+    }
+    if !three_d {
         let report = app.compute.report.as_ref().map(|(_, r)| r);
         crate::compute_ui::draw_overlay(&app.document, report, &painter, &screen, level_z, app.tool == crate::Tool::EndPoint);
     }

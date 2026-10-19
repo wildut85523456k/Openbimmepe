@@ -42,6 +42,7 @@ impl Desktop {
                 if ui.add_enabled(ok, egui::Button::new("Rename")).clicked() { action = Some(("rename", t)); }
                 if ui.add_enabled(ok, egui::Button::new("Duplicate")).clicked() { action = Some(("duplicate", t)); }
                 if ui.add_enabled(users.is_empty(), egui::Button::new("Delete")).on_disabled_hover_text("Elements still use this type").clicked() { action = Some(("delete", t)); }
+                if self.document.get(t).is_some_and(|x| x.type_for == Some(Category::Wall)) && ui.button("Edit…").on_hover_text("Name, height and layers").clicked() { action = Some(("edit", t)); }
             });
             ui.small("Rename and Duplicate take the name typed here; it must be new among the types of the same kind.");
             egui::ScrollArea::vertical().max_height(160.0).id_salt("types_users").show(ui, |ui| {
@@ -58,6 +59,7 @@ impl Desktop {
             let result = match what {
                 "rename" => self.document.rename_type(t, &name).map(|()| format!("Type renamed to {}", name.trim())),
                 "duplicate" => self.document.duplicate_type(t, &name).map(|n| { d.picked = Some(n); format!("Type {} made as a copy", name.trim()) }),
+                "edit" => { self.open_type_editor(t); Ok(self.message.clone()) }
                 _ => self.document.delete_type(t).map(|()| { d.picked = None; "Type deleted".to_string() }),
             };
             self.message = match result { Ok(m) => m, Err(e) => format!("Type rejected ({e:?}): the name must be new among the types of its kind") };
@@ -605,18 +607,19 @@ impl Desktop {
     /// A click of the Beam tool in the plan of `level`: the first sets the start, the second places the beam and the
     /// tool stays on for the next one.
     /// The Location Line choices of the Wall tool, as Revit lists them. A wall of one layer has its core where its
-    /// finish is, so the core choices give the same lines as the finish ones.
+    /// finish is, so the core choices give the same lines as the finish ones; a layered wall type has its own.
     pub(crate) const WALL_LOCATIONS: [&'static str; 6] = ["Wall Centerline", "Core Centerline", "Finish Face: Exterior", "Finish Face: Interior", "Core Face: Exterior", "Core Face: Interior"];
 
     /// The axis of a wall drawn from `a` to `b` along the Location Line: the exterior face is on the left of the
-    /// direction of drawing (draw clockwise and it faces out), so a line drawn along it has the axis half a
-    /// thickness to its right, and one drawn along the interior face has it half a thickness to its left.
+    /// direction of drawing (draw clockwise and it faces out). The axis, the centre of the thickness, lies where the
+    /// layers of the wall type put it: half a thickness to the right of a line drawn along the exterior face, half to
+    /// the left of one along the interior face, and for a core line as far from it as the core is from the middle.
     pub(crate) fn wall_axis(&self, a: [f64; 2], b: [f64; 2]) -> ([f64; 2], [f64; 2]) {
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let len = dx.hypot(dy);
         if len < 1e-9 { return (a, b); }
-        let half = self.width_mm / 2000.0;
-        let k = match self.wall_loc { 2 | 4 => -half, 3 | 5 => half, _ => 0.0 } * if self.wall_flip { -1.0 } else { 1.0 };
+        let loc = openbim_document::LocationLine::ALL[self.wall_loc.min(5)];
+        let k = self.document.location_shift(self.wall_type, self.width_mm / 1000.0, loc, self.wall_flip);
         let (nx, ny) = (-dy / len * k, dx / len * k);
         ([a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny])
     }

@@ -79,6 +79,19 @@ pub struct TypeObj {
     pub predefined: String,
     pub name: String,
     pub psets: Psets,
+    /// the layers of the type's material layer set, from one face to the other (empty for none)
+    pub layers: Vec<LayerObj>,
+}
+
+/// A layer of a material layer set as the file has it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayerObj {
+    pub material: String,
+    pub thickness: f64,
+    /// the layer's category (what it is for: `Structure`, `Finish 1`...), empty when the file has none
+    pub function: String,
+    /// the file marks the layer as core ('Core' as its description)
+    pub core: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -245,6 +258,24 @@ impl R<'_> {
         }
     }
 
+    /// The layers of the material layer set `set`, in the file's order. IFC4 layers are (material, thickness,
+    /// ventilated, name, description, category, priority); IFC2X3 ones stop after the ventilation flag.
+    fn layers(&self, set: u32) -> Vec<LayerObj> {
+        let Some(e) = self.f.get(set).filter(|e| e.class == "IFCMATERIALLAYERSET") else { return Vec::new() };
+        let mut out = Vec::new();
+        for l in e.args.first().map_or(&[][..], Value::as_list) {
+            let Some(le) = self.f.deref(l).filter(|x| x.class == "IFCMATERIALLAYER") else { return Vec::new() };
+            let material = le.args.first().and_then(|m| self.f.deref(m)).and_then(|m| m.args.first()).and_then(Value::as_str).unwrap_or("").to_string();
+            let Some(thickness) = le.args.get(1).and_then(Value::as_f64) else { return Vec::new() };
+            out.push(LayerObj {
+                material, thickness,
+                function: le.args.get(5).and_then(Value::as_str).unwrap_or("").to_string(),
+                core: le.args.get(4).and_then(Value::as_str).is_some_and(|d| d.eq_ignore_ascii_case("core")),
+            });
+        }
+        out
+    }
+
     fn pset(&self, id: u32) -> Option<(String, BTreeMap<String, Prop>)> {
         let e = self.f.get(id)?;
         if e.class != "IFCPROPERTYSET" { return None; }
@@ -287,6 +318,7 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
     let mut psets_of: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
     let mut type_of: BTreeMap<u32, u32> = BTreeMap::new();
     let mut material_of: BTreeMap<u32, String> = BTreeMap::new();
+    let mut layer_set_of: BTreeMap<u32, u32> = BTreeMap::new();
     for e in f.entities.values() {
         let objects = |i: usize| -> Vec<u32> { e.args.get(i).map_or(Vec::new(), |l| l.as_list().iter().filter_map(Value::as_ref).collect()) };
         match e.class.as_str() {
@@ -305,6 +337,13 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                 if let Some(m) = e.args.get(5).and_then(|m| f.deref(m)).filter(|m| m.class == "IFCMATERIAL") {
                     if let Some(name) = m.args.first().and_then(Value::as_str) { for o in objects(4) { material_of.insert(o, name.to_string()); } }
                 }
+                // a layer set, or the usage of one (a wall's way of using the set of its type)
+                let set = e.args.get(5).and_then(Value::as_ref).and_then(|m| match f.get(m) {
+                    Some(x) if x.class == "IFCMATERIALLAYERSET" => Some(m),
+                    Some(x) if x.class == "IFCMATERIALLAYERSETUSAGE" => x.args.first().and_then(Value::as_ref),
+                    _ => None,
+                });
+                if let Some(set) = set { for o in objects(4) { layer_set_of.insert(o, set); } }
             }
             _ => {}
         }
@@ -329,7 +368,8 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
             if let Some((n, props)) = p.as_ref().and_then(|p| r.pset(p)) { psets.insert(n, props); }
         }
         type_index.insert(id, out.types.len());
-        out.types.push(TypeObj { step_id: id, guid: guid.to_string(), class: e.class.clone(), predefined: predefined(e), name: e.args.get(2).and_then(Value::as_str).unwrap_or("").to_string(), psets });
+        let layers = layer_set_of.get(&id).map_or_else(Vec::new, |set| r.layers(*set));
+        out.types.push(TypeObj { step_id: id, guid: guid.to_string(), class: e.class.clone(), predefined: predefined(e), name: e.args.get(2).and_then(Value::as_str).unwrap_or("").to_string(), psets, layers });
     }
 
     for (&id, e) in &f.entities {

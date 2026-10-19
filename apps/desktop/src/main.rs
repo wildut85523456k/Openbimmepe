@@ -11,6 +11,7 @@ mod section_ui;
 mod view_tools;
 mod view_notes;
 mod model_edit;
+mod type_editor;
 mod export;
 mod import;
 mod file;
@@ -197,6 +198,8 @@ struct Desktop {
     file: file::FileState,
     /// the types window, while it is open
     types_dialog: Option<model_edit::TypesDialog>,
+    /// Edit Type of a wall type: its layers
+    type_editor: Option<type_editor::TypeEditor>,
     /// the End Point tool and the Compute window
     end_draft: compute_ui::EndDraft,
     compute: compute_ui::ComputeDialog,
@@ -259,7 +262,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -532,6 +535,7 @@ impl eframe::App for Desktop {
         self.export_window(&ctx);
         self.import_window(&ctx);
         self.types_window(&ctx);
+        self.type_editor_window(&ctx);
         self.compute_window(&ctx);
         self.elec_window(&ctx);
         self.file_window(&ctx);

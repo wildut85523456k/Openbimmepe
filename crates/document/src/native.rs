@@ -92,6 +92,21 @@ fn parse_geometry(s: &str) -> Result<Option<Geometry>, String> {
     }))
 }
 
+/// The layers of a wall type: `material:thickness:function:wraps` for each, between `;`. Records written before wall
+/// types had layers have none.
+fn parse_layers(s: &str) -> Result<Vec<crate::WallLayer>, String> {
+    if s.is_empty() { return Ok(Vec::new()); }
+    s.split(';').map(|l| {
+        let p: Vec<&str> = l.split(':').collect();
+        if p.len() != 4 { return Err("a layer without four parts".to_string()); }
+        Ok(crate::WallLayer {
+            material: unesc(p[0])?, thickness_m: num(p[1])?,
+            function: crate::LayerFunction::from_code(p[2]).ok_or("an unknown layer function")?,
+            wraps: p[3] == "T",
+        })
+    }).collect()
+}
+
 /// The line of one element.
 pub fn element_record(e: &Element) -> String {
     let cat = CATEGORIES.iter().find(|c| c.0 == e.category).map_or("", |c| c.1);
@@ -101,11 +116,13 @@ pub fn element_record(e: &Element) -> String {
     let ov: Vec<String> = e.overrides.iter().map(|(n, v)| format!("{},{v:?}", esc(n))).collect();
     let tx: Vec<String> = e.texts.iter().map(|(n, v)| format!("{},{}", esc(n), esc(v))).collect();
     let tf = e.type_for.and_then(|t| CATEGORIES.iter().find(|c| c.0 == t)).map_or("", |c| c.1);
+    let ly: Vec<String> = e.layers.iter().map(|l| format!("{}:{:?}:{}:{}", esc(&l.material), l.thickness_m, l.function.code(), if l.wraps { 'T' } else { 'F' })).collect();
+    let lc = e.core.map_or(String::new(), |(a, b)| format!("{a},{b}"));
     format!(
-        "E|id={}|cat={cat}|name={}|w={:?}|h={:?}|el={:?}|sl={}|geo={}|sec={section}|use={usage}|mat={}|out={}|sk={}|se={}|je={}{}|sp={:?}|an={:?}|par={}|cnt={}|fam={}|tn={}|ov={}|tx={}|tid={}|tf={tf}",
+        "E|id={}|cat={cat}|name={}|w={:?}|h={:?}|el={:?}|sl={}|geo={}|sec={section}|use={usage}|mat={}|out={}|sk={}|se={}|je={}{}|sp={:?}|an={:?}|par={}|cnt={}|fam={}|tn={}|ov={}|tx={}|tid={}|tf={tf}|ly={}|lc={lc}",
         e.id.0, esc(&e.name), e.width_m, e.height_m, e.elevation_m, e.slope_ratio.map_or(String::new(), |s| format!("{s:?}")), geometry_text(e.geometry),
         e.material.name(), outline.join(";"), e.slab_kind.name(), e.slope_edges.iter().map(|b| if *b { 'T' } else { 'F' }).collect::<String>(), if e.join_ends[0] { 'T' } else { 'F' }, if e.join_ends[1] { 'T' } else { 'F' },
-        e.spacing_m, e.angle_deg, id(e.parent), e.count, esc(&e.family), esc(&e.type_name), ov.join(";"), tx.join(";"), id(e.type_id),
+        e.spacing_m, e.angle_deg, id(e.parent), e.count, esc(&e.family), esc(&e.type_name), ov.join(";"), tx.join(";"), id(e.type_id), ly.join(";"),
     )
 }
 
@@ -300,6 +317,11 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
             texts: pairs(get("tx")?)?.into_iter().map(|(n, v)| Ok((n, unesc(&v)?))).collect::<Result<_, String>>()?,
             type_id: opt_id(get("tid")?)?,
             type_for: if get("tf")?.is_empty() { None } else { Some(CATEGORIES.iter().find(|c| c.1 == get("tf").unwrap_or("")).map(|c| c.0).ok_or("an unknown type category")?) },
+            layers: parse_layers(f.get("ly").copied().unwrap_or(""))?,
+            core: match f.get("lc").copied().unwrap_or("") {
+                "" => None,
+                s => { let (a, b) = s.split_once(',').ok_or("a core without ','")?; Some((int(a)? as usize, int(b)? as usize)) }
+            },
             revision: 0,
         });
     }

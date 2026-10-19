@@ -12,6 +12,8 @@ pub struct ImportReport {
     pub added: BTreeMap<&'static str, usize>,
     pub levels: usize,
     pub types: usize,
+    /// wall types that came with their layers
+    pub layered_types: usize,
     /// elements put back exactly as the app wrote them (from the file's own records)
     pub restored: usize,
     /// things to tell the user: edited elsewhere, deleted elsewhere, own data not used
@@ -25,6 +27,7 @@ impl ImportReport {
         let added: Vec<String> = self.added.iter().map(|(k, n)| format!("{n} {k}")).collect();
         let mut s = if self.restored > 0 { format!("Restored {} elements exactly as saved. ", self.restored) } else { String::new() };
         s.push_str(&format!("Imported {} ({}): {}", if added.is_empty() { "nothing".to_string() } else { added.join(", ") }, self.schema, if self.levels > 0 { format!("{} new levels, {} types", self.levels, self.types) } else { format!("{} types", self.types) }));
+        if self.layered_types > 0 { s.push_str(&format!(" ({} of them layered wall types)", self.layered_types)); }
         for n in &self.notes { s.push_str(&format!(". {n}")); }
         if !self.skipped.is_empty() {
             let left: Vec<String> = self.skipped.iter().map(|(k, n)| format!("{n} {k}")).collect();
@@ -54,6 +57,38 @@ struct Planned {
     wall_footing_at: Option<([f64; 2], f64)>,
     number: Option<u64>,
     type_obj: Option<usize>,
+}
+
+/// The layers of a wall type as the file has them, when they make a wall. IFC counts layers from the right of the wall's
+/// direction to the left and the document from the exterior (on the left), so the order is turned round. What each
+/// layer is for comes from its category (a layer with none is structure), the core from the layers the file marks, else
+/// from the first to the last structure layer; which layers wrap is in the app's own `OpenBIM_WallType` set, if there.
+fn layers_of(t: &openbim_ifc::reader::TypeObj) -> Option<(Vec<openbim_document::WallLayer>, Option<(usize, usize)>)> {
+    use openbim_document::{LayerFunction, WallLayer};
+    let function = |s: &str| {
+        let s = s.to_lowercase();
+        if s.contains("substrate") { LayerFunction::Substrate }
+        else if s.contains("thermal") || s.contains("air") { LayerFunction::ThermalAir }
+        else if s.contains("membrane") { LayerFunction::Membrane }
+        else if s.contains("finish") && s.contains('2') { LayerFunction::Finish2 }
+        else if s.contains("finish") { LayerFunction::Finish1 }
+        else { LayerFunction::Structure }
+    };
+    let n = t.layers.len();
+    let wrapping: BTreeSet<usize> = t.psets.get("OpenBIM_WallType").and_then(|p| p.get("WrappingLayers")).and_then(|p| p.text())
+        .map(|s| s.split(',').filter_map(|x| x.trim().parse::<usize>().ok()).collect()).unwrap_or_default();
+    // the set's numbers count from the exterior, as the document does
+    let from_file: Vec<&openbim_ifc::reader::LayerObj> = t.layers.iter().rev().collect();
+    let layers: Vec<WallLayer> = from_file.iter().enumerate().map(|(i, l)| WallLayer {
+        material: if l.material.trim().is_empty() { "Unnamed".into() } else { l.material.trim().chars().take(64).collect() },
+        thickness_m: l.thickness, function: function(&l.function), wraps: wrapping.contains(&(i + 1)),
+    }).collect();
+    let marked: Vec<usize> = from_file.iter().enumerate().filter(|(_, l)| l.core).map(|(i, _)| i).collect();
+    let structure: Vec<usize> = layers.iter().enumerate().filter(|(_, l)| l.function == LayerFunction::Structure).map(|(i, _)| i).collect();
+    let span = |v: &[usize]| v.first().zip(v.last()).map(|(a, b)| (*a, *b));
+    let core = span(&marked).or(span(&structure)).filter(|c| *c != (0, n.saturating_sub(1)));
+    openbim_document::check_layers(&layers, core).ok()?;
+    Some((layers, core))
 }
 
 fn material_of(name: Option<&str>) -> Material {
@@ -295,9 +330,10 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
     for (i, p) in planned.iter().enumerate() {
         if let (Some(t), true) = (p.type_obj, openbim_document::Element::can_have_type(p.category)) { by_type.entry(t).or_default().push(i); }
     }
+    let mut widths: Vec<(usize, f64)> = Vec::new(); // walls that take the exact thickness of their layered type
     for (t, members) in &by_type {
         let kind = planned[members[0]].category;
-        let gov = governed(&planned[members[0]]);
+        let mut gov = governed(&planned[members[0]]);
         let same: Vec<usize> = members.iter().copied().filter(|i| planned[*i].category == kind && governed(&planned[*i]) == gov).collect();
         for i in members { if !same.contains(i) { skip(&mut report, "elements whose size differs from their type (imported without it)"); } }
         let base = if imp.types[*t].name.trim().is_empty() { "Type".to_string() } else { imp.types[*t].name.trim().to_string() };
@@ -306,14 +342,22 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
         while taken_names.contains(&name) { name = format!("{base} ({k})"); k += 1; }
         taken_names.insert(name.clone());
         let tid = take(None, &mut used);
+        // a wall type whose layers add up to the thickness of its walls keeps them (and is exactly as thick as they are)
+        let layered = if kind == Category::Wall { layers_of(&imp.types[*t]).filter(|(l, _)| (openbim_document::layers_thickness(l) - gov.width_m).abs() < 1e-4) } else { None };
+        if let Some((l, _)) = &layered {
+            gov.width_m = openbim_document::layers_thickness(l);
+            for i in &same { widths.push((*i, gov.width_m)); }
+        }
         ops.push(Command::Create { id: tid, category: Category::Type, name, width_m: gov.width_m, height_m: gov.height_m, elevation_m: 0.0 });
         ops.push(Command::SetTypeFor { id: tid, category: kind });
         ops.extend(gov.commands(tid, kind));
+        if let Some((layers, core)) = layered { ops.push(Command::SetLayers { id: tid, layers, core }); report.layered_types += 1; }
         type_ids.insert(*t, tid);
         report.types += 1;
         for i in same { follows.insert(i, *t); }
     }
 
+    for (i, w) in widths { planned[i].width = w; }
     // walls first (strip footings need them), then the rest in the order of the file
     let mut wall_axes: Vec<(ElementId, [f64; 2], [f64; 2], f64)> = doc.elements().filter_map(|e| match (e.category, e.geometry) {
         (Category::Wall, Some(Geometry::Linear { start, end, level })) => Some((e.id, start, end, doc.get(level).map_or(0.0, |l| l.elevation_m) + e.elevation_m)),
@@ -775,6 +819,35 @@ mod tests {
         let want: Vec<String> = digest(&d).into_iter().map(|l| l.replace("[4.000, 0.000][4.000, 6.000]", "[4.000, 0.100][4.000, 5.900]")).collect();
         let got = digest(&back);
         assert_eq!(want, got, "{}", report.text());
+    }
+
+    #[test]
+    fn a_layered_wall_type_comes_back_with_its_layers_with_or_without_the_apps_own_data() {
+        use openbim_document::{LayerFunction::*, WallLayer};
+        let mut d = Document::spatial_sample();
+        let mut layers = vec![WallLayer::new("Render", 0.02, Finish1), WallLayer::new("Brick", 0.1, Structure), WallLayer::new("Insulation", 0.05, ThermalAir), WallLayer::new("Block", 0.15, Structure), WallLayer::new("Plaster", 0.015, Finish2)];
+        layers[0].wraps = true;
+        layers[4].wraps = true;
+        let t = d.add_layered_wall_type("Cavity 335", 3.0, layers.clone(), Some((1, 3))).unwrap();
+        let plain = d.add_wall_type("Plain 200", 0.2, 3.0).unwrap();
+        for (y, ty) in [(0.0, t), (5.0, t), (10.0, plain)] {
+            d.place_wall_typed(ElementId(10), [20.0, y], [26.0, y], 0.1, 2.0, 0.0, &[], Some(ty)).unwrap();
+        }
+        for own in [true, false] {
+            let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-18T00:00:00", crate::export::Schema::Ifc4x3, own).unwrap();
+            assert_eq!(out.text.matches("IFCWALLTYPE(").count(), 2, "own data {own}: the layered type once, with its layers, and the plain one");
+            assert_eq!(out.text.matches("IFCMATERIALLAYERSETUSAGE(").count(), 2);
+            let mut back = Document::new();
+            let report = import_ifc(&mut back, &out.text).unwrap();
+            let bt = back.types_for(Category::Wall).into_iter().find(|x| x.name == "Cavity 335").unwrap_or_else(|| panic!("own data {own}: {}", report.text()));
+            assert_eq!((bt.layers.clone(), bt.core), (layers.clone(), Some((1, 3))), "own data {own}: {}", report.text());
+            assert!((bt.width_m - 0.335).abs() < 1e-12);
+            let walls: Vec<_> = back.elements().filter(|e| e.category == Category::Wall && e.type_id == Some(bt.id)).collect();
+            assert_eq!(walls.len(), 2, "own data {own}");
+            assert!(walls.iter().all(|w| w.width_m == bt.width_m && w.height_m == 3.0));
+            assert!(back.types_for(Category::Wall).into_iter().find(|x| x.name == "Plain 200").is_some_and(|p| p.layers.is_empty()));
+            if !own { assert_eq!(report.layered_types, 1, "{}", report.text()); }
+        }
     }
 
     #[test]

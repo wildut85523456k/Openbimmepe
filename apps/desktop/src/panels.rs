@@ -249,6 +249,9 @@ fn type_maker(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Eleme
         let n = app.document.instances_of(t).len();
         ui.weak(format!("Edits to its size, section, material or bars change the type and its {n} element{}.", if n == 1 { "" } else { "s" }));
     }
+    if let (Some(t), openbim_document::Category::Wall) = (el.type_id, el.category) {
+        if ui.small_button("Edit Type…").on_hover_text("Name, height and layers of the wall type").clicked() { app.open_type_editor(t); }
+    }
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut app.type_name_input).hint_text("New type name").desired_width(120.0));
         if ui.add_enabled(!app.type_name_input.trim().is_empty(), egui::Button::new("Make type").small()).clicked() { app.make_type(); }
@@ -425,6 +428,9 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                     Ok(id) => { app.wall_type = Some(id); app.wall_type_name.clear(); app.message = format!("Wall type {name} added"); }
                     Err(_) => app.message = "A wall type needs a name that is not used yet".into(),
                 }
+            }
+            if ui.add_enabled(app.wall_type.is_some(), egui::Button::new("Edit Type…")).on_hover_text("The layers of the wall type").clicked() {
+                if let Some(t) = app.wall_type { app.open_type_editor(t); }
             }
             ui.label("Base offset (mm)");
             ui.add(egui::DragValue::new(&mut app.elevation_mm).speed(10.0));

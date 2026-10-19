@@ -1,6 +1,6 @@
 //! The document as an IFC 4.3 file (IFC4 on request): levels, walls and beams. The document's other elements are named in the warnings.
 use openbim_arch::{Level, Levels};
-use openbim_document::{Category, Document, Geometry, Material, Usage};
+use openbim_document::{Category, Document, ElementId, Geometry, Material, Usage};
 use openbim_family::mep::{Domain, System};
 use openbim_geom::WallChain;
 use openbim_route::graph::{NetFitting, NetSegment, Network, NodeRef, PortRef, Tapping};
@@ -90,6 +90,20 @@ pub fn scene_for_view(doc: &Document) -> Result<(Scene, std::collections::BTreeM
     scene_with(doc, "view", 1, "t", false, true)
 }
 
+/// A layered wall type of the document as the file's wall type.
+fn wall_type_of(t: &openbim_document::Element) -> openbim_ifc::walls::WallType {
+    use openbim_document::LayerFunction as F;
+    use openbim_ifc::walls::{Function, Layer};
+    openbim_ifc::walls::WallType {
+        name: t.name.clone(),
+        layers: t.layers.iter().map(|l| Layer {
+            material: l.material.clone(), thickness: l.thickness_m, wraps: l.wraps,
+            function: match l.function { F::Structure => Function::Structure, F::Substrate => Function::Substrate, F::ThermalAir => Function::ThermalAir, F::Membrane => Function::Membrane, F::Finish1 => Function::Finish1, F::Finish2 => Function::Finish2 },
+        }).collect(),
+        core: t.core,
+    }
+}
+
 fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &str, own_data: bool, for_view: bool) -> Result<(Scene, std::collections::BTreeMap<&'static str, usize>), String> {
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
@@ -100,12 +114,15 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
     let mut instances = Vec::new();
     let mut mep = Network::new(1);
+    // the wall types that have layers, as the file writes them (IFC2X3 has none)
+    let wall_types: Vec<(ElementId, openbim_ifc::walls::WallType)> = doc.types_for(Category::Wall).into_iter().filter(|t| t.is_layered()).map(|t| (t.id, wall_type_of(t))).collect();
     for el in doc.elements() {
         match (el.category, el.geometry) {
             (Category::Wall, Some(Geometry::Linear { start, end, level })) => {
                 let mut chain = doc.wall_chain(el.id).unwrap_or_else(|| WallChain::new(vec![start, end], false, el.width_m, el.height_m));
                 chain.base_z = level_of(level).ok_or("a wall stands on a level that is gone")? + el.elevation_m;
-                walls.push(WallItem { id: el.id.0, name: el.name.clone(), chain, wall_type: None, room_bounding: true });
+                let wall_type = el.type_id.and_then(|t| wall_types.iter().position(|(id, _)| *id == t));
+                walls.push(WallItem { id: el.id.0, name: el.name.clone(), chain, wall_type, room_bounding: true });
             }
             (Category::Beam, Some(Geometry::Linear { .. })) => {
                 beams.push(beam_item(doc, el).ok_or("a beam lies on a level that is gone")?);
@@ -271,7 +288,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations: vec![], slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: vec![],
+        floor_penetrations: vec![], slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
@@ -348,6 +365,7 @@ fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamIt
     let mut types = Vec::new();
     for t in doc.elements().filter(|e| e.category == Category::Type) {
         let Some(kind) = t.type_for else { continue };
+        if t.is_layered() { continue; } // written with its layer set, as the type of its walls
         let class = match kind {
             Category::Beam => TypeClass::Beam(match t.usage { Usage::Joist => "JOIST", Usage::Girder => "BEAM", _ => "NOTDEFINED" }),
             Category::Column => TypeClass::Column,
