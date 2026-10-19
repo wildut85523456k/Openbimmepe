@@ -165,6 +165,9 @@ Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". 
 | IFC: a vertical opening in a floor is an IfcOpeningElement + IfcRelVoidsElement like a shaft's; in a roof the hole is in the roof's shape (the roof is a faceted solid), with no opening element; the app's own file brings every one back unchanged | done in all three schemas; a ceiling's hole is in the app but not in the file (the covering carries no voids) |
 | By Face (perpendicular to the face of a sloping roof), Dormer, openings in curved walls, arc / polygon / circle sketch of a shaft, shaft symbol options, a slab split in two by a shaft (only the larger piece is drawn in 3D; the file is right) | missing |
 
+## Books review (2026-10-19)
+The Revit MEP 2024 and Architecture 2026 books were read against the app: `docs/revit-book-review.md` (project doc `claude/revit-book-review.md`). It adds the rows this audit lacked for the Duct/Pipe placement tab (toggles, justification, slope, insulation), systems and Generate Layout, spaces and zones, electrical circuits, schedules, sheets, view range and Visibility/Graphics, other dimension types, and the modify tools not yet built (Redo, Create Similar, Select All Instances, Copy/Paste, Match Type, Pin, Split, Array). The Redo button in the ribbon has nothing behind it.
+
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level 1 and Level 2 are fixed tabs.
 
@@ -176,5 +179,6 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 2. (Railings, L and U stairs, the railing on a stair, vertical opening, roof cuts, layered wall types and polygon/circle/arc wall modes are done.) Butt/Miter joins and associative dimensions.
 3. True curved walls, Butt/Miter configuration, layer cleanup at wall joins by priority.
 4. Associative dimensions.
+5. From the books review (order in section 6 of `docs/revit-book-review.md`): Redo and the Create Similar group; Duct/Pipe placement tab with slope and Mechanical Settings; insulation; Generate Layout and systems; schedules, sheets and view range; spaces and zones; electrical circuits.
 
 The 3D view (editing in 3D, the orbit control at the top right, GPU needs) is its own topic: `docs/3d-view-parity-plan.md` (project doc `claude/3d-view-parity-plan.md`). To be cleared at a later stage, on the owner's request of 2026-10-19.
