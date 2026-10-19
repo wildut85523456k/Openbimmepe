@@ -30,10 +30,6 @@ pub(crate) enum VJust { Top, Middle, Bottom }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SlopeMode { Off, Up, Down }
 
-/// The slopes of the drop-down list, in percent. Revit takes this list from Mechanical Settings; until that dialog
-/// exists these are fixed values chosen here.
-pub(crate) const SLOPES_PCT: [f64; 10] = [0.2, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 10.0];
-
 /// The Place Duct / Place Pipe options that are not sizes: the contextual "Placement Tools" of Revit.
 #[derive(Clone, Debug)]
 pub(crate) struct RunOpts {
@@ -56,6 +52,14 @@ impl Default for RunOpts {
     fn default() -> Self {
         RunOpts { auto_connect: true, inherit_elevation: true, inherit_size: false, hjust: HJust::Center, vjust: VJust::Middle, tag: false, slope: SlopeMode::Off, slope_pct: 1.0, show_slope_tip: true }
     }
+}
+
+/// The list of sizes next to a size field: picking one puts it in the field.
+fn size_list(ui: &mut egui::Ui, id: &str, sizes: &[f64], value: &mut f64) {
+    egui::ComboBox::from_id_salt(id).selected_text("▾").width(14.0).show_ui(ui, |ui| {
+        if sizes.is_empty() { ui.weak("No sizes in Mechanical Settings"); }
+        for s in sizes { if ui.selectable_label((*value - s).abs() < 0.5, format!("{s} mm")).clicked() { *value = *s; } }
+    }).response.on_hover_text("Sizes from Manage > MEP Settings");
 }
 
 fn run_size_extent(s: &RunSize) -> (f64, f64) {
@@ -311,11 +315,15 @@ impl Desktop {
         egui::ComboBox::from_id_salt("run_system").selected_text(self.system_pick.name()).show_ui(ui, |ui| {
             for s in systems { ui.selectable_value(&mut self.system_pick, s, s.name()); }
         });
+        // the sizes of Manage > MEP Settings are offered next to the fields; any other size can be typed
+        let (sizes_w, sizes_h, slopes) = { let s = &self.document.mep().settings; (if pipe { s.pipe_diameters_mm.clone() } else { s.duct_widths_mm.clone() }, s.duct_heights_mm.clone(), s.pipe_slopes_pct.clone()) };
         ui.label(if pipe { "Diameter (mm)" } else { "Width (mm)" });
         ui.add(egui::DragValue::new(&mut self.width_mm).speed(1.0).range(10.0..=3000.0));
+        size_list(ui, "run_width_list", &sizes_w, &mut self.width_mm);
         if !pipe {
             ui.label("Height (mm)");
             ui.add(egui::DragValue::new(&mut self.height_mm).speed(1.0).range(10.0..=3000.0));
+            size_list(ui, "run_height_list", &sizes_h, &mut self.height_mm);
         }
         ui.label("Middle elevation (mm)");
         ui.add(egui::DragValue::new(&mut self.elevation_mm).speed(1.0));
@@ -339,7 +347,7 @@ impl Desktop {
             });
             if self.run_opts.slope != SlopeMode::Off {
                 egui::ComboBox::from_id_salt("run_slope_pct").selected_text(format!("{} %", self.run_opts.slope_pct)).width(70.0).show_ui(ui, |ui| {
-                    for v in SLOPES_PCT { ui.selectable_value(&mut self.run_opts.slope_pct, v, format!("{v} %")); }
+                    for v in slopes { ui.selectable_value(&mut self.run_opts.slope_pct, v, format!("{v} %")); }
                 });
                 ui.add(egui::DragValue::new(&mut self.run_opts.slope_pct).speed(0.05).range(0.01..=100.0).suffix(" %"));
                 ui.checkbox(&mut self.run_opts.show_slope_tip, "Show Slope Tooltip");

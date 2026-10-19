@@ -56,7 +56,7 @@ pub fn arc(a: P, b: P, t: P) -> Option<Vec<P>> {
     if d.abs() < 1e-9 * (sa + sb + st).max(1.0) { return None; }
     let c = [(sa * (b[1] - t[1]) + sb * (t[1] - a[1]) + st * (a[1] - b[1])) / d, (sa * (t[0] - b[0]) + sb * (a[0] - t[0]) + st * (b[0] - a[0])) / d];
     let r = len(c, a);
-    if !r.is_finite() || r < MIN_RADIUS_M || r > 1e5 { return None; }
+    if !r.is_finite() || !(MIN_RADIUS_M..=1e5).contains(&r) { return None; }
     let wrap = |x: f64| x.rem_euclid(TAU);
     let (tb, tt) = (wrap(angle_of(c, b) - angle_of(c, a)), wrap(angle_of(c, t) - angle_of(c, a)));
     // counter-clockwise from a to b when that way meets t, else clockwise

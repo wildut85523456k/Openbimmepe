@@ -152,6 +152,9 @@ impl Element {
     pub fn is_layered(&self) -> bool { self.category == Category::Type && !self.layers.is_empty() }
 }
 
+/// The layers of a wall's type and the range of them that is its core.
+pub type WallLayers<'a> = (&'a [WallLayer], Option<(usize, usize)>);
+
 impl Document {
     /// A new wall type made of `layers`, `height_m` high, ready to be drawn with. Its thickness is the sum of the layers.
     pub fn add_layered_wall_type(&mut self, name: &str, height_m: f64, layers: Vec<WallLayer>, core: Option<(usize, usize)>) -> Result<ElementId, EditError> {
@@ -202,7 +205,7 @@ impl Document {
     }
 
     /// The layers and core of the type of the wall `id`, if its type has any.
-    pub fn wall_layers(&self, id: ElementId) -> Option<(&[WallLayer], Option<(usize, usize)>)> {
+    pub fn wall_layers(&self, id: ElementId) -> Option<WallLayers<'_>> {
         let ty = self.get(self.get(id)?.type_id?)?;
         ty.is_layered().then_some((ty.layers.as_slice(), ty.core))
     }

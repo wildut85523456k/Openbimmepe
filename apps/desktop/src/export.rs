@@ -355,6 +355,7 @@ pub fn fingerprint(el: &openbim_document::Element) -> String {
 }
 
 /// The IFC type objects of the document's types, and the `OpenBIM_Element` data of the members that were written.
+#[allow(clippy::too_many_arguments)]
 fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem], roofs: &[openbim_ifc::RoofItem], stairs: &[openbim_ifc::StairItem], railings: &[openbim_ifc::RailingItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
     let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(walls.iter().map(|w| w.id)).chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).chain(roofs.iter().map(|r| r.id)).chain(stairs.iter().map(|s| s.id)).chain(railings.iter().map(|r| r.id)).collect();
     let mut info = std::collections::BTreeMap::new();

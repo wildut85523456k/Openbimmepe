@@ -114,10 +114,10 @@ impl Document {
         if copy {
             // the tags that came with the copies of elements are copies in this view too: they go with them
             for op in &mut ops { if let Command::Restore(e) = op { if here(e.geometry) { e.geometry = e.geometry.map(shifted); } } }
-            let mut next = ops.iter().filter_map(|o| if let Command::Restore(e) = o { Some(e.id.0 + 1) } else { None }).max().unwrap_or(0).max(self.next_id().0);
-            for id in notes {
+            let next = ops.iter().filter_map(|o| if let Command::Restore(e) = o { Some(e.id.0 + 1) } else { None }).max().unwrap_or(0).max(self.next_id().0);
+            for (id, number) in notes.into_iter().zip(next..) {
                 let mut n = self.get(id).ok_or("an annotation is gone")?.clone();
-                n.id = ElementId(next); next += 1;
+                n.id = ElementId(number);
                 n.geometry = n.geometry.map(shifted);
                 made.push(n.id);
                 ops.push(Command::Restore(Box::new(n)));

@@ -50,6 +50,7 @@ pub static ICONS: &[Icon] = &[
     icon!("create_similar"),
     icon!("cut"),
     icon!("match_type"),
+    icon!("mep_settings"),
     icon!("paste"),
     icon!("paste_same_place"),
     icon!("pin"),

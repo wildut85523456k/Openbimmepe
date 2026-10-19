@@ -46,10 +46,10 @@ impl TypeEditor {
     /// Why this cannot be applied, if it cannot.
     pub fn problem(&self) -> Option<String> {
         if self.name.trim().is_empty() { return Some("The type needs a name".into()); }
-        if !(self.height_mm > 0.0) { return Some("The height must be above 0".into()); }
+        if self.height_mm.is_nan() || self.height_mm <= 0.0 { return Some("The height must be above 0".into()); }
         match &self.layers {
             Some(l) => openbim_document::check_layers(l, self.core_option()).err(),
-            None => (!(self.plain_mm > 0.0)).then(|| "The thickness must be above 0".to_string()),
+            None => (self.plain_mm.is_nan() || self.plain_mm <= 0.0).then(|| "The thickness must be above 0".to_string()),
         }
     }
 

@@ -350,6 +350,7 @@ fn stair_items(st: &openbim_ifc::StairItem, fr: &Fr, sec: &Section, faces: bool,
 
 /// A solid made of closed parts (a roof, the parts of a railing): the loops where the plane cuts it, and, seen from outside,
 /// its faces that turn toward the viewer.
+#[allow(clippy::too_many_arguments)]
 fn solid_items(kind: Kind, id: u64, verts: &[[f64; 3]], faces_of: &[Vec<usize>], fr: &Fr, sec: &Section, faces: bool, items: &mut Vec<Item>, far: &mut Vec<Face>) {
     let el = Element { kind, id };
     let w: Vec<f64> = verts.iter().map(|v| fr.uw([v[0], v[1]]).1).collect();

@@ -390,6 +390,39 @@ pub(crate) fn draw_overlay(doc: &Document, report: Option<&SystemReport>, painte
     }
 }
 
+
+/// The commands that put the run end of `q` on the connector `c`: when the run's other end is free (nothing joined, no
+/// tap on the run) the whole run moves, so it keeps its direction and square-on meeting; otherwise the end is stretched
+/// to the connector and the run takes the slope the height asks. Nothing when it is there already (or cannot follow).
+pub(crate) fn snap_commands(doc: &Document, q: &openbim_document::EquipLink, c: &openbim_family::mep::Connector) -> Vec<Command> {
+    let MepNode::Run(id) = q.port.node else { return Vec::new() };
+    let Some(e) = doc.get(id) else { return Vec::new() };
+    let Some(Geometry::Linear { start, end, level }) = e.geometry else { return Vec::new() };
+    let lz = doc.get(level).map_or(0.0, |l| l.elevation_m);
+    let (z0, slope) = (lz + e.elevation_m, e.slope_ratio.unwrap_or(0.0));
+    let plan = (end[0] - start[0]).hypot(end[1] - start[1]);
+    let z1 = z0 + slope * plan;
+    let (p, pz) = if q.port.port == 0 { (start, z0) } else { (end, z1) };
+    let d = [c.pos[0] - p[0], c.pos[1] - p[1], c.pos[2] - pz];
+    if d.iter().all(|v| v.abs() < 1e-9) { return Vec::new(); }
+    let other = MepPort { node: q.port.node, port: 1 - q.port.port };
+    let has_taps = doc.mep().taps.iter().any(|t| t.run == id);
+    let mut out = Vec::new();
+    if doc.mep().partner(other).is_none() && !has_taps {
+        out.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: [start[0] + d[0], start[1] + d[1]], end: [end[0] + d[0], end[1] + d[1]], level } });
+        if d[2].abs() > 1e-12 { out.push(Command::MoveElevation { id, elevation_m: e.elevation_m + d[2] }); }
+    } else {
+        let (ns, ne) = if q.port.port == 0 { ([c.pos[0], c.pos[1]], end) } else { (start, [c.pos[0], c.pos[1]]) };
+        let np = (ne[0] - ns[0]).hypot(ne[1] - ns[1]);
+        if np < 0.05 || (q.port.port == 0 && has_taps) { return Vec::new(); }
+        let (nz0, nz1) = if q.port.port == 0 { (c.pos[2], z1) } else { (z0, c.pos[2]) };
+        out.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: ns, end: ne, level } });
+        out.push(Command::MoveElevation { id, elevation_m: nz0 - lz });
+        out.push(Command::SetSlope { id, slope_ratio: (nz1 - nz0) / np });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,36 +485,4 @@ mod tests {
         // a bad catalogue line is explained
         assert!(parse_catalogue("a,b,c\n300x200,300\n", true).is_err());
     }
-}
-
-/// The commands that put the run end of `q` on the connector `c`: when the run's other end is free (nothing joined, no
-/// tap on the run) the whole run moves, so it keeps its direction and square-on meeting; otherwise the end is stretched
-/// to the connector and the run takes the slope the height asks. Nothing when it is there already (or cannot follow).
-pub(crate) fn snap_commands(doc: &Document, q: &openbim_document::EquipLink, c: &openbim_family::mep::Connector) -> Vec<Command> {
-    let MepNode::Run(id) = q.port.node else { return Vec::new() };
-    let Some(e) = doc.get(id) else { return Vec::new() };
-    let Some(Geometry::Linear { start, end, level }) = e.geometry else { return Vec::new() };
-    let lz = doc.get(level).map_or(0.0, |l| l.elevation_m);
-    let (z0, slope) = (lz + e.elevation_m, e.slope_ratio.unwrap_or(0.0));
-    let plan = (end[0] - start[0]).hypot(end[1] - start[1]);
-    let z1 = z0 + slope * plan;
-    let (p, pz) = if q.port.port == 0 { (start, z0) } else { (end, z1) };
-    let d = [c.pos[0] - p[0], c.pos[1] - p[1], c.pos[2] - pz];
-    if d.iter().all(|v| v.abs() < 1e-9) { return Vec::new(); }
-    let other = MepPort { node: q.port.node, port: 1 - q.port.port };
-    let has_taps = doc.mep().taps.iter().any(|t| t.run == id);
-    let mut out = Vec::new();
-    if doc.mep().partner(other).is_none() && !has_taps {
-        out.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: [start[0] + d[0], start[1] + d[1]], end: [end[0] + d[0], end[1] + d[1]], level } });
-        if d[2].abs() > 1e-12 { out.push(Command::MoveElevation { id, elevation_m: e.elevation_m + d[2] }); }
-    } else {
-        let (ns, ne) = if q.port.port == 0 { ([c.pos[0], c.pos[1]], end) } else { (start, [c.pos[0], c.pos[1]]) };
-        let np = (ne[0] - ns[0]).hypot(ne[1] - ns[1]);
-        if np < 0.05 || (q.port.port == 0 && has_taps) { return Vec::new(); }
-        let (nz0, nz1) = if q.port.port == 0 { (c.pos[2], z1) } else { (z0, c.pos[2]) };
-        out.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: ns, end: ne, level } });
-        out.push(Command::MoveElevation { id, elevation_m: nz0 - lz });
-        out.push(Command::SetSlope { id, slope_ratio: (nz1 - nz0) / np });
-    }
-    out
 }

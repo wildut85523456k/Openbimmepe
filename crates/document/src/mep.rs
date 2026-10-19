@@ -84,8 +84,51 @@ pub struct MepEndpoint {
     pub required_pressure_pa: f64,
 }
 
+/// The lists of Revit's Mechanical Settings that this app keeps with the model: the slopes offered for a pipe (percent)
+/// and the sizes offered for pipes (diameters) and ducts (widths and heights), in millimetres. The drawing tools'
+/// options bars offer them; any other size can still be typed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MepSettings {
+    pub pipe_slopes_pct: Vec<f64>,
+    pub pipe_diameters_mm: Vec<f64>,
+    pub duct_widths_mm: Vec<f64>,
+    pub duct_heights_mm: Vec<f64>,
+}
+
+impl Default for MepSettings {
+    fn default() -> Self {
+        MepSettings {
+            pipe_slopes_pct: vec![0.2, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 10.0],
+            pipe_diameters_mm: vec![15.0, 20.0, 25.0, 32.0, 40.0, 50.0, 65.0, 80.0, 100.0, 125.0, 150.0, 200.0, 250.0, 300.0],
+            duct_widths_mm: vec![100.0, 150.0, 200.0, 250.0, 300.0, 400.0, 500.0, 600.0, 800.0, 1000.0, 1200.0],
+            duct_heights_mm: vec![100.0, 150.0, 200.0, 250.0, 300.0, 400.0, 500.0, 600.0],
+        }
+    }
+}
+
+impl MepSettings {
+    /// The same lists with every value outside its range (slopes 0 to 100 percent, sizes 10 to 3000 mm, or not a
+    /// number) dropped, sorted, and each value once.
+    pub fn cleaned(&self) -> MepSettings {
+        let tidy = |v: &[f64], lo: f64, hi: f64| -> Vec<f64> {
+            let mut out: Vec<f64> = v.iter().copied().filter(|x| x.is_finite() && *x >= lo && *x <= hi).collect();
+            out.sort_by(|a, b| a.total_cmp(b));
+            out.dedup();
+            out
+        };
+        MepSettings {
+            pipe_slopes_pct: tidy(&self.pipe_slopes_pct, 0.01, 100.0),
+            pipe_diameters_mm: tidy(&self.pipe_diameters_mm, 10.0, 3000.0),
+            duct_widths_mm: tidy(&self.duct_widths_mm, 10.0, 3000.0),
+            duct_heights_mm: tidy(&self.duct_heights_mm, 10.0, 3000.0),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct MepData {
+    /// the Mechanical Settings lists
+    pub settings: MepSettings,
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
@@ -101,7 +144,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -123,6 +166,7 @@ impl MepData {
     pub(crate) fn pruned(&self, elements: &BTreeMap<ElementId, Element>) -> MepData {
         let alive = |n: &MepNode| match n { MepNode::Run(id) => is_run(elements.get(id)), MepNode::Fitting(_) => true };
         MepData {
+            settings: self.settings.clone(),
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
@@ -187,6 +231,7 @@ impl MepData {
             let open = matches!(q.port.node, MepNode::Run(_)) && ports(&q.port.node).is_some_and(|n| q.port.port < n) && self.partner(q.port).is_none();
             if !open || q.connector.is_empty() || !elements.get(&q.element).is_some_and(|x| x.category == Category::Family) || !linked.insert(q.port) { return Err(EditError::InvalidMep); }
         }
+        if self.settings != self.settings.cleaned() { return Err(EditError::InvalidMep); }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }
         Ok(())
@@ -201,6 +246,17 @@ fn is_run(e: Option<&Element>) -> bool {
 }
 
 impl crate::Document {
+    /// Mechanical Settings > OK: the lists (cleaned: out-of-range values dropped, sorted, each once) replace the model's, in one
+    /// undoable step. Nothing happens, and no step is made, when they are the same.
+    pub fn set_mep_settings(&mut self, settings: &MepSettings) -> Result<bool, EditError> {
+        let cleaned = settings.cleaned();
+        if cleaned == self.mep().settings { return Ok(false); }
+        let mut data = self.mep().clone();
+        data.settings = cleaned;
+        self.transact(self.revision(), &[crate::Command::SetMep(Box::new(data))])?;
+        Ok(true)
+    }
+
     /// A drawn duct or pipe as the routing code sees it (3D ends, section, system).
     pub fn mep_run(&self, id: ElementId) -> Option<openbim_place::penetrations::Run> {
         use openbim_place::penetrations::{Run, RunSize};
@@ -363,6 +419,44 @@ mod tests {
     }
 
     #[test]
+    fn mechanical_settings_are_cleaned_saved_with_the_model_undone_and_kept_when_runs_go() {
+        let mut d = Document::spatial_sample();
+        assert_eq!(d.mep().settings, MepSettings::default());
+        let mut s = d.mep().settings.clone();
+        s.pipe_slopes_pct = vec![2.0, 0.5, 0.5, f64::NAN, -1.0, 500.0, 1.0];
+        s.duct_widths_mm = vec![5.0, 350.0, 120.0];
+        assert_eq!(d.set_mep_settings(&s), Ok(true));
+        assert_eq!(d.mep().settings.pipe_slopes_pct, vec![0.5, 1.0, 2.0], "bad values dropped, sorted, once");
+        assert_eq!(d.mep().settings.duct_widths_mm, vec![120.0, 350.0]);
+        assert_eq!(d.set_mep_settings(&d.mep().settings.clone()), Ok(false), "no change, no step");
+        // saved and read back
+        let lines = crate::native::mep_records(d.mep());
+        assert!(lines.iter().any(|l| l.starts_with("M|")));
+        assert_eq!(crate::native::parse_mep(&lines).unwrap(), *d.mep());
+        // an empty list is allowed and comes back empty
+        let mut e = d.mep().settings.clone();
+        e.duct_heights_mm.clear();
+        d.set_mep_settings(&e).unwrap();
+        assert_eq!(crate::native::parse_mep(&crate::native::mep_records(d.mep())).unwrap().settings.duct_heights_mm, Vec::<f64>::new());
+        // a route placed and deleted afterwards leaves the lists alone
+        let ids = d.place_mep_route(ElementId(10), &duct_route(&[[1.0, 1.0, 2.7], [5.0, 1.0, 2.7], [5.0, 4.0, 2.7]])).unwrap();
+        d.transact(d.revision(), &ids.iter().map(|i| crate::Command::Delete { id: *i }).collect::<Vec<_>>()).unwrap();
+        assert_eq!(d.mep().settings.duct_widths_mm, vec![120.0, 350.0]);
+        // a model with the defaults writes no record, and a file without one reads as the defaults
+        let fresh = Document::spatial_sample();
+        assert!(!crate::native::mep_records(fresh.mep()).iter().any(|l| l.starts_with("M|")));
+        assert_eq!(crate::native::parse_mep(&[]).unwrap().settings, MepSettings::default());
+        // undo goes back one list at a time
+        assert!(d.undo().unwrap() && d.undo().unwrap());
+        assert!(d.undo().unwrap());
+        assert_eq!(d.mep().settings.pipe_slopes_pct, vec![0.5, 1.0, 2.0]);
+        // data that was not cleaned is refused
+        let mut bad = d.mep().clone();
+        bad.settings.pipe_diameters_mm = vec![-5.0];
+        assert_eq!(d.transact(d.revision(), &[crate::Command::SetMep(Box::new(bad))]), Err(EditError::InvalidMep));
+    }
+
+    #[test]
     fn the_end_of_a_run_joined_to_an_elbow_keeps_its_height_and_the_free_ends_can_be_changed() {
         let mut d = Document::spatial_sample();
         let route = duct_route(&[[1.0, 1.0, 2.7], [5.0, 1.0, 2.7], [5.0, 4.0, 2.7]]);
@@ -496,7 +590,7 @@ mod tests {
             let text = crate::native::records(&d);
             assert_eq!(crate::native::parse_mep(&text).unwrap(), *d.mep());
             assert!(d.undo().unwrap());
-            assert!(d.mep().fittings.len() == 0 && d.get(main).is_some() && d.get(new[0]).is_none());
+            assert!(d.mep().fittings.is_empty() && d.get(main).is_some() && d.get(new[0]).is_none());
             assert_eq!(d.mep().links.len(), 0);
         }
     }

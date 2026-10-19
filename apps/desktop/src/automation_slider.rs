@@ -10,8 +10,8 @@ pub fn show(ui:&mut egui::Ui,kind:&mut NodeKind,id:u64)->bool {
     let before=(*value,*min,*max,*step,*quantity);
     let mut open=expanded(ui.ctx(),id);
     ui.horizontal(|ui| {
-        if ui.small_button(if open {"?"} else {"?"}).on_hover_text("Edit Min / Max / Step").clicked() {
-            open=!open;
+        if ui.small_button("?").on_hover_text("Edit Min / Max / Step").clicked() {
+            open = !open;
             ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("slider-range",id)),open));
             ui.ctx().request_repaint();
         }
@@ -31,8 +31,8 @@ pub fn show(ui:&mut egui::Ui,kind:&mut NodeKind,id:u64)->bool {
                     i32::from(i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowDown))
                 });
                 *value=(*value+f64::from(direction)* *step).clamp(*min,*max);
-                if ui.input(|i|i.key_pressed(egui::Key::Home)) {*value=*min;}
-                if ui.input(|i|i.key_pressed(egui::Key::End)) {*value=*max;}
+                if ui.input(|i|i.key_pressed(egui::Key::Home)) { *value = *min; }
+                if ui.input(|i|i.key_pressed(egui::Key::End)) { *value = *max; }
             }
             let dark=ui.visuals().dark_mode;
             let painter=ui.painter();

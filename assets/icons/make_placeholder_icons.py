@@ -66,5 +66,16 @@ def create_similar():
     d.line([70 * S, 50 * S, 102 * S, 50 * S], fill=ORANGE, width=5 * S)
     save(im, "create_similar")
 
-for f in (paste, cut, match_type, pin, select_instances, create_similar): f()
+def mep_settings():
+    # a pipe with a slope tick marks and a gear-like dot: lists of sizes and slopes
+    im, d = canvas()
+    sheet(d, 20, 22, 88, 84, fill=WHITE, line=BLUE)
+    for k in range(4):
+        y = 38 + 17 * k
+        d.line([30 * S, y * S, 70 * S, y * S], fill=BLUE, width=3 * S)
+        d.ellipse([82 * S, (y - 5) * S, 92 * S, (y + 5) * S], fill=ORANGE, outline=DARK, width=S)
+    d.line([30 * S, 100 * S, 98 * S, 88 * S], fill=DARK, width=4 * S)
+    save(im, "mep_settings")
+
+for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings): f()
 pin(slash=True)

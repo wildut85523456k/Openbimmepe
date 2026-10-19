@@ -59,11 +59,14 @@ struct Planned {
     type_obj: Option<usize>,
 }
 
+/// The layers of a wall type and the range of them that is its core.
+type TypeLayers = (Vec<openbim_document::WallLayer>, Option<(usize, usize)>);
+
 /// The layers of a wall type as the file has them, when they make a wall. IFC counts layers from the right of the wall's
 /// direction to the left and the document from the exterior (on the left), so the order is turned round. What each
 /// layer is for comes from its category (a layer with none is structure), the core from the layers the file marks, else
 /// from the first to the last structure layer; which layers wrap is in the app's own `OpenBIM_WallType` set, if there.
-fn layers_of(t: &openbim_ifc::reader::TypeObj) -> Option<(Vec<openbim_document::WallLayer>, Option<(usize, usize)>)> {
+fn layers_of(t: &openbim_ifc::reader::TypeObj) -> Option<TypeLayers> {
     use openbim_document::{LayerFunction, WallLayer};
     let function = |s: &str| {
         let s = s.to_lowercase();
@@ -470,6 +473,8 @@ fn unchanged_in_file(native: &openbim_document::Element, nd: &Document, read: &o
 /// run is gone is dropped by the model itself when the import is applied.
 fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepData) -> openbim_document::MepData {
     let mut out = have.clone();
+    // the file's Mechanical Settings come with it unless the model already has lists of its own
+    if have.settings == openbim_document::MepSettings::default() { out.settings = incoming.settings.clone(); }
     let mut refused: BTreeSet<u64> = BTreeSet::new();
     for f in incoming.fittings {
         match have.fitting(f.id) { None => out.fittings.push(f), Some(h) if *h == f => {}, Some(_) => { refused.insert(f.id); } }

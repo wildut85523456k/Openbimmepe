@@ -161,7 +161,7 @@ const VIEW: &[Group] = &[
     ]},
 ];
 const MANAGE: &[Group] = &[
-    Group { title: "Settings", commands: &[c("settings", "Settings"), c("project_parameters", "Types")] },
+    Group { title: "Settings", commands: &[c("settings", "Settings"), c("project_parameters", "Types"), c("mep_settings", "MEP Settings")] },
     Group { title: "Automation", commands: &[c("automation_editor", "Graph Editor"), c("automation_player", "Player")] },
     Group { title: "AI Integration", commands: &[c("automation_mcp", "MCP Setup"), c("automation_snapshot", "Export Snapshot")] },
 ];

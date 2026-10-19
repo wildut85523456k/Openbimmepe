@@ -47,7 +47,7 @@ pub fn edges(doc: &openbim_document::Document, view: &SectionView) -> Vec<Edge> 
     };
     for item in &view.items {
         let datum = item.class == Class::Datum || item.element.kind == Kind::Level;
-        let id = (!datum).then(|| ElementId(item.element.id)).filter(|i| doc.get(*i).is_some());
+        let id = (!datum).then_some(ElementId(item.element.id)).filter(|i| doc.get(*i).is_some());
         if !datum && id.is_none() { continue; }
         match &item.shape {
             Shape::Region { outer, holes } => { ring(&mut out, outer, id, datum); for h in holes { ring(&mut out, h, id, datum); } }

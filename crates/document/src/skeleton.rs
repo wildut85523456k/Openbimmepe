@@ -83,7 +83,7 @@ pub fn faces(ring: &[P]) -> Option<Vec<(usize, Vec<P>)>> {
         w.n[i] = [-dy / l, dx / l];
         w.c[i] = dot(w.n[i], a);
     }
-    for i in 0..n { w.corner(ring[i], 0.0, (i + n - 1) % n, i, (i + n - 1) % n, (i + 1) % n); }
+    for (i, &r) in ring.iter().enumerate().take(n) { w.corner(r, 0.0, (i + n - 1) % n, i, (i + n - 1) % n, (i + 1) % n); }
     let mut now = 0.0;
     for _ in 0..(8 * n + 16) {
         let alive: Vec<usize> = (0..w.v.len()).filter(|&i| w.v[i].alive).collect();

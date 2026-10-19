@@ -895,7 +895,7 @@ impl Desktop {
         // the point where side `i` starts: the corner with the side before it, or its own start at the end of a path
         let corner = |i: usize| {
             let (u, v) = sides[i % count];
-            if !closed && i % count == 0 { return u; }
+            if !closed && i.is_multiple_of(count) { return u; }
             let (s, t) = sides[(i + count - 1) % count];
             openbim_document::line_meet(s, [t[0] - s[0], t[1] - s[1]], u, [v[0] - u[0], v[1] - u[1]]).unwrap_or(u)
         };

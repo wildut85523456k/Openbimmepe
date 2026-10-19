@@ -57,7 +57,7 @@ pub fn mesh(path: &[[f64; 2]], z0: f64, height: f64, rail: f64, spacing: f64) ->
 /// The same for a path whose points have a height of their own (the base of the railing there): the rail follows the
 /// slope between them, the posts and balusters stand upright on it.
 pub fn mesh3(path: &[[f64; 3]], height: f64, rail: f64, spacing: f64) -> Option<Mesh> {
-    if path.len() < 2 || !(height > rail) || !(rail > 0.0) { return None; }
+    if path.len() < 2 || height.is_nan() || rail.is_nan() || height <= rail || rail <= 0.0 { return None; }
     let mut m = Mesh { vertices: Vec::new(), faces: Vec::new() };
     for w in path.windows(2) {
         let (p, q) = ([w[0][0], w[0][1]], [w[1][0], w[1][1]]);

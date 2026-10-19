@@ -129,10 +129,8 @@ impl Document {
         for t in targets.iter().filter(|t| **t != source) {
             let e = self.get(*t).ok_or("an element is gone")?;
             if e.category != s.category || e.family != s.family { return Err(format!("{} is not the same kind as {}", e.name, s.name)); }
-            if s.category == Category::Family {
-                if e.type_name != s.type_name {
-                    ops.push(Command::SetFamily { id: *t, family: s.family.clone(), type_name: s.type_name.clone(), overrides: e.overrides.clone(), angle_deg: e.angle_deg });
-                }
+            if s.category == Category::Family && e.type_name != s.type_name {
+                ops.push(Command::SetFamily { id: *t, family: s.family.clone(), type_name: s.type_name.clone(), overrides: e.overrides.clone(), angle_deg: e.angle_deg });
             }
         }
         if s.category == Category::Family {

@@ -1459,7 +1459,7 @@ fn write_railings(o: &mut Out) -> Result<(), ExportError> {
 fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
     for s in &scene.stairs {
-        if s.risers < 2 || !(s.riser_height > 0.0) || !(s.tread_length > 0.0) || !(s.width > 0.0) || (s.dir[0].hypot(s.dir[1]) - 1.0).abs() > 1e-6 {
+        if s.risers < 2 || s.riser_height.is_nan() || s.riser_height <= 0.0 || s.tread_length.is_nan() || s.tread_length <= 0.0 || s.width.is_nan() || s.width <= 0.0 || (s.dir[0].hypot(s.dir[1]) - 1.0).abs() > 1e-6 {
             return Err(ExportError::Unsupported(format!("stair {}: a run with no steps or no direction", s.name)));
         }
         let st = o.storey_for(s.start[2]);

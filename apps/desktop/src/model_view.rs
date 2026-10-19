@@ -1303,7 +1303,8 @@ mod tests {
         }
         assert_eq!(walls(&app), n + 1, "{}", app.message);
         // the chain goes on from the end of the last wall
-        for at in [c] { frame(&ctx, screen, &mut app, vec![button(at, true)]); frame(&ctx, screen, &mut app, vec![button(at, false)]); }
+        frame(&ctx, screen, &mut app, vec![button(c, true)]);
+        frame(&ctx, screen, &mut app, vec![button(c, false)]);
         assert_eq!(walls(&app), n + 2, "{}", app.message);
         // Esc ends the chain, and then a press-drag-release draws one wall
         frame(&ctx, screen, &mut app, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);

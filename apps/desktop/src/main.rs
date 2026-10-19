@@ -18,6 +18,7 @@ mod export;
 mod import;
 mod file;
 mod mep_tool;
+mod mep_settings_ui;
 mod compute_ui;
 mod elec_ui;
 mod automation;
@@ -51,6 +52,8 @@ impl TempDim {
     /// A number that tells one temporary dimension from another.
     fn key(self) -> (u8, u64, u64) { match self { TempDim::Length(a) => (0, a.0, 0), TempDim::Distance(a, b) => (1, a.0, b.0) } }
 }
+/// The elevation marker being placed: its number and the views (facing, from, to) it will hold.
+type ElevMarks = (u64, Vec<(u8, [f64; 2], [f64; 2])>);
 /// What is being dragged in Select mode: an element to move, or one end of a wall.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Drag { Move { id: ElementId, from: [f64; 2] }, Grip { id: ElementId, at_start: bool } }
@@ -181,7 +184,7 @@ struct Desktop {
     /// how the elevation or section view last drawn maps (u, z) to the screen, for picking and for the tests
     section_xf: Option<section_ui::Xf>,
     /// where the four elevations look from, for the markers in plans: worked out again when the document changes
-    elev_marks: Option<(u64, Vec<(u8, [f64; 2], [f64; 2])>)>,
+    elev_marks: Option<ElevMarks>,
     slab_kind_pick: openbim_document::SlabKind,
     /// footing: the thickness of a new pad, or of the selected one
     footing_thickness_mm: f64,
@@ -205,6 +208,7 @@ struct Desktop {
     file: file::FileState,
     /// the types window, while it is open
     types_dialog: Option<model_edit::TypesDialog>,
+    mep_settings_dialog: Option<mep_settings_ui::MepSettingsDialog>,
     /// Edit Type of a wall type: its layers
     type_editor: Option<type_editor::TypeEditor>,
     /// the End Point tool and the Compute window
@@ -269,7 +273,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -446,6 +450,7 @@ impl Desktop {
             "open" => self.open_file(),
             "save" => self.save_file(false),
             "save_as" => self.save_file(true),
+            "mep_settings" => self.open_mep_settings(),
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
             "redo" => self.redo_document(),
@@ -566,6 +571,7 @@ impl eframe::App for Desktop {
         self.export_window(&ctx);
         self.import_window(&ctx);
         self.types_window(&ctx);
+        self.mep_settings_window(&ctx);
         self.type_editor_window(&ctx);
         self.compute_window(&ctx);
         self.elec_window(&ctx);
