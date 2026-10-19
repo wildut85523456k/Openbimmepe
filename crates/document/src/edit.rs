@@ -55,7 +55,7 @@ impl Document {
         loop {
             let before = all.len();
             for e in self.elements() {
-                let host = match e.geometry { Some(Geometry::InWall { host, .. } | Geometry::OnWall { host } | Geometry::OnMember { host } | Geometry::Tag { host, .. }) => Some(host), _ => None };
+                let host = match e.geometry { Some(Geometry::InWall { host, .. } | Geometry::OnWall { host } | Geometry::OnMember { host } | Geometry::Tag { host, .. } | Geometry::ViewTag { host, .. }) => Some(host), _ => None };
                 if host.is_some_and(|h| all.contains(&h)) || e.parent.is_some_and(|p| all.contains(&p)) { all.insert(e.id); }
             }
             if all.len() == before { return all; }
@@ -77,7 +77,7 @@ impl Document {
             return Err(format!("element {} is a type: delete it from the Types dialog", t.0));
         }
         // tags first: deleting their host would take them anyway
-        let is_tag = |i: &ElementId| self.get(*i).is_some_and(|e| matches!(e.geometry, Some(Geometry::Tag { .. })));
+        let is_tag = |i: &ElementId| self.get(*i).is_some_and(|e| matches!(e.geometry, Some(Geometry::Tag { .. } | Geometry::ViewTag { .. } | Geometry::ViewDimension { .. })));
         let (tags, rest): (Vec<_>, Vec<_>) = all.into_iter().partition(is_tag);
         Ok(tags.into_iter().chain(rest).map(|id| Command::Delete { id }).collect())
     }
@@ -118,6 +118,8 @@ impl Document {
                 e.outline = e.outline.iter().map(|q| p(*q)).collect();
                 if xf.flips() { e.outline.reverse(); }
             }
+            // it belongs to a view, where it stays when the model moves in the plan
+            Some(Geometry::ViewTag { .. } | Geometry::ViewDimension { .. }) => {}
             // hosted by something else: it goes where its host goes
             Some(Geometry::InWall { .. } | Geometry::OnWall { .. } | Geometry::OnMember { .. }) => {}
             Some(Geometry::Level) | None => return Err(format!("{} cannot be moved in the plan", e.name)),
@@ -320,6 +322,7 @@ impl Document {
                 Geometry::OnWall { host } => Geometry::OnWall { host: re(host) },
                 Geometry::OnMember { host } => Geometry::OnMember { host: re(host) },
                 Geometry::Tag { host, at, anchor } => Geometry::Tag { host: re(host), at, anchor },
+                Geometry::ViewTag { host, view, at, anchor } => Geometry::ViewTag { host: re(host), view, at, anchor },
                 other => other,
             });
             ops.push(Command::Restore(Box::new(e)));

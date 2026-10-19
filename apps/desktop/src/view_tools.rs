@@ -155,16 +155,22 @@ pub fn pick_edge(edges: &[Edge], xf: &Xf, p: Pos2, reach: f32, want: impl Fn(&Ed
         if d <= reach && best.as_ref().is_none_or(|b| d < b.0) { best = Some((d, *e)); }
     }
     let (_, e) = best?;
+    orientation(&e).map(|o| (e, o))
+}
+
+/// Whether an edge is vertical or horizontal, and where.
+pub fn orientation(e: &Edge) -> Option<ViewEdge> {
     let (dx, dy) = ((e.b[0] - e.a[0]).abs(), (e.b[1] - e.a[1]).abs());
-    if dx <= 1e-6 + 0.01 * dy { Some((e, ViewEdge::Vertical(e.a[0]))) }
-    else if dy <= 1e-6 + 0.01 * dx { Some((e, ViewEdge::Horizontal(e.a[1]))) }
+    if dx <= 1e-6 + 0.01 * dy { Some(ViewEdge::Vertical(e.a[0])) }
+    else if dy <= 1e-6 + 0.01 * dx { Some(ViewEdge::Horizontal(e.a[1])) }
     else { None }
 }
 
 impl Desktop {
     /// The commands of a Move or Copy of the selection by (`du`, `dz`) in a view, applied as one undoable step.
     pub(crate) fn view_move(&mut self, frame: ViewFrame, ids: &[ElementId], du: f64, dz: f64, copy: bool) -> bool {
-        match self.document.view_move_commands(ids, frame, du, dz, copy)
+        let Some(view) = crate::view_notes::view_ref(self.view) else { self.message = "Cannot do that: this is not an elevation or a section".into(); return false };
+        match self.document.view_move_in(ids, frame, view, du, dz, copy)
             .and_then(|(ops, new)| self.document.transact(self.document.revision(), &ops).map(|_| new).map_err(|e| format!("{e:?}"))) {
             Ok(new) => {
                 if copy && !new.is_empty() { self.select_many(new); }

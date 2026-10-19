@@ -1,7 +1,7 @@
 //! Versioned file/stdio interchange. This transports immutable snapshots and
 //! preview reports, never executable host commands or a transferable apply token.
 use crate::{Change, Graph, Value};
-use openbim_document::{Category, Command, Document, ElementId, Geometry};
+use openbim_document::{Category, Command, Document, ElementId, Geometry, ViewRef};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,6 +20,9 @@ pub enum SnapshotGeometry {
     InWall { host:u64,along_m:f64 },
     Tag { host:u64,at:[f64;2],anchor:[f64;2] },
     Dimension { a:[f64;2],b:[f64;2],at:[f64;2],level:u64 },
+    /// a tag in an elevation or section view; `view` is (kind 0 elevation / 1 section / 2 marker, element number, direction)
+    ViewTag { host:u64,view:(u8,u64,u8),at:[f64;2],anchor:[f64;2] },
+    ViewDimension { view:(u8,u64,u8),a:[f64;2],b:[f64;2],at:[f64;2] },
     Room { at:[f64;2],level:u64 },
     Shaft { level:u64,top:u64,base_offset_m:f64,top_offset_m:f64 },
 }
@@ -38,6 +41,8 @@ impl From<Geometry> for SnapshotGeometry {
             Geometry::InWall { host,along_m }=>Self::InWall { host:host.0,along_m },
             Geometry::Tag { host,at,anchor }=>Self::Tag { host:host.0,at,anchor },
             Geometry::Dimension { a,b,at,level }=>Self::Dimension { a,b,at,level:level.0 },
+            Geometry::ViewTag { host,view,at,anchor }=>Self::ViewTag { host:host.0,view:view.parts(),at,anchor },
+            Geometry::ViewDimension { view,a,b,at }=>Self::ViewDimension { view:view.parts(),a,b,at },
             Geometry::Room { at,level }=>Self::Room { at,level:level.0 },
             Geometry::Shaft { level,top,base_offset_m,top_offset_m }=>Self::Shaft { level:level.0,top:top.0,base_offset_m,top_offset_m },
         }
@@ -58,6 +63,8 @@ impl From<SnapshotGeometry> for Geometry {
             SnapshotGeometry::InWall { host,along_m }=>Self::InWall { host:ElementId(host),along_m },
             SnapshotGeometry::Tag { host,at,anchor }=>Self::Tag { host:ElementId(host),at,anchor },
             SnapshotGeometry::Dimension { a,b,at,level }=>Self::Dimension { a,b,at,level:ElementId(level) },
+            SnapshotGeometry::ViewTag { host,view,at,anchor }=>match ViewRef::from_parts(view.0,view.1,view.2) { Some(view)=>Self::ViewTag { host:ElementId(host),view,at,anchor }, None=>Self::Level },
+            SnapshotGeometry::ViewDimension { view,a,b,at }=>match ViewRef::from_parts(view.0,view.1,view.2) { Some(view)=>Self::ViewDimension { view,a,b,at }, None=>Self::Level },
             SnapshotGeometry::Room { at,level }=>Self::Room { at,level:ElementId(level) },
             SnapshotGeometry::Shaft { level,top,base_offset_m,top_offset_m }=>Self::Shaft { level:ElementId(level),top:ElementId(top),base_offset_m,top_offset_m },
         }

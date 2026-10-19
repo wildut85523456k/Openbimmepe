@@ -1091,7 +1091,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
 
 /// An aligned dimension: extension lines from the measured points `p1` and `p2` to the dimension line `q1`-`q2`, ticks at its
 /// ends and the text on it. Returns the middle of the text.
-fn draw_dimension(painter: &egui::Painter, p1: Pos2, p2: Pos2, q1: Pos2, q2: Pos2, text: &str, ink: Color32) -> Pos2 {
+pub(crate) fn draw_dimension(painter: &egui::Painter, p1: Pos2, p2: Pos2, q1: Pos2, q2: Pos2, text: &str, ink: Color32) -> Pos2 {
     let stroke = Stroke::new(1.0, ink);
     for (p, q) in [(p1, q1), (p2, q2)] {
         let d = (q - p).normalized();
@@ -2457,4 +2457,78 @@ mod tests {
         assert_eq!((o.elevation_m, o.height_m), (0.9, 1.2000000000000002));
     }
 
+
+    #[test]
+    fn tags_and_dimensions_are_placed_in_an_elevation_belong_to_it_follow_their_element_and_delete_with_undo() {
+        use openbim_document::ViewRef;
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        let (a, _) = south_view_with_openings(&mut app);
+        app.select_element(None);
+        frame(&ctx, screen, &mut app, vec![]);
+        let view_tags = |d: &Desktop| d.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::ViewTag { .. }))).count();
+        let plan_tags = |d: &Desktop| d.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Tag { .. }))).count();
+        // Tag: a click on the opening tags it, in this view only
+        app.run_command("tag", "Tag");
+        assert!(app.tool == crate::Tool::Tag);
+        let at = spot(&app, a, 0.5, 0.5);
+        click(&ctx, screen, &mut app, at);
+        assert_eq!((view_tags(&app), plan_tags(&app)), (1, 0), "{}", app.message);
+        let tag = app.document.elements().find(|e| matches!(e.geometry, Some(Geometry::ViewTag { .. }))).unwrap().id;
+        assert!(matches!(app.document.get(tag).unwrap().geometry, Some(Geometry::ViewTag { host, view: ViewRef::Elevation(2), .. }) if host == a));
+        // a click on nothing says so and places nothing
+        let nothing = app.section_xf.unwrap().screen([-50.0, -50.0]);
+        click(&ctx, screen, &mut app, nothing);
+        assert_eq!(view_tags(&app), 1);
+        app.choose_tool(crate::Tool::Select);
+        // Dimension: the two vertical edges of the opening, then where the line goes
+        app.run_command("dimension", "Dimension");
+        assert!(app.tool == crate::Tool::Dimension);
+        frame(&ctx, screen, &mut app, vec![]);
+        let (left, right, above) = (spot(&app, a, 0.0, 0.5), spot(&app, a, 1.0, 0.5), spot(&app, a, 0.5, -0.8));
+        click(&ctx, screen, &mut app, left);
+        assert_eq!(app.view_edit.as_ref().map(|e| e.pts.len()), Some(1), "{}", app.message);
+        // a horizontal edge cannot be the second reference of a horizontal dimension
+        let top = spot(&app, a, 0.5, 1.0);
+        click(&ctx, screen, &mut app, top);
+        assert_eq!(app.view_edit.as_ref().map(|e| e.pts.len()), Some(1), "{}", app.message);
+        click(&ctx, screen, &mut app, right);
+        click(&ctx, screen, &mut app, above);
+        let dim = app.document.elements().find(|e| matches!(e.geometry, Some(Geometry::ViewDimension { .. }))).expect(&app.message).id;
+        match app.document.get(dim).unwrap().geometry {
+            Some(Geometry::ViewDimension { view: ViewRef::Elevation(2), a: p, b: q, .. }) => assert!((p[1] - q[1]).abs() < 1e-9 && ((p[0] - q[0]).abs() - 1.0).abs() < 1e-6, "{p:?} {q:?}"),
+            g => panic!("{g:?}"),
+        }
+        // nothing of it is in the plan or in another view; another view still draws
+        app.choose_tool(crate::Tool::Select);
+        app.view = View::Elevation(0);
+        frame(&ctx, screen, &mut app, vec![]);
+        app.view = View::Elevation(2);
+        frame(&ctx, screen, &mut app, vec![]);
+        // a click on the tag selects it; dragging the opening takes the tag along with it
+        let head = match app.document.get(tag).unwrap().geometry { Some(Geometry::ViewTag { at, .. }) => at, g => panic!("{g:?}") };
+        let xf = app.section_xf.unwrap();
+        click(&ctx, screen, &mut app, xf.screen(head));
+        assert_eq!(app.selected_id(), Some(tag), "{}", app.message);
+        app.select_element(Some(a));
+        let (press, to) = (spot(&app, a, 0.5, 0.5), spot(&app, a, 0.5, 0.5) + Vec2::new(xf.scale * 0.5, 0.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(10.0, 0.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let head2 = match app.document.get(tag).unwrap().geometry { Some(Geometry::ViewTag { at, .. }) => at, g => panic!("{g:?}") };
+        assert!((head2[0] - head[0]).abs() > 0.2 && (head2[1] - head[1]).abs() < 1e-6, "{head:?} -> {head2:?} {}", app.message);
+        app.document.undo().unwrap();
+        // Delete takes a selected dimension away and undo brings it back
+        app.select_element(Some(dim));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert!(app.document.get(dim).is_none(), "{}", app.message);
+        app.document.undo().unwrap();
+        assert!(app.document.get(dim).is_some());
+        // taking the opening away takes its tag, and the dimension stays
+        app.select_element(Some(a));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert!(app.document.get(tag).is_none() && app.document.get(dim).is_some());
+    }
 }

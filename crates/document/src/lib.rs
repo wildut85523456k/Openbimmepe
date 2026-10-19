@@ -33,7 +33,7 @@ pub use elec::{ElecCable, ElecKind, ElecNode};
 pub use mep::{EquipLink, EndDemand, EndRole, MepData, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
 pub use edit::Xf;
-pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh};
+pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh, ViewRef};
 
 /// Document-local, stable element identity. Future versions require
 /// a project-scoped ID allocation strategy for collaborative editing.
@@ -661,8 +661,8 @@ impl Document {
     pub fn level_of(&self, id: ElementId) -> Option<ElementId> {
         match self.get(id)?.geometry? {
             Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Placed { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. } | Geometry::Dimension { level, .. } | Geometry::Room { level, .. } | Geometry::Shaft { level, .. } => Some(level),
-            Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } => self.level_of(host),
-            Geometry::Level | Geometry::Grid { .. } => None,
+            Geometry::InWall { host, .. } | Geometry::OnMember { host } | Geometry::OnWall { host } | Geometry::Tag { host, .. } | Geometry::ViewTag { host, .. } => self.level_of(host),
+            Geometry::Level | Geometry::Grid { .. } | Geometry::ViewDimension { .. } => None,
         }
     }
     /// Draws a section line from `a` to `b` on `level`, looking to the left of `a -> b`, `depth_m` deep.
@@ -699,7 +699,7 @@ impl Document {
     }
     /// What a tag says: the type of its element when it has one (a door's type, a wall type), else its name.
     pub fn tag_text(&self, tag: ElementId) -> String {
-        let Some(Geometry::Tag { host, .. }) = self.get(tag).and_then(|t| t.geometry) else { return String::new() };
+        let Some(Geometry::Tag { host, .. } | Geometry::ViewTag { host, .. }) = self.get(tag).and_then(|t| t.geometry) else { return String::new() };
         let Some(h) = self.get(host) else { return "?".into() };
         match h.type_id.and_then(|t| self.get(t)) {
             Some(t) => t.name.clone(),
@@ -717,6 +717,30 @@ impl Document {
         self.transact(self.revision, &[
             Command::Create { id, category: Category::Tag, name: format!("Tag {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
             Command::SetGeometry { id, geometry: Geometry::Tag { host, at, anchor } },
+        ])?;
+        Ok(id)
+    }
+    /// Tags `host` in the elevation or section view `view`: the label at `at` with a leader to `anchor`, both as (along the
+    /// view, height). A tag belongs to the view it is placed in, as in Revit.
+    pub fn place_view_tag(&mut self, host: ElementId, view: ViewRef, at: [f64; 2], anchor: [f64; 2]) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let ok = self.get(host).is_some_and(|h| !matches!(h.category, Category::Tag | Category::Dimension | Category::Level | Category::Grid | Category::Type));
+        if !ok { return Err(EditError::NotFound(host)); }
+        let n = self.elements.values().filter(|e| e.category == Category::Tag).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Tag, name: format!("Tag {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::ViewTag { host, view, at, anchor } },
+        ])?;
+        Ok(id)
+    }
+    /// Dimensions in the view `view` the distance between `a` and `b`, which are at one height (a horizontal dimension)
+    /// or at one place along the view (a vertical one); its line passes through `at`.
+    pub fn place_view_dimension(&mut self, view: ViewRef, a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Dimension).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Dimension, name: format!("Dimension {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::ViewDimension { view, a, b, at } },
         ])?;
         Ok(id)
     }
@@ -1159,7 +1183,8 @@ impl Document {
                 Command::Delete { id } => {
                     if trial.remove(id).is_none() { return Err(EditError::NotFound(*id)); }
                     // the tags of an element go with it
-                    trial.retain(|_, e| !matches!(e.geometry, Some(Geometry::Tag { host, .. }) if host == *id));
+                    trial.retain(|_, e| !matches!(e.geometry, Some(Geometry::Tag { host, .. } | Geometry::ViewTag { host, .. }) if host == *id)
+                        && !matches!(e.geometry, Some(Geometry::ViewTag { view, .. } | Geometry::ViewDimension { view, .. }) if view.maker() == Some(*id)));
                 }
             }
         }

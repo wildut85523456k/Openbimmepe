@@ -2,7 +2,7 @@
 //! a distance up. Doors, windows and openings slide in their wall; walls, beams, slabs and stairs also change their
 //! height offset; a mirror is about a vertical line; a rotation turns about an axis square to the view. Each function
 //! gives the commands of one undoable step; the model is not changed until they are applied.
-use super::{Category, Command, Document, ElementId, Geometry};
+use super::{Category, Command, Document, ElementId, Geometry, ViewRef};
 use crate::edit::Xf;
 
 type P = [f64; 2];
@@ -96,6 +96,40 @@ impl Document {
             }
         }
         if ops.is_empty() { return Err(if stuck { "this cannot be moved up or down in a view; change its offset or its levels in Properties".into() } else { "nothing changes".into() }); }
+        Ok((ops, made))
+    }
+
+    /// Like `view_move_commands`, for the view `view`: the tags of the moved elements in that view go with them, and a
+    /// tag or a dimension of the view that is itself in `ids` moves by (`du`, `dz`) on its own.
+    pub fn view_move_in(&self, ids: &[ElementId], f: ViewFrame, view: ViewRef, du: f64, dz: f64, copy: bool) -> Result<(Vec<Command>, Vec<ElementId>), String> {
+        let is_note = |i: &ElementId| self.get(*i).is_some_and(|e| matches!(e.geometry, Some(Geometry::ViewTag { .. } | Geometry::ViewDimension { .. })));
+        let (notes, rest): (Vec<ElementId>, Vec<ElementId>) = ids.iter().copied().partition(is_note);
+        let shifted = |g: Geometry| match g {
+            Geometry::ViewTag { host, view, at, anchor } => Geometry::ViewTag { host, view, at: [at[0] + du, at[1] + dz], anchor: [anchor[0] + du, anchor[1] + dz] },
+            Geometry::ViewDimension { view, a, b, at } => Geometry::ViewDimension { view, a: [a[0] + du, a[1] + dz], b: [b[0] + du, b[1] + dz], at: [at[0] + du, at[1] + dz] },
+            other => other,
+        };
+        let (mut ops, mut made) = if rest.is_empty() { (Vec::new(), Vec::new()) } else { self.view_move_commands(&rest, f, du, dz, copy)? };
+        let here = |g: Option<Geometry>| matches!(g, Some(Geometry::ViewTag { view: v, .. } | Geometry::ViewDimension { view: v, .. }) if v == view);
+        if copy {
+            // the tags that came with the copies of elements are copies in this view too: they go with them
+            for op in &mut ops { if let Command::Restore(e) = op { if here(e.geometry) { e.geometry = e.geometry.map(shifted); } } }
+            let mut next = ops.iter().filter_map(|o| if let Command::Restore(e) = o { Some(e.id.0 + 1) } else { None }).max().unwrap_or(0).max(self.next_id().0);
+            for id in notes {
+                let mut n = self.get(id).ok_or("an annotation is gone")?.clone();
+                n.id = ElementId(next); next += 1;
+                n.geometry = n.geometry.map(shifted);
+                made.push(n.id);
+                ops.push(Command::Restore(Box::new(n)));
+            }
+        } else {
+            let moving = self.with_dependents(&rest);
+            for t in self.elements() {
+                let follows = matches!(t.geometry, Some(Geometry::ViewTag { host, .. }) if moving.contains(&host)) && here(t.geometry) && !notes.contains(&t.id);
+                if follows || notes.contains(&t.id) { if let Some(g) = t.geometry { ops.push(Command::SetGeometry { id: t.id, geometry: shifted(g) }); } }
+            }
+        }
+        if ops.is_empty() { return Err("nothing changes".into()); }
         Ok((ops, made))
     }
 
@@ -367,5 +401,43 @@ mod tests {
         run(&mut d, ops);
         assert!(near(d.get(door).unwrap().elevation_m, 0.3));
         assert!(d.view_align_commands(door, south(), ViewEdge::Horizontal(1.0), ViewEdge::Vertical(1.0)).is_err());
+    }
+
+    #[test]
+    fn tags_and_dimensions_belong_to_one_view_follow_their_element_there_and_go_with_what_they_are_on() {
+        let mut d = Document::spatial_sample();
+        let east = ViewRef::Elevation(0);
+        let tag = d.place_view_tag(ElementId(20), east, [3.0, 4.0], [2.0, 1.5]).unwrap();
+        let dim = d.place_view_dimension(east, [1.0, 2.0], [4.0, 2.0], [2.5, 3.0]).unwrap();
+        // a vertical dimension is allowed, a slanted one and one in a view that does not exist are not
+        assert!(d.place_view_dimension(east, [1.0, 0.0], [1.0, 3.0], [2.0, 1.0]).is_ok());
+        assert!(d.place_view_dimension(east, [1.0, 0.0], [2.0, 3.0], [2.0, 1.0]).is_err());
+        assert!(d.place_view_dimension(ViewRef::Section(ElementId(999)), [1.0, 2.0], [4.0, 2.0], [2.5, 3.0]).is_err());
+        assert!(d.place_view_tag(ElementId(999), east, [0.0, 0.0], [0.0, 0.0]).is_err());
+        assert!(!d.tag_text(tag).is_empty());
+        // the tag is not drawn in the plan: it has no level of its own plan symbol, only its host's
+        // moving the wall in this view carries the tag of that view with it, not the tag of another view
+        let other = d.place_view_tag(ElementId(20), ViewRef::Elevation(1), [3.0, 4.0], [2.0, 1.5]).unwrap();
+        let (ops, _) = d.view_move_in(&[ElementId(20)], south(), east, 1.0, 0.5, false).unwrap();
+        run(&mut d, ops);
+        assert!(matches!(d.get(tag).unwrap().geometry, Some(Geometry::ViewTag { at, anchor, .. }) if near(at[0], 4.0) && near(at[1], 4.5) && near(anchor[0], 3.0) && near(anchor[1], 2.0)));
+        assert!(matches!(d.get(other).unwrap().geometry, Some(Geometry::ViewTag { at, .. }) if near(at[0], 3.0) && near(at[1], 4.0)));
+        // a dimension moves on its own, and copies of it and of a tag are made on the same view
+        let (ops, made) = d.view_move_in(&[dim, tag], south(), east, 0.5, 0.0, true).unwrap();
+        run(&mut d, ops);
+        assert_eq!(made.len(), 2);
+        assert!(matches!(d.get(made[0]).unwrap().geometry, Some(Geometry::ViewDimension { a, .. }) if near(a[0], 1.5)) || matches!(d.get(made[1]).unwrap().geometry, Some(Geometry::ViewDimension { a, .. }) if near(a[0], 1.5)));
+        // saved and read back unchanged
+        let (back, _) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
+        for id in [tag, dim, other] { assert_eq!(back.iter().find(|e| e.id == id).unwrap().geometry, d.get(id).unwrap().geometry); }
+        // deleting the wall takes its tags (in every view), deleting a section line takes what was drawn in its view
+        let sec = d.place_section(ElementId(10), [0.0, -2.0], [8.0, -2.0], 20.0).unwrap();
+        let in_sec = d.place_view_dimension(ViewRef::Section(sec), [1.0, 2.0], [4.0, 2.0], [2.5, 3.0]).unwrap();
+        let ops = d.delete_commands(&[sec]).unwrap();
+        run(&mut d, ops);
+        assert!(d.get(in_sec).is_none() && d.get(dim).is_some());
+        let ops = d.delete_commands(&[ElementId(20)]).unwrap();
+        run(&mut d, ops);
+        assert!(d.get(tag).is_none() && d.get(other).is_none() && d.get(dim).is_some());
     }
 }

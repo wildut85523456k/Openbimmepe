@@ -3,6 +3,32 @@
 use super::{Category, Document, EditError, Element, ElementId};
 use std::collections::BTreeMap;
 
+/// The elevation or section view an annotation belongs to: one of the four building elevations (East, North, South,
+/// West as 0..4), a section line, or one view of an elevation marker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewRef { Elevation(u8), Section(ElementId), Marked(ElementId, u8) }
+
+impl ViewRef {
+    /// The three numbers that stand for it in a file: a kind (0 elevation, 1 section, 2 marker), an element number and a direction.
+    pub fn parts(self) -> (u8, u64, u8) {
+        match self { ViewRef::Elevation(k) => (0, 0, k), ViewRef::Section(id) => (1, id.0, 0), ViewRef::Marked(id, k) => (2, id.0, k) }
+    }
+    pub fn from_parts(kind: u8, id: u64, k: u8) -> Option<ViewRef> {
+        match kind { 0 => Some(ViewRef::Elevation(k)), 1 => Some(ViewRef::Section(ElementId(id))), 2 => Some(ViewRef::Marked(ElementId(id), k)), _ => None }
+    }
+    /// The element (a section line or an elevation marker) the view is made by, if it has one.
+    pub fn maker(self) -> Option<ElementId> {
+        match self { ViewRef::Elevation(_) => None, ViewRef::Section(id) | ViewRef::Marked(id, _) => Some(id) }
+    }
+    fn valid(self, elements: &BTreeMap<ElementId, crate::Element>) -> bool {
+        match self {
+            ViewRef::Elevation(k) => k < 4,
+            ViewRef::Section(id) => elements.get(&id).is_some_and(|e| e.category == crate::Category::Section),
+            ViewRef::Marked(id, k) => k < 4 && elements.get(&id).is_some_and(|e| e.category == crate::Category::Elevation),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Geometry {
     Level,
@@ -26,6 +52,12 @@ pub enum Geometry {
     Tag { host: ElementId, at: [f64; 2], anchor: [f64; 2] },
     /// an aligned dimension on `level`: the distance between the points `a` and `b`, its line through `at`
     Dimension { a: [f64; 2], b: [f64; 2], at: [f64; 2], level: ElementId },
+    /// a tag in an elevation or section view: the label of `host`, at `at` and with a leader to `anchor`, both as
+    /// (along the view, height) in metres
+    ViewTag { host: ElementId, view: ViewRef, at: [f64; 2], anchor: [f64; 2] },
+    /// a dimension in an elevation or section view, horizontal (`a` and `b` at one height) or vertical (at one place
+    /// along the view); points and the place of the line `at` are (along the view, height) in metres
+    ViewDimension { view: ViewRef, a: [f64; 2], b: [f64; 2], at: [f64; 2] },
     /// a room: its point `at` on `level`
     Room { at: [f64; 2], level: ElementId },
     /// a shaft (an opening cut through floors): its outline is the element's, from `level` plus `base_offset_m` up to the
@@ -186,6 +218,15 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Dimension { a, b, at, level }) => {
                 el.category == Category::Dimension && valid_axis(*a, *b) && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::ViewTag { host, view, at, anchor }) => {
+                el.category == Category::Tag && view.valid(elements) && at.iter().chain(anchor.iter()).all(|v| v.is_finite() && v.abs() <= 1e6)
+                    && elements.get(host).is_some_and(|h| !matches!(h.category, Category::Tag | Category::Dimension | Category::Level | Category::Grid | Category::Type))
+            }
+            Some(Geometry::ViewDimension { view, a, b, at }) => {
+                let level_line = a[1] == b[1] && a[0] != b[0] || a[0] == b[0] && a[1] != b[1];
+                el.category == Category::Dimension && view.valid(elements) && level_line && valid_axis(*a, *b)
+                    && at.iter().chain(a.iter()).chain(b.iter()).all(|v| v.is_finite() && v.abs() <= 1e6)
             }
             Some(Geometry::Room { at, level }) => {
                 el.category == Category::Room && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)

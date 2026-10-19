@@ -30,7 +30,7 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 |---|---|
 | Aligned Dimension: point, point, then the place of the line; saved with the model, selectable, movable, deletable, undoable | done as point-to-point (snaps to wall corners, grid ends, 50 mm). Not associative: it does not follow the walls when they move. No chains, no baseline, no angular, radial or other dimension types, no editing the value, no equality |
 | Measure between two points: distance, x and y parts, angle | done; no Measure Along an Element |
-| Tag | done for any element; cannot be selected or moved by itself |
+| Tag | done for any element, in plans, elevations and sections (a tag belongs to the view it is placed in); cannot be selected or moved by itself in the plan |
 | Dimensions and tags in exports | not exported (kept in the OpenBIM records only) |
 
 ## Wall tool vs Revit
@@ -98,7 +98,9 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Mirror in a view: Draw Axis by two points, which must be vertical (Shift keeps the second point plumb); Copy on by default; a door or opening on its own stays in its wall and goes to the other side of the axis | done; Pick Axis and a horizontal axis are missing |
 | Rotate in a view (axis square to the view, through the middle of the element): by two rays or a typed angle. Walls do not rotate in these views and a door or window cannot without its wall (Autodesk's rules); a beam or brace parallel to the view tilts about its middle (its slope changes) | done; the centre of rotation cannot be moved; columns, footings, slabs, stairs, ducts and pipes cannot be turned in a view |
 | Align in a view: reference edge (a level line too), then the edge of what moves; a wall end goes to the reference (the wall gets longer or shorter, joined walls follow), the top or base of a wall moves (the wall gets taller or lower), anything else moves; the reference stays until Esc | done; Multiple Alignment, the lock and Prefer (face / centerline) are missing |
-| Tags and dimensions in these views; drawing walls/floors in these views; callouts; legends | missing: other tools say they work in plan views |
+| Tag in an elevation or section: click an element; the tag says its type, follows the element when it is moved in the view, belongs to the view it was placed in (another view does not show it), is deleted with its element, saved and read back | done. Revit also lets a tag follow when the element moves in the plan; here a plan move leaves the tag where it is in the view |
+| Dimension in an elevation or section: two vertical (or two horizontal) edges of what is drawn, then the place of the line; belongs to its view, selectable, draggable, deletable, undoable, saved | done as a linear dimension between the picked places. Not associative (it does not follow the edges when they move); no chains, no dimension to a point, no angled edges |
+| Drawing walls/floors in these views; callouts; legends | missing: other tools say they work in plan views |
 
 ## Ceiling
 | Revit behaviour | State |

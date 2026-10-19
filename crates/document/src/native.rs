@@ -54,11 +54,17 @@ fn geometry_text(g: Option<Geometry>) -> String {
         Some(Geometry::Shaft { level, top, base_offset_m, top_offset_m }) => format!("H,{},{},{:?},{:?}", level.0, top.0, base_offset_m, top_offset_m),
         Some(Geometry::Dimension { a, b, at, level }) => format!("N,{},{:?},{:?},{:?},{:?},{:?},{:?}", level.0, a[0], a[1], b[0], b[1], at[0], at[1]),
         Some(Geometry::Tag { host, at, anchor }) => format!("K,{},{:?},{:?},{:?},{:?}", host.0, at[0], at[1], anchor[0], anchor[1]),
+        Some(Geometry::ViewTag { host, view, at, anchor }) => { let (k, id, d) = view.parts(); format!("T,{},{k},{id},{d},{:?},{:?},{:?},{:?}", host.0, at[0], at[1], anchor[0], anchor[1]) }
+        Some(Geometry::ViewDimension { view, a, b, at }) => { let (k, id, d) = view.parts(); format!("X,{k},{id},{d},{:?},{:?},{:?},{:?},{:?},{:?}", a[0], a[1], b[0], b[1], at[0], at[1]) }
     }
 }
 
 fn num(s: &str) -> Result<f64, String> { s.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| format!("'{s}' is not a number")) }
 fn int(s: &str) -> Result<u64, String> { s.parse::<u64>().map_err(|_| format!("'{s}' is not a whole number")) }
+fn view_ref(kind: &str, id: &str, k: &str) -> Result<crate::ViewRef, String> {
+    let small = |s: &str| int(s).and_then(|n| u8::try_from(n).map_err(|_| format!("'{s}' is too big")));
+    crate::ViewRef::from_parts(small(kind)?, int(id)?, small(k)?).ok_or_else(|| format!("'{kind}' is not a kind of view"))
+}
 fn opt_id(s: &str) -> Result<Option<ElementId>, String> { if s.is_empty() { Ok(None) } else { int(s).map(|n| Some(ElementId(n))) } }
 
 fn parse_geometry(s: &str) -> Result<Option<Geometry>, String> {
@@ -80,6 +86,8 @@ fn parse_geometry(s: &str) -> Result<Option<Geometry>, String> {
         "R" => { need(4)?; Geometry::Room { level: ElementId(int(p[1])?), at: [num(p[2])?, num(p[3])?] } }
         "N" => { need(8)?; Geometry::Dimension { level: ElementId(int(p[1])?), a: [num(p[2])?, num(p[3])?], b: [num(p[4])?, num(p[5])?], at: [num(p[6])?, num(p[7])?] } }
         "K" => { need(6)?; Geometry::Tag { host: ElementId(int(p[1])?), at: [num(p[2])?, num(p[3])?], anchor: [num(p[4])?, num(p[5])?] } }
+        "T" => { need(9)?; Geometry::ViewTag { host: ElementId(int(p[1])?), view: view_ref(p[2], p[3], p[4])?, at: [num(p[5])?, num(p[6])?], anchor: [num(p[7])?, num(p[8])?] } }
+        "X" => { need(10)?; Geometry::ViewDimension { view: view_ref(p[1], p[2], p[3])?, a: [num(p[4])?, num(p[5])?], b: [num(p[6])?, num(p[7])?], at: [num(p[8])?, num(p[9])?] } }
         other => return Err(format!("unknown geometry '{other}'")),
     }))
 }

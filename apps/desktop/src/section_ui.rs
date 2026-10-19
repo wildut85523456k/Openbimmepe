@@ -201,7 +201,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let built = build(&app.document, app.view);
     ui.horizontal(|ui| {
         ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects / drag moves"));
-        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align) { ui.small("— this tool works in plan views; press Esc"); }
+        if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align | crate::Tool::Tag | crate::Tool::Dimension) { ui.small("— this tool works in plan views; press Esc"); }
         if let Ok(v) = &built {
             if let Some(w) = v.warnings.first() { ui.small(format!("— {w}")); }
         }
@@ -287,6 +287,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     for (_, _, r) in rects.iter().filter(|(id, _, _)| chosen.contains(id)) {
         painter.rect_stroke(egui::Rect::from_two_pos(screen([r[0], r[1]]), screen([r[2], r[3]])), 0.0, Stroke::new(2.5, blue), egui::StrokeKind::Middle);
     }
+    // the tags and dimensions of this view
+    let notes = crate::view_notes::view_ref(app.view).map(|v| crate::view_notes::draw(app, ui, &painter, &xf, v)).unwrap_or_default();
     // interaction: Select picks the element under the pointer; Wall Opening sketches a rectangle on a wall
     let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
     match app.tool {
@@ -297,7 +299,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             let snap = |p: Pos2| crate::view_tools::snap(&edges, &xf, p, 10.0, None, false);
             if response.drag_started_by(egui::PointerButton::Primary) {
                 if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
-                    if let Some(hit) = pick_at(&app.document, &view, xf.model(p)) {
+                    if let Some(hit) = crate::view_notes::pick(&notes, p).or_else(|| pick_at(&app.document, &view, xf.model(p))) {
                         if !chosen.contains(&hit) { app.select_element(Some(hit)); }
                         app.view_drag = Some(snap(p).at);
                     }
@@ -320,10 +322,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if !ui.input(|i| i.pointer.primary_down()) { app.view_drag = None; }
             if response.clicked() {
                 if let Some(h) = response.interact_pointer_pos() {
-                    let hit = pick_at(&app.document, &view, xf.model(h));
+                    let hit = crate::view_notes::pick(&notes, h).or_else(|| pick_at(&app.document, &view, xf.model(h)));
                     app.select_element(hit);
                 }
             }
+        }
+        crate::Tool::Tag | crate::Tool::Dimension => {
+            let edges = crate::view_tools::edges(&app.document, &view);
+            crate::view_notes::tool(app, ui, &painter, &response, &view, xf, &edges);
         }
         crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align => {
             let edges = crate::view_tools::edges(&app.document, &view);

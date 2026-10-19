@@ -340,7 +340,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.strong("Tag by Category");
             ui.separator();
             ui.checkbox(&mut app.tag_leader, "Leader");
-            ui.weak("click an element in a plan view; the tag says its type, or its name when it has none");
+            ui.weak("click an element in a plan, elevation or section view; the tag says its type, or its name when it has none, and stays in that view");
         });
         return;
     }

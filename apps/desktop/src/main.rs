@@ -9,6 +9,7 @@ mod model_view;
 mod view3d;
 mod section_ui;
 mod view_tools;
+mod view_notes;
 mod model_edit;
 mod export;
 mod import;
@@ -307,12 +308,12 @@ impl Desktop {
             Tool::Stair => "Stair: click the foot of the first riser, then a point in the direction the stair climbs (Shift keeps it square); the number of risers follows from the height between the levels and the highest riser allowed. Esc ends.".into(),
             Tool::Room => "Room: move over a closed space (its walls shown) and click to place a room there; it follows the walls and shows its name and area. Esc ends.".into(),
             Tool::WallJoins => "Wall Joins: click the end of a wall (a marker shows the ends) to disallow its join, so that it stays square, or to allow it again. Esc ends.".into(),
-            Tool::Dimension => "Aligned Dimension: click the first point, the second point, then where the dimension line goes (corners of walls, ends of grids and 50 mm positions snap; Shift keeps it square). Esc ends.".into(),
+            Tool::Dimension => "Aligned Dimension: click the first point, the second point, then where the dimension line goes (corners of walls, ends of grids and 50 mm positions snap; Shift keeps it square). In an elevation or section: click two vertical (or two horizontal) edges, then where the line goes; it stays in that view. Esc ends.".into(),
             Tool::Measure => "Measure between two points: click both; the distance, its x and y parts and the angle are shown. Esc ends.".into(),
             Tool::Align => "Align: click the wall, beam or grid to align to, then the one to move onto its line (it keeps the reference until Esc).".into(),
             Tool::Trim => "Trim/Extend to Corner: click the first wall on the part to keep, then the second wall on the part to keep; both meet at the corner of their lines (Esc ends).".into(),
             Tool::Offset => "Offset: set the distance in the options bar and click a wall, beam or grid on the side to offset to; Copy keeps the original (Esc ends).".into(),
-            Tool::Tag => "Tag: click an element in a plan view; the tag shows its type (or its name) and follows the element. With Leader on, the label stands off the element on a leader line. Esc ends.".into(),
+            Tool::Tag => "Tag: click an element in a plan view, an elevation or a section; the tag shows its type (or its name), follows the element and belongs to the view it is placed in. With Leader on, the label stands off the element on a leader line. Esc ends.".into(),
             Tool::Grid => "Grid: click the start and the end of the grid line in a plan view, or press, drag and release; each is named after the last (Shift keeps it square, Esc ends).".into(),
             Tool::Level => "Level: set the elevation (and a name, if you want one) in the options bar and click in a plan view. Revit draws a level in an elevation view; there is none here yet, so the click only confirms. The level gets its own plan view.".into(),
             Tool::Wall => "Wall: (Draw: Line, Rectangle or Pick Lines in the options bar; Spacebar flips the wall) click the start and then each next point in a plan view, or press, drag and release for one wall. The line you draw is the Location Line of the options bar (centreline, or the exterior or interior face, exterior on the left when you draw clockwise). Shift keeps it square, a typed length (mm) and Enter sets it, clicking the first point closes the loop; Esc ends the chain, Esc again the tool.".into(),
