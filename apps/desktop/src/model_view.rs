@@ -3,7 +3,7 @@
 //! depth-buffered GPU BIM engine (cut planes/joins/hidden-line are future work).
 use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
-use openbim_document::{Category, Geometry};
+use openbim_document::{Category, Geometry, RangeClass};
 
 fn project(point: [f64; 3], three_d: bool, yaw: f32, pitch: f32) -> (Vec2, f32) {
     let [x, y, z] = point.map(|v| v as f32);
@@ -80,6 +80,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
+    app.view_control_bar(ui);
     // Spacebar turns the selected wall over
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Space)) { app.flip_selected_wall(); }
     // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
@@ -90,6 +91,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let level_id = app.plan_level();
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);
     let three_d = app.view == View::ThreeD;
+    let vis = app.vis();
+    let range = vis.settings.effective_range();
+    let (detail, denom) = (vis.settings.detail, vis.settings.scale);
+    let reveal_ink = Color32::from_rgb(220, 0, 220);
     ui.horizontal(|ui| {
         ui.small(if three_d { "3D — right-drag orbit / middle-drag pan / wheel zoom" }
             else { "Plan footprint — middle-drag pan / wheel zoom" });
@@ -112,35 +117,22 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let (yaw0, pitch0, pan0) = (app.camera_yaw, app.camera_pitch, app.pan);
     let proj = |p| project(p, three_d, yaw0, pitch0);
     let mut bounds = Rect::NOTHING;
-    let mut meshes = Vec::new();
-    for el in app.document.elements() {
-        // a footing hosted by a wall is on the wall's level
-        let hosted = match el.geometry { Some(Geometry::OnWall { host }) => app.document.get(host).and_then(|w| match w.geometry { Some(Geometry::Linear { level, .. }) => Some(level), _ => None }), _ => None };
-        if let Some(level) = hosted.as_ref().or(match &el.geometry { Some(Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level } | Geometry::Pad { level, .. }) => Some(level), _ => None }) {
-            if !three_d && *level != level_id { continue; }
-            if let Some(mesh) = app.document.mesh(el.id) {
-                for vertex in &mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
-                meshes.push((el.id, el.category, mesh));
-            }
-        }
+    // every mesh of the model is classed by the view range: out of it it is not drawn, above the cut plane it is faded
+    let plan_meshes = app.plan_meshes();
+    let mut meshes: Vec<(ElementId, Category, &openbim_document::Mesh, f32, bool)> = Vec::new();
+    let mut classes: std::collections::HashMap<ElementId, RangeClass> = std::collections::HashMap::new();
+    let mut out_of_range = 0usize;
+    for pm in plan_meshes.iter() {
+        let Some(el) = app.document.get(pm.id) else { continue };
+        let shown = vis.state(el);
+        if shown == crate::view_ui::Show::Hidden { continue; }
+        let class = if three_d { RangeClass::Cut } else { crate::view_ui::plan_class(range, level_id, level_z, pm) };
+        if class == RangeClass::Out { if pm.level == Some(level_id) { out_of_range += 1; } continue; }
+        for vertex in &pm.mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
+        classes.insert(pm.id, class);
+        meshes.push((pm.id, el.category, &pm.mesh, crate::view_ui::range_fade(class), shown == crate::view_ui::Show::Revealed));
     }
-    // family instances, and the walls and members they cut, come from the scene mesher
-    if let Some(scene) = crate::view3d::scene_meshes(&app.document) {
-        for em in scene.iter() {
-            let id = ElementId(em.element.id);
-            let Some(el) = app.document.get(id) else { continue };
-            let level = match el.geometry {
-                Some(Geometry::Placed { level, .. } | Geometry::Linear { level, .. } | Geometry::Point { level, .. } | Geometry::Area { level }) => Some(level),
-                Some(Geometry::InWall { host, .. }) => app.document.get(host).and_then(|w| match w.geometry { Some(Geometry::Linear { level, .. }) => Some(level), _ => None }),
-                _ => None,
-            };
-            let Some(level) = level else { continue };
-            if !three_d && level != level_id { continue; }
-            let mesh = crate::view3d::doc_mesh(em);
-            for vertex in &mesh.vertices { bounds.extend_with(Pos2::ZERO + proj(*vertex).0); }
-            match meshes.iter().position(|(m, _, _)| *m == id) { Some(i) => meshes[i] = (id, el.category, mesh), None => meshes.push((id, el.category, mesh)) }
-        }
-    }
+    app.views.out_of_range = out_of_range;
     // Include datum extents so grid bubbles remain inside the viewport.
     for el in app.document.elements() {
         if let Some(Geometry::Grid { start, end }) = el.geometry {
@@ -151,6 +143,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let fit = ((rect.width() - 100.0).max(10.0) / bounds.width().max(1.0))
         .min((rect.height() - 90.0).max(10.0) / bounds.height().max(1.0));
     let scale = fit * app.zoom;
+    // annotations keep their size on paper: bigger on screen at a coarser scale (clamped so that they stay legible)
+    let ann = |paper_mm: f32, min: f32, max: f32| crate::view_ui::annotation_px(paper_mm, denom, scale, min, max);
+    let (bubble_r, note_px) = (ann(1.8, 6.0, 26.0), ann(2.0, 7.0, 20.0));
     let screen = |p| rect.center() + pan0 + (proj(p).0 - bounds.center().to_vec2()) * scale;
     let selected = app.selected_id();
     let selected_all = app.selected_ids();
@@ -168,23 +163,25 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // what a double click opens: section lines and elevation markers
     let mut view_hits: Vec<(View, Pos2, Pos2)> = Vec::new();
     for el in app.document.elements() {
+        let shown = vis.state(el);
+        if shown == crate::view_ui::Show::Hidden { continue; }
         let active = selected_all.contains(&el.id);
-        let stroke = Stroke::new(if active { 2.5 } else { 1.0 }, if active { blue } else { Color32::from_gray(135) });
+        let stroke = Stroke::new(if active { 2.5 } else { 1.0 }, if shown == crate::view_ui::Show::Revealed { reveal_ink } else if active { blue } else { Color32::from_gray(135) });
         match el.geometry {
             Some(Geometry::Grid { start, end }) => {
                 let a = screen([start[0], start[1], level_z]);
                 let b = screen([end[0], end[1], level_z]);
                 dashed(&painter, a, b, stroke);
                 for p in [a, b] {
-                    painter.circle(p, 11.0, ui.visuals().panel_fill, stroke);
-                    painter.text(p, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(12.0), stroke.color);
+                    painter.circle(p, bubble_r, ui.visuals().panel_fill, stroke);
+                    painter.text(p, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(note_px), stroke.color);
                 }
                 datum_hits.push((el.id, a, b));
             }
             Some(Geometry::Linear { start, end, level }) if el.category == Category::Section && !three_d && level == level_id => {
                 // the section line with a tick toward the side the view looks to (the left of the line)
                 let (a, b) = (screen([start[0], start[1], level_z]), screen([end[0], end[1], level_z]));
-                let stroke = Stroke::new(if active { 2.5 } else { 1.5 }, if active { blue } else { Color32::from_rgb(190, 60, 60) });
+                let stroke = Stroke::new(if active { 2.5 } else { 1.5 }, if shown == crate::view_ui::Show::Revealed { reveal_ink } else if active { blue } else { Color32::from_rgb(190, 60, 60) });
                 dashed(&painter, a, b, stroke);
                 let d = b - a;
                 if d.length() > 1.0 {
@@ -193,8 +190,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     painter.arrow(m, left, stroke);
                     // the head: a bubble at the start with the number of the section, and a tick at the other end
                     let number = el.name.rsplit(' ').next().unwrap_or("");
-                    painter.circle(a, 10.0, ui.visuals().panel_fill, stroke);
-                    painter.text(a, egui::Align2::CENTER_CENTER, number, egui::FontId::proportional(11.0), stroke.color);
+                    painter.circle(a, bubble_r * 0.9, ui.visuals().panel_fill, stroke);
+                    painter.text(a, egui::Align2::CENTER_CENTER, number, egui::FontId::proportional(note_px * 0.9), stroke.color);
                     painter.arrow(b, left * 0.6, stroke);
                     painter.text(a + (a - b).normalized() * 22.0, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(11.0), stroke.color);
                 }
@@ -204,9 +201,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Some(Geometry::Point { at, level, .. }) if el.category == Category::Elevation && !three_d && level == level_id => {
                 // a circle with a pointer for each view the marker holds, pointing the way the view looks
                 let c = screen([at[0], at[1], level_z]);
-                let ink = if active { blue } else { Color32::from_rgb(120, 120, 120) };
-                painter.circle(c, 11.0, ui.visuals().panel_fill, Stroke::new(if active { 2.0 } else { 1.0 }, ink));
-                painter.text(c, egui::Align2::CENTER_CENTER, el.name.rsplit(' ').next().unwrap_or(""), egui::FontId::proportional(11.0), ink);
+                let ink = if shown == crate::view_ui::Show::Revealed { reveal_ink } else if active { blue } else { Color32::from_rgb(120, 120, 120) };
+                painter.circle(c, bubble_r, ui.visuals().panel_fill, Stroke::new(if active { 2.0 } else { 1.0 }, ink));
+                painter.text(c, egui::Align2::CENTER_CENTER, el.name.rsplit(' ').next().unwrap_or(""), egui::FontId::proportional(note_px * 0.9), ink);
                 for k in 0..4u8 {
                     if el.count >> k & 1 == 0 { continue; }
                     let f = crate::section_ui::facing_vector(usize::from(k));
@@ -231,7 +228,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
     }
     // elevation markers: a circle with a pointer towards the building at the middle of each of the four lines
-    if !three_d {
+    if !three_d && !vis.category_off(openbim_document::ViewCategory::Elevations) {
         if app.elev_marks.as_ref().is_none_or(|m| m.0 != app.document.revision()) {
             app.elev_marks = Some((app.document.revision(), crate::section_ui::elevation_lines(&app.document)));
         }
@@ -258,7 +255,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
     }
     let mut faces = Vec::new();
-    for (id, category, mesh) in meshes {
+    for (id, category, mesh, fade, revealed) in meshes {
         let color = match category {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
             Category::Family => Color32::from_rgb(120, 150, 110),
@@ -273,6 +270,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Pipe => Color32::from_rgb(136, 153, 166),
             _ => Color32::GRAY,
         };
+        let color = if revealed { reveal_ink } else { color };
         // in a plan a roof is under everything else: it is drawn first and picked last
         let under = !three_d && app.document.get(id).is_some_and(|e| e.is_roof() || (e.category == Category::Slab && e.slab_kind == openbim_document::SlabKind::Ceiling));
         for (i, face) in mesh.faces.iter().enumerate() {
@@ -281,14 +279,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 .map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f32>().abs();
             if area < 0.2 { continue; }
             let depth = if under { f32::MIN / 2.0 } else { face.iter().map(|&v| proj(mesh.vertices[v]).1).sum::<f32>() / face.len() as f32 };
-            faces.push((depth, id, points, color.gamma_multiply(if three_d { 0.72 + (i % 3) as f32 * 0.12 } else { 1.0 })));
+            faces.push((depth, id, points, color.gamma_multiply(fade * if three_d { 0.72 + (i % 3) as f32 * 0.12 } else { 1.0 })));
         }
     }
     // rooms of this level (plan only): a tinted floor under everything, picked last; a room without a closed space shows a warning
     let mut room_labels: Vec<(ElementId, Pos2, String, bool)> = Vec::new();
     if !three_d {
         let rooms: Vec<(ElementId, [f64; 2], String)> = app.document.elements().filter_map(|e| match e.geometry {
-            Some(Geometry::Room { at, level }) if level == level_id => Some((e.id, at, e.name.clone())),
+            Some(Geometry::Room { at, level }) if level == level_id && !vis.hidden(e) => Some((e.id, at, e.name.clone())),
             _ => None,
         }).collect();
         for (id, at, name) in rooms {
@@ -313,7 +311,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // lines on every level it passes through; each can be picked on its symbol
     let mut opening_marks: Vec<(ElementId, Vec<Pos2>, bool)> = Vec::new();
     if !three_d {
-        for el in app.document.elements().filter(|e| e.category == Category::Opening) {
+        for el in app.document.elements().filter(|e| e.category == Category::Opening && !vis.hidden(e)) {
             match el.geometry {
                 Some(Geometry::InWall { host, along_m }) => {
                     let Some(w) = app.document.get(host) else { continue };
@@ -371,7 +369,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         // the layers of a layered wall: a thin line where each ends, a heavier one at the core boundaries
         let ink = if app.dark { Color32::from_gray(170) } else { Color32::from_gray(90) };
         for el in app.document.elements().filter(|e| e.category == Category::Wall && e.type_id.is_some()) {
-            if app.document.level_of(el.id) != Some(level_id) { continue; }
+            if app.document.level_of(el.id) != Some(level_id) || detail == openbim_document::Detail::Coarse || !classes.contains_key(&el.id) { continue; }
             for (a, b, core) in app.document.wall_layer_lines(el.id) {
                 painter.line_segment([screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z])], Stroke::new(if core { 1.2 } else { 0.5 }, ink));
             }
@@ -389,7 +387,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     if !three_d {
         // aligned dimensions of this level; each can be picked on its line
         let ink = ui.visuals().text_color();
-        let dims: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Dimension).map(|e| e.id).collect();
+        let dims: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Dimension && !vis.hidden(e)).map(|e| e.id).collect();
         for id in dims {
             let Some(Geometry::Dimension { a, b, at, level }) = app.document.get(id).and_then(|d| d.geometry) else { continue };
             if level != level_id { continue; }
@@ -406,7 +404,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     if !three_d {
         // the plan symbol of a stair: an arrow up its centre line from the first riser, with UP at the foot
         let ink = ui.visuals().text_color();
-        for el in app.document.elements().filter(|e| e.category == Category::Stair) {
+        for el in app.document.elements().filter(|e| e.category == Category::Stair && !vis.hidden(e)) {
             let Some(Geometry::Linear { start, end, level }) = el.geometry else { continue };
             if level != level_id { continue; }
             let (a, b) = (screen([start[0], start[1], level_z]), screen([end[0], end[1], level_z]));
@@ -428,11 +426,11 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let shown = selected_all.contains(id);
         painter.line_segment([*at - Vec2::new(5.0, 0.0), *at + Vec2::new(5.0, 0.0)], Stroke::new(1.0, if shown { blue } else { ink }));
         painter.line_segment([*at - Vec2::new(0.0, 5.0), *at + Vec2::new(0.0, 5.0)], Stroke::new(1.0, if shown { blue } else { ink }));
-        painter.text(*at + Vec2::new(0.0, 8.0), egui::Align2::CENTER_TOP, text, egui::FontId::proportional(12.0), if shown { blue } else { ink });
+        painter.text(*at + Vec2::new(0.0, 8.0), egui::Align2::CENTER_TOP, text, egui::FontId::proportional(note_px), if shown { blue } else { ink });
     }
     if !three_d {
         // tags: the label of an element, boxed, at a constant size, on a leader to the place that was clicked
-        let tag_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Tag).map(|e| e.id).collect();
+        let tag_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Tag && !vis.hidden(e)).map(|e| e.id).collect();
         for id in tag_ids {
             let Some(Geometry::Tag { host, at, anchor }) = app.document.get(id).and_then(|t| t.geometry) else { continue };
             if app.document.level_of(host) != Some(level_id) { continue; }
@@ -440,7 +438,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             let text = app.document.tag_text(id);
             let ink = ui.visuals().text_color();
             if head.distance(tip) > 2.0 { painter.line_segment([head, tip], Stroke::new(1.0, ink)); painter.circle_filled(tip, 2.5, ink); }
-            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.0), ink);
+            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(note_px), ink);
             let r = Rect::from_center_size(head, galley.size() + Vec2::new(10.0, 6.0));
             painter.rect_filled(r, 2.0, ui.visuals().panel_fill);
             painter.rect_stroke(r, 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Middle);

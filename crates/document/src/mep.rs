@@ -178,6 +178,8 @@ pub struct MepData {
     pub systems: Vec<MepSystemDef>,
     /// the schedules/quantities views
     pub schedules: Vec<crate::schedule::ScheduleDef>,
+    /// the scale, detail level, view range and hidden categories and elements of the views that are not at their defaults
+    pub view_settings: Vec<crate::viewsettings::ViewSettings>,
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
@@ -193,7 +195,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -225,6 +227,7 @@ impl MepData {
                 (!members.is_empty()).then(|| MepSystemDef { name: d.name.clone(), system: d.system, base: d.base.filter(|b| members.contains(b)), members })
             }).collect(),
             schedules: self.schedules.clone(),
+            view_settings: self.view_settings.iter().cloned().map(|mut v| { v.hidden_elements.retain(|id| elements.contains_key(id)); v }).filter(|v| !v.is_default()).collect(),
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
@@ -318,6 +321,10 @@ impl MepData {
         if self.schedules.len() > crate::schedule::MAX_SCHEDULES { return Err(EditError::InvalidMep); }
         for s in &self.schedules {
             if s.check().is_err() || !sched_names.insert(s.name.clone()) || !sched_ids.insert(s.id) { return Err(EditError::InvalidMep); }
+        }
+        let mut view_keys = std::collections::BTreeSet::new();
+        for v in &self.view_settings {
+            if v.is_default() || v.check(elements).is_err() || !view_keys.insert(v.key.clone()) { return Err(EditError::InvalidMep); }
         }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }

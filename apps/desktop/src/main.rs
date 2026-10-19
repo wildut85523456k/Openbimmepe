@@ -21,6 +21,7 @@ mod mep_tool;
 mod insulation_ui;
 mod systems_ui;
 mod schedule_ui;
+mod view_ui;
 mod mep_settings_ui;
 mod compute_ui;
 mod elec_ui;
@@ -218,6 +219,7 @@ struct Desktop {
     /// systems of equipment, the System Browser and Generate Layout
     systems: systems_ui::SystemsUi,
     schedules: schedule_ui::ScheduleUi,
+    views: view_ui::ViewUi,
     /// Edit Type of a wall type: its layers
     type_editor: Option<type_editor::TypeEditor>,
     /// the End Point tool and the Compute window
@@ -282,7 +284,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -467,6 +469,8 @@ impl Desktop {
             "generate_layout" => self.open_generate_layout(),
             "system_browser" => self.systems.browser = !self.systems.browser,
             "schedule" => self.open_new_schedule(),
+            "visibility" => self.open_vis_graphics(),
+            "view_range" => self.open_view_range(),
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
             "redo" => self.redo_document(),
@@ -594,6 +598,8 @@ impl eframe::App for Desktop {
         self.new_schedule_window(&ctx);
         self.schedule_props_window(&ctx);
         self.rename_schedule_window(&ctx);
+        self.view_range_window(&ctx);
+        self.vis_graphics_window(&ctx);
         self.layout_window(&ctx);
         self.type_editor_window(&ctx);
         self.compute_window(&ctx);

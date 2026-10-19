@@ -198,7 +198,8 @@ pub fn view_at(hits: &[(View, Pos2, Pos2)], p: Pos2, reach: f32) -> Option<View>
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let name = name_of(app, app.view);
-    let built = build(&app.document, app.view);
+    let seen = app.view_document();
+    let built = build(seen.as_ref().unwrap_or(&app.document), app.view);
     ui.horizontal(|ui| {
         ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects / drag moves"));
         if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror | crate::Tool::Align | crate::Tool::Tag | crate::Tool::Dimension) { ui.small("— this tool is not available in an elevation or a section yet; press Esc"); }

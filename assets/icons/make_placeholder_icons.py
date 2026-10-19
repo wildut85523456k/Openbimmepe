@@ -114,5 +114,15 @@ def system_browser():
         d.line([48 * S, (y + 7) * S, 100 * S, (y + 7) * S], fill=BLUE if k else ORANGE, width=4 * S)
     save(im, "system_browser")
 
-for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings, create_system, create_piping_system, generate_layout, system_browser): f()
+def view_range():
+    # a side view of a building with the top, cut plane and bottom lines of a plan
+    im, d = canvas()
+    d.rectangle([34 * S, 22 * S, 70 * S, 112 * S], fill=LIGHT, outline=DARK, width=4 * S)
+    for y, c, w in ((30, BLUE, 3), (62, ORANGE, 5), (96, BLUE, 3)):
+        d.line([10 * S, y * S, 118 * S, y * S], fill=c, width=w * S)
+    d.polygon([(100 * S, 30 * S), (112 * S, 44 * S), (88 * S, 44 * S)], fill=DARK)
+    d.polygon([(100 * S, 96 * S), (112 * S, 82 * S), (88 * S, 82 * S)], fill=DARK)
+    save(im, "view_range")
+
+for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings, create_system, create_piping_system, generate_layout, system_browser, view_range): f()
 pin(slash=True)

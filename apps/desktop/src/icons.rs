@@ -55,6 +55,7 @@ pub static ICONS: &[Icon] = &[
     icon!("create_pipe_system"),
     icon!("generate_layout"),
     icon!("system_browser"),
+    icon!("view_range"),
     icon!("paste"),
     icon!("paste_same_place"),
     icon!("pin"),

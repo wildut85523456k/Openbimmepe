@@ -510,6 +510,9 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
         if out.schedules.iter().any(|x| x.id == sc.id) { sc.id = out.schedules.iter().map(|x| x.id + 1).max().unwrap_or(1); }
         out.schedules.push(sc);
     }
+    for v in incoming.view_settings {
+        if !out.view_settings.iter().any(|x| x.key == v.key) { out.view_settings.push(v); }
+    }
     for n in incoming.elec_nodes {
         if !out.elec_nodes.iter().any(|x| x.id == n.id) { out.elec_nodes.push(n); }
     }

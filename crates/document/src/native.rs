@@ -211,6 +211,12 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
         let so: Vec<String> = sc.sorts.iter().map(|s| format!("{},{},{},{},{}", esc(&s.field), u8::from(s.descending), u8::from(s.header), u8::from(s.footer), u8::from(s.blank))).collect();
         out.push(format!("H|id={}|nm={}|k={}|it={}|gt={}|f={}|fl={}|so={}", sc.id, esc(&sc.name), sc.kind.code(), u8::from(sc.itemize), u8::from(sc.grand_totals), fl.join(";"), ft.join(";"), so.join(";")));
     }
+    for v in &m.view_settings {
+        let range = v.range.map_or("N".to_string(), |r| format!("{:?},{:?},{:?},{:?}", r.top_m, r.cut_m, r.bottom_m, r.depth_m));
+        let cats: Vec<String> = v.hidden_categories.iter().map(|c| esc(&c.code())).collect();
+        let els: Vec<String> = v.hidden_elements.iter().map(|e| e.0.to_string()).collect();
+        out.push(format!("W|k={}|sc={}|dt={}|rg={range}|hc={}|he={}", esc(&v.key), v.scale, v.detail.code(), cats.join(";"), els.join(",")));
+    }
     for q in &m.equip_links { out.push(format!("Q|p={}|el={}|cn={}", port_text(&q.port), q.element.0, esc(&q.connector))); }
     for n in &m.elec_nodes {
         let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
@@ -230,7 +236,7 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
@@ -242,6 +248,16 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
             // a file written before the insulation types existed has the standard ones
             let (it, lt) = (f.get("it").map_or(Ok(have.insulation_types), |t| names(t))?, f.get("lt").map_or(Ok(have.lining_types), |t| names(t))?);
             m.settings = super::MepSettings { pipe_slopes_pct: list(get("sl")?)?, pipe_diameters_mm: list(get("dn")?)?, duct_widths_mm: list(get("dw")?)?, duct_heights_mm: list(get("dh")?)?, insulation_types: it, lining_types: lt };
+            continue;
+        }
+        if line.starts_with("W|") {
+            let range = match get("rg")? {
+                "N" => None,
+                t => { let p: Vec<&str> = t.split(',').collect(); if p.len() != 4 { return Err("a view range without four heights".into()); } Some(crate::ViewRange { top_m: num(p[0])?, cut_m: num(p[1])?, bottom_m: num(p[2])?, depth_m: num(p[3])? }) }
+            };
+            let cats = if get("hc")?.is_empty() { Vec::new() } else { get("hc")?.split(';').map(|c| crate::ViewCategory::from_code(&unesc(c)?).ok_or_else(|| "an unknown view category".to_string())).collect::<Result<Vec<_>, _>>()? };
+            let els = if get("he")?.is_empty() { Vec::new() } else { get("he")?.split(',').map(|t| int(t).map(ElementId)).collect::<Result<Vec<_>, _>>()? };
+            m.view_settings.push(crate::ViewSettings { key: unesc(get("k")?)?, scale: int(get("sc")?)? as u32, detail: crate::Detail::from_code(get("dt")?).ok_or("an unknown detail level")?, range, hidden_categories: cats, hidden_elements: els });
             continue;
         }
         if line.starts_with("H|") {
@@ -340,7 +356,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

@@ -336,9 +336,10 @@ fn library() -> &'static [openbim_family::Compiled] {
     LIB.get_or_init(|| openbim_family::library::all().unwrap_or_default())
 }
 
-fn family_facts(e: &Element) -> FamFacts {
-    let Some(f) = library().iter().find(|f| f.name() == e.family) else { return FamFacts { kind: ScheduleKind::GenericModels, opening: None } };
-    let kind = match f.category() {
+/// The category a family instance is scheduled and shown under (Doors, Windows, Mechanical Equipment...), from its family.
+pub fn family_kind(e: &Element) -> ScheduleKind {
+    let Some(f) = library().iter().find(|f| f.name() == e.family) else { return ScheduleKind::GenericModels };
+    match f.category() {
         Fam::Door => ScheduleKind::Doors, Fam::Window => ScheduleKind::Windows, Fam::Furniture => ScheduleKind::Furniture,
         Fam::AirTerminal => ScheduleKind::AirTerminals, Fam::Damper => ScheduleKind::DuctAccessories, Fam::Valve => ScheduleKind::PipeAccessories,
         Fam::Fan | Fam::Pump | Fam::Boiler | Fam::Chiller | Fam::Coil | Fam::UnitaryEquipment | Fam::Tank => ScheduleKind::MechanicalEquipment,
@@ -346,7 +347,12 @@ fn family_facts(e: &Element) -> FamFacts {
         Fam::DistributionBoard => ScheduleKind::ElectricalEquipment, Fam::Outlet | Fam::SwitchingDevice => ScheduleKind::ElectricalFixtures,
         Fam::Sprinkler => ScheduleKind::Sprinklers,
         Fam::Generic | Fam::DuctFitting | Fam::PipeFitting | Fam::CableFitting => ScheduleKind::GenericModels,
-    };
+    }
+}
+
+fn family_facts(e: &Element) -> FamFacts {
+    let Some(f) = library().iter().find(|f| f.name() == e.family) else { return FamFacts { kind: ScheduleKind::GenericModels, opening: None } };
+    let kind = family_kind(e);
     let opening = if matches!(kind, ScheduleKind::Doors | ScheduleKind::Windows) {
         f.solve(&openbim_family::Request {
             type_name: (!e.type_name.is_empty()).then_some(e.type_name.as_str()),

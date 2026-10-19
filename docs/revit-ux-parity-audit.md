@@ -200,6 +200,29 @@ Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". 
 - Door and window "Mark" is the family's own text input; there is no Mark numbering command. Rooms have no Number yet (needs spaces and zones, step 6).
 - The layout of the table in the window has only been checked by drawing it (no crash, rows and columns as expected from the tests); I have not looked at it on a screen.
 
+## View settings: scale, detail level, View Range, Visibility/Graphics, Hide/Isolate (done 2026-10-19, step 5b of the books review)
+| Revit behaviour | App |
+|---|---|
+| View Control Bar: Scale, Detail Level, Visibility/Graphics, Temporary Hide/Isolate, Reveal Hidden Elements | done, one bar under the view tabs of every plan, the 3D view, elevations and sections. **Departure:** Revit has it at the bottom of the view; here it is at the top |
+| View Scale 1:1 to 1:10000 | done: the standard scales in a list and a custom value; saved per view. On screen it sets the size of the annotations (grid bubbles, section and elevation markers, room and tag text) as on paper (bubble 1.8 mm, text 2 mm), clamped so they stay legible. It does not change the size of the model on screen (the zoom does that) |
+| Detail Level Coarse / Medium / Fine | saved per view. Coarse draws a layered wall as one shape (no layer lines); Medium and Fine draw the layers. **Fine is the same as Medium**: the families have only one level of detail |
+| View Range (Top, Cut plane, Bottom, View depth) of a plan | done: the View Range window (View > Graphics, and the control bar) with Revit's rules (view depth <= bottom <= cut <= top) and Restore default. Defaults as Revit: 2300 / 1200 / 0 / 0 mm for a level plan; **3000 mm top for the Mechanical plan** (to see ducts under a ceiling). Each element is tested by its real height: out of the range it is not drawn, between the cut plane and the top it is faded, under the bottom but within the view depth it is faded more. The plan says how many elements of its level the range leaves out |
+| What stands on the plan's level and lies below the range (a floor slab, a footing) is seen in a plan | done by a rule: on its own level and under the bottom, it is shown |
+| Visibility/Graphics: model and annotation categories on or off, per view | done: All / None / Invert, the model categories of the schedules (25: all but the fittings) plus Openings and Rebar, and the annotation categories Grids, Levels, Tags, Dimensions, Sections, Elevations; saved per view |
+| Hide in View > Elements / Category, Unhide, Reveal Hidden Elements (magenta) | done, saved per view; a hidden element cannot be picked; with Reveal on it is drawn in magenta and can be selected to unhide |
+| Temporary Hide/Isolate (element or category), Apply to View, Reset | done: not saved, not an edit (no undo step, the model does not change); it belongs to the view it was made in; Apply makes it the view's own setting in one undo step |
+| The settings are part of the model | done: save, undo, the IFC file (the app's own records `W|`). A view of a deleted element drops it |
+| 3D view, elevations and sections follow their own settings | done: they are made from the model without the hidden elements |
+
+**Not the same as Revit, said plainly:**
+- **The Level 1 plan no longer shows the sample duct** (it hangs at 2.7 to 3.0 m, above the 2300 mm top, as in Revit); it is in the Mechanical plan. **Ceilings and roofs above the top of a plan are not drawn in it either**, which is what Revit does; they were drawn before.
+- Not built: view templates, Scope Box, Crop Region, View Filters, Underlay, Duplicate View (with detailing / dependent), Visibility/Graphics overrides of colour, line weight and transparency (only on/off), per-type and per-subcategory switches, Revit links tab, Phases and Design Options filters.
+- The plan does not draw the cut graphics of Revit (heavy cut lines, cut pattern); an element crossed by the cut plane is drawn as the others. There is no separate view range for a reflected ceiling plan (there is no such view yet).
+- The compute and cable overlays, pushpins, insulation outlines and Generate Layout placeholders are not hidden by categories or Hide in View. Reveal Hidden Elements works in plans only (the 3D view and sections simply leave the elements out).
+- The dimension text and the clash symbols do not follow the view scale; the annotation size is only approximately Revit's.
+- In a section or an elevation the model is cut again every frame; with many hidden elements that costs a copy of the model each time.
+- The windows and the bar have only been checked by drawing them in tests (no crash, the right numbers); I have not looked at them on a screen.
+
 ## Books review (2026-10-19)
 The Revit MEP 2024 and Architecture 2026 books were read against the app: `docs/revit-book-review.md` (project doc `claude/revit-book-review.md`). It adds the rows this audit lacked for the Duct/Pipe placement tab (toggles, justification, slope, insulation), systems and Generate Layout, spaces and zones, electrical circuits, schedules, sheets, view range and Visibility/Graphics, other dimension types, and the modify tools not yet built (Redo, Create Similar, Select All Instances, Copy/Paste, Match Type, Pin, Split, Array). Redo and the Create Similar group were built from it (see Select-mode editing).
 

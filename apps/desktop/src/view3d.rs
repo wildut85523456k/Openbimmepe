@@ -183,9 +183,13 @@ impl Desktop {
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // new geometry only when the document changed
-    if app.view3d_revision != Some(app.document.revision()) {
-        app.view3d.set_batch(Arc::new(batch(&app.document)));
-        app.view3d.datums = datums(&app.document);
+    let temp = app.vis().temp;
+    if app.view3d_revision != Some(app.document.revision()) || app.views.batch_temp != temp {
+        // what the view hides (Visibility/Graphics, Hide in View, Temporary Hide/Isolate) is left out of its geometry
+        let (model, datum) = (app.view_document(), app.view_datum_document());
+        app.view3d.set_batch(Arc::new(batch(model.as_ref().unwrap_or(&app.document))));
+        app.view3d.datums = datums(datum.as_ref().unwrap_or(&app.document));
+        app.views.batch_temp = temp;
         if app.view3d_revision.is_none() { app.view3d.zoom_to_fit(ui.available_width() as f64 / ui.available_height().max(1.0) as f64); }
         app.view3d_revision = Some(app.document.revision());
     }
