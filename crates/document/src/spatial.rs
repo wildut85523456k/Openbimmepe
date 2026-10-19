@@ -241,6 +241,11 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
                     && el.elevation_m.abs() <= 1e6
             }
+            Some(Geometry::Point { at, level, top }) if el.category == Category::Elevation => {
+                elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+                    && level == top && at.iter().all(|n| n.is_finite() && n.abs() <= 1e6)
+                    && (1..=15).contains(&el.count) && el.width_m > 0.0 && el.width_m <= 1e4 && el.height_m > 0.0 && el.height_m <= 1e4
+            }
             Some(Geometry::Point { at, level, top }) => {
                 let lv = |id: &ElementId| elements.get(id).filter(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level));
                 el.category == Category::Column
@@ -428,6 +433,7 @@ impl Document {
 
     pub fn mesh(&self, id: ElementId) -> Option<Mesh> {
         let el = self.get(id)?;
+        if el.category == Category::Elevation { return None; }
         if let Some(Geometry::Point { at, level, top }) = el.geometry {
             // the section stood on its point from the foot to the top level; the end faces of an I-section are
             // concave polygons, which a plan does not mind (the 3D view meshes columns itself)
@@ -468,7 +474,8 @@ impl Document {
             let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
             return crate::stair::mesh(start, end, el.width_m, el.height_m, el.count, self.get(level)?.elevation_m + el.elevation_m);
         }
-        if matches!(el.category, Category::BeamSystem | Category::Truss) { return None; }
+        // a section line is a mark on the plan with a view depth, not a body: it has no mesh
+        if matches!(el.category, Category::BeamSystem | Category::Truss | Category::Section) { return None; }
         if el.category == Category::Rebar { return self.rebar_mesh(el); }
         if el.category == Category::Family { return None; }
         if let (Some(Geometry::Area { level }), true) = (el.geometry, el.is_roof()) {

@@ -220,7 +220,7 @@ impl Snapshot {
             let category = match el.category.as_str() {
                 "Wall" => Category::Wall, "Beam" => Category::Beam, "Column" => Category::Column, "Slab" => Category::Slab, "Footing" => Category::Footing, "WallFooting" => Category::WallFooting, "BeamSystem" => Category::BeamSystem, "Truss" => Category::Truss, "Rebar" => Category::Rebar, "Family" => Category::Family, "Type" => Category::Type, "Pipe" => Category::Pipe,
                 "Duct" => Category::Duct, "Equipment" => Category::Equipment,
-                "Level" => Category::Level, "Grid" => Category::Grid, "Tag" => Category::Tag, "Dimension" => Category::Dimension, "Room" => Category::Room, "Stair" => Category::Stair, "Opening" => Category::Opening, "Section" => Category::Section,
+                "Level" => Category::Level, "Grid" => Category::Grid, "Tag" => Category::Tag, "Dimension" => Category::Dimension, "Room" => Category::Room, "Stair" => Category::Stair, "Opening" => Category::Opening, "Section" => Category::Section, "Elevation" => Category::Elevation,
                 _ => return Err(format!("Unsupported category {}",el.category)),
             };
             let type_for = match &el.type_for {

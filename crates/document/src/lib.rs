@@ -56,6 +56,11 @@ pub enum Category {
     /// A section line (`Geometry::Linear` on a level): the view looks to the left of its direction, `width_m` deep. An
     /// annotation: not part of the building, so it is not exported as a product.
     Section,
+    /// An elevation marker (`Geometry::Point` at its place on a level, `top` the same level): a circle in the plan with a
+    /// pointer for each view it holds. `count` says which, bit k for East, North, South, West in that order; each view
+    /// looks from the marker the way its pointer points, `width_m` across and `height_m` deep. An annotation: not part of
+    /// the building, so it is not exported as a product.
+    Elevation,
     /// An opening: a rectangle cut in a wall (`Geometry::InWall`: `width_m` wide and `height_m` high, its sill `elevation_m`
     /// above the base of the wall) or a shaft cut through floors (`Geometry::Shaft`, with an `outline`).
     Opening,
@@ -370,7 +375,7 @@ impl Element {
             && (k != Category::Truss || self.angle_deg == 0.0)
             && (k != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (self.category == Category::Beam || self.parent.is_none())
-            && (matches!(k, Category::Rebar | Category::Stair) || self.count == 0)
+            && (matches!(k, Category::Rebar | Category::Stair | Category::Elevation) || self.count == 0)
             && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
@@ -665,6 +670,18 @@ impl Document {
         self.transact(self.revision, &[
             Command::Create { id, category: Category::Section, name: format!("Section {n}"), width_m: depth_m, height_m: 1.0, elevation_m: 0.0 },
             Command::SetGeometry { id, geometry: Geometry::Linear { start: a, end: b, level } },
+        ])?;
+        Ok(id)
+    }
+    /// Puts an elevation marker at `at` on `level` with the views of `views` (bit k for East, North, South, West), each
+    /// `width_m` across and `depth_m` deep.
+    pub fn place_elevation(&mut self, level: ElementId, at: [f64; 2], views: u32, width_m: f64, depth_m: f64) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Elevation).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Elevation, name: format!("Elevation {n}"), width_m, height_m: depth_m, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Point { at, level, top: level } },
+            Command::SetCount { id, count: views },
         ])?;
         Ok(id)
     }
@@ -1059,7 +1076,7 @@ impl Document {
                 }
                 Command::SetCount { id, count } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.kind(), Category::Rebar | Category::Stair) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.kind(), Category::Rebar | Category::Stair | Category::Elevation) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.count = *count;
                     el.revision = revision;
                 }

@@ -13,12 +13,15 @@ pub const FACINGS: [(Facing, &str); 4] = [(Facing::East, "East"), (Facing::North
 const MARGIN: f64 = 2.0;
 /// How deep a new section looks, in metres.
 pub const DEFAULT_DEPTH_M: f64 = 20.0;
+/// How wide a new elevation marker's views are, in metres.
+pub const MARKER_WIDTH_M: f64 = 20.0;
 
 /// The name of an elevation or section view.
 pub fn name_of(app: &Desktop, view: View) -> String {
     match view {
         View::Elevation(k) => FACINGS.get(usize::from(k)).map_or("Elevation".into(), |f| format!("{} elevation", f.1)),
         View::Section(id) => app.document.get(ElementId(id)).map_or("Section".into(), |e| e.name.clone()),
+        View::Marked(id, k) => format!("{} - {}", app.document.get(ElementId(id)).map_or("Elevation", |e| e.name.as_str()), FACINGS.get(usize::from(k)).map_or("", |f| f.1)),
         _ => String::new(),
     }
 }
@@ -39,8 +42,33 @@ pub fn build(doc: &openbim_document::Document, view: View) -> Result<SectionView
             let (bottom, top) = around.and_then(|v| v.first().map(|f| (f.1.bottom, f.1.top))).unwrap_or((-1.0, 10.0));
             openbim_view::section_view(&scene, openbim_view::Section { a: start, b: end, bottom, top, depth: el.width_m }).map_err(|e| format!("{e:?}"))
         }
+        View::Marked(id, k) => {
+            let el = doc.get(ElementId(id)).filter(|e| e.category == Category::Elevation).ok_or("the elevation marker is gone")?;
+            let Some(Geometry::Point { at, .. }) = el.geometry else { return Err("the marker has no place".into()) };
+            let k = usize::from(k);
+            if k >= 4 || el.count >> k & 1 == 0 { return Err("the marker has no such view".into()); }
+            let (a, b) = marker_line(at, k, el.width_m);
+            let (bottom, top) = around.and_then(|v| v.first().map(|f| (f.1.bottom, f.1.top))).unwrap_or((-1.0, 10.0));
+            openbim_view::section_view(&scene, openbim_view::Section { a, b, bottom, top, depth: el.height_m }).map_err(|e| format!("{e:?}"))
+        }
         _ => Err("not an elevation or a section".into()),
     }
+}
+
+/// The name of the view `k` of the marker called `marker`.
+pub fn name_of_marker(marker: &str, k: u8) -> String { format!("{marker} - {}", FACINGS.get(usize::from(k)).map_or("", |f| f.1)) }
+
+/// The direction an elevation looks, as a unit vector in the plan: East, North, South, West.
+pub fn facing_vector(k: usize) -> [f64; 2] {
+    match k { 0 => [1.0, 0.0], 1 => [0.0, 1.0], 2 => [0.0, -1.0], _ => [-1.0, 0.0] }
+}
+
+/// The line of the view `k` of a marker at `at`, `width` across: it looks to the left of a -> b, which is the way the pointer points.
+pub fn marker_line(at: [f64; 2], k: usize, width: f64) -> ([f64; 2], [f64; 2]) {
+    let f = facing_vector(k);
+    let d = [f[1], -f[0]];
+    let h = width / 2.0;
+    ([at[0] - d[0] * h, at[1] - d[1] * h], [at[0] + d[0] * h, at[1] + d[1] * h])
 }
 
 fn ink(dark: bool, class: Class) -> (Color32, f32) {
@@ -319,6 +347,28 @@ impl Desktop {
             Err(e) => self.message = format!("Cannot flip: {e:?}"),
         }
         true
+    }
+
+    /// A click of the Elevation tool: a marker with its four views at the point.
+    pub(crate) fn elevation_click(&mut self, level: ElementId, point: [f64; 2]) {
+        match self.document.place_elevation(level, point, 0b1111, MARKER_WIDTH_M, DEFAULT_DEPTH_M) {
+            Ok(id) => {
+                let name = self.document.get(id).map_or_else(String::new, |e| e.name.clone());
+                self.message = format!("{name} placed with its four views; select it to switch views on or off, double click a pointer to open one; undo removes it");
+            }
+            Err(e) => self.message = format!("Elevation rejected ({e:?})"),
+        }
+    }
+
+    /// Switch the view `k` of the selected marker on or off. A marker keeps at least one view.
+    pub(crate) fn toggle_marker_view(&mut self, id: ElementId, k: usize) {
+        let Some(el) = self.document.get(id).filter(|e| e.category == Category::Elevation) else { return };
+        let count = el.count ^ (1 << k);
+        if count == 0 { self.message = "An elevation marker keeps at least one view; delete the marker to remove it".into(); return; }
+        match self.document.transact(self.document.revision(), &[openbim_document::Command::SetCount { id, count }]) {
+            Ok(_) => self.message = format!("{} view {}; undo takes it back", FACINGS[k].1, if count >> k & 1 == 1 { "added" } else { "removed" }),
+            Err(e) => self.message = format!("Cannot do that: {e:?}"),
+        }
     }
 
     /// A click of the Section tool: one end of the line, then the other. The view looks to the left of the line.

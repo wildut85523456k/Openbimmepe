@@ -76,6 +76,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
         C::Slab => &[Field::Width, Field::Elevation],
         C::Stair | C::Opening => &[Field::Width, Field::Height, Field::Elevation],
         C::Section => &[Field::Width],
+        C::Elevation => &[Field::Width, Field::Height],
         C::Family => &[Field::Angle, Field::Elevation],
         C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
@@ -149,6 +150,8 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Height if category == C::WallFooting => "Depth (mm)",
         Field::Elevation if category == C::Footing || category == C::WallFooting => "Top Offset (mm)",
         Field::Width if category == C::Section => "View Depth (mm)",
+        Field::Width if category == C::Elevation => "View Width (mm)",
+        Field::Height if category == C::Elevation => "View Depth (mm)",
         Field::Width if category == C::Stair || category == C::Opening => "Width (mm)",
         Field::Height if category == C::Opening => "Height (mm)",
         Field::Elevation if category == C::Opening => "Sill Height (mm)",
@@ -216,7 +219,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
-        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"), C::Section => ("Views (1)", "Section", "section"),
+        C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"), C::Section => ("Views (1)", "Section", "section"), C::Elevation => ("Views (1)", "Elevation", "elevation"),
         C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
@@ -770,6 +773,16 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     if matches!(el.geometry, Some(Geometry::Shaft { .. })) { shaft_group(app, ui, el); } else {
                         edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     }
+                    if el.category == openbim_document::Category::Elevation {
+                        // the views of the marker: tick the ones it holds, open one with its button
+                        for (k, (_, name)) in crate::section_ui::FACINGS.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let mut on = el.count >> k & 1 == 1;
+                                if ui.checkbox(&mut on, *name).on_hover_text("A view of the marker looking this way").changed() { app.toggle_marker_view(el.id, k); }
+                                if on && ui.small_button("Open").clicked() { app.view = View::Marked(el.id.0, k as u8); app.selected = None; }
+                            });
+                        }
+                    }
                     if el.category == openbim_document::Category::Section && ui.button("Flip direction").on_hover_text("Look to the other side of the line (Space)").clicked() { app.flip_selected_section(); }
                     if el.category == openbim_document::Category::Section && ui.button("Open view").on_hover_text("Go to the view of this section line").clicked() {
                         app.view = View::Section(el.id.0);
@@ -816,7 +829,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn view_name(view: View) -> &'static str {
-    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) => "Elevation / section" }
+    match view { View::Plan => "Level 1", View::UpperPlan => "Level 2", View::ThreeD => "{3D}", View::Mechanical => "M-101 - Mechanical", View::Level(_) => "Level plan", View::Elevation(_) | View::Section(_) | View::Marked(..) => "Elevation / section" }
 }
 
 struct Node {
@@ -895,6 +908,16 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
                 if !matches(&query, &name) { continue; }
                 let active = app.view == View::Section(id.0);
                 if ui.selectable_label(active, RichText::new(format!("{name} (section)"))).on_hover_text("Open the view of this section line").clicked() { app.view = View::Section(id.0); app.selected = None; }
+            }
+            // the views of the elevation markers placed in plans
+            let marked: Vec<(ElementId, String, u32)> = app.document.elements().filter(|e| e.category == openbim_document::Category::Elevation).map(|e| (e.id, e.name.clone(), e.count)).collect();
+            for (id, name, views) in marked {
+                for (k, (_, side)) in crate::section_ui::FACINGS.iter().enumerate() {
+                    let label = format!("{name} - {side}");
+                    if views >> k & 1 == 0 || !matches(&query, &label) { continue; }
+                    let active = app.view == View::Marked(id.0, k as u8);
+                    if ui.selectable_label(active, RichText::new(format!("{label} (elevation)"))).on_hover_text("Open this view of the elevation marker").clicked() { app.view = View::Marked(id.0, k as u8); app.selected = None; }
+                }
             }
             if !TREE.iter().any(|node| node_matches(node, &query)) { ui.weak("No matching items"); }
         });

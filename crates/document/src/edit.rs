@@ -162,10 +162,16 @@ impl Document {
     /// Drags one end of a wall to `to`, as the grip of a wall does in Revit: the ends of other walls that meet it
     /// there go with it, so that the corner stays joined.
     pub fn wall_end_commands(&self, id: ElementId, at_start: bool, to: P) -> Result<Vec<Command>, String> {
-        let wall = self.get(id).filter(|e| e.category == Category::Wall).ok_or("not a wall")?;
+        let wall = self.get(id).filter(|e| matches!(e.category, Category::Wall | Category::Section)).ok_or("not a wall")?;
         let Some(Geometry::Linear { start, end, level }) = wall.geometry else { return Err("not a wall".into()) };
         let old = if at_start { start } else { end };
         if (to[0] - old[0]).hypot(to[1] - old[1]) < 1e-9 { return Err("nothing changes".into()); }
+        if wall.category == Category::Section {
+            // a section line stands alone: only its own end moves, and it keeps a length to look along
+            let (ns, nt) = if at_start { (to, end) } else { (start, to) };
+            if (ns[0] - nt[0]).hypot(ns[1] - nt[1]) < 0.05 { return Err("a section line would be left with no length".into()); }
+            return Ok(vec![Command::SetGeometry { id, geometry: Geometry::Linear { start: ns, end: nt, level } }]);
+        }
         let close = |a: P| (a[0] - old[0]).hypot(a[1] - old[1]) < 1e-3;
         let mut ops = Vec::new();
         for e in self.elements().filter(|e| e.category == Category::Wall) {
@@ -337,6 +343,54 @@ mod tests {
         let door = d.place_family_in_wall(ElementId(20), 3.0, &door).unwrap();
         let tag = d.place_tag(ElementId(20), [2.0, 1.0], [2.0, 0.0]).unwrap();
         (d, ElementId(20), door, tag)
+    }
+
+    #[test]
+    fn a_section_line_has_no_body_and_either_end_of_it_moves_alone() {
+        let mut d = Document::spatial_sample();
+        let level = match d.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let s = d.place_section(level, [1.0, 0.0], [7.0, 0.0], 20.0).unwrap();
+        // its view depth (20 m) is not a thickness: it must not become a 20 m wide box in the plan
+        assert!(d.mesh(s).is_none());
+        let wall_before = line(&d, ElementId(20));
+        let ops = d.wall_end_commands(s, true, [2.0, 1.0]).unwrap();
+        assert_eq!(ops.len(), 1);
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(line(&d, s).0, [2.0, 1.0]) && near(line(&d, s).1, [7.0, 0.0]));
+        assert_eq!(line(&d, ElementId(20)), wall_before);
+        // the other end, and a line that would shrink to nothing is refused
+        assert!(d.wall_end_commands(s, false, [2.0, 1.01]).is_err());
+        assert!(d.wall_end_commands(s, false, [2.0, 3.0]).is_ok());
+    }
+
+    #[test]
+    fn an_elevation_marker_holds_up_to_four_views_moves_saves_and_is_not_a_body() {
+        let mut d = Document::spatial_sample();
+        let level = match d.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let m = d.place_elevation(level, [4.0, -6.0], 0b1111, 20.0, 30.0).unwrap();
+        assert!(d.mesh(m).is_none());
+        assert_eq!(d.level_of(m), Some(level));
+        // a view may be switched off, but a marker with none is refused
+        d.transact(d.revision(), &[Command::SetCount { id: m, count: 0b0101 }]).unwrap();
+        assert_eq!(d.get(m).unwrap().count, 0b0101);
+        assert!(d.transact(d.revision(), &[Command::SetCount { id: m, count: 0 }]).is_err());
+        assert!(d.transact(d.revision(), &[Command::SetCount { id: m, count: 16 }]).is_err());
+        // it moves like any point, and undo brings it back
+        let ops = d.transform_commands(&[m], Xf::Move([1.0, 2.0])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(matches!(d.get(m).unwrap().geometry, Some(Geometry::Point { at, .. }) if near(at, [5.0, -4.0])));
+        d.undo().unwrap();
+        assert!(matches!(d.get(m).unwrap().geometry, Some(Geometry::Point { at, .. }) if near(at, [4.0, -6.0])));
+        // it survives saving
+        let (els, site) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
+        let mut back = Document::new();
+        back.transact(0, &crate::native::restore_commands(els, site)).unwrap();
+        let e = back.get(m).unwrap();
+        assert_eq!((e.category, e.count, e.width_m, e.height_m), (Category::Elevation, 0b0101, 20.0, 30.0));
+        // and deleting takes it away
+        let ops = d.delete_commands(&[m]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(d.get(m).is_none());
     }
 
     #[test]

@@ -36,7 +36,9 @@ fn segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
-        let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0))).collect();
+        let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0)))
+            .chain(app.document.elements().filter(|e| e.category == Category::Elevation).flat_map(|e| (0..4u8).filter(move |k| e.count >> k & 1 == 1).map(move |k| (crate::section_ui::name_of_marker(&e.name, k), View::Marked(e.id.0, k)))))
+            .collect();
         let tabs = [("Level 1".to_string(), View::Plan), ("Level 2".to_string(), View::UpperPlan)].into_iter()
             .chain(added.into_iter().map(|(v, n)| (n, v)))
             .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)])
@@ -53,7 +55,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) { app.delete_selected(); }
     if app.view == View::ThreeD { return crate::view3d::show(app, ui); }
-    if matches!(app.view, View::Elevation(_) | View::Section(_)) { return crate::section_ui::show(app, ui); }
+    if matches!(app.view, View::Elevation(_) | View::Section(_) | View::Marked(..)) { return crate::section_ui::show(app, ui); }
     let level_id = app.plan_level();
     let level_z = app.document.get(level_id).map_or(0.0, |el| el.elevation_m);
     let three_d = app.view == View::ThreeD;
@@ -130,6 +132,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let right = axes.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
     let back = axes.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
     let mut datum_hits = Vec::new();
+    // the places of the elevation markers of this level, to press on and move
+    let mut markers: Vec<(ElementId, Pos2)> = Vec::new();
     // what a double click opens: section lines and elevation markers
     let mut view_hits: Vec<(View, Pos2, Pos2)> = Vec::new();
     for el in app.document.elements() {
@@ -165,6 +169,24 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 }
                 datum_hits.push((el.id, a, b));
                 view_hits.push((View::Section(el.id.0), a, b));
+            }
+            Some(Geometry::Point { at, level, .. }) if el.category == Category::Elevation && !three_d && level == level_id => {
+                // a circle with a pointer for each view the marker holds, pointing the way the view looks
+                let c = screen([at[0], at[1], level_z]);
+                let ink = if active { blue } else { Color32::from_rgb(120, 120, 120) };
+                painter.circle(c, 11.0, ui.visuals().panel_fill, Stroke::new(if active { 2.0 } else { 1.0 }, ink));
+                painter.text(c, egui::Align2::CENTER_CENTER, el.name.rsplit(' ').next().unwrap_or(""), egui::FontId::proportional(11.0), ink);
+                for k in 0..4u8 {
+                    if el.count >> k & 1 == 0 { continue; }
+                    let f = crate::section_ui::facing_vector(usize::from(k));
+                    let toward = Vec2::new(f[0] as f32, -f[1] as f32); // screen y points down
+                    let side = Vec2::new(-toward.y, toward.x) * 5.0;
+                    let tip = c + toward * 21.0;
+                    painter.add(egui::Shape::convex_polygon(vec![c + toward * 11.0 + side, c + toward * 11.0 - side, tip], ink, Stroke::NONE));
+                    view_hits.push((View::Marked(el.id.0, k), tip, tip));
+                }
+                datum_hits.push((el.id, c, c));
+                markers.push((el.id, c));
             }
             Some(Geometry::Level) if three_d => {
                 let a = screen([left, back, el.elevation_m]);
@@ -563,6 +585,16 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { if app.edit_pts.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.edit_pts.clear(); } }
         else if let Some(p) = pick { app.section_click(level_id, to_model(p)); }
+    } else if app.tool == crate::Tool::Elevation && !three_d {
+        // one click puts a marker with its four views; a ghost follows the pointer, snapped to 50 mm
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
+        if let Some(h) = response.hover_pos() {
+            let m = to_model(h);
+            painter.circle_stroke(screen([m[0], m[1], level_z]), 11.0, Stroke::new(1.5, Color32::from_rgb(120, 120, 120)));
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if let Some(p) = pick { app.elevation_click(level_id, to_model(p)); }
     } else if app.tool == crate::Tool::WallJoins && !three_d {
         // The ends of the walls of this level are marked: green where the join is allowed, red where it is not.
         let mut ends: Vec<(ElementId, bool, Pos2, bool)> = Vec::new();
@@ -909,7 +941,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             m
         };
         let wall_ends = selected.and_then(|id| match app.document.get(id) {
-            Some(e) if e.category == Category::Wall && app.document.level_of(id) == Some(level_id) => match e.geometry { Some(Geometry::Linear { start, end, .. }) => Some((id, start, end)), _ => None },
+            Some(e) if matches!(e.category, Category::Wall | Category::Section) && app.document.level_of(id) == Some(level_id) => match e.geometry { Some(Geometry::Linear { start, end, .. }) => Some((id, start, end)), _ => None },
             _ => None,
         });
         let grip_at = |m: [f64; 2]| screen([m[0], m[1], level_z]);
@@ -919,7 +951,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         // Temporary dimensions of the selected wall, as Revit shows them: its length and its distance to the nearest line
         // alongside on each side. Click a number and type another: the wall changes.
         app.temp_labels.clear();
-        if let (Some((id, a, b)), None, 1) = (wall_ends, app.drag, selected_all.len()) {
+        if let (Some((id, a, b)), None, 1, true) = (wall_ends, app.drag, selected_all.len(), selected.is_some_and(|s| app.document.get(s).is_some_and(|e| e.category == Category::Wall))) {
             let ink = Color32::from_rgb(70, 130, 180);
             let (pa, pb) = (grip_at(a), grip_at(b));
             let len = (b[0] - a[0]).hypot(b[1] - a[1]);
@@ -963,6 +995,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
                 if let Some((id, a, b)) = wall_ends.filter(|(_, a, b)| grip_at(*a).distance(p) < 10.0 || grip_at(*b).distance(p) < 10.0) {
                     app.drag = Some(crate::Drag::Grip { id, at_start: grip_at(a).distance(p) <= grip_at(b).distance(p) });
+                } else if let Some(hit) = markers.iter().find(|(_, c)| c.distance(p) < 13.0).map(|(id, _)| *id) {
+                    if !selected_all.contains(&hit) { app.select_element(Some(hit)); }
+                    app.drag = Some(crate::Drag::Move { id: hit, from: snap_to(p, None) });
                 } else if let Some(hit) = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id) {
                     if !selected_all.contains(&hit) { app.select_element(Some(hit)); }
                     app.drag = Some(crate::Drag::Move { id: hit, from: snap_to(p, None) });
@@ -1012,6 +1047,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                             let moved: Vec<Pos2> = points.iter().map(|q| { let m = xf.point(raw(*q)); screen([m[0], m[1], level_z]) }).collect();
                             painter.add(egui::Shape::convex_polygon(moved, fill, ghost));
                         }
+                        for (_, c) in markers.iter().filter(|m| group.contains(&m.0)) {
+                            let m = xf.point(raw(*c));
+                            painter.circle(screen([m[0], m[1], level_z]), 11.0, fill, ghost);
+                        }
                         painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", (to[0] - from[0]).hypot(to[1] - from[1]) * 1000.0), egui::FontId::proportional(13.0), blue);
                         if (to[0] - from[0]).hypot(to[1] - from[1]) > 1e-6 { done = Some(app.document.transform_commands(&group, xf)); }
                     }
@@ -1021,10 +1060,11 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                         let (dx, dy) = (to[0] - fixed[0], to[1] - fixed[1]);
                         let l = dx.hypot(dy);
                         if l > 1e-6 {
-                            let w = app.document.get(id).map_or(0.2, |e| e.width_m) / 2.0;
+                            let is_section = app.document.get(id).is_some_and(|e| e.category == Category::Section);
+                            let w = if is_section { 0.0 } else { app.document.get(id).map_or(0.2, |e| e.width_m) / 2.0 };
                             let (nx, ny) = (-dy / l * w, dx / l * w);
                             let ring = [[fixed[0] - nx, fixed[1] - ny], [to[0] - nx, to[1] - ny], [to[0] + nx, to[1] + ny], [fixed[0] + nx, fixed[1] + ny]].map(|p| screen([p[0], p[1], level_z]));
-                            painter.add(egui::Shape::convex_polygon(ring.to_vec(), fill, ghost));
+                            if is_section { dashed(&painter, grip_at(fixed), grip_at(to), ghost); } else { painter.add(egui::Shape::convex_polygon(ring.to_vec(), fill, ghost)); }
                             painter.text(grip_at(to) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", l * 1000.0), egui::FontId::proportional(13.0), blue);
                         }
                         if (to[0] - moving[0]).hypot(to[1] - moving[1]) > 1e-6 { done = Some(app.document.wall_end_commands(id, at_start, to)); }
@@ -1509,6 +1549,39 @@ mod tests {
         // Esc cancels a drag in progress
         let mid = Pos2::new((left + right) / 2.0, y);
         let _ = mid;
+    }
+
+    #[test]
+    fn dragging_a_section_end_moves_only_that_end_and_undo_puts_it_back() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = app.plan_level();
+        let (y, left, right) = wall_span(&ctx, screen, &app);
+        // the section lies along wall 20 (y = 0 m); one metre is (right - left + 8) / 8 pixels, as the wall test measures it
+        let per_m = (right - left + 8.0) / 8.0;
+        let x_at = |m: f32| left + 1.0 + per_m * m;
+        let id = app.document.place_section(level, [1.0, 0.0], [7.0, 0.0], 20.0).unwrap();
+        app.select_element(Some(id));
+        frame(&ctx, screen, &mut app, vec![]);
+        // the first row that picks the wall is its upper edge: the line is half the wall's thickness (0.1 m) lower
+        let y = y + per_m * 0.1;
+        let (press, to) = (Pos2::new(x_at(7.0), y), Pos2::new(x_at(7.0), y + 60.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(0.0, 20.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        assert!(matches!(app.drag, Some(crate::Drag::Grip { at_start: false, .. })), "{:?} {}", app.drag, app.message);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let (a, b) = wall_line(&app, id);
+        assert!(a == [1.0, 0.0] && b[1] < -0.3 && (b[0] - 7.0).abs() < 0.5, "{a:?} {b:?} {}", app.message);
+        // the wall under it did not move, and the section's view is built from the new line
+        assert_eq!(wall_line(&app, ElementId(20)), ([0.0, 0.0], [8.0, 0.0]));
+        assert_eq!(crate::section_ui::build(&app.document, View::Section(id.0)).expect("builds").section.b, b);
+        app.document.undo().unwrap();
+        assert_eq!(wall_line(&app, id), ([1.0, 0.0], [7.0, 0.0]));
+        // no length at all is refused
+        assert!(app.document.wall_end_commands(id, false, [1.0, 0.01]).is_err());
     }
 
     #[test]
@@ -2065,6 +2138,71 @@ mod tests {
         assert!(app.document.get(wall).is_none() && app.document.wall_openings().len() == before, "{}", app.message);
         frame(&ctx, screen, &mut app, vec![]);
     }
+    #[test]
+    fn the_elevation_tool_puts_a_marker_with_views_that_switch_on_and_off_open_and_move() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("elevation", "Elevation");
+        assert!(app.tool == crate::Tool::Elevation && app.view == View::Plan, "{}", app.message);
+        let at = Pos2::new(420.0, 400.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        let marks: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Elevation).map(|e| e.id).collect();
+        assert_eq!(marks.len(), 1, "{}", app.message);
+        let m = marks[0];
+        assert_eq!(app.document.get(m).unwrap().count, 0b1111);
+        assert!(app.tool == crate::Tool::Elevation, "the tool stays for the next marker");
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        // it is drawn in the plan, and each of its views is a view of the building seen from its place
+        frame(&ctx, screen, &mut app, vec![]);
+        let Some(Geometry::Point { at: place, .. }) = app.document.get(m).unwrap().geometry else { panic!() };
+        for k in 0..4u8 {
+            let v = crate::section_ui::build(&app.document, View::Marked(m.0, k)).unwrap_or_else(|e| panic!("view {k}: {e}"));
+            // the line of the view stands across the way it looks, through the marker
+            let f = crate::section_ui::facing_vector(usize::from(k));
+            let mid = [(v.section.a[0] + v.section.b[0]) / 2.0, (v.section.a[1] + v.section.b[1]) / 2.0];
+            assert!((mid[0] - place[0]).abs() < 1e-9 && (mid[1] - place[1]).abs() < 1e-9);
+            let d = [v.section.b[0] - v.section.a[0], v.section.b[1] - v.section.a[1]];
+            assert!((-d[1] * f[0] + d[0] * f[1]).signum() > 0.0 && (d[0] * f[0] + d[1] * f[1]).abs() < 1e-9, "view {k} looks the wrong way");
+            app.view = View::Marked(m.0, k);
+            frame(&ctx, screen, &mut app, vec![]);
+        }
+        assert_eq!(crate::section_ui::name_of(&app, View::Marked(m.0, 2)), "Elevation 1 - South");
+        // a view is switched off and then it is gone, a marker keeps one at least, undo brings a view back
+        app.view = View::Plan;
+        app.toggle_marker_view(m, 0);
+        assert_eq!(app.document.get(m).unwrap().count, 0b1110);
+        assert!(crate::section_ui::build(&app.document, View::Marked(m.0, 0)).is_err());
+        for k in 1..3 { app.toggle_marker_view(m, k); }
+        app.toggle_marker_view(m, 3);
+        assert_eq!(app.document.get(m).unwrap().count, 0b1000, "{}", app.message);
+        assert!(app.message.contains("at least one"), "{}", app.message);
+        app.document.undo().unwrap();
+        assert_eq!(app.document.get(m).unwrap().count, 0b1100);
+        // pressing on the circle and dragging moves the marker; undo puts it back
+        app.select_element(None);
+        frame(&ctx, screen, &mut app, vec![]);
+        let to = at + Vec2::new(90.0, 0.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at + Vec2::new(30.0, 0.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        assert!(matches!(app.drag, Some(crate::Drag::Move { id, .. }) if id == m), "{:?} {}", app.drag, app.message);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        let Some(Geometry::Point { at: moved, .. }) = app.document.get(m).unwrap().geometry else { panic!() };
+        assert!(moved[0] > place[0] + 0.5 && (moved[1] - place[1]).abs() < 0.2, "{place:?} -> {moved:?} {}", app.message);
+        app.document.undo().unwrap();
+        assert!(matches!(app.document.get(m).unwrap().geometry, Some(Geometry::Point { at, .. }) if at == place));
+        // Delete takes it away, and a marker is not part of the exported building
+        assert!(crate::export::scene_for_view(&app.document).is_ok());
+        app.select_element(Some(m));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert!(app.document.get(m).is_none(), "{}", app.message);
+    }
+
     #[test]
     fn plans_show_section_heads_and_elevation_markers_that_open_their_views_and_a_section_flips() {
         use crate::section_ui::{elevation_lines, view_at};
