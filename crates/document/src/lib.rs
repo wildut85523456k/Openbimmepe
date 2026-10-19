@@ -33,12 +33,14 @@ pub use layers::{centre_shift, check as check_layers, core_faces, core_range, th
 pub mod compute;
 pub mod compute_elec;
 pub mod mep;
+mod mepsys;
+pub mod layout;
 pub mod elec;
 mod warnings;
 pub use rebar::BarPath;
 pub use types::TypeValues;
 pub use elec::{ElecCable, ElecKind, ElecNode};
-pub use mep::{EquipLink, EndDemand, EndRole, InsulationKind, MepData, MepInsulation, MepSettings, MAX_INSULATION_M, MIN_INSULATION_M, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
+pub use mep::{EquipLink, EndDemand, EndRole, InsulationKind, MepData, MepInsulation, MepSettings, MepSystemDef, MAX_SYSTEM_MEMBERS, MAX_INSULATION_M, MIN_INSULATION_M, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
 pub use warnings::{Warning, WarningKind};
 pub use edit::Xf;
 pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh, ViewRef};
@@ -1040,6 +1042,18 @@ impl Document {
     pub fn get(&self, id: ElementId) -> Option<&Element> { self.elements.get(&id) }
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
+
+    /// The number of undo steps now; `merge_steps_since` makes everything done after it one step.
+    pub fn history_mark(&self) -> usize { self.history.len() }
+
+    /// Makes the steps taken since `mark` (from `history_mark`) one undo step: undo goes back to where `mark` was.
+    pub fn merge_steps_since(&mut self, mark: usize) { if self.history.len() > mark + 1 { self.history.truncate(mark + 1); } }
+
+    /// Takes back the steps taken since `mark` and forgets them (they cannot be redone).
+    pub fn roll_back_to(&mut self, mark: usize) {
+        while self.history.len() > mark { if !matches!(self.undo(), Ok(true)) { break; } }
+        self.future.clear();
+    }
     /// Establish a loaded/new sample as the undo baseline, without changing its revision.
     pub fn clear_undo_history(&mut self) { self.history.clear(); self.future.clear(); }
     pub fn can_redo(&self) -> bool { !self.future.is_empty() }

@@ -63,6 +63,7 @@ const HVAC: &[Group] = &[
         c("air_terminal", "Air Terminal"), c("diffuser", "Diffuser"), c("grille", "Grille"),
     ]},
     Group { title: "Analysis", commands: &[c("end_point", "End Point"), c("compute", "Compute")] },
+    Group { title: "Mechanical Systems", commands: &[c("create_mech_system", "Mechanical System"), c("generate_layout", "Generate Layout"), c("system_browser", "System Browser")] },
     Group { title: "Mechanical Equipment", commands: &[
         c("ahu", "AHU"), c("fan", "Fan"), c("vav_box", "VAV Box"),
         c("mechanical_equipment", "Equipment"), c("chiller", "Chiller"), c("cooling_tower", "Cooling Tower"),
@@ -74,6 +75,7 @@ const PLUMBING: &[Group] = &[
         c("pipe", "Pipe"), c("pipe_fitting", "Pipe Fitting"), c("pipe_elbow", "Elbow"), c("pipe_tee", "Tee"),
         c("pipe_transition", "Transition"), c("pipe_insulation", "Insulation"),
     ]},
+    Group { title: "Piping Systems", commands: &[c("create_pipe_system", "Piping System"), c("generate_layout", "Generate Layout"), c("system_browser", "System Browser")] },
     Group { title: "Valves & Accessories", commands: &[
         c("valve_gate", "Gate Valve"), c("valve_ball", "Ball Valve"), c("valve_butterfly", "Butterfly Valve"),
         c("backflow_preventer", "Backflow Preventer"), c("hanger", "Hanger"), c("pipe_support", "Support"),
@@ -156,6 +158,7 @@ const VIEW: &[Group] = &[
     Group { title: "Create", commands: &[
         c("view", "View"), c("section", "Section"), c("elevation", "Elevation"), c("level", "Level"),
     ]},
+    Group { title: "Windows", commands: &[c("system_browser", "System Browser")] },
     Group { title: "Navigate", commands: &[
         c("zoom_in", "Zoom In"), c("zoom_out", "Zoom Out"), c("pan", "Pan"), c("orbit", "Orbit"), c("search", "Find"),
     ]},

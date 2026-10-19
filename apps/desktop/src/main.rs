@@ -19,6 +19,7 @@ mod import;
 mod file;
 mod mep_tool;
 mod insulation_ui;
+mod systems_ui;
 mod mep_settings_ui;
 mod compute_ui;
 mod elec_ui;
@@ -211,6 +212,8 @@ struct Desktop {
     types_dialog: Option<model_edit::TypesDialog>,
     mep_settings_dialog: Option<mep_settings_ui::MepSettingsDialog>,
     insulation_dialog: Option<insulation_ui::InsulationDialog>,
+    /// systems of equipment, the System Browser and Generate Layout
+    systems: systems_ui::SystemsUi,
     /// Edit Type of a wall type: its layers
     type_editor: Option<type_editor::TypeEditor>,
     /// the End Point tool and the Compute window
@@ -275,7 +278,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -455,6 +458,10 @@ impl Desktop {
             "mep_settings" => self.open_mep_settings(),
             "duct_insulation" => self.open_insulation(false),
             "pipe_insulation" => self.open_insulation(true),
+            "create_mech_system" => self.open_create_system(false),
+            "create_pipe_system" => self.open_create_system(true),
+            "generate_layout" => self.open_generate_layout(),
+            "system_browser" => self.systems.browser = !self.systems.browser,
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
             "redo" => self.redo_document(),
@@ -577,6 +584,9 @@ impl eframe::App for Desktop {
         self.types_window(&ctx);
         self.mep_settings_window(&ctx);
         self.insulation_window(&ctx);
+        self.create_system_window(&ctx);
+        self.system_browser_window(&ctx);
+        self.layout_window(&ctx);
         self.type_editor_window(&ctx);
         self.compute_window(&ctx);
         self.elec_window(&ctx);

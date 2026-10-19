@@ -99,6 +99,19 @@ pub struct MepInsulation {
     pub thickness_m: f64,
 }
 
+/// A named group of equipment that carries one kind of system together (Revit's Create Mechanical / Piping System): its
+/// type, its members (family instances such as a fan coil unit or a pump) and the member the layout starts from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MepSystemDef {
+    pub name: String,
+    pub system: System,
+    pub members: Vec<ElementId>,
+    /// the equipment the layout starts from; one of the members
+    pub base: Option<ElementId>,
+}
+
+pub const MAX_SYSTEM_MEMBERS: usize = 500;
+
 pub const MIN_INSULATION_M: f64 = 0.001;
 pub const MAX_INSULATION_M: f64 = 0.2;
 
@@ -161,6 +174,8 @@ pub struct MepData {
     pub settings: MepSettings,
     /// insulation and lining on single ducts, pipes and fittings
     pub insulations: Vec<MepInsulation>,
+    /// the named systems of equipment
+    pub systems: Vec<MepSystemDef>,
     pub fittings: Vec<MepFitting>,
     pub links: Vec<(MepPort, MepPort)>,
     pub taps: Vec<MepTap>,
@@ -176,7 +191,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -203,6 +218,10 @@ impl MepData {
         MepData {
             settings: self.settings.clone(),
             insulations: self.insulations.iter().filter(|i| alive(&i.node)).cloned().collect(),
+            systems: self.systems.iter().filter_map(|d| {
+                let members: Vec<ElementId> = d.members.iter().copied().filter(|m| elements.get(m).is_some_and(|x| x.category == Category::Family)).collect();
+                (!members.is_empty()).then(|| MepSystemDef { name: d.name.clone(), system: d.system, base: d.base.filter(|b| members.contains(b)), members })
+            }).collect(),
             fittings: self.fittings.clone(),
             links: self.links.iter().filter(|(a, b)| alive(&a.node) && alive(&b.node)).copied().collect(),
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
@@ -278,6 +297,18 @@ impl MepData {
                 && i.thickness_m.is_finite() && (MIN_INSULATION_M..=MAX_INSULATION_M).contains(&i.thickness_m)
                 && !i.type_name.trim().is_empty() && i.type_name.chars().count() <= 60;
             if !ok || !layered.insert((i.node, i.kind)) { return Err(EditError::InvalidMep); }
+        }
+        let mut named = std::collections::BTreeSet::new();
+        let mut member_of = std::collections::BTreeSet::new();
+        for d in &self.systems {
+            let ok = d.name == d.name.trim() && !d.name.is_empty() && d.name.chars().count() <= 60
+                && (d.system.domain_ok(Domain::Duct) || d.system.domain_ok(Domain::Pipe)) && d.system != System::Other && !matches!(d.system, System::Power | System::Data)
+                && !d.members.is_empty() && d.members.len() <= MAX_SYSTEM_MEMBERS
+                && d.members.iter().all(|m| elements.get(m).is_some_and(|x| x.category == Category::Family))
+                && d.members.iter().collect::<std::collections::BTreeSet<_>>().len() == d.members.len()
+                && d.base.is_none_or(|b| d.members.contains(&b));
+            // a piece of equipment is in one system of each type, as a connector is in one system
+            if !ok || !named.insert(d.name.clone()) || d.members.iter().any(|m| !member_of.insert((*m, d.system.code()))) { return Err(EditError::InvalidMep); }
         }
         let is_level = |id: ElementId| elements.get(&id).is_some_and(|l| l.category == Category::Level);
         if !crate::elec::valid_nodes(&self.elec_nodes, &self.elec_cables, &is_level) { return Err(EditError::InvalidMep); }

@@ -500,6 +500,10 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
         let there = match i.node { openbim_document::MepNode::Run(_) => true, openbim_document::MepNode::Fitting(f) => out.fitting(f).is_some() };
         if there && out.insulation_of(i.node, i.kind).is_none() { out.insulations.push(i); }
     }
+    for d in incoming.systems {
+        // a system the model has by that name, or whose equipment is in another of the type, is not taken
+        if out.systems.iter().all(|x| x.name != d.name && !(x.system == d.system && x.members.iter().any(|m| d.members.contains(m)))) { out.systems.push(d); }
+    }
     for n in incoming.elec_nodes {
         if !out.elec_nodes.iter().any(|x| x.id == n.id) { out.elec_nodes.push(n); }
     }

@@ -472,6 +472,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             painter.add(egui::Shape::closed_line(pts, Stroke::new(1.2, Color32::from_rgb(214, 190, 70))));
         }
     }
+    if !three_d {
+        // the placeholders of Generate Layout: the trunk heavier, the branches lighter, dashed
+        for (trunk, pts) in app.layout_placeholders(level_id) {
+            let stroke = Stroke::new(if trunk { 3.0 } else { 2.0 }, if trunk { Color32::from_rgb(220, 140, 0) } else { Color32::from_rgb(70, 130, 200) });
+            for w in pts.windows(2) { dashed(&painter, screen([w[0][0], w[0][1], level_z]), screen([w[1][0], w[1][1], level_z]), stroke); }
+        }
+    }
     if matches!(app.tool, crate::Tool::ElecNode | crate::Tool::Cable) && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };

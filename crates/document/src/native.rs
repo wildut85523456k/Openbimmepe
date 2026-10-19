@@ -201,6 +201,10 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
         let node = match i.node { super::MepNode::Run(id) => format!("R{}", id.0), super::MepNode::Fitting(id) => format!("F{id}") };
         out.push(format!("J|n={node}|k={}|ty={}|th={:?}", if i.kind == super::InsulationKind::Lining { "L" } else { "I" }, esc(&i.type_name), i.thickness_m));
     }
+    for d in &m.systems {
+        let ids: Vec<String> = d.members.iter().map(|i| i.0.to_string()).collect();
+        out.push(format!("G|nm={}|sy={}|b={}|m={}", esc(&d.name), d.system.code(), d.base.map_or("N".to_string(), |b| b.0.to_string()), ids.join(",")));
+    }
     for q in &m.equip_links { out.push(format!("Q|p={}|el={}|cn={}", port_text(&q.port), q.element.0, esc(&q.connector))); }
     for n in &m.elec_nodes {
         let kind = match n.kind { super::ElecKind::Source => "S", super::ElecKind::Board => "B", super::ElecKind::Load => "L" };
@@ -220,7 +224,7 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
@@ -232,6 +236,12 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
             // a file written before the insulation types existed has the standard ones
             let (it, lt) = (f.get("it").map_or(Ok(have.insulation_types), |t| names(t))?, f.get("lt").map_or(Ok(have.lining_types), |t| names(t))?);
             m.settings = super::MepSettings { pipe_slopes_pct: list(get("sl")?)?, pipe_diameters_mm: list(get("dn")?)?, duct_widths_mm: list(get("dw")?)?, duct_heights_mm: list(get("dh")?)?, insulation_types: it, lining_types: lt };
+            continue;
+        }
+        if line.starts_with("G|") {
+            let members = if get("m")?.is_empty() { Vec::new() } else { get("m")?.split(',').map(|t| int(t).map(ElementId)).collect::<Result<Vec<_>, _>>()? };
+            let base = match get("b")? { "N" => None, t => Some(ElementId(int(t)?)) };
+            m.systems.push(super::MepSystemDef { name: unesc(get("nm")?)?, system: System::from_code(int(get("sy")?)? as u8).ok_or("an unknown system")?, members, base });
             continue;
         }
         if line.starts_with("J|") {
@@ -308,7 +318,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
     for line in it {
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
-        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
+        if ["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|"].iter().any(|p| line.starts_with(p)) { continue; } // see `parse_mep`
         if line.starts_with("S|") {
             site = Some(Site { latitude: num(get("lat")?)?, longitude: num(get("lon")?)?, angle_to_true_north_deg: num(get("ang")?)?, utc_offset_hours: num(get("utc")?)? });
             continue;

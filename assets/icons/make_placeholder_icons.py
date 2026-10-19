@@ -77,5 +77,42 @@ def mep_settings():
     d.line([30 * S, 100 * S, 98 * S, 88 * S], fill=DARK, width=4 * S)
     save(im, "mep_settings")
 
-for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings): f()
+def system_icon(name, accent):
+    # equipment boxes joined by a trunk and branches
+    im, d = canvas()
+    d.line([64 * S, 20 * S, 64 * S, 108 * S], fill=accent, width=6 * S)
+    for y in (30, 64, 98):
+        d.line([64 * S, y * S, 36 * S, y * S], fill=accent, width=4 * S)
+        d.rectangle([12 * S, (y - 10) * S, 36 * S, (y + 10) * S], fill=LIGHT, outline=DARK, width=3 * S)
+    d.rectangle([88 * S, 46 * S, 118 * S, 82 * S], fill=WHITE, outline=BLUE, width=3 * S)
+    d.line([64 * S, 64 * S, 88 * S, 64 * S], fill=accent, width=4 * S)
+    save(im, name)
+
+def create_system():
+    system_icon("create_mech_system", BLUE)
+
+def create_piping_system():
+    system_icon("create_pipe_system", ORANGE)
+
+def generate_layout():
+    # a dashed trunk with branches: the placeholders of a layout
+    im, d = canvas()
+    for y0 in range(16, 112, 16):
+        d.line([70 * S, y0 * S, 70 * S, (y0 + 9) * S], fill=ORANGE, width=6 * S)
+    for y in (28, 64, 100):
+        for x0 in range(30, 70, 14):
+            d.line([x0 * S, y * S, (x0 + 8) * S, y * S], fill=ORANGE, width=4 * S)
+        d.rectangle([8 * S, (y - 9) * S, 26 * S, (y + 9) * S], fill=LIGHT, outline=DARK, width=3 * S)
+    d.rectangle([96 * S, 50 * S, 120 * S, 78 * S], fill=WHITE, outline=BLUE, width=3 * S)
+    save(im, "generate_layout")
+
+def system_browser():
+    im, d = canvas()
+    sheet(d, 14, 16, 100, 96, fill=WHITE, line=BLUE)
+    for k, y in enumerate((30, 56, 82)):
+        d.rectangle([24 * S, y * S, 40 * S, (y + 14) * S], fill=LIGHT, outline=DARK, width=2 * S)
+        d.line([48 * S, (y + 7) * S, 100 * S, (y + 7) * S], fill=BLUE if k else ORANGE, width=4 * S)
+    save(im, "system_browser")
+
+for f in (paste, cut, match_type, pin, select_instances, create_similar, mep_settings, create_system, create_piping_system, generate_layout, system_browser): f()
 pin(slash=True)
