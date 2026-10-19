@@ -850,6 +850,7 @@ impl Desktop {
 
     /// Spacebar on a selected wall turns it over, as Revit does.
     pub(crate) fn flip_selected_wall(&mut self) {
+        if self.flip_selected_section() { return; }
         let Some(id) = self.selected_id() else { return };
         if self.document.get(id).is_none_or(|e| e.category != Category::Wall) { return; }
         match self.document.flip_wall_commands(id).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {

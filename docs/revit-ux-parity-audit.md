@@ -87,6 +87,8 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Select by click in an elevation or section (walls, slabs, roofs, stairs, columns, beams, doors/windows, wall openings; the element turns blue; Properties edits it; Delete removes it with what it hosts) | done (2026-10-19); picking is by the drawn shapes, so a wall seen through a hole is not picked; level lines are not picked |
 | Wall openings drawn in elevation | done: the opening is a hole in its wall in the view (walls parallel to the view only; a wall seen end on has no opening drawn) |
 | Wall Opening tool in an elevation or section: click one corner on a wall, then the opposite corner; the rectangle becomes the opening (sill and head from its heights, along the wall from its width) | done; the wall must be parallel to the view; the rubber band shows the rectangle; it does not snap to other edges and the options-bar sill/head values are not used in this mode |
+| Plans: section line with a head bubble (its number) at the start, a tick at the other end and an arrow for the side it looks to; Space or Properties > Flip direction turns it round (undoable); a double click on the line opens its view | done (2026-10-19); no flip control drawn on the line, no ends to drag, no split segments or gaps |
+| Plans: an elevation marker (circle with a pointer toward the building and the side's name) outside each of the four sides; a double click opens that elevation | done, but the four markers are worked out from the building (2 m outside it, 30 px off the line): they cannot be placed, moved or deleted, and there is no Elevation tool that places a marker with one to four views |
 | Move, rotate, copy, mirror, align, tags, dimensions, drawing walls/floors in these views; drag handles; Elevation tool placing markers in plans; callouts; legends | missing: other tools say they work in plan views |
 
 ## Ceiling
@@ -133,7 +135,7 @@ Split Element. The Offset and Wall Joins icons are placeholders I drew (the appr
 All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Elevation markers in plans, section heads, moving things in elevation/section views (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting and wall openings in them are done).
+1. The Elevation tool placing markers of its own, dragging section ends, moving things in elevation/section views (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting and wall openings in them are done).
 2. Railings, L/U stairs, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.

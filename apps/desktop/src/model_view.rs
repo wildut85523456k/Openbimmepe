@@ -130,6 +130,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let right = axes.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
     let back = axes.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
     let mut datum_hits = Vec::new();
+    // what a double click opens: section lines and elevation markers
+    let mut view_hits: Vec<(View, Pos2, Pos2)> = Vec::new();
     for el in app.document.elements() {
         let active = selected_all.contains(&el.id);
         let stroke = Stroke::new(if active { 2.5 } else { 1.0 }, if active { blue } else { Color32::from_gray(135) });
@@ -154,9 +156,15 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     let left = Vec2::new(d.y, -d.x).normalized() * 18.0; // screen y points down, so the model's left is (dy, -dx)
                     let m = a + d * 0.5;
                     painter.arrow(m, left, stroke);
-                    painter.text(a, egui::Align2::CENTER_BOTTOM, &el.name, egui::FontId::proportional(12.0), stroke.color);
+                    // the head: a bubble at the start with the number of the section, and a tick at the other end
+                    let number = el.name.rsplit(' ').next().unwrap_or("");
+                    painter.circle(a, 10.0, ui.visuals().panel_fill, stroke);
+                    painter.text(a, egui::Align2::CENTER_CENTER, number, egui::FontId::proportional(11.0), stroke.color);
+                    painter.arrow(b, left * 0.6, stroke);
+                    painter.text(a + (a - b).normalized() * 22.0, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(11.0), stroke.color);
                 }
                 datum_hits.push((el.id, a, b));
+                view_hits.push((View::Section(el.id.0), a, b));
             }
             Some(Geometry::Level) if three_d => {
                 let a = screen([left, back, el.elevation_m]);
@@ -167,6 +175,33 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 datum_hits.push((el.id, a, b));
             }
             _ => {}
+        }
+    }
+    // elevation markers: a circle with a pointer towards the building at the middle of each of the four lines
+    if !three_d {
+        if app.elev_marks.as_ref().is_none_or(|m| m.0 != app.document.revision()) {
+            app.elev_marks = Some((app.document.revision(), crate::section_ui::elevation_lines(&app.document)));
+        }
+        let marks = app.elev_marks.as_ref().map(|m| m.1.clone()).unwrap_or_default();
+        for (k, a, b) in marks {
+            let (pa, pb) = (screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]));
+            let (mid, d) = (pa + (pb - pa) * 0.5, pb - pa);
+            if d.length() < 1.0 { continue; }
+            let toward = Vec2::new(d.y, -d.x).normalized(); // the left of a -> b on the screen: where the view looks
+            let mid = mid - toward * 30.0; // the marker stands off the line, outside the building, so that it is not drawn over the walls
+            let ink = Color32::from_rgb(120, 120, 120);
+            painter.circle(mid, 11.0, ui.visuals().panel_fill, Stroke::new(1.0, ink));
+            let tip = mid + toward * 18.0;
+            let side = Vec2::new(-toward.y, toward.x) * 5.0;
+            painter.add(egui::Shape::convex_polygon(vec![mid + toward * 11.0 + side, mid + toward * 11.0 - side, tip], ink, Stroke::NONE));
+            painter.text(mid - toward * 22.0, egui::Align2::CENTER_CENTER, crate::section_ui::FACINGS[usize::from(k)].1, egui::FontId::proportional(11.0), ink);
+            view_hits.push((View::Elevation(k), mid, mid));
+        }
+    }
+    // a double click on a section line or an elevation marker opens its view, as in Revit
+    if !three_d && app.tool == crate::Tool::Select && response.double_clicked() {
+        if let Some(p) = response.interact_pointer_pos() {
+            if let Some(v) = crate::section_ui::view_at(&view_hits, p, 12.0) { app.view = v; app.select_element(None); }
         }
     }
     let mut faces = Vec::new();
@@ -2029,6 +2064,38 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
         assert!(app.document.get(wall).is_none() && app.document.wall_openings().len() == before, "{}", app.message);
         frame(&ctx, screen, &mut app, vec![]);
+    }
+    #[test]
+    fn plans_show_section_heads_and_elevation_markers_that_open_their_views_and_a_section_flips() {
+        use crate::section_ui::{elevation_lines, view_at};
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        // four elevation lines, each looking at the building from outside (the middle of the building is to their left)
+        let lines = elevation_lines(&app.document);
+        assert_eq!(lines.len(), 4);
+        // a section, then the plan draws its head and the markers
+        let level = app.plan_level();
+        let id = app.document.place_section(level, [0.0, 3.0], [8.0, 3.0], 20.0).unwrap();
+        frame(&ctx, screen, &mut app, vec![]);
+        assert!(app.elev_marks.as_ref().is_some_and(|m| m.1.len() == 4));
+        // a double click near a marker or a section line opens its view
+        let hits = [(View::Elevation(1), egui::pos2(100.0, 100.0), egui::pos2(100.0, 100.0)), (View::Section(id.0), egui::pos2(0.0, 0.0), egui::pos2(100.0, 0.0))];
+        assert!(view_at(&hits, egui::pos2(104.0, 98.0), 12.0) == Some(View::Elevation(1)));
+        assert!(view_at(&hits, egui::pos2(50.0, 5.0), 12.0) == Some(View::Section(id.0)));
+        assert!(view_at(&hits, egui::pos2(50.0, 40.0), 12.0).is_none());
+        // Space (or the Flip direction button) turns the section round: the same line the other way
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(id).unwrap().geometry else { panic!() };
+        app.select_element(Some(id));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Space)]);
+        let Some(Geometry::Linear { start: s2, end: e2, .. }) = app.document.get(id).unwrap().geometry else { panic!() };
+        assert_eq!((s2, e2), (end, start), "{}", app.message);
+        // it looks the other way now: its view is built from the swapped line, and undo restores it
+        let v = crate::section_ui::build(&app.document, View::Section(id.0)).expect("builds");
+        assert_eq!(v.section.a, end);
+        app.document.undo().unwrap();
+        let Some(Geometry::Linear { start: s3, .. }) = app.document.get(id).unwrap().geometry else { panic!() };
+        assert_eq!(s3, start);
     }
     #[test]
     fn shaft_tool_sketches_an_outline_cuts_the_floor_above_and_shows_its_symbol_and_wall_opening_tool_picks_two_ends() {

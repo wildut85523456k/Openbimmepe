@@ -151,6 +151,23 @@ pub fn opening_of_corners(doc: &openbim_document::Document, view: &SectionView, 
     Some((a.min(b), a.max(b), sill, head))
 }
 
+/// The lines the four elevations look along (East, North, South, West as `FACINGS` numbers them), each with the two
+/// ends of its line: the building is to the left of a -> b. Empty when the model has nothing to look at.
+pub fn elevation_lines(doc: &openbim_document::Document) -> Vec<(u8, [f64; 2], [f64; 2])> {
+    let Ok((scene, _)) = crate::export::scene_for_view(doc) else { return Vec::new() };
+    let Some(all) = openbim_view::standard_elevations(&scene, MARGIN) else { return Vec::new() };
+    FACINGS.iter().enumerate().filter_map(|(k, f)| all.iter().find(|v| v.0 == f.0).map(|v| (k as u8, v.1.a, v.1.b))).collect()
+}
+
+/// The view a double click at `p` opens: the section line or the elevation marker within `reach` pixels of it.
+pub fn view_at(hits: &[(View, Pos2, Pos2)], p: Pos2, reach: f32) -> Option<View> {
+    hits.iter().rev().find(|(_, a, b)| {
+        let ab = *b - *a;
+        let t = ((p - *a).dot(ab) / ab.length_sq().max(1e-10)).clamp(0.0, 1.0);
+        (p - (*a + t * ab)).length() <= reach
+    }).map(|h| h.0)
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let name = name_of(app, app.view);
     let built = build(&app.document, app.view);
@@ -290,6 +307,18 @@ impl Desktop {
             Ok(id) => self.message = format!("Wall opening {} placed, {:.0} mm wide and {:.0} mm high; undo removes it", id.0, (to - from) * 1000.0, (head - sill) * 1000.0),
             Err(e) => self.message = format!("Wall opening rejected ({e:?}): it must be at least 50 mm each way and inside the wall"),
         }
+    }
+
+    /// Turn the view of the selected section line round: it looks to the other side of the line.
+    pub(crate) fn flip_selected_section(&mut self) -> bool {
+        let Some(id) = self.selected_id() else { return false };
+        let Some(el) = self.document.get(id).filter(|e| e.category == Category::Section) else { return false };
+        let Some(Geometry::Linear { start, end, level }) = el.geometry else { return false };
+        match self.document.transact(self.document.revision(), &[openbim_document::Command::SetGeometry { id, geometry: Geometry::Linear { start: end, end: start, level } }]) {
+            Ok(_) => self.message = "Section flipped: it looks to the other side of the line; undo takes it back".into(),
+            Err(e) => self.message = format!("Cannot flip: {e:?}"),
+        }
+        true
     }
 
     /// A click of the Section tool: one end of the line, then the other. The view looks to the left of the line.

@@ -770,6 +770,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     if matches!(el.geometry, Some(Geometry::Shaft { .. })) { shaft_group(app, ui, el); } else {
                         edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     }
+                    if el.category == openbim_document::Category::Section && ui.button("Flip direction").on_hover_text("Look to the other side of the line (Space)").clicked() { app.flip_selected_section(); }
                     if el.category == openbim_document::Category::Section && ui.button("Open view").on_hover_text("Go to the view of this section line").clicked() {
                         app.view = View::Section(el.id.0);
                         app.selected = None;
