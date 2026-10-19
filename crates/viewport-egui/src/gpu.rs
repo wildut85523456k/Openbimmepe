@@ -45,13 +45,48 @@ pub fn sun_matrix(scene: &Scene) -> [[f32; 4]; 4] {
     m
 }
 
+/// The largest a single vertex buffer is made, in bytes. wgpu's default limit for one buffer is 256 MiB, which is
+/// the limit that applies when a program does not ask the card for more (eframe does not): a model of more than
+/// about 2.2 million triangles in one buffer stopped the program. Half of it leaves room below the limit.
+pub const CHUNK_BYTES: u64 = 128 << 20;
+
+/// Vertex data kept in several buffers, each below the card's limit for one buffer, drawn one after the other.
+pub struct Chunked {
+    parts: Vec<(wgpu::Buffer, u32)>,
+    /// number of vertices in all parts
+    total: u32,
+}
+
+impl Chunked {
+    /// `data` in parts of whole triangles (and so of whole line pairs): a part holds a multiple of 6 vertices.
+    pub fn new<T: Pod>(device: &wgpu::Device, label: &str, data: &[T], usage: wgpu::BufferUsages) -> Chunked {
+        let limit = CHUNK_BYTES.min(device.limits().max_buffer_size / 2).max(1024);
+        let per = ((limit as usize / std::mem::size_of::<T>().max(1)) / 6 * 6).max(6);
+        let mut parts = Vec::new();
+        for (i, piece) in data.chunks(per).enumerate() {
+            let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(&format!("{label} {i}")), contents: bytemuck::cast_slice(piece), usage });
+            parts.push((buf, piece.len() as u32));
+        }
+        Chunked { parts, total: data.len() as u32 }
+    }
+    pub fn len(&self) -> u32 { self.total }
+    pub fn is_empty(&self) -> bool { self.total == 0 }
+    /// Number of buffers the data is in.
+    pub fn parts(&self) -> usize { self.parts.len() }
+    fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        for (buf, n) in &self.parts { pass.set_vertex_buffer(0, buf.slice(..)); pass.draw(0..*n, 0..1); }
+    }
+}
+
+/// Bytes of graphics memory the fills of a batch take: three corners of one vertex each, for every triangle. The
+/// figure is the size of what `upload` makes, and is what a notice to the user about the size of a model uses.
+pub fn fill_bytes(triangles: usize) -> u64 { triangles as u64 * 3 * std::mem::size_of::<Vertex>() as u64 }
+
 /// A batch uploaded for one style.
 pub struct Scene {
-    fills: wgpu::Buffer,
-    fill_count: u32,
-    lines: wgpu::Buffer,
-    line_count: u32,
-    selected: Option<(wgpu::Buffer, u32)>,
+    fills: Chunked,
+    lines: Chunked,
+    selected: Option<Chunked>,
     /// triangles' corner data kept for building the selection
     pub style: Style,
     /// model position of the zero of the buffers
@@ -62,6 +97,12 @@ pub struct Scene {
     pub centre: [f32; 3],
     /// where the sun is, for Realistic
     pub sun: Sun,
+}
+
+impl Scene {
+    /// Number of buffers the triangles are in, and the number of corners in all of them.
+    pub fn fill_parts(&self) -> usize { self.fills.parts() }
+    pub fn fill_vertices(&self) -> u32 { self.fills.len() }
 }
 
 pub struct Gpu {
@@ -183,8 +224,21 @@ impl Gpu {
         }
     }
 
-    /// Put a batch on the GPU for a style.
+    /// Put a batch on the GPU for a style. Panics when `try_upload` refuses; use `try_upload` in a program.
     pub fn upload(&self, device: &wgpu::Device, b: &Batch, style: Style) -> Scene {
+        self.try_upload(device, b, style, None).expect("upload")
+    }
+
+    /// Put a batch on the GPU for a style, in buffers below the card's limit for one buffer. When `budget` (bytes of
+    /// graphics memory the model may take) is given and the batch needs more, nothing is made and the reason is
+    /// returned, so that a model too large for the equipment can be told to the user instead of stopping the program.
+    pub fn try_upload(&self, device: &wgpu::Device, b: &Batch, style: Style, budget: Option<u64>) -> Result<Scene, String> {
+        if let Some(budget) = budget {
+            let need = if style == Style::Wireframe { 0 } else { fill_bytes(b.tris.len()) };
+            if need > budget {
+                return Err(format!("this model needs about {:.1} GB of graphics memory for its {} triangles and {:.1} GB is available", need as f64 / 1e9, b.tris.len(), budget as f64 / 1e9));
+            }
+        }
         let mut fills: Vec<Vertex> = Vec::new();
         if style != Style::Wireframe {
             fills.reserve(b.tris.len() * 3);
@@ -206,18 +260,15 @@ impl Gpu {
                 for p in e { lines.push([p[0] as f32, p[1] as f32, p[2] as f32]); }
             }
         }
-        let mk = |label: &str, bytes: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: if bytes.is_empty() { &[0u8; 16] } else { bytes }, usage });
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         for v in &b.verts { for k in 0..3 { lo[k] = lo[k].min(v[k]); hi[k] = hi[k].max(v[k]); } }
         let radius = if b.verts.is_empty() { 1.0 } else { (0..3).map(|k| ((hi[k] - lo[k]) as f64).powi(2)).sum::<f64>().sqrt() / 2.0 };
-        Scene {
-            fills: mk("fills", bytemuck::cast_slice(&fills), wgpu::BufferUsages::VERTEX),
-            fill_count: fills.len() as u32,
-            lines: mk("lines", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
-            line_count: lines.len() as u32,
+        Ok(Scene {
+            fills: Chunked::new(device, "fills", &fills, wgpu::BufferUsages::VERTEX),
+            lines: Chunked::new(device, "lines", &lines, wgpu::BufferUsages::VERTEX),
             selected: None,
             style, origin: b.origin, radius, sun: Sun::default(), centre: if b.verts.is_empty() { [0.0; 3] } else { [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0] },
-        }
+        })
     }
 
     /// Mark the elements to draw as selected (an empty set clears it).
@@ -234,7 +285,7 @@ impl Gpu {
                 for v in p { vs.push(Vertex { pos: v, nrm: n.map(|x| x / l), col: [1.0; 4] }); }
             }
         }
-        scene.selected = (!vs.is_empty()).then(|| (device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("selection"), contents: bytemuck::cast_slice(&vs), usage: wgpu::BufferUsages::VERTEX }), vs.len() as u32));
+        scene.selected = (!vs.is_empty()).then(|| Chunked::new(device, "selection", &vs, wgpu::BufferUsages::VERTEX));
     }
 
     pub fn target(&self, device: &wgpu::Device, size: [u32; 2]) -> Target {
@@ -274,7 +325,7 @@ impl Gpu {
             light_vp: sun_matrix(scene),
         };
         queue.write_buffer(&target.uniforms, 0, bytemuck::bytes_of(&uni));
-        if scene.style == Style::Realistic && scene.fill_count > 0 && scene.sun.strength() > 0.0 {
+        if scene.style == Style::Realistic && !scene.fills.is_empty() && scene.sun.strength() > 0.0 {
             let mut sp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
                 color_attachments: &[],
@@ -283,8 +334,7 @@ impl Gpu {
             });
             sp.set_pipeline(&self.shadow_pipeline);
             sp.set_bind_group(0, &target.bind, &[]);
-            sp.set_vertex_buffer(0, scene.fills.slice(..));
-            sp.draw(0..scene.fill_count, 0..1);
+            for (buf, n) in &scene.fills.parts { sp.set_vertex_buffer(0, buf.slice(..)); sp.draw(0..*n, 0..1); }
         }
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("viewport"),
@@ -294,20 +344,17 @@ impl Gpu {
         });
         pass.set_bind_group(0, &target.bind, &[]);
         if scene.style == Style::Realistic { pass.set_bind_group(1, &self.shadow_bind, &[]); }
-        if scene.fill_count > 0 {
+        if !scene.fills.is_empty() {
             pass.set_pipeline(match scene.style { Style::HiddenLine => &self.paper, Style::Realistic => &self.real, _ => &self.shaded });
-            pass.set_vertex_buffer(0, scene.fills.slice(..));
-            pass.draw(0..scene.fill_count, 0..1);
+            scene.fills.draw(&mut pass);
         }
-        if let Some((buf, n)) = &scene.selected {
+        if let Some(sel) = &scene.selected {
             pass.set_pipeline(&self.select);
-            pass.set_vertex_buffer(0, buf.slice(..));
-            pass.draw(0..*n, 0..1);
+            sel.draw(&mut pass);
         }
-        if scene.line_count > 0 {
+        if !scene.lines.is_empty() {
             pass.set_pipeline(if scene.style == Style::Wireframe { &self.lines_through } else { &self.lines_hidden });
-            pass.set_vertex_buffer(0, scene.lines.slice(..));
-            pass.draw(0..scene.line_count, 0..1);
+            scene.lines.draw(&mut pass);
         }
     }
 
