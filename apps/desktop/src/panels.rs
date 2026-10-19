@@ -561,6 +561,11 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Place Stair");
             ui.separator();
+            ui.label("Shape");
+            let shown = openbim_document::StairShape::ALL.iter().find(|(s, _)| *s == app.stair_shape).map_or("Straight", |(_, n)| *n);
+            egui::ComboBox::from_id_salt("stair_shape").selected_text(shown).show_ui(ui, |ui| {
+                for (shape, name) in openbim_document::StairShape::ALL { ui.selectable_value(&mut app.stair_shape, shape, name); }
+            });
             ui.label("Width (mm)");
             ui.add(egui::DragValue::new(&mut app.stair_width_mm).speed(5.0).range(200.0..=10000.0));
             ui.label("Max Riser Height (mm)");

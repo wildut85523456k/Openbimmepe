@@ -181,6 +181,7 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
         let category = match class {
             "IFCBEAM" | "IFCMEMBER" => Category::Beam,
             "IFCCOLUMN" => Category::Column,
+            "IFCSLAB" if m.predefined == "LANDING" => { skip(&mut report, "IFCSLAB LANDING (the landing of a stair written by another program is not read yet)"); continue }
             "IFCSLAB" => Category::Slab,
             "IFCCOVERING" if m.predefined == "CEILING" => Category::Slab,
             "IFCCOVERING" => { skip(&mut report, "IFCCOVERING that is not a ceiling (no such element in the app)"); continue }
@@ -618,6 +619,7 @@ mod tests {
         d.place_roof(ElementId(11), &openbim_document::RoofSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true, false, true, false], material: Material::Timber }).unwrap();
         d.place_stair(ElementId(10), &openbim_document::StairSpec { start: [1.0, 1.0], toward: [1.0, 9.0], width_m: 1.0, rise_m: 3.0, risers: 18, tread_m: 0.28, base_offset_m: 0.0 }).unwrap();
         d.place_railing(ElementId(10), &openbim_document::RailingSpec::new(vec![[1.5, 1.0], [1.5, 5.0], [2.5, 5.0]])).unwrap();
+        d.place_turning_stair(ElementId(10), &openbim_document::StairSpec { start: [5.0, 1.0], toward: [5.0, 9.0], width_m: 1.0, rise_m: 3.0, risers: 17, tread_m: 0.28, base_offset_m: 0.0 }, openbim_document::StairShape::U { left: false }).unwrap();
         d.place_wall_opening(ElementId(22), 5.0, 6.0, 0.5, 2.0).unwrap();
         d.place_shaft(ElementId(10), &openbim_document::ShaftSpec { outline: vec![[6.5, 0.5], [7.1, 0.5], [7.1, 1.1], [6.5, 1.1]], top: ElementId(11), base_offset_m: 0.0, top_offset_m: 0.0 }).unwrap();
         d.place_ceiling(ElementId(10), vec![[0.2, 0.2], [3.8, 0.2], [3.8, 5.8], [0.2, 5.8]], 2.7, 0.02, Material::Unspecified).unwrap();
@@ -729,7 +731,9 @@ mod tests {
             let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", schema).unwrap();
             assert_eq!(out.text.matches("IFCCOVERING(").count(), 1, "{schema:?}: the ceiling");
             assert!(out.text.contains(".CEILING."), "{schema:?}");
-            assert_eq!(out.text.matches("IFCSTAIR(").count(), 1, "{schema:?}: the stair");
+            // the straight stair, and the two runs of the U stair with their landing slab
+            assert_eq!(out.text.matches("IFCSTAIR(").count(), 3, "{schema:?}: the stairs");
+            assert_eq!(out.text.matches(".LANDING.").count(), 1, "{schema:?}: the landing");
             assert_eq!(out.text.matches("IFCRAILING(").count(), 1, "{schema:?}: the railing");
             // its top rails, posts and balusters are solids of their own: 2 rails, 3 posts, 25 + 6 balusters
             assert!(out.text.matches("IFCFACETEDBREP(").count() >= 36, "{schema:?}: the parts of the railing");

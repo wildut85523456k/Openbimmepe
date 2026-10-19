@@ -18,7 +18,7 @@ mod opening;
 mod railing;
 pub use railing::RailingSpec;
 pub use opening::ShaftSpec;
-pub use stair::{StairSpec, StairFigures, risers_for, MAX_RISER_M as MAX_STAIR_RISER_M, TREAD_M as STAIR_TREAD_M, WIDTH_M as STAIR_WIDTH_M, mesh as stair_mesh, profile as stair_profile};
+pub use stair::{StairSpec, StairShape, StairFigures, layout as stair_layout, LANDING_THICKNESS_M, U_GAP_M, risers_for, MAX_RISER_M as MAX_STAIR_RISER_M, TREAD_M as STAIR_TREAD_M, WIDTH_M as STAIR_WIDTH_M, mesh as stair_mesh, profile as stair_profile};
 pub use roof::{is_convex as roof_is_convex, RoofFigures, mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
 pub use rooms::RoomShape;
 pub mod native;
@@ -377,13 +377,13 @@ impl Element {
         (matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || self.section == Section::Rectangle)
             && (matches!(k, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
             && (matches!(k, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
-            && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss | Category::Railing) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor) || (k == Category::Opening && self.slab_kind == SlabKind::Floor))
+            && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss | Category::Railing | Category::Stair) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor) || (k == Category::Opening && self.slab_kind == SlabKind::Floor))
             && (matches!(k, Category::Beam | Category::Wall) || self.join_ends == [true; 2])
             && (matches!(k, Category::BeamSystem | Category::Truss | Category::Rebar | Category::Railing) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || k == Category::Family)))
             && (k != Category::Truss || self.angle_deg == 0.0)
             && (k != Category::Railing || (self.angle_deg == 0.0 && (self.spacing_m == 0.0 || (0.05..=2.0).contains(&self.spacing_m)) && self.height_m <= 5.0 && self.width_m <= 0.5))
             && (k != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
-            && (self.category == Category::Beam || self.parent.is_none())
+            && (matches!(self.category, Category::Beam | Category::Stair) || self.parent.is_none())
             && (matches!(k, Category::Rebar | Category::Stair | Category::Elevation) || self.count == 0)
             && (self.category == Category::Family || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
@@ -1084,7 +1084,7 @@ impl Document {
                 }
                 Command::SetOutline { id, outline } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss | Category::Opening | Category::Railing) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss | Category::Opening | Category::Railing | Category::Stair) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.outline = outline.clone();
                     if el.slab_kind == SlabKind::Roof && el.slope_edges.len() != el.outline.len() { el.slope_edges = vec![true; el.outline.len()]; }
                     el.revision = revision;
@@ -1115,7 +1115,7 @@ impl Document {
                 }
                 Command::SetParent { id, parent } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Beam { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Stair) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.parent = *parent;
                     el.revision = revision;
                 }

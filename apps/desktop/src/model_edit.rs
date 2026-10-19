@@ -710,9 +710,11 @@ impl Desktop {
         if rise < 0.2 { self.message = "Stair: the base is too close to the top level (nothing to climb)".into(); return; }
         let risers = openbim_document::risers_for(rise, self.stair_riser_mm / 1000.0);
         let spec = openbim_document::StairSpec { start, toward: point, width_m: self.stair_width_mm / 1000.0, rise_m: rise, risers, tread_m: self.stair_tread_mm / 1000.0, base_offset_m: base };
-        match self.document.place_stair(level, &spec) {
+        let turning = self.stair_shape != openbim_document::StairShape::Straight;
+        match self.document.place_turning_stair(level, &spec, self.stair_shape) {
+            Ok(id) if turning => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm in two runs with a landing; undo removes all of it", id.0, rise / f64::from(risers) * 1000.0); }
             Ok(id) => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm, {} treads of {:.0} mm; undo removes it", id.0, rise / f64::from(risers) * 1000.0, risers - 1, self.stair_tread_mm); }
-            Err(e) => self.message = format!("Stair rejected ({e:?}): check the riser height and tread depth"),
+            Err(e) => self.message = format!("Stair rejected ({e:?}): check the riser height and tread depth (an L or U stair needs at least 4 risers)"),
         }
     }
 
@@ -1388,6 +1390,49 @@ mod tests {
         app.edit_pts.clear();
         app.stair_click(level, [5.0, 5.0]);
         assert_eq!(app.edit_pts.len(), 1);
+    }
+
+    #[test]
+    fn an_l_or_u_stair_is_chosen_in_the_options_bar_placed_as_one_group_and_exported_with_its_landing() {
+        use openbim_document::StairShape;
+        let mut app = Desktop::sample();
+        let level = ElementId(10);
+        app.run_command("stair", "Stair");
+        let stairs = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Stair).count();
+        let before = stairs(&app);
+        app.stair_shape = StairShape::L { left: true };
+        app.stair_click(level, [1.0, 1.0]);
+        app.stair_click(level, [1.0, 9.0]);
+        assert_eq!(stairs(&app), before + 3, "two runs and a landing: {}", app.message);
+        assert!(app.message.contains("two runs with a landing"), "{}", app.message);
+        let first = app.document.elements().filter(|e| e.category == Category::Stair && e.parent.is_none()).last().unwrap().id;
+        let parts = app.document.stair_parts(first);
+        assert_eq!(parts.len(), 3);
+        // the figures of the two runs add up to the whole climb
+        let climbed: f64 = parts.iter().filter_map(|p| app.document.get(*p)).filter(|e| matches!(e.geometry, Some(Geometry::Linear { .. }))).map(|e| e.height_m).sum();
+        let above = app.document.level_above(level).unwrap();
+        let rise = app.document.get(above).unwrap().elevation_m - app.document.get(level).unwrap().elevation_m;
+        assert!((climbed - rise).abs() < 1e-9, "{climbed} {rise}");
+        // selecting the first run and deleting takes the stair with it; undo brings it back whole
+        app.select_element(Some(first));
+        app.delete_selected();
+        assert_eq!(stairs(&app), before, "{}", app.message);
+        app.document.undo().unwrap();
+        assert_eq!(stairs(&app), before + 3);
+        // exported: two flights and a landing slab
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCSTAIR(").count(), before + 2);
+        assert_eq!(out.text.matches(".LANDING.").count(), 1);
+        // a U stair, turning right, is placed the same way; too little climb for two runs is refused
+        app.stair_shape = StairShape::U { left: false };
+        app.stair_click(level, [6.0, 1.0]);
+        app.stair_click(level, [6.0, 9.0]);
+        assert_eq!(stairs(&app), before + 6, "{}", app.message);
+        (app.stair_riser_mm, app.stair_rise_mm) = (2000.0, 3000.0);
+        app.stair_click(level, [8.0, 1.0]);
+        app.stair_click(level, [8.0, 3.0]);
+        assert_eq!(stairs(&app), before + 6, "{}", app.message);
+        assert!(app.message.contains("rejected"), "{}", app.message);
     }
 
     #[test]

@@ -139,6 +139,12 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
                 roofs.push(openbim_ifc::RoofItem { id: el.id.0, name: el.name.clone(), eaves_z: z0, verts: mesh.vertices, faces: mesh.faces, shape });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
             }
+            (Category::Stair, Some(Geometry::Area { level })) => {
+                // the landing of a turning stair: a slab that hangs from its top and bounds no room
+                let top = level_of(level).ok_or("a stair landing lies on a level that is gone")? + el.elevation_m;
+                let slab = openbim_place::floors::Slab { name: el.name.clone(), top, thickness: el.height_m, outline: el.outline.clone(), fire_rating_min: None };
+                slabs.push(SlabItem { id: el.id.0, slab, role: SlabRole::Landing, room_bounding: false });
+            }
             (Category::Slab, Some(Geometry::Area { level })) => {
                 let ceiling = el.slab_kind == openbim_document::SlabKind::Ceiling;
                 // a ceiling is placed by its underside, a slab by its top

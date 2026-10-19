@@ -183,6 +183,8 @@ pub enum SlabRole {
     PadFooting,
     /// a strip footing under a wall: an IfcFooting STRIP_FOOTING, which bounds no room
     StripFooting,
+    /// the landing between two runs of a stair: an IfcSlab LANDING, which bounds no room
+    Landing,
 }
 
 pub struct SlabItem {
@@ -1295,7 +1297,7 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             o.report.slabs += 1;
             continue;
         }
-        let slab_type = if item.role == SlabRole::Foundation { ".BASESLAB." } else { ".FLOOR." };
+        let slab_type = match item.role { SlabRole::Foundation => ".BASESLAB.", SlabRole::Landing => ".LANDING.", _ => ".FLOOR." };
         let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,{slab_type})", string(&s.name)));
         o.contain(st, slab);
         o.slab_entities.push(slab);

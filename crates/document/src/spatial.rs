@@ -207,8 +207,10 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             if !ok { return Err(EditError::InvalidGeometry(el.id)); }
         }
         if let Some(p) = el.parent {
-            // a beam made by a beam system points at it
-            if !(el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss))) { return Err(EditError::InvalidElement); }
+            // a beam made by a beam system points at it; a landing and the second run of a stair point at the first run
+            let beam = el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss));
+            let stair = el.category == Category::Stair && p != el.id && elements.get(&p).is_some_and(|s| s.category == Category::Stair && s.parent.is_none());
+            if !(beam || stair) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
             None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family),
@@ -286,6 +288,11 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Area { level }) if el.category == Category::Railing => {
                 valid_path(&el.outline) && el.elevation_m.abs() <= 1e6
                     && (el.spacing_m == 0.0 || path_length(&el.outline) / el.spacing_m <= 5000.0)
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::Area { level }) if el.category == Category::Stair => {
+                // a landing: a flat slab between two runs
+                valid_ring(&el.outline) && el.count == 0 && el.height_m <= 1.0 && el.elevation_m.abs() <= 1e6
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Area { level }) => {
@@ -526,8 +533,8 @@ impl Document {
             for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
         }
-        if el.category == Category::Stair {
-            let Some(Geometry::Linear { start, end, level }) = el.geometry else { return None };
+        // a landing (a stair with an area) is a flat slab, below
+        if let (Category::Stair, Some(Geometry::Linear { start, end, level })) = (el.category, el.geometry) {
             return crate::stair::mesh(start, end, el.width_m, el.height_m, el.count, self.get(level)?.elevation_m + el.elevation_m);
         }
         // a section line is a mark on the plan with a view depth, not a body: it has no mesh

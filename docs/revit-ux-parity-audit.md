@@ -112,7 +112,7 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Ceiling type with layers/materials, Ceiling Plan view (reflected ceiling plan), ceiling grid, slope, openings | missing; in a plan the ceiling is drawn faint under everything and picked last |
 | IFC: IfcCovering CEILING (a room's ceiling for space boundaries), back from the app's own file unchanged | done; a covering that is not a ceiling is skipped on import |
 
-## Stair (by component, one straight run)
+## Stair (by component: straight, L and U)
 | Revit behaviour | State |
 |---|---|
 | Stair > Run > Straight: click the foot of the first riser, then the direction; the number of risers follows from the height between the base and the top level and the Maximum Riser Height; treads are drawn as you move | done (press-drag-release works; Shift keeps it square) |
@@ -122,7 +122,11 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Properties: Width, Total Rise, Base Offset editable; risers, treads, actual riser height and tread depth, run length shown | done (riser count is not editable: place the stair again) |
 | Move / rotate / mirror / copy / delete / undo, saved | done |
 | IFC: IfcStair STRAIGHT_RUN_STAIR with the side profile extruded across the width and Pset_StairCommon, in all three schemas; the app's own file brings it back unchanged | done; a stair written by another program is not read (skipped) |
-| Winder, L and U shapes, landings, runs from sketch, stair by sketch, top/base level choice, ramps | missing |
+| L and U shapes (Autodesk: two straight runs joined by an automatic landing): the Shape choice in the options bar (Straight, L left/right, U left/right) places two runs and a landing as one stair; the risers are shared equally (the first run gets the odd one), the landing is the surface after the first run | done (the first click and direction are the first run; an L or U stair needs at least 4 risers) |
+| The parts are one stair: pick, move, rotate, mirror, copy, delete and undo take all three; they are saved and exported together | done (the second run and the landing point at the first run, as the beams of a beam system point at their system) |
+| Landing: as wide as the stair (L) or across both runs with a 100 mm gap between them (U), 150 mm thick | done, but the thickness, the gap and the odd-riser rule are my choices, not read from Revit; the landing and the runs cannot be edited apart (no Edit Sketch) |
+| IFC: each run an IfcStair STRAIGHT_RUN_STAIR; the landing an IfcSlab LANDING that bounds no room; the app's own file brings all three back unchanged | done; a landing written by another program is skipped like its stair |
+| Automatic railing on the stair, winder, runs from sketch, stair by sketch, top/base level choice, ramps | missing: draw the railing with the Railing tool |
 
 ## Railing (sketched path)
 Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". Nothing here comes from my own reading except the default sizes.
@@ -161,7 +165,7 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 
 ## Suggested order
 1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
-2. (Railings are done as a sketched path.) L/U stairs with a railing on the stair, vertical opening and roof cuts.
+2. (Railings are done as a sketched path; L and U stairs are done.) A railing that follows the stair, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
 

@@ -543,14 +543,33 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 };
                 if rise >= 0.2 {
                     let n = openbim_document::risers_for(rise, app.stair_riser_mm / 1000.0);
-                    let (d, right, t, w) = ([(m[0] - s[0]) / l, (m[1] - s[1]) / l], [(m[1] - s[1]) / l, -(m[0] - s[0]) / l], app.stair_tread_mm / 1000.0, app.stair_width_mm / 1000.0);
-                    let pt = |along: f64, lat: f64| screen([s[0] + d[0] * along + right[0] * lat, s[1] + d[1] * along + right[1] * lat, level_z]);
-                    let ghost = Stroke::new(1.0, blue);
-                    for i in 0..n { let a = f64::from(i) * t; painter.line_segment([pt(a, -w / 2.0), pt(a, w / 2.0)], ghost); }
-                    let run = f64::from(n - 1) * t;
-                    painter.line_segment([pt(0.0, -w / 2.0), pt(run, -w / 2.0)], Stroke::new(1.5, blue));
-                    painter.line_segment([pt(0.0, w / 2.0), pt(run, w / 2.0)], Stroke::new(1.5, blue));
-                    painter.text(pt(run, 0.0) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{n} risers, {:.0} mm", rise / f64::from(n) * 1000.0), egui::FontId::proportional(13.0), blue);
+                    let (t, w) = (app.stair_tread_mm / 1000.0, app.stair_width_mm / 1000.0);
+                    let spec = openbim_document::StairSpec { start: s, toward: m, width_m: w, rise_m: rise, risers: n, tread_m: t, base_offset_m: 0.0 };
+                    // each run drawn as its treads between two edges; a turning stair is two runs with the landing outlined
+                    let run = |a: [f64; 2], b: [f64; 2], risers: u32| {
+                        let len = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-9);
+                        let (d, right) = ([(b[0] - a[0]) / len, (b[1] - a[1]) / len], [(b[1] - a[1]) / len, -(b[0] - a[0]) / len]);
+                        let pt = |along: f64, lat: f64| screen([a[0] + d[0] * along + right[0] * lat, a[1] + d[1] * along + right[1] * lat, level_z]);
+                        for i in 0..risers { let x = f64::from(i) * t; painter.line_segment([pt(x, -w / 2.0), pt(x, w / 2.0)], Stroke::new(1.0, blue)); }
+                        let far = f64::from(risers - 1) * t;
+                        painter.line_segment([pt(0.0, -w / 2.0), pt(far, -w / 2.0)], Stroke::new(1.5, blue));
+                        painter.line_segment([pt(0.0, w / 2.0), pt(far, w / 2.0)], Stroke::new(1.5, blue));
+                        pt(far, 0.0)
+                    };
+                    let (label_at, risers_text) = match openbim_document::stair_layout(&spec, app.stair_shape) {
+                        Some(lay) => {
+                            run(lay.run1[0], [lay.run1[0][0] + (m[0] - s[0]) / l, lay.run1[0][1] + (m[1] - s[1]) / l], lay.risers[0]);
+                            let corners = lay.landing.len();
+                            for i in 0..corners {
+                                let (p, q) = (lay.landing[i], lay.landing[(i + 1) % corners]);
+                                painter.line_segment([screen([p[0], p[1], level_z]), screen([q[0], q[1], level_z])], Stroke::new(1.5, blue));
+                            }
+                            let end = run(lay.run2[0], lay.run2[1], lay.risers[1]);
+                            (end, format!("{} risers ({} + {}), {:.0} mm", spec.risers, lay.risers[0], lay.risers[1], rise / f64::from(spec.risers) * 1000.0))
+                        }
+                        None => (run(s, m, n), format!("{n} risers, {:.0} mm", rise / f64::from(n) * 1000.0)),
+                    };
+                    painter.text(label_at + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, risers_text, egui::FontId::proportional(13.0), blue);
                 }
             }
         }
