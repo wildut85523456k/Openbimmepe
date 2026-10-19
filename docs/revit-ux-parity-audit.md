@@ -51,7 +51,7 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Compound walls in IFC | done: IfcWallType with IfcMaterialLayerSet (functions, core, wraps in OpenBIM_WallType), walls with IfcMaterialLayerSetUsage, read back by this app with or without its own data; an IFC from another program with a layer set on its wall types gives layered types when the layers add up to the wall's thickness (core from the layers marked Core, else first to last structure layer; IFC2X3 files have no function, so every layer is structure) |
 | Draw mode Rectangle: two corners, four joined walls in one undo step, exterior face on the picked rectangle | done |
 | Draw mode Pick Lines: click a grid, wall or beam; the clicked side is the exterior | done (no Pick Faces) |
-| Draw modes polygon, circle, arc | missing |
+| Draw modes Inscribed Polygon, Circumscribed Polygon (sides in the options bar, 3 to 64), Circle, Arc (start, end, a point on it) | done as joined straight walls in one undo step, along the Location Line with the exterior outward (clockwise); a circle or arc is built of straight walls that stand within 25 mm of the curve (at least 12 for a circle, at most 360), so a curved wall is many walls and is not one element with a radius. Missing: true curved walls, Start-End-Radius and Centre-ends and Tangent and Fillet arcs, typed radius or side length, Pick Faces |
 | Spacebar flips the wall while drawing | done as the other face being the reference (Exterior and Interior lines swap); the exterior stays on the left of the direction drawn: use Flip on the placed wall, or draw clockwise |
 | Listening dimensions with angle while drawing | length only |
 | Wall Joins: Allow / Disallow Join at a wall end (the end stays square, and so does the wall that met it); saved, undoable, round-trips through IFC with OpenBIM data | done; markers green (allowed) and red (disallowed) |
@@ -173,8 +173,8 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 
 ## Suggested order
 1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
-2. (Railings, L and U stairs, the railing on a stair, vertical opening, roof cuts and layered wall types are done.) Polygon/arc wall modes, Butt/Miter joins and associative dimensions.
-3. Polygon/arc wall draw modes, Butt/Miter configuration, layer cleanup at wall joins by priority.
+2. (Railings, L and U stairs, the railing on a stair, vertical opening, roof cuts, layered wall types and polygon/circle/arc wall modes are done.) Butt/Miter joins and associative dimensions.
+3. True curved walls, Butt/Miter configuration, layer cleanup at wall joins by priority.
 4. Associative dimensions.
 
 The 3D view (editing in 3D, the orbit control at the top right, GPU needs) is its own topic: `docs/3d-view-parity-plan.md` (project doc `claude/3d-view-parity-plan.md`). To be cleared at a later stage, on the owner's request of 2026-10-19.

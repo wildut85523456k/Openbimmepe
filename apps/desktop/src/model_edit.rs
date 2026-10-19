@@ -635,6 +635,7 @@ impl Desktop {
             self.wall_rectangle(level, first, point);
             return;
         }
+        if self.wall_mode >= 3 { self.wall_shape_click(level, point); return; }
         let Some(&last) = self.wall_pts.last() else { self.wall_pts.push(point); self.message = "Wall: pick the end (type a length in mm, Shift keeps it square, Esc ends the chain)".into(); return; };
         if (point[0] - last[0]).hypot(point[1] - last[1]) < 0.01 { return; }
         let m = |v: f64| v / 1000.0;
@@ -880,10 +881,27 @@ impl Desktop {
     /// `b`, along the Location Line, meeting at the corners of their offset lines.
     pub(crate) fn rectangle_lines(&self, a: [f64; 2], b: [f64; 2]) -> Vec<([f64; 2], [f64; 2])> {
         let (x0, x1, y0, y1) = (a[0].min(b[0]), a[0].max(b[0]), a[1].min(b[1]), a[1].max(b[1]));
-        let p = [[x0, y1], [x1, y1], [x1, y0], [x0, y0]];
-        let sides: Vec<([f64; 2], [f64; 2])> = (0..4).map(|i| self.wall_axis(p[i], p[(i + 1) % 4])).collect();
-        let corner = |i: usize| { let (s, t) = sides[(i + 3) % 4]; let (u, v) = sides[i]; openbim_document::line_meet(s, [t[0] - s[0], t[1] - s[1]], u, [v[0] - u[0], v[1] - u[1]]).unwrap_or(u) };
-        (0..4).map(|i| (corner(i), corner((i + 1) % 4))).collect()
+        self.chain_lines(&[[x0, y1], [x1, y1], [x1, y0], [x0, y0]], true)
+    }
+
+    /// The lines (start, end) of walls along the sides of the path `points`, drawn along the Location Line: each side
+    /// is moved to where the wall's axis is, and neighbouring sides meet at the corners of their moved lines. A closed
+    /// path has a side from its last point to its first.
+    pub(crate) fn chain_lines(&self, points: &[[f64; 2]], closed: bool) -> Vec<([f64; 2], [f64; 2])> {
+        let n = points.len();
+        let count = if closed { n } else { n.saturating_sub(1) };
+        let sides: Vec<([f64; 2], [f64; 2])> = (0..count).map(|i| self.wall_axis(points[i], points[(i + 1) % n])).collect();
+        // the point where side `i` starts: the corner with the side before it, or its own start at the end of a path
+        let corner = |i: usize| {
+            let (u, v) = sides[i % count];
+            if !closed && i % count == 0 { return u; }
+            let (s, t) = sides[(i + count - 1) % count];
+            openbim_document::line_meet(s, [t[0] - s[0], t[1] - s[1]], u, [v[0] - u[0], v[1] - u[1]]).unwrap_or(u)
+        };
+        (0..count).map(|i| {
+            let end = if !closed && i + 1 == count { sides[i].1 } else { corner(i + 1) };
+            (corner(i), end)
+        }).collect()
     }
 
     /// The Wall tool's rectangle: four joined walls in one undoable step.
@@ -892,6 +910,51 @@ impl Desktop {
         let m = |v: f64| v / 1000.0;
         match self.document.place_walls(level, &lines, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
             Ok(ids) => self.message = format!("{} walls placed; undo removes them together", ids.len()),
+            Err(e) => self.message = format!("Walls rejected: {e:?}"),
+        }
+    }
+
+    /// The names of the Wall tool's draw modes, in the order of `wall_mode`.
+    pub(crate) const WALL_MODES: [&'static str; 7] = ["Line", "Rectangle", "Pick Lines", "Inscribed Polygon", "Circumscribed Polygon", "Circle", "Arc (start, end, point on it)"];
+
+    /// The path a polygon, circle or arc mode draws from the points picked so far (the last of them where the pointer
+    /// is), and whether it is closed. None while the points do not make the shape.
+    pub(crate) fn shape_path(&self, pts: &[[f64; 2]]) -> Option<(Vec<[f64; 2]>, bool)> {
+        use crate::wall_shapes as w;
+        match (self.wall_mode, pts) {
+            (3 | 4, [c, p]) => w::polygon(*c, *p, self.wall_sides, self.wall_mode == 4).map(|v| (v, true)),
+            (5, [c, p]) => w::circle(*c, *p).map(|v| (v, true)),
+            (6, [a, b, t]) => w::arc(*a, *b, *t).map(|v| (v, false)),
+            _ => None,
+        }
+    }
+
+    /// The walls a polygon, circle or arc mode would place for the points picked, along the Location Line.
+    pub(crate) fn shape_lines(&self, pts: &[[f64; 2]]) -> Option<Vec<([f64; 2], [f64; 2])>> {
+        self.shape_path(pts).map(|(path, closed)| self.chain_lines(&path, closed))
+    }
+
+    /// A pick of a polygon, circle or arc mode: the centre then a point of the shape (the arc: its start, its end, a point
+    /// on it); the walls are placed in one undoable step.
+    fn wall_shape_click(&mut self, level: ElementId, point: [f64; 2]) {
+        let need = if self.wall_mode == 6 { 3 } else { 2 };
+        if self.wall_pts.last().is_some_and(|l| (l[0] - point[0]).hypot(l[1] - point[1]) < 0.01) { return; }
+        self.wall_pts.push(point);
+        if self.wall_pts.len() < need {
+            self.message = match (self.wall_mode, self.wall_pts.len()) {
+                (6, 1) => "Wall (arc): pick the end of the arc (Esc cancels)".into(),
+                (6, _) => "Wall (arc): pick a point the arc passes through (Esc cancels)".into(),
+                (3, _) => "Wall (inscribed polygon): pick a corner (Esc cancels)".into(),
+                (4, _) => "Wall (circumscribed polygon): pick the middle of a side (Esc cancels)".into(),
+                _ => "Wall (circle): pick a point of the circle (Esc cancels)".into(),
+            };
+            return;
+        }
+        let pts = std::mem::take(&mut self.wall_pts);
+        let Some(lines) = self.shape_lines(&pts) else { self.message = "Wall: those points make no shape (too small, or on a line)".into(); return };
+        let m = |v: f64| v / 1000.0;
+        match self.document.place_walls(level, &lines, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
+            Ok(ids) => self.message = format!("{} walls placed{}; undo removes them together", ids.len(), if self.wall_mode >= 5 { " (a curve is built of straight walls)" } else { "" }),
             Err(e) => self.message = format!("Walls rejected: {e:?}"),
         }
     }

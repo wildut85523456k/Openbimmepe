@@ -405,9 +405,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                 for (i, name) in Desktop::WALL_LOCATIONS.iter().enumerate() { ui.selectable_value(&mut app.wall_loc, i, *name); }
             });
             ui.label("Draw");
-            egui::ComboBox::from_id_salt("wall_mode").selected_text(["Line", "Rectangle", "Pick Lines"][app.wall_mode]).show_ui(ui, |ui| {
-                for (i, name) in ["Line", "Rectangle", "Pick Lines"].iter().enumerate() { if ui.selectable_value(&mut app.wall_mode, i, *name).clicked() { app.wall_pts.clear(); app.wall_ids.clear(); } }
+            egui::ComboBox::from_id_salt("wall_mode").selected_text(Desktop::WALL_MODES[app.wall_mode]).show_ui(ui, |ui| {
+                for (i, name) in Desktop::WALL_MODES.iter().enumerate() { if ui.selectable_value(&mut app.wall_mode, i, *name).clicked() { app.wall_pts.clear(); app.wall_ids.clear(); } }
             });
+            if matches!(app.wall_mode, 3 | 4) {
+                ui.label("Sides");
+                ui.add(egui::DragValue::new(&mut app.wall_sides).range(crate::wall_shapes::MIN_SIDES..=crate::wall_shapes::MAX_SIDES));
+            }
             ui.label("Type");
             let types: Vec<(ElementId, String, f64, f64)> = app.document.types_for(openbim_document::Category::Wall).iter().map(|t| (t.id, t.name.clone(), t.width_m, t.height_m)).collect();
             let shown = app.wall_type.and_then(|t| types.iter().find(|x| x.0 == t)).map_or("Custom".to_string(), |t| t.1.clone());

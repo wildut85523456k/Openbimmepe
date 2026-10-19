@@ -494,6 +494,26 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 painter.text(screen([b[0], b[1], level_z]) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} x {:.0} mm", (b[0] - a[0]).abs() * 1000.0, (b[1] - a[1]).abs() * 1000.0), egui::FontId::proportional(13.0), blue);
             }
         }
+        // polygon, circle and arc: the walls that the points picked and the pointer would make
+        if app.wall_mode >= 3 && !app.wall_pts.is_empty() {
+            if let Some(h) = hover {
+                let (b, _) = snap_to(h);
+                let mut pts = app.wall_pts.clone();
+                pts.push(b);
+                // an arc with two points is shown as the line between them until the third is under the pointer
+                let lines = app.shape_lines(&pts).unwrap_or_default();
+                for (s, t) in &lines {
+                    let (dx, dy) = (t[0] - s[0], t[1] - s[1]);
+                    let l = dx.hypot(dy).max(1e-9);
+                    let (nx, ny) = (-dy / l * app.width_mm / 2000.0, dx / l * app.width_mm / 2000.0);
+                    let ring = [[s[0] - nx, s[1] - ny], [t[0] - nx, t[1] - ny], [t[0] + nx, t[1] + ny], [s[0] + nx, s[1] + ny]].map(|p| screen([p[0], p[1], level_z]));
+                    painter.add(egui::Shape::convex_polygon(ring.to_vec(), Color32::from_rgba_unmultiplied(120, 120, 130, 110), Stroke::new(1.0, blue)));
+                }
+                let a = app.wall_pts[0];
+                dashed(&painter, screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z]), Stroke::new(1.0, blue));
+                painter.text(screen([b[0], b[1], level_z]) + Vec2::new(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("{:.0} mm", (b[0] - a[0]).hypot(b[1] - a[1]) * 1000.0), egui::FontId::proportional(13.0), blue);
+            }
+        }
         if let (0, Some(a), Some(h)) = (app.wall_mode, start, hover) {
             let (mut b, _) = snap_to(h);
             // a typed length keeps the direction of the pointer
@@ -519,7 +539,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if snapped { painter.rect_stroke(Rect::from_center_size(screen([m[0], m[1], level_z]), Vec2::splat(9.0)), 0.0, Stroke::new(1.5, Color32::from_rgb(220, 140, 0)), egui::StrokeKind::Middle); }
         }
         let typed: String = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }).collect());
-        if app.wall_pts.last().is_some() { for c in typed.chars().filter(|c| c.is_ascii_digit() || *c == '.') { app.wall_len.push(c); } }
+        if app.wall_pts.last().is_some() && app.wall_mode == 0 { for c in typed.chars().filter(|c| c.is_ascii_digit() || *c == '.') { app.wall_len.push(c); } }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             if !app.wall_pts.is_empty() { app.wall_pts.clear(); app.wall_ids.clear(); app.wall_len.clear(); app.message = "Wall: chain ended; Esc again leaves the tool".into(); } else { app.choose_tool(crate::Tool::Select); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) && !app.wall_len.is_empty() { app.wall_len.pop();
@@ -1748,6 +1768,72 @@ mod tests {
         assert!(near(lo, [20.0, 14.0]) && near(hi, [26.0, 20.0]), "{lo:?} {hi:?}");
         app.document.undo().unwrap();
         assert_eq!(walls(&app), n);
+        // Polygon, circle and arc: joined walls in one undo step, the exterior outward along the Location Line
+        app.wall_loc = 2;
+        app.width_mm = 200.0;
+        app.wall_mode = 3;
+        app.wall_sides = 6;
+        let n = walls(&app);
+        app.wall_click(level, [40.0, 10.0]);
+        assert_eq!(walls(&app), n);
+        app.wall_click(level, [43.0, 10.0]);
+        assert_eq!(walls(&app), n + 6, "{}", app.message);
+        let ids: Vec<_> = app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).skip(n).collect();
+        assert!(ids.iter().all(|i| app.document.wall_plan(*i).is_some()));
+        // the exterior faces are on the hexagon with its corners 3 m from the centre
+        let far = ids.iter().flat_map(|i| app.document.wall_plan(*i).unwrap()).map(|p| (p[0] - 40.0).hypot(p[1] - 10.0)).fold(0.0, f64::max);
+        assert!((far - 3.0).abs() < 0.2 / 2.0 + 0.05 && far > 2.9, "outer corners about 3 m out: {far}");
+        app.document.undo().unwrap();
+        assert_eq!(walls(&app), n);
+        // circumscribed: the point picked is the middle of a side, and four sides make a square 6 m across
+        app.wall_mode = 4;
+        app.wall_sides = 4;
+        app.wall_click(level, [40.0, 10.0]);
+        app.wall_click(level, [43.0, 10.0]);
+        assert_eq!(walls(&app), n + 4, "{}", app.message);
+        let ids: Vec<_> = app.document.elements().filter(|e| e.category == Category::Wall).map(|e| e.id).skip(n).collect();
+        let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+        for id in &ids { for p in app.document.wall_plan(*id).unwrap() { for k in 0..2 { lo[k] = lo[k].min(p[k]); hi[k] = hi[k].max(p[k]); } } }
+        assert!(near(lo, [37.0, 7.0]) && near(hi, [43.0, 13.0]), "exterior faces on the square: {lo:?} {hi:?}");
+        app.document.undo().unwrap();
+        // a circle of 2 m radius is many walls, all of them placed or none
+        app.wall_mode = 5;
+        app.wall_click(level, [40.0, 10.0]);
+        app.wall_click(level, [42.0, 10.0]);
+        let made = walls(&app) - n;
+        assert!(made >= 12, "{made}: {}", app.message);
+        assert!(app.message.contains("straight walls"));
+        app.document.undo().unwrap();
+        assert_eq!(walls(&app), n);
+        // an arc keeps its ends: start, end, a point on it
+        app.wall_mode = 6;
+        app.wall_loc = 0;
+        app.wall_click(level, [30.0, 10.0]);
+        app.wall_click(level, [34.0, 10.0]);
+        assert_eq!(walls(&app), n);
+        app.wall_click(level, [32.0, 12.0]);
+        let made: Vec<_> = app.document.elements().filter(|e| e.category == Category::Wall).skip(n).collect();
+        assert!(made.len() >= 2, "{}", app.message);
+        let first = match made[0].geometry { Some(Geometry::Linear { start, .. }) => start, _ => panic!() };
+        let last = match made.last().unwrap().geometry { Some(Geometry::Linear { end, .. }) => end, _ => panic!() };
+        assert!(near(first, [30.0, 10.0]) && near(last, [34.0, 10.0]), "{first:?} {last:?}");
+        // three points on a line make no arc, and nothing is left half done
+        let before = walls(&app);
+        app.wall_click(level, [0.0, 50.0]);
+        app.wall_click(level, [4.0, 50.0]);
+        app.wall_click(level, [2.0, 50.0]);
+        assert_eq!(walls(&app), before);
+        assert!(app.wall_pts.is_empty() && app.message.contains("no shape"), "{}", app.message);
+        app.wall_mode = 0;
+        app.wall_loc = 2;
+        // the ghost of each shape draws while the pointer moves
+        for mode in 3..=6 {
+            app.wall_mode = mode;
+            app.wall_pts = vec![[40.0, 10.0], [43.0, 10.0]][..if mode == 6 { 2 } else { 1 }].to_vec();
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(Pos2::new(420.0, 310.0))]);
+        }
+        app.wall_pts.clear();
+        app.wall_mode = 0;
         // Spacebar while drawing flips the side of the Location Line
         app.wall_mode = 0;
         let before = app.wall_axis([0.0, 0.0], [4.0, 0.0]);
