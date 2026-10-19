@@ -209,7 +209,7 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
         if let Some(p) = el.parent {
             // a beam made by a beam system points at it; a landing and the second run of a stair point at the first run
             let beam = el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss));
-            let stair = el.category == Category::Stair && p != el.id && elements.get(&p).is_some_and(|s| s.category == Category::Stair && s.parent.is_none());
+            let stair = matches!(el.category, Category::Stair | Category::Railing) && p != el.id && elements.get(&p).is_some_and(|s| s.category == Category::Stair && s.parent.is_none());
             if !(beam || stair) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
@@ -520,8 +520,8 @@ impl Document {
             for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
         }
-        if let (Category::Railing, Some(Geometry::Area { level })) = (el.category, el.geometry) {
-            return crate::railing::mesh(&el.outline, self.get(level)?.elevation_m + el.elevation_m, el.height_m, el.width_m, el.spacing_m);
+        if let (Category::Railing, Some(Geometry::Area { .. })) = (el.category, el.geometry) {
+            return crate::railing::mesh3(&self.railing_path3(id)?, el.height_m, el.width_m, el.spacing_m);
         }
         if let Some(Geometry::Pad { at, level, thickness_m }) = el.geometry {
             let top = self.get(level)?.elevation_m + el.elevation_m;

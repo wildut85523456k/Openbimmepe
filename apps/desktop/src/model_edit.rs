@@ -711,9 +711,10 @@ impl Desktop {
         let risers = openbim_document::risers_for(rise, self.stair_riser_mm / 1000.0);
         let spec = openbim_document::StairSpec { start, toward: point, width_m: self.stair_width_mm / 1000.0, rise_m: rise, risers, tread_m: self.stair_tread_mm / 1000.0, base_offset_m: base };
         let turning = self.stair_shape != openbim_document::StairShape::Straight;
-        match self.document.place_turning_stair(level, &spec, self.stair_shape) {
-            Ok(id) if turning => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm in two runs with a landing; undo removes all of it", id.0, rise / f64::from(risers) * 1000.0); }
-            Ok(id) => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm, {} treads of {:.0} mm; undo removes it", id.0, rise / f64::from(risers) * 1000.0, risers - 1, self.stair_tread_mm); }
+        let with = match self.stair_railing { openbim_document::RailingSides::None => "", openbim_document::RailingSides::Both => " and a railing on each side", _ => " and a railing on one side" };
+        match self.document.place_stair_with_railing(level, &spec, self.stair_shape, self.stair_railing) {
+            Ok(id) if turning => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm in two runs with a landing{with}; undo removes all of it", id.0, rise / f64::from(risers) * 1000.0); }
+            Ok(id) => { self.edit_pts.clear(); self.message = format!("Stair {}: {risers} risers of {:.0} mm, {} treads of {:.0} mm{with}; undo removes it", id.0, rise / f64::from(risers) * 1000.0, risers - 1, self.stair_tread_mm); }
             Err(e) => self.message = format!("Stair rejected ({e:?}): check the riser height and tread depth (an L or U stair needs at least 4 risers)"),
         }
     }
@@ -1400,11 +1401,15 @@ mod tests {
         app.run_command("stair", "Stair");
         let stairs = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Stair).count();
         let before = stairs(&app);
+        let railings = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Railing).count();
+        // a railing goes on both sides of the stair unless the options bar says otherwise, as in Revit
+        assert_eq!(app.stair_railing, openbim_document::RailingSides::Both);
         app.stair_shape = StairShape::L { left: true };
         app.stair_click(level, [1.0, 1.0]);
         app.stair_click(level, [1.0, 9.0]);
         assert_eq!(stairs(&app), before + 3, "two runs and a landing: {}", app.message);
-        assert!(app.message.contains("two runs with a landing"), "{}", app.message);
+        assert!(app.message.contains("two runs with a landing") && app.message.contains("railing"), "{}", app.message);
+        assert_eq!(railings(&app), 2, "one on each side");
         let first = app.document.elements().filter(|e| e.category == Category::Stair && e.parent.is_none()).last().unwrap().id;
         let parts = app.document.stair_parts(first);
         assert_eq!(parts.len(), 3);
@@ -1416,18 +1421,21 @@ mod tests {
         // selecting the first run and deleting takes the stair with it; undo brings it back whole
         app.select_element(Some(first));
         app.delete_selected();
-        assert_eq!(stairs(&app), before, "{}", app.message);
+        assert_eq!((stairs(&app), railings(&app)), (before, 0), "{}", app.message);
         app.document.undo().unwrap();
-        assert_eq!(stairs(&app), before + 3);
+        assert_eq!((stairs(&app), railings(&app)), (before + 3, 2));
         // exported: two flights and a landing slab
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
         assert_eq!(out.text.matches("IFCSTAIR(").count(), before + 2);
         assert_eq!(out.text.matches(".LANDING.").count(), 1);
+        assert_eq!(out.text.matches("IFCRAILING(").count(), 2, "the railings of the stair");
         // a U stair, turning right, is placed the same way; too little climb for two runs is refused
         app.stair_shape = StairShape::U { left: false };
+        app.stair_railing = openbim_document::RailingSides::None;
         app.stair_click(level, [6.0, 1.0]);
         app.stair_click(level, [6.0, 9.0]);
         assert_eq!(stairs(&app), before + 6, "{}", app.message);
+        assert_eq!(railings(&app), 2, "no railing was asked for");
         (app.stair_riser_mm, app.stair_rise_mm) = (2000.0, 3000.0);
         app.stair_click(level, [8.0, 1.0]);
         app.stair_click(level, [8.0, 3.0]);

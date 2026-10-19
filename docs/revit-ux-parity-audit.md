@@ -126,7 +126,9 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | The parts are one stair: pick, move, rotate, mirror, copy, delete and undo take all three; they are saved and exported together | done (the second run and the landing point at the first run, as the beams of a beam system point at their system) |
 | Landing: as wide as the stair (L) or across both runs with a 100 mm gap between them (U), 150 mm thick | done, but the thickness, the gap and the odd-riser rule are my choices, not read from Revit; the landing and the runs cannot be edited apart (no Edit Sketch) |
 | IFC: each run an IfcStair STRAIGHT_RUN_STAIR; the landing an IfcSlab LANDING that bounds no room; the app's own file brings all three back unchanged | done; a landing written by another program is skipped like its stair |
-| Automatic railing on the stair, winder, runs from sketch, stair by sketch, top/base level choice, ramps | missing: draw the railing with the Railing tool |
+| Railing on the stair (Autodesk: a railing is created by default): the Railing choice in the options bar (Both sides, Left, Right, None; Both by default) puts a railing along the edge of each run, round the landing on the outside and straight across it on the inside, in the same step as the stair | done; the railing is the Railing element with the stair as its host, so it is picked, moved, turned, mirrored, copied, deleted and undone with the stair, and Properties edits its height, rail size and baluster spacing |
+| The rail rises with the runs and is level over the landing; posts at the corners and ends, balusters at the spacing | done, simplified: the rail is a straight line from the foot to the top of each run (1100 mm over the base, so about 1100 mm minus one riser over the first nosing, and 1100 mm over the last), balusters stand on that line and not on each tread, and the railing cannot be moved off its stair or put on another |
+| Winder, runs from sketch, stair by sketch, top/base level choice, ramps, railing types and Railing Placement dialog | missing |
 
 ## Railing (sketched path)
 Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". Nothing here comes from my own reading except the default sizes.
@@ -138,8 +140,8 @@ Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". 
 | Properties: Railing Height, Base Offset, baluster spacing, edit at any time, undo | done: Railing Height, Rail and Post Size, Baluster Spacing, Base Offset in the Properties palette |
 | Seen in plans, elevations, sections, 3D; cut by a section line | done (plan, elevation, section, 3D) |
 | Move, Copy, Rotate, Mirror, Delete; save; IFC IfcRailing | done in plan views; saved with the model; IfcRailing (GUARDRAIL) with a solid for each part in IFC2x3, IFC4 and IFC4.3, and the app's own file brings it back unchanged |
-| Railing types with several rails, handrails, Rail Structure and Baluster Placement dialogs (patterns, posts at set places, profiles), Baluster Offset, angled/tangent joins and mitered rails, slopes along a stair, Landing Height Adjustment | missing: one fixed pattern; rails are straight boxes that overlap at a corner (no miter) |
-| Pick New Host (a railing placed on a stair, a floor or a ramp edge), Edit Path with Toggle Sketch Orientation, Reset Railing, Split | missing: a railing is free-standing on its level; editing the path means deleting and drawing again |
+| Railing types with several rails, handrails, Rail Structure and Baluster Placement dialogs (patterns, posts at set places, profiles), Baluster Offset, angled/tangent joins and mitered rails, Landing Height Adjustment | missing: one fixed pattern; rails are straight boxes that overlap at a corner (no miter). Slopes along a stair are done (see Stair) |
+| Pick New Host (a railing placed on a stair, a floor or a ramp edge), Edit Path with Toggle Sketch Orientation, Reset Railing, Split | partly: a railing is made on its stair when the stair is placed; a sketched railing is free-standing on its level, there is no Pick New Host, and editing the path means deleting and drawing again |
 | Moving or copying a railing in elevation and section views; a railing written by another program (read from IFC) | missing |
 
 ## Opening (Wall, Shaft; done 2026-10-19)
@@ -165,7 +167,7 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 
 ## Suggested order
 1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
-2. (Railings are done as a sketched path; L and U stairs are done.) A railing that follows the stair, vertical opening and roof cuts.
+2. (Railings, L and U stairs and the railing on a stair are done.) Vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
 

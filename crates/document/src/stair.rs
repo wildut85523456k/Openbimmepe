@@ -149,19 +149,7 @@ impl Document {
 
     /// Places a stair on `level`: the run starts at `spec.start`, goes toward `spec.toward` for as long as its treads.
     pub fn place_stair(&mut self, level: ElementId, spec: &StairSpec) -> Result<ElementId, EditError> {
-        let id = self.next_id();
-        let (dx, dy) = (spec.toward[0] - spec.start[0], spec.toward[1] - spec.start[1]);
-        let l = dx.hypot(dy);
-        if l < 1e-9 || spec.risers < 2 { return Err(EditError::InvalidGeometry(id)); }
-        let run = (spec.risers - 1) as f64 * spec.tread_m;
-        let end = [spec.start[0] + dx / l * run, spec.start[1] + dy / l * run];
-        let n = self.elements.values().filter(|e| e.category == Category::Stair).count() + 1;
-        self.transact(self.revision, &[
-            Command::Create { id, category: Category::Stair, name: format!("Stair {n}"), width_m: spec.width_m, height_m: spec.rise_m, elevation_m: spec.base_offset_m },
-            Command::SetCount { id, count: spec.risers },
-            Command::SetGeometry { id, geometry: Geometry::Linear { start: spec.start, end, level } },
-        ])?;
-        Ok(id)
+        self.place_stair_with_railing(level, spec, StairShape::Straight, crate::RailingSides::None)
     }
 
     /// Places an L or U stair: two runs and the landing between them, in one undoable transaction. The second run and the
@@ -169,26 +157,65 @@ impl Document {
     /// moved, copied and deleted together. `spec.risers` is the total; the landing is the surface after the first run.
     /// A straight shape places a plain stair. Returns the first run.
     pub fn place_turning_stair(&mut self, level: ElementId, spec: &StairSpec, shape: StairShape) -> Result<ElementId, EditError> {
-        if shape == StairShape::Straight { return self.place_stair(level, spec); }
+        self.place_stair_with_railing(level, spec, shape, crate::RailingSides::None)
+    }
+
+    /// A stair of any shape with the railing Revit puts on it: one railing along the chosen side (or both) of the runs
+    /// and the landing, all in one undoable transaction. The railings point at the first run like the other parts.
+    pub fn place_stair_with_railing(&mut self, level: ElementId, spec: &StairSpec, shape: StairShape, sides: crate::RailingSides) -> Result<ElementId, EditError> {
         let id = self.next_id();
-        let Some(lay) = layout(spec, shape) else { return Err(EditError::InvalidGeometry(id)) };
-        let (second, landing) = (ElementId(id.0 + 1), ElementId(id.0 + 2));
-        let riser = spec.rise_m / f64::from(spec.risers);
-        let climbed = riser * f64::from(lay.risers[0]);
+        let (dx, dy) = (spec.toward[0] - spec.start[0], spec.toward[1] - spec.start[1]);
+        let l = dx.hypot(dy);
+        if l < 1e-9 || spec.risers < 2 { return Err(EditError::InvalidGeometry(id)); }
         let n = self.elements.values().filter(|e| e.category == Category::Stair && e.parent.is_none()).count() + 1;
-        self.transact(self.revision, &[
-            Command::Create { id, category: Category::Stair, name: format!("Stair {n}"), width_m: spec.width_m, height_m: riser * f64::from(lay.risers[0]), elevation_m: spec.base_offset_m },
-            Command::SetCount { id, count: lay.risers[0] },
-            Command::SetGeometry { id, geometry: Geometry::Linear { start: lay.run1[0], end: lay.run1[1], level } },
-            Command::Create { id: second, category: Category::Stair, name: format!("Stair {n} (run 2)"), width_m: spec.width_m, height_m: riser * f64::from(lay.risers[1]), elevation_m: spec.base_offset_m + climbed },
-            Command::SetCount { id: second, count: lay.risers[1] },
-            Command::SetGeometry { id: second, geometry: Geometry::Linear { start: lay.run2[0], end: lay.run2[1], level } },
-            Command::SetParent { id: second, parent: Some(id) },
-            Command::Create { id: landing, category: Category::Stair, name: format!("Stair {n} (landing)"), width_m: spec.width_m, height_m: LANDING_THICKNESS_M, elevation_m: spec.base_offset_m + climbed },
-            Command::SetOutline { id: landing, outline: lay.landing.clone() },
-            Command::SetGeometry { id: landing, geometry: Geometry::Area { level } },
-            Command::SetParent { id: landing, parent: Some(id) },
-        ])?;
+        let mut ops: Vec<Command>;
+        let (runs, landing): (Vec<(P, P)>, Option<Vec<P>>);
+        let mut next = id.0 + 1;
+        if shape == StairShape::Straight {
+            let run = (spec.risers - 1) as f64 * spec.tread_m;
+            let end = [spec.start[0] + dx / l * run, spec.start[1] + dy / l * run];
+            ops = vec![
+                Command::Create { id, category: Category::Stair, name: format!("Stair {n}"), width_m: spec.width_m, height_m: spec.rise_m, elevation_m: spec.base_offset_m },
+                Command::SetCount { id, count: spec.risers },
+                Command::SetGeometry { id, geometry: Geometry::Linear { start: spec.start, end, level } },
+            ];
+            (runs, landing) = (vec![(spec.start, end)], None);
+        } else {
+            let Some(lay) = layout(spec, shape) else { return Err(EditError::InvalidGeometry(id)) };
+            let (second, slab) = (ElementId(id.0 + 1), ElementId(id.0 + 2));
+            next = id.0 + 3;
+            let riser = spec.rise_m / f64::from(spec.risers);
+            let climbed = riser * f64::from(lay.risers[0]);
+            ops = vec![
+                Command::Create { id, category: Category::Stair, name: format!("Stair {n}"), width_m: spec.width_m, height_m: climbed, elevation_m: spec.base_offset_m },
+                Command::SetCount { id, count: lay.risers[0] },
+                Command::SetGeometry { id, geometry: Geometry::Linear { start: lay.run1[0], end: lay.run1[1], level } },
+                Command::Create { id: second, category: Category::Stair, name: format!("Stair {n} (run 2)"), width_m: spec.width_m, height_m: riser * f64::from(lay.risers[1]), elevation_m: spec.base_offset_m + climbed },
+                Command::SetCount { id: second, count: lay.risers[1] },
+                Command::SetGeometry { id: second, geometry: Geometry::Linear { start: lay.run2[0], end: lay.run2[1], level } },
+                Command::SetParent { id: second, parent: Some(id) },
+                Command::Create { id: slab, category: Category::Stair, name: format!("Stair {n} (landing)"), width_m: spec.width_m, height_m: LANDING_THICKNESS_M, elevation_m: spec.base_offset_m + climbed },
+                Command::SetOutline { id: slab, outline: lay.landing.clone() },
+                Command::SetGeometry { id: slab, geometry: Geometry::Area { level } },
+                Command::SetParent { id: slab, parent: Some(id) },
+            ];
+            (runs, landing) = (vec![(lay.run1[0], lay.run1[1]), (lay.run2[0], lay.run2[1])], Some(lay.landing));
+        }
+        let first_railing = self.elements.values().filter(|e| e.category == Category::Railing).count() + 1;
+        let wanted: &[bool] = match sides { crate::RailingSides::None => &[], crate::RailingSides::Left => &[true], crate::RailingSides::Right => &[false], crate::RailingSides::Both => &[true, false] };
+        for (k, left) in wanted.iter().enumerate() {
+            let rid = ElementId(next + k as u64);
+            let path = crate::stair_railing::rail_path(&runs, landing.as_deref(), spec.width_m, *left);
+            let r = crate::RailingSpec::new(path);
+            ops.extend([
+                Command::Create { id: rid, category: Category::Railing, name: format!("Railing {}", first_railing + k), width_m: r.rail_m, height_m: r.height_m, elevation_m: r.base_offset_m },
+                Command::SetBeamSystem { id: rid, spacing_m: r.baluster_spacing_m, angle_deg: 0.0 },
+                Command::SetOutline { id: rid, outline: r.path },
+                Command::SetGeometry { id: rid, geometry: Geometry::Area { level } },
+                Command::SetParent { id: rid, parent: Some(id) },
+            ]);
+        }
+        self.transact(self.revision, &ops)?;
         Ok(id)
     }
 
