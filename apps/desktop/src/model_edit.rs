@@ -161,7 +161,7 @@ impl Desktop {
             if let (Category::Footing, Some(Geometry::Pad { thickness_m, .. })) = (el.category, el.geometry) { (self.material_pick, self.footing_thickness_mm) = (el.material, thickness_m * 1000.0); }
             if el.category == Category::WallFooting { self.material_pick = el.material; }
             if el.category == Category::Beam { self.join_pick = el.join_ends; }
-            if matches!(el.category, Category::BeamSystem | Category::Truss) { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
+            if matches!(el.category, Category::BeamSystem | Category::Truss | Category::Railing) { (self.spacing_mm, self.angle_deg) = (el.spacing_m * 1000.0, el.angle_deg); }
             if el.category == Category::Truss { self.material_pick = el.material; }
             if el.category == Category::Family {
                 (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone());
@@ -196,7 +196,7 @@ impl Desktop {
     pub(crate) fn has_pending_edit(&self) -> bool {
         let Some(el) = self.selected_id().and_then(|id| self.document.get(id)) else { return false; };
         let differs = |a: f64, b: f64| !b.is_finite() || (a - b).abs() > 1e-6;
-        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Stair | Category::Opening)
+        let size = matches!(el.category, Category::Wall | Category::Beam | Category::Column | Category::Duct | Category::Pipe | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Stair | Category::Opening | Category::Railing)
             && (differs(el.width_m * 1000.0, self.width_mm)
                 || (!el.is_round() && el.category != Category::Slab && self.section_pick != 1 && differs(el.height_m * 1000.0, self.height_mm)));
         let section = matches!(el.category, Category::Beam | Category::Column | Category::BeamSystem) && {
@@ -218,7 +218,8 @@ impl Desktop {
         let truss = el.category == Category::Truss && (differs(el.spacing_m * 1000.0, self.spacing_mm) || el.material != self.material_pick);
         let family = el.category == Category::Family && (differs(el.angle_deg, self.angle_deg) || el.type_name != self.family_type || self.family_values_changed(el));
         let rebar = el.category == Category::Rebar && (differs(el.spacing_m * 1000.0, self.spacing_mm) || differs(f64::from(el.count), self.bar_count));
-        let kind = system || truss || rebar || family || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
+        let railing = el.category == Category::Railing && differs(el.spacing_m * 1000.0, self.spacing_mm);
+        let kind = system || truss || rebar || railing || family || (el.category == Category::Beam && el.usage != self.usage_pick) || (matches!(el.category, Category::Beam | Category::Column | Category::Slab) && el.material != self.material_pick)
             || (el.category == Category::Slab && el.slab_kind != self.slab_kind_pick)
             || (el.category == Category::WallFooting && el.material != self.material_pick)
             || (el.category == Category::Beam && el.join_ends != self.join_pick)
@@ -398,7 +399,7 @@ impl Desktop {
         if closing && self.slab_points.len() >= 3 { return self.finish_slab(level); }
         if self.slab_points.last() == Some(&at) { return; }
         self.slab_points.push(at);
-        self.message = format!("Slab: {} corners; Enter closes the outline", self.slab_points.len());
+        self.message = if self.tool == crate::Tool::Railing { format!("Railing: {} points; Enter finishes the path", self.slab_points.len()) } else { format!("Slab: {} corners; Enter closes the outline", self.slab_points.len()) };
     }
 
     /// A click of the Wall Opening tool on `wall`, `along_m` from its start: the first click is one end of the opening, the
@@ -451,6 +452,14 @@ impl Desktop {
                     self.message = format!("Shaft {} placed; it cuts {cut} floor{} and ceilings; undo removes it", id.0, if cut == 1 { "" } else { "s" });
                 }
                 Err(error) => self.message = format!("Shaft rejected ({error:?}): it must go up from its base; Backspace takes a corner back"),
+            }
+            return;
+        }
+        if self.tool == crate::Tool::Railing {
+            let spec = openbim_document::RailingSpec { path: self.slab_points.clone(), height_m: m(self.height_mm), rail_m: m(self.width_mm), baluster_spacing_m: m(self.spacing_mm), base_offset_m: m(self.elevation_mm) };
+            match self.document.place_railing(level, &spec) {
+                Ok(id) => { self.slab_points.clear(); self.message = format!("Railing {} placed; undo removes it", id.0); }
+                Err(error) => self.message = format!("Railing rejected ({error:?}): check the height, the sizes and the spacing (50 mm to 2 m, or 0 for none); Backspace takes a point back"),
             }
             return;
         }
@@ -933,6 +942,15 @@ impl Desktop {
                 Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 }]);
             match self.document.transact(self.document.revision(), &commands) {
                 Ok(_) => { self.sync_duct_controls(); self.message = format!("Element {} updated", id.0); }
+                Err(error) => self.message = format!("Edit rejected: {error:?}"),
+            }
+            return;
+        }
+        if el.category == Category::Railing {
+            commands.extend([Command::Resize { id, width_m: self.width_mm / 1000.0, height_m: self.height_mm / 1000.0 }, Command::MoveElevation { id, elevation_m: self.elevation_mm / 1000.0 },
+                Command::SetBeamSystem { id, spacing_m: self.spacing_mm / 1000.0, angle_deg: 0.0 }]);
+            match self.document.transact(self.document.revision(), &commands) {
+                Ok(_) => { self.sync_duct_controls(); self.message = format!("Railing {} updated", id.0); }
                 Err(error) => self.message = format!("Edit rejected: {error:?}"),
             }
             return;

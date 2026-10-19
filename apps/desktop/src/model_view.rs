@@ -232,6 +232,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
             Category::Family => Color32::from_rgb(120, 150, 110),
             Category::Beam | Category::BeamSystem | Category::Truss => Color32::from_rgb(176, 140, 104),
+            Category::Railing => Color32::from_rgb(120, 120, 130),
             Category::Column => Color32::from_rgb(150, 150, 160),
             Category::Footing | Category::WallFooting => Color32::from_rgb(160, 150, 135),
             Category::Slab if app.document.get(id).is_some_and(|e| e.slab_kind == openbim_document::SlabKind::Ceiling) => if three_d { Color32::from_rgb(232, 230, 220) } else { Color32::from_rgba_unmultiplied(232, 230, 220, 70) },
@@ -831,7 +832,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if pick.is_some() { if let Some(p) = pick { app.footing_click(level_id, to_model(p)); } }
-    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Shaft) && !three_d {
+    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Shaft | crate::Tool::Railing) && !three_d {
         // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
@@ -855,10 +856,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             if app.slab_points.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.slab_points.clear(); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.slab_points.pop();
-        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= 3 { app.finish_slab(level_id);
+        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= if app.tool == crate::Tool::Railing { 2 } else { 3 } { app.finish_slab(level_id);
         } else if pick.is_some() {
             if let Some(p) = pick {
-                let closing = pts.first().is_some_and(|f| f.distance(p) < 10.0);
+                let closing = app.tool != crate::Tool::Railing && pts.first().is_some_and(|f| f.distance(p) < 10.0);
                 app.slab_click(level_id, to_model(p), closing);
             }
         }
@@ -2530,5 +2531,68 @@ mod tests {
         app.select_element(Some(a));
         frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
         assert!(app.document.get(tag).is_none() && app.document.get(dim).is_some());
+    }
+
+    #[test]
+    fn the_railing_tool_sketches_a_path_by_clicks_and_enter_edits_in_properties_and_is_drawn_in_every_view() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.select_element(None);
+        app.run_command("railing", "Railing");
+        assert!(app.tool == crate::Tool::Railing, "{}", app.message);
+        assert_eq!((app.height_mm, app.width_mm, app.spacing_mm), (1100.0, 50.0, 150.0));
+        frame(&ctx, screen, &mut app, vec![]);
+        let railings = |a: &Desktop| a.document.elements().filter(|e| e.category == Category::Railing).count();
+        // three points, Enter finishes; Backspace takes a point back and Esc clears a path
+        for p in [Pos2::new(300.0, 200.0), Pos2::new(300.0, 400.0), Pos2::new(500.0, 400.0)] { click(&ctx, screen, &mut app, p); }
+        assert_eq!(app.slab_points.len(), 3, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Backspace)]);
+        assert_eq!(app.slab_points.len(), 2);
+        click(&ctx, screen, &mut app, Pos2::new(500.0, 400.0));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(railings(&app), 1, "{}", app.message);
+        assert!(app.slab_points.is_empty());
+        let id = app.document.elements().find(|e| e.category == Category::Railing).unwrap().id;
+        let el = app.document.get(id).unwrap();
+        assert_eq!((el.outline.len(), el.height_m, el.width_m, el.spacing_m), (3, 1.1, 0.05, 0.15));
+        // one point is not a railing
+        click(&ctx, screen, &mut app, Pos2::new(700.0, 300.0));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(railings(&app), 1);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.slab_points.is_empty());
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        // selected, its height, rail size and spacing are edited in Properties and undone
+        app.select_element(Some(id));
+        assert_eq!((app.height_mm, app.spacing_mm), (1100.0, 150.0));
+        (app.height_mm, app.spacing_mm, app.elevation_mm) = (900.0, 100.0, 50.0);
+        assert!(app.has_pending_edit());
+        app.apply_selected_edit();
+        let el = app.document.get(id).unwrap();
+        assert_eq!((el.height_m, el.spacing_m, el.elevation_m), (0.9, 0.1, 0.05), "{}", app.message);
+        app.document.undo().unwrap();
+        assert_eq!(app.document.get(id).unwrap().height_m, 1.1);
+        // the plan, the 3D view and an elevation that looks at it draw it, and its parts are in the section engine's view
+        frame(&ctx, screen, &mut app, vec![]);
+        assert!(crate::view3d::batch(&app.document).verts.len() >= 8 * 20);
+        let railing_drawn_in = |view: View| crate::section_ui::build(&app.document, view).ok().is_some_and(|v| v.items.iter().any(|i| i.element.id == id.0 && i.element.kind == openbim_view::Kind::Railing));
+        assert!((0..4u8).any(|k| railing_drawn_in(View::Elevation(k))), "an elevation shows the railing");
+        // a section line across it cuts the rail, the posts and the balusters
+        let sec = {
+            let o = &app.document.get(id).unwrap().outline;
+            app.document.place_section(ElementId(10), [o[0][0] - 1.0, (o[0][1] + o[1][1]) / 2.0 + 0.011], [o[2][0] + 1.0, (o[0][1] + o[1][1]) / 2.0 + 0.011], 5.0)
+        };
+        let sec = sec.expect("a section line");
+        let v = crate::section_ui::build(&app.document, View::Section(sec.0)).unwrap();
+        let cut = v.items.iter().filter(|i| i.element.id == id.0 && i.class == openbim_view::Class::Cut).count();
+        assert!(cut >= 1, "the plane cuts the railing: {cut}");
+        // Delete and undo
+        app.select_element(Some(id));
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Delete)]);
+        assert_eq!(railings(&app), 0);
+        app.document.undo().unwrap();
+        assert_eq!(railings(&app), 1);
     }
 }

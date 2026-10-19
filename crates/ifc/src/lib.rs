@@ -322,6 +322,16 @@ pub struct RoofItem {
     pub shape: &'static str,
 }
 
+/// A railing: its parts (top rail, posts, balusters) as closed boxes, as faces of points; `base_z` puts it on a storey.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RailingItem {
+    pub id: u64,
+    pub name: String,
+    pub base_z: f64,
+    pub verts: Vec<[f64; 3]>,
+    pub faces: Vec<Vec<usize>>,
+}
+
 /// A straight stair: a stepped block `width` wide that climbs `risers` risers over `risers - 1` treads along `dir`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StairItem {
@@ -352,6 +362,8 @@ pub struct Scene {
     pub slabs: Vec<SlabItem>,
     /// roofs by footprint, each written as an IfcRoof with a faceted solid
     pub roofs: Vec<RoofItem>,
+    /// railings, each an IfcRailing whose parts are faceted solids
+    pub railings: Vec<RailingItem>,
     /// straight stairs, each an IfcStair with its side profile extruded across its width
     pub stairs: Vec<StairItem>,
     /// structural columns, each a straight prism on a convex footprint
@@ -416,6 +428,7 @@ pub struct Report {
     pub openings: usize,
     pub slabs: usize,
     pub roofs: usize,
+    pub railings: usize,
     pub stairs: usize,
     pub bars: usize,
     pub segments: usize,
@@ -937,6 +950,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     }
     write_slabs(&mut o)?;
     write_roofs(&mut o)?;
+    write_railings(&mut o)?;
     write_stairs(&mut o)?;
     write_columns(&mut o)?;
     write_beams(&mut o)?;
@@ -1390,6 +1404,50 @@ fn write_roofs(o: &mut Out) -> Result<(), ExportError> {
         o.contain(st, roof);
         o.member_entities.push((item.id, roof));
         o.report.roofs += 1;
+    }
+    Ok(())
+}
+
+/// Railings: an IfcRailing whose body is one faceted solid for each of its parts (rails, posts, balusters), which are
+/// the groups of faces that share points.
+fn write_railings(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for item in &scene.railings {
+        if item.faces.is_empty() || item.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= item.verts.len())) {
+            return Err(ExportError::Unsupported(format!("railing {}: a solid without faces", item.name)));
+        }
+        let st = o.storey_for(item.base_z);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let pts: Vec<u32> = item.verts.iter().map(|v| o.p3([v[0], v[1], v[2] - elev])).collect();
+        // the parts: faces that share a point belong to one solid
+        let mut part: Vec<usize> = (0..item.verts.len()).collect();
+        fn root(part: &mut [usize], mut i: usize) -> usize { while part[i] != i { part[i] = part[part[i]]; i = part[i]; } i }
+        for f in &item.faces {
+            let r0 = root(&mut part, f[0]);
+            for &i in &f[1..] { let r = root(&mut part, i); part[r] = r0; }
+        }
+        let mut shells: std::collections::BTreeMap<usize, Vec<String>> = std::collections::BTreeMap::new();
+        for f in &item.faces {
+            let ring: Vec<String> = f.iter().map(|&i| format!("#{}", pts[i])).collect();
+            let lp = o.s.add(format!("IFCPOLYLOOP(({}))", ring.join(",")));
+            let bound = o.s.add(format!("IFCFACEOUTERBOUND(#{lp},.T.)"));
+            let face = format!("#{}", o.s.add(format!("IFCFACE((#{bound}))")));
+            let key = root(&mut part, f[0]);
+            shells.entry(key).or_default().push(face);
+        }
+        let mut breps = Vec::new();
+        for faces in shells.values() {
+            let shell = o.s.add(format!("IFCCLOSEDSHELL(({}))", faces.join(",")));
+            breps.push(o.s.add(format!("IFCFACETEDBREP(#{shell})")));
+        }
+        let rep = o.shape_rep("Brep", &breps);
+        let shape = o.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+        let g = o.gid(item.id, 0);
+        let railing = o.s.add(format!("IFCRAILING({g},$,{},$,$,#{pl},#{shape},$,.GUARDRAIL.)", string(&item.name)));
+        o.contain(st, railing);
+        o.member_entities.push((item.id, railing));
+        o.report.railings += 1;
     }
     Ok(())
 }

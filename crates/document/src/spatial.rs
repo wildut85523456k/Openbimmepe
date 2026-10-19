@@ -154,6 +154,13 @@ fn segment_param(q: [f64; 2], p: [f64; 2], c: [f64; 2], d: [f64; 2]) -> Option<f
 }
 
 /// A simple polygon: 3 to 1000 finite corners, some area, and no edge crossing another.
+/// An open path of two or more points, none of them on top of the next.
+fn valid_path(p: &[[f64; 2]]) -> bool {
+    (2..=1000).contains(&p.len()) && p.iter().all(|q| q.iter().all(|v| v.is_finite() && v.abs() <= 1e6))
+        && p.windows(2).all(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]) > 1e-3)
+}
+fn path_length(p: &[[f64; 2]]) -> f64 { p.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum() }
+
 fn valid_ring(r: &[[f64; 2]]) -> bool {
     let n = r.len();
     if !(3..=1000).contains(&n) || r.iter().any(|p| !p[0].is_finite() || !p[1].is_finite() || p[0].abs() > 1e6 || p[1].abs() > 1e6) {
@@ -274,6 +281,11 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Pad { at, level, thickness_m }) => {
                 el.category == Category::Footing && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
                     && thickness_m.is_finite() && *thickness_m > 0.0 && *thickness_m <= 5.0
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::Area { level }) if el.category == Category::Railing => {
+                valid_path(&el.outline) && el.elevation_m.abs() <= 1e6
+                    && (el.spacing_m == 0.0 || path_length(&el.outline) / el.spacing_m <= 5000.0)
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Area { level }) => {
@@ -500,6 +512,9 @@ impl Document {
             let mut faces = vec![vec![3, 2, 1, 0], vec![4, 5, 6, 7]];
             for i in 0..4 { faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]); }
             return Some(Mesh { vertices, faces });
+        }
+        if let (Category::Railing, Some(Geometry::Area { level })) = (el.category, el.geometry) {
+            return crate::railing::mesh(&el.outline, self.get(level)?.elevation_m + el.elevation_m, el.height_m, el.width_m, el.spacing_m);
         }
         if let Some(Geometry::Pad { at, level, thickness_m }) = el.geometry {
             let top = self.get(level)?.elevation_m + el.elevation_m;

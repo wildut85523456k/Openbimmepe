@@ -122,7 +122,21 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Properties: Width, Total Rise, Base Offset editable; risers, treads, actual riser height and tread depth, run length shown | done (riser count is not editable: place the stair again) |
 | Move / rotate / mirror / copy / delete / undo, saved | done |
 | IFC: IfcStair STRAIGHT_RUN_STAIR with the side profile extruded across the width and Pset_StairCommon, in all three schemas; the app's own file brings it back unchanged | done; a stair written by another program is not read (skipped) |
-| Winder, L and U shapes, landings, runs from sketch, stair by sketch, railings, top/base level choice, ramps | missing |
+| Winder, L and U shapes, landings, runs from sketch, stair by sketch, top/base level choice, ramps | missing |
+
+## Railing (sketched path)
+Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". Nothing here comes from my own reading except the default sizes.
+
+| Revit | OpenBIM |
+|---|---|
+| Architecture > Railing > Sketch Path: click the points of the path, finish | done: Railing tool in a plan view, a click per point (50 mm snap), Enter or Finish ends it, Backspace takes a point back, Esc cancels. One railing is one element with a path of any number of straight stretches |
+| Railing Height (the top rail), rail structure, balusters at a pattern with a spacing, posts at the ends and corners | done: top rail at the Railing Height, a post at every point of the path, balusters at an even spacing near the one asked for (0 for none). Defaults 1100 mm high, 50 mm rails and posts, 150 mm spacing |
+| Properties: Railing Height, Base Offset, baluster spacing, edit at any time, undo | done: Railing Height, Rail and Post Size, Baluster Spacing, Base Offset in the Properties palette |
+| Seen in plans, elevations, sections, 3D; cut by a section line | done (plan, elevation, section, 3D) |
+| Move, Copy, Rotate, Mirror, Delete; save; IFC IfcRailing | done in plan views; saved with the model; IfcRailing (GUARDRAIL) with a solid for each part in IFC2x3, IFC4 and IFC4.3, and the app's own file brings it back unchanged |
+| Railing types with several rails, handrails, Rail Structure and Baluster Placement dialogs (patterns, posts at set places, profiles), Baluster Offset, angled/tangent joins and mitered rails, slopes along a stair, Landing Height Adjustment | missing: one fixed pattern; rails are straight boxes that overlap at a corner (no miter) |
+| Pick New Host (a railing placed on a stair, a floor or a ramp edge), Edit Path with Toggle Sketch Orientation, Reset Railing, Split | missing: a railing is free-standing on its level; editing the path means deleting and drawing again |
+| Moving or copying a railing in elevation and section views; a railing written by another program (read from IFC) | missing |
 
 ## Opening (Wall, Shaft; done 2026-10-19)
 | Revit | This app |
@@ -143,11 +157,11 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all
-All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
+All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
 1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
-2. Railings, L/U stairs, vertical opening and roof cuts.
+2. (Railings are done as a sketched path.) L/U stairs with a railing on the stair, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
 

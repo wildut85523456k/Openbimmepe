@@ -80,6 +80,7 @@ fn dimensions(category: openbim_document::Category, section: u8) -> &'static [Fi
         C::Family => &[Field::Angle, Field::Elevation],
         C::Rebar => &[Field::Count, Field::Width, Field::Height, Field::Elevation, Field::Spacing],
         C::Truss => &[Field::Spacing, Field::Width, Field::Height, Field::Elevation],
+        C::Railing => &[Field::Height, Field::Width, Field::Spacing, Field::Elevation],
         C::BeamSystem => &[Field::Spacing, Field::Angle, Field::Width, Field::Height, Field::Elevation],
         C::Footing => &[Field::Width, Field::Height, Field::Thickness, Field::Elevation],
         C::WallFooting => &[Field::Width, Field::Height, Field::Elevation],
@@ -139,6 +140,10 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
         Field::Elevation if category == C::Rebar => "Cover (mm)",
         Field::Spacing if category == C::Rebar => "Stirrup Spacing (mm)",
         Field::Spacing if category == C::Truss => "Panel Length (mm)",
+        Field::Height if category == C::Railing => "Railing Height (mm)",
+        Field::Width if category == C::Railing => "Rail and Post Size (mm)",
+        Field::Spacing if category == C::Railing => "Baluster Spacing (mm)",
+        Field::Elevation if category == C::Railing => "Base Offset (mm)",
         Field::Width if category == C::Truss => "Member Size (mm)",
         Field::Height if category == C::Truss => "Truss Depth (mm)",
         Field::Elevation if category == C::Truss => "Bottom Chord Elevation (mm)",
@@ -215,7 +220,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Slab => ("Floors (1)", "Generic Slab", "structural_floor"),
         C::Family => ("Specialty Equipment (1)", "Family Instance", "component"),
         C::Rebar => ("Structural Rebar (1)", "Beam Rebar", "rebar"),
-        C::Truss => ("Structural Trusses (1)", "Warren Truss", "truss"),
+        C::Truss => ("Structural Trusses (1)", "Warren Truss", "truss"), C::Railing => ("Railings (1)", "Railing", "railing"),
         C::BeamSystem => ("Structural Framing (1)", "Beam System", "beam"),
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
@@ -568,6 +573,24 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                 ui.label("Height (mm)");
                 ui.add(egui::DragValue::new(&mut app.stair_rise_mm).speed(5.0).range(200.0..=50000.0));
             }
+        });
+        return;
+    }
+    if app.tool == crate::Tool::Railing {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Place Railing");
+            ui.separator();
+            ui.label("Height (mm)");
+            ui.add(egui::DragValue::new(&mut app.height_mm).speed(5.0).range(100.0..=5000.0));
+            ui.label("Rail and Post Size (mm)");
+            ui.add(egui::DragValue::new(&mut app.width_mm).speed(1.0).range(10.0..=500.0));
+            ui.label("Baluster Spacing (mm, 0 for none)");
+            ui.add(egui::DragValue::new(&mut app.spacing_mm).speed(5.0).range(0.0..=2000.0));
+            ui.label("Base Offset (mm)");
+            ui.add(egui::DragValue::new(&mut app.elevation_mm).speed(5.0));
+            ui.label(format!("{} points", app.slab_points.len()));
+            if ui.add_enabled(app.slab_points.len() >= 2, egui::Button::new("Finish")).clicked() { app.finish_slab(app.plan_level()); }
+            if ui.add_enabled(!app.slab_points.is_empty(), egui::Button::new("Clear")).clicked() { app.slab_points.clear(); }
         });
         return;
     }

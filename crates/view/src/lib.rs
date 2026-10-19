@@ -119,6 +119,8 @@ pub enum Kind {
     Slab,
     /// a roof by footprint (a solid of several planes)
     Roof,
+    /// a railing: a top rail, posts and balusters
+    Railing,
     /// a straight stair
     Stair,
     Room,

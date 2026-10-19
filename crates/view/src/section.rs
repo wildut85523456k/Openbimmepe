@@ -239,7 +239,10 @@ fn build(scene: &Scene, sec: Section, faces: bool) -> Result<SectionView, ViewEr
         }
     }
     for r in &scene.roofs {
-        roof_items(r, &fr, &sec, faces, &mut items, &mut far);
+        solid_items(Kind::Roof, r.id, &r.verts, &r.faces, &fr, &sec, faces, &mut items, &mut far);
+    }
+    for r in &scene.railings {
+        solid_items(Kind::Railing, r.id, &r.verts, &r.faces, &fr, &sec, faces, &mut items, &mut far);
     }
     for st in &scene.stairs {
         stair_items(st, &fr, &sec, faces, &mut items, &mut far);
@@ -345,11 +348,12 @@ fn stair_items(st: &openbim_ifc::StairItem, fr: &Fr, sec: &Section, faces: bool,
     }
 }
 
-/// A roof: the loops where the plane cuts its solid, and, seen from outside, its faces that turn toward the viewer.
-fn roof_items(r: &openbim_ifc::RoofItem, fr: &Fr, sec: &Section, faces: bool, items: &mut Vec<Item>, far: &mut Vec<Face>) {
-    let el = Element { kind: Kind::Roof, id: r.id };
-    let w: Vec<f64> = r.verts.iter().map(|v| fr.uw([v[0], v[1]]).1).collect();
-    let uz = |i: usize| -> P { [fr.uw([r.verts[i][0], r.verts[i][1]]).0, r.verts[i][2]] };
+/// A solid made of closed parts (a roof, the parts of a railing): the loops where the plane cuts it, and, seen from outside,
+/// its faces that turn toward the viewer.
+fn solid_items(kind: Kind, id: u64, verts: &[[f64; 3]], faces_of: &[Vec<usize>], fr: &Fr, sec: &Section, faces: bool, items: &mut Vec<Item>, far: &mut Vec<Face>) {
+    let el = Element { kind, id };
+    let w: Vec<f64> = verts.iter().map(|v| fr.uw([v[0], v[1]]).1).collect();
+    let uz = |i: usize| -> P { [fr.uw([verts[i][0], verts[i][1]]).0, verts[i][2]] };
     // where the edge between vertices i and j crosses the plane
     let cut_at = |i: usize, j: usize| -> P {
         let (i, j) = if i < j { (i, j) } else { (j, i) };
@@ -359,7 +363,7 @@ fn roof_items(r: &openbim_ifc::RoofItem, fr: &Fr, sec: &Section, faces: bool, it
     };
     // segments of the cut, one per face the plane crosses
     let mut segs: Vec<(P, P)> = Vec::new();
-    for f in &r.faces {
+    for f in faces_of {
         let mut hits: Vec<P> = Vec::new();
         for k in 0..f.len() {
             let (i, j) = (f[k], f[(k + 1) % f.len()]);
@@ -390,12 +394,12 @@ fn roof_items(r: &openbim_ifc::RoofItem, fr: &Fr, sec: &Section, faces: bool, it
     }
     if !faces { return; }
     let wn = [fr.n[0], fr.n[1]];
-    for f in &r.faces {
+    for f in faces_of {
         if f.len() < 3 { continue; }
         // the face turns toward the viewer when its outward normal points against the viewing direction
         let mut nrm = [0.0; 3];
         for k in 0..f.len() {
-            let (a, b) = (r.verts[f[k]], r.verts[f[(k + 1) % f.len()]]);
+            let (a, b) = (verts[f[k]], verts[f[(k + 1) % f.len()]]);
             nrm[0] += (a[1] - b[1]) * (a[2] + b[2]);
             nrm[1] += (a[2] - b[2]) * (a[0] + b[0]);
             nrm[2] += (a[0] - b[0]) * (a[1] + b[1]);
