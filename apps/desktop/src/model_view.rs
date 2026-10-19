@@ -2139,6 +2139,54 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![]);
     }
     #[test]
+    fn dragging_in_an_elevation_slides_an_opening_along_its_wall_and_up_and_esc_cancels() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Elevation(2);
+        let op = app.document.place_wall_opening(ElementId(20), 1.0, 2.0, 0.9, 2.1).unwrap();
+        frame(&ctx, screen, &mut app, vec![]);
+        let xf = app.section_xf.expect("the view was drawn");
+        let view = crate::section_ui::build(&app.document, app.view).expect("builds");
+        let rect = crate::section_ui::opening_rects(&app.document, &view).into_iter().find(|r| r.0 == op).expect("the opening is seen").2;
+        let centre = [(rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0];
+        let (press, to) = (xf.screen(centre), xf.screen([centre[0] + 1.0, centre[1] + 0.3]));
+        let along = |a: &Desktop| match a.document.get(op).unwrap().geometry { Some(Geometry::InWall { along_m, .. }) => along_m, g => panic!("{g:?}") };
+        let (a0, sill0) = (along(&app), app.document.get(op).unwrap().elevation_m);
+        let sign = (view.section.b[0] - view.section.a[0]).signum();
+        // Esc in the middle of a drag leaves it where it was
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(20.0, -5.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        assert!(app.view_drag.is_some() && app.selected_id() == Some(op), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        assert_eq!(along(&app), a0);
+        // a drag of one metre along and 300 mm up
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(20.0, -5.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        assert!((along(&app) - a0 - sign).abs() < 1e-6, "{} -> {} ({sign}) {}", a0, along(&app), app.message);
+        assert!((app.document.get(op).unwrap().elevation_m - sill0 - 0.3).abs() < 1e-6, "{}", app.message);
+        assert!(app.view_drag.is_none());
+        app.document.undo().unwrap();
+        assert_eq!(along(&app), a0);
+        // pressing on the wall itself and dragging up raises the wall, and the opening in it goes with it
+        let f = crate::section_ui::wall_frame(&app.document, &view, ElementId(20)).expect("the wall is parallel to the view");
+        let spot = [f.u0 + f.sign * 6.0, f.base + 1.5];
+        let (press, to) = (xf.screen(spot), xf.screen([spot[0], spot[1] + 0.5]));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(&ctx, screen, &mut app, vec![button(press, true)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(press + Vec2::new(0.0, -10.0))]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
+        frame(&ctx, screen, &mut app, vec![button(to, false)]);
+        assert!((app.document.get(ElementId(20)).unwrap().elevation_m - 0.5).abs() < 1e-6, "{}", app.message);
+        assert_eq!((along(&app), app.document.get(op).unwrap().elevation_m), (a0, sill0), "the opening keeps its place in the wall");
+    }
+
+    #[test]
     fn the_elevation_tool_puts_a_marker_with_views_that_switch_on_and_off_open_and_move() {
         let (ctx, screen) = frames();
         let mut app = Desktop::sample();

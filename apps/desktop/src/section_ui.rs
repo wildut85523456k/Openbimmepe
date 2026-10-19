@@ -200,7 +200,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let name = name_of(app, app.view);
     let built = build(&app.document, app.view);
     ui.horizontal(|ui| {
-        ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects"));
+        ui.small(format!("{name} — middle-drag pan / wheel zoom / click selects / drag moves"));
         if !matches!(app.tool, crate::Tool::Select | crate::Tool::WallOpening) { ui.small("— this tool works in plan views; press Esc"); }
         if let Ok(v) = &built {
             if let Some(w) = v.warnings.first() { ui.small(format!("— {w}")); }
@@ -292,6 +292,49 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
     match app.tool {
         crate::Tool::Select => {
+            // press on an element and drag: it moves along the view and up or down, 50 mm at a time; a ghost shows where
+            let snap = |m: [f64; 2]| [(m[0] / 0.05).round() * 0.05, (m[1] / 0.05).round() * 0.05];
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
+                    if let Some(hit) = pick_at(&app.document, &view, xf.model(p)) {
+                        if !chosen.contains(&hit) { app.select_element(Some(hit)); }
+                        app.view_drag = Some(snap(xf.model(p)));
+                    }
+                }
+            }
+            if let (Some(from), Some(h)) = (app.view_drag, response.interact_pointer_pos().or(response.hover_pos())) {
+                let ids = app.selected_ids();
+                let to = snap(xf.model(h));
+                let (du, dz) = (to[0] - from[0], to[1] - from[1]);
+                let ghost = Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
+                let shift = |p: &[f64; 2]| screen([p[0] + du, p[1] + dz]);
+                for item in view.items.iter().filter(|i| i.class != Class::Datum && ids.contains(&ElementId(i.element.id)) && i.element.kind != Kind::Level) {
+                    match &item.shape {
+                        Shape::Region { outer, holes } => for r in std::iter::once(outer).chain(holes.iter()) { painter.add(egui::Shape::closed_line(r.iter().map(shift).collect(), ghost)); },
+                        Shape::Fill(r) => { painter.add(egui::Shape::closed_line(r.iter().map(shift).collect(), ghost)); }
+                        Shape::Line(a, b) => { painter.line_segment([shift(a), shift(b)], ghost); }
+                        _ => {}
+                    }
+                }
+                for (_, _, r) in rects.iter().filter(|(id, _, _)| ids.contains(id)) {
+                    painter.rect_stroke(egui::Rect::from_two_pos(shift(&[r[0], r[1]]), shift(&[r[2], r[3]])), 0.0, ghost, egui::StrokeKind::Middle);
+                }
+                painter.text(h + Vec2::new(12.0, -12.0), egui::Align2::LEFT_BOTTOM, format!("{:+.0} mm along, {:+.0} mm up", du * 1000.0, dz * 1000.0), egui::FontId::proportional(13.0), blue);
+                if esc { app.view_drag = None; app.message = "Move cancelled".into(); }
+                else if response.drag_stopped_by(egui::PointerButton::Primary) {
+                    app.view_drag = None;
+                    let (a, b) = (view.section.a, view.section.b);
+                    let len = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-9);
+                    let dir = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+                    if du != 0.0 || dz != 0.0 {
+                        match app.document.move_in_view_commands(&ids, dir, du, dz).and_then(|ops| app.document.transact(app.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
+                            Ok(_) => app.message = "Moved; undo takes it back".into(),
+                            Err(e) => app.message = format!("Cannot do that: {e}"),
+                        }
+                    }
+                }
+            }
+            if !ui.input(|i| i.pointer.primary_down()) { app.view_drag = None; }
             if response.clicked() {
                 if let Some(h) = response.interact_pointer_pos() {
                     let hit = pick_at(&app.document, &view, xf.model(h));

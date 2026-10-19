@@ -90,7 +90,8 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Plans: section line with a head bubble (its number) at the start, a tick at the other end and an arrow for the side it looks to; Space or Properties > Flip direction turns it round (undoable); a double click on the line opens its view | done (2026-10-19); no flip control drawn on the line, no split segments or gaps. Select a section and drag the grip at either end: only that end moves (undoable, its view follows) |
 | Plans: an elevation marker (circle with a pointer toward the building and the side's name) outside each of the four sides; a double click opens that elevation | the four building markers are worked out from the building (2 m outside it, 30 px off the line) and cannot be moved or deleted. See the next row for markers you place |
 | Elevation tool: click in a plan to place a marker (circle with a pointer per view); select it to tick East / North / South / West on or off in Properties (at least one stays); each view is a tab and a Project Browser entry ("Elevation 1 - East"); double click a pointer opens it; drag the circle to move it; Delete; View Width and View Depth in Properties | done (2026-10-19), saved and undoable, not exported to IFC. A click places all four views (Revit starts with one and a rotation by the pointer); the marker cannot be rotated, the view is a straight cut 20 m wide and 20 m deep unless edited, and the pointers are not grips to drag |
-| Move, rotate, copy, mirror, align, tags, dimensions, drawing walls/floors in these views; drag handles; callouts; legends | missing: other tools say they work in plan views |
+| Press on an element in an elevation or section and drag: it moves along the view and up or down in 50 mm steps, with a ghost and the distances; Esc cancels; undo. Doors, windows and wall openings slide in their wall and change their sill (the model refuses a move out of the wall, with the reason); walls, beams, slabs and stairs also change their height offset; a column, footing or anything else moves sideways only (up and down alone says to use Properties); what stands in a moved wall goes with it | done (2026-10-19); only along the view (nothing in depth), a wall at an angle to the view cannot slide what stands in it, no Move tool with a typed distance, no snapping to other edges |
+| Rotate, copy, mirror, align, tags, dimensions, drawing walls/floors in these views; callouts; legends | missing: other tools say they work in plan views |
 
 ## Ceiling
 | Revit behaviour | State |
@@ -136,7 +137,7 @@ Split Element. The Offset and Wall Joins icons are placeholders I drew (the appr
 All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, railing, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
 
 ## Suggested order
-1. Moving things in elevation/section views (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting and wall openings in them, the Elevation tool and dragging section ends are done).
+1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
 2. Railings, L/U stairs, vertical opening and roof cuts.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
