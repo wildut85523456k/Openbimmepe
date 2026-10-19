@@ -53,7 +53,7 @@ The Project Browser lists *Schedules/Quantities*, *Sheets* and *Legends* as empt
 
 | # | Revit behaviour | App today | Priority |
 |---|---|---|---|
-| A1 | **Redo** (Ctrl+Y) | The Redo button exists in the quick-access bar but nothing is behind it; undo works | P1 (cheap) |
+| A1 | **Redo** (Ctrl+Y) | **Done 2026-10-19** (was a button with nothing behind it) | done |
 | A2 | **Wall options bar**: Offset (distance to the location line), Radius (for circle/arc), Height/Depth list, **Top constraint** (Unconnected Height or up to a level), Base/Top offset, Room Bounding, Structural Usage; **Attach Top/Base** to roof or floor | Height and Base offset only. No Offset field, no top constraint to a level, no attach | P1 |
 | A3 | **Layer priority and join cleanup** (arch ch3): the Priority number next to each layer decides how layers join at corners and intersections; Wrapping at Inserts/Ends; Join Geometry | Layers drawn straight through; no priority, no wrapping | P2 (already on the backlog) |
 | A4 | **More wall kinds**: Slanted (angle from vertical), Tapered (exterior/interior angles), Stacked walls (several types by height), Wall Sweeps and Reveals, wall finishes *Place by Room* and *Place by Segment* (new in 2026), curtain walls, Ellipse / Tangent End Arc / Fillet Arc / Center-ends Arc sketch tools, **true curved walls** | Straight walls only (curves are facets). None of the others | P2 |
@@ -61,7 +61,7 @@ The Project Browser lists *Schedules/Quantities*, *Sheets* and *Legends* as empt
 | A6 | **Floors**: sketch boundary with Pick Walls, Span Direction, slope arrow, **shape editing** (Add Point, Add Split Line, Pick Supports, Modify Sub Elements, Reset Shape); floor types with layers | Slab from a rectangle/boundary; no shape editing | P2 |
 | A7 | **Roofs**: by Extrusion, Join/Cut Roof, Attach Walls, soffit, fascia, gutter; **Ceiling types** and ceiling plan views; Dormer and By Face openings | Footprint roofs only | P2 |
 | A8 | **Levels and grids**: Create Plan View check, plan view types, level copy/monitor, story elevation display; grid Multi-Segment and Pick Lines, bubbles and 2D/3D extents; **Reference Planes and Work Planes** (set work plane, show) | Level and Grid tools exist; two fixed level tabs; no reference planes, no work planes | P1 (level tabs, reference planes), P2 (rest) |
-| A9 | **Modify tools not yet there** (ch5): Array (linear, radial), Match Type Properties, **Create Similar**, Pin, Scale, **Split Element** and Split with Gap, Trim/Extend Single and Multiple, Align Multiple Alignment, Copy/Cut/Paste (Paste Aligned to Selected Levels / Same Place), **Select All Instances**, Selection Filter, Save/Load selection, Groups (create, place, swap, ungroup), Parts, Measure along an element, Select by ID | Missing (Trim corner, Align, Offset, Move, Copy, Rotate, Mirror, Delete are done) | P1: Create Similar, Select All Instances, Copy/Paste, Match Type, Pin, Split; P2: Array, Groups, Scale, Filter, Parts |
+| A9 | **Modify tools** (ch5): Array (linear, radial), Match Type Properties, **Create Similar**, Pin, Scale, **Split Element** and Split with Gap, Trim/Extend Single and Multiple, Align Multiple Alignment, Copy/Cut/Paste (Paste Aligned to Selected Levels / Same Place), **Select All Instances**, Selection Filter, Save/Load selection, Groups (create, place, swap, ungroup), Parts, Measure along an element, Select by ID | **Done 2026-10-19:** Match Type Properties, Create Similar, Pin/Unpin, Cut/Copy/Paste (plan views, Same Place), Select All Instances. Missing: Split Element, Array, Scale, Filter, Groups, Parts, Trim single/multiple, Multiple Alignment, Paste to selected levels/views | P1: Split; P2: Array, Groups, Scale, Filter, Parts |
 | A10 | **Stairs and ramps**: Stair by Sketch, Winder, Landing and Support tools, ramps | Stair by component only; no ramps | P3 |
 | A11 | **Site** (ch9): Toposolid (points, imported data, subdivision, split, grading, excavation), property lines, site and parking components, contour labels | Missing | P3 |
 | A12 | **Massing** (ch10): In-place mass, Building Maker (wall/floor/roof/curtain system by face) | Missing | P3 |
@@ -83,7 +83,7 @@ The Project Browser lists *Schedules/Quantities*, *Sheets* and *Legends* as empt
 
 Each step is a self-contained, tested change like the earlier ones.
 
-1. **Redo** and the **Create Similar / Select All Instances / Copy-Paste / Match Type / Pin** group (A1, A9). Small, used all the time.
+1. ~~Redo and the Create Similar / Select All Instances / Copy-Paste / Match Type / Pin group (A1, A9)~~ done 2026-10-19; Split Element and Array are the next small ones.
 2. **Duct and Pipe placement tab** (M1, M2, M3): toggles, justification, elevation lock, slope up/down with a slope list, editable end offsets, Tag on Placement. Includes the Mechanical Settings dialog for sizes, slopes and fluids (M14).
 3. **Insulation and lining** for ducts, pipes and fittings (M4).
 4. **Generate Layout for a piping/duct system**: system object, Edit System, Place Base, solutions, Convert Placeholder (M5, M6). The engine already exists.

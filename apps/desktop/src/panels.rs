@@ -741,6 +741,10 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
         .max_height((ui.available_height() - 50.0).max(20.0)).auto_shrink([false, false]).show(ui, |ui| {
             if let Some(el) = &element {
                 ui.push_id(el.id.0, |ui| {
+                    if el.category != openbim_document::Category::Type && (query.is_empty() || "pinned constraints".contains(&query)) {
+                        let mut pinned = el.pinned;
+                        if ui.checkbox(&mut pinned, "Pinned").on_hover_text("Pin (PN): it cannot be moved or deleted until it is unpinned").changed() { app.pin_selected(pinned); }
+                    }
                     if let Some(Geometry::Point { level, top, .. }) = el.geometry {
                         let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
                         read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);

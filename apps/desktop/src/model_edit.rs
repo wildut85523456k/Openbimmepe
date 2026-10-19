@@ -858,6 +858,7 @@ impl Desktop {
                     Err(e) => self.message = format!("Offset: {e}"),
                 }
             }
+            Tool::MatchType => self.match_type_click(Some(id), at),
             _ => {}
         }
     }

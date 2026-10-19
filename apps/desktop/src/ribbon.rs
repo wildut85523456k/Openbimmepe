@@ -167,12 +167,13 @@ const MANAGE: &[Group] = &[
 ];
 const ADDINS: &[Group] = &[Group { title: "Automation", commands: &[c("automation_editor", "Graph Editor"), c("automation_player", "Player")] }];
 const MODIFY: &[Group] = &[
-    Group { title: "Select", commands: &[c("select", "Modify")] },
-    Group { title: "Clipboard", commands: &[c("copy", "Copy")] },
+    Group { title: "Select", commands: &[c("select", "Modify"), c("select_instances", "Select All Instances")] },
+    Group { title: "Clipboard", commands: &[c("paste", "Paste"), c("paste_same_place", "Paste Same Place"), c("cut", "Cut"), c("copy_clipboard", "Copy"), c("match_type", "Match Type")] },
     Group { title: "Modify", commands: &[
-        c("move", "Move"), c("rotate", "Rotate"), c("mirror", "Mirror"), c("align", "Align"),
-        c("offset", "Offset"), c("trim", "Trim/Extend"), c("delete", "Delete"),
+        c("move", "Move"), c("copy", "Copy"), c("rotate", "Rotate"), c("mirror", "Mirror"), c("align", "Align"),
+        c("offset", "Offset"), c("trim", "Trim/Extend"), c("pin", "Pin"), c("unpin", "Unpin"), c("delete", "Delete"),
     ]},
+    Group { title: "Create", commands: &[c("create_similar", "Create Similar")] },
     Group { title: "Geometry", commands: &[c("wall_joins", "Wall Joins")] },
     Group { title: "Measure", commands: &[c("measure", "Measure")] },
 ];

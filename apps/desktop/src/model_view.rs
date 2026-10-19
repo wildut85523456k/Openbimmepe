@@ -427,6 +427,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
         else if response.drag_stopped_by(egui::PointerButton::Primary) { response.interact_pointer_pos().or(response.hover_pos()) }
         else { None };
+    // a pushpin on every pinned element of this level
+    if !three_d {
+        for m in app.pin_marks(level_id) {
+            let p = screen([m[0], m[1], level_z]) + Vec2::new(0.0, -10.0);
+            painter.line_segment([p, p + Vec2::new(0.0, 12.0)], Stroke::new(1.5, Color32::from_rgb(60, 60, 60)));
+            painter.circle(p, 4.5, Color32::from_rgb(220, 140, 0), Stroke::new(1.0, Color32::from_rgb(60, 60, 60)));
+        }
+    }
     if matches!(app.tool, crate::Tool::ElecNode | crate::Tool::Cable) && !three_d {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [v.x as f64, -v.y as f64] };
@@ -787,7 +795,22 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         } else if selected.is_none() && response.clicked() {
             if let Some(p) = response.interact_pointer_pos() { let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id); app.select_element(hit); }
         }
-    } else if matches!(app.tool, crate::Tool::Align | crate::Tool::Trim | crate::Tool::Offset) && !three_d {
+    } else if app.tool == crate::Tool::Paste && !three_d {
+        // the clipboard follows the pointer by its centre, snapped to 50 mm; a click puts it down, Esc ends
+        let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
+        let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
+        if let (Some(cb), Some(h)) = (app.clipboard.as_ref(), response.hover_pos()) {
+            let at = to_model(h);
+            let d = [at[0] - cb.base[0], at[1] - cb.base[1]];
+            let ghost = Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
+            for shape in cb.shapes(d) {
+                let pts: Vec<Pos2> = shape.iter().map(|q| screen([q[0], q[1], level_z])).collect();
+                match pts.len() { 1 => { painter.circle_stroke(pts[0], 6.0, ghost); } 2 => { painter.line_segment([pts[0], pts[1]], ghost); } _ => { painter.add(egui::Shape::closed_line(pts, ghost)); } }
+            }
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if let Some(p) = pick { app.paste_at(to_model(p)); }
+    } else if matches!(app.tool, crate::Tool::Align | crate::Tool::Trim | crate::Tool::Offset | crate::Tool::MatchType) && !three_d {
         // Revit's pick tools: Align takes the line to align to and then the element to move, Trim/Extend two elements
         // on the parts to keep, Offset one element on the side to offset to.
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
@@ -1459,6 +1482,38 @@ mod tests {
         app.select_element(Some(ElementId(10)));
         app.delete_selected();
         assert!(app.document.get(ElementId(10)).is_some(), "{}", app.message);
+    }
+
+    #[test]
+    fn paste_follows_the_pointer_with_a_ghost_and_a_click_puts_it_down_again_and_again() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.select_element(Some(ElementId(24)));
+        app.copy_to_clipboard(false);
+        app.paste_start();
+        assert!(app.tool == crate::Tool::Paste, "{}", app.message);
+        let (before, at) = (walls(&app), Pos2::new(500.0, 350.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at + Vec2::new(30.0, 0.0))]);
+        assert_eq!(walls(&app), before, "moving the pointer pastes nothing");
+        click(&ctx, screen, &mut app, at);
+        assert_eq!(walls(&app), before + 1, "{}", app.message);
+        let first = app.selected_id().unwrap();
+        // the centre of the wall went to the pointer: the pasted wall is as long as the first and elsewhere
+        let (a, b) = (wall_line(&app, first), wall_line(&app, ElementId(24)));
+        assert!(((a.0[0] - a.1[0]).hypot(a.0[1] - a.1[1]) - (b.0[0] - b.1[0]).hypot(b.0[1] - b.1[1])).abs() < 1e-9 && a != b);
+        assert!(app.tool == crate::Tool::Paste, "the tool stays on");
+        click(&ctx, screen, &mut app, at + Vec2::new(0.0, 60.0));
+        assert_eq!(walls(&app), before + 2);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        // a pinned element is drawn with its pushpin and the frame still draws
+        app.select_element(Some(ElementId(20)));
+        app.pin_selected(true);
+        frame(&ctx, screen, &mut app, vec![]);
+        assert_eq!(app.pin_marks(ElementId(10)).len(), 1);
+        assert!(app.pin_marks(ElementId(11)).is_empty(), "the pin belongs to its level");
     }
 
     #[test]

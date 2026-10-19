@@ -76,6 +76,7 @@ impl Document {
         if let Some(t) = all.iter().find(|i| self.get(**i).is_some_and(|e| e.category == Category::Type)) {
             return Err(format!("element {} is a type: delete it from the Types dialog", t.0));
         }
+        if let Some(p) = all.iter().find_map(|i| self.get(*i).filter(|e| e.pinned)) { return Err(format!("{} is pinned: unpin it first", p.name)); }
         // tags first: deleting their host would take them anyway
         let is_tag = |i: &ElementId| self.get(*i).is_some_and(|e| matches!(e.geometry, Some(Geometry::Tag { .. } | Geometry::ViewTag { .. } | Geometry::ViewDimension { .. })));
         let (tags, rest): (Vec<_>, Vec<_>) = all.into_iter().partition(is_tag);
@@ -83,7 +84,7 @@ impl Document {
     }
 
     /// The element as it is after `xf`; an error says why it cannot be.
-    fn transformed(&self, e: &Element, xf: Xf) -> Result<Element, String> {
+    pub(crate) fn transformed(&self, e: &Element, xf: Xf) -> Result<Element, String> {
         let mut e = e.clone();
         let p = |q: P| xf.point(q);
         match e.geometry {
@@ -135,6 +136,7 @@ impl Document {
         for id in all {
             let e = self.get(id).ok_or("an element is gone")?;
             if matches!(e.category, Category::Level | Category::Type) { return Err(format!("{} cannot be moved in the plan", e.name)); }
+            if !for_copy && e.pinned { return Err(format!("{} is pinned: unpin it first", e.name)); }
             // a duct or pipe joined to fittings would leave them behind
             if !for_copy && matches!(e.category, Category::Duct | Category::Pipe) && self.run_is_joined(id) {
                 return Err(format!("{} is joined to fittings or equipment; moving a joined network is not supported yet", e.name));
@@ -166,6 +168,7 @@ impl Document {
     pub fn wall_end_commands(&self, id: ElementId, at_start: bool, to: P) -> Result<Vec<Command>, String> {
         let wall = self.get(id).filter(|e| matches!(e.category, Category::Wall | Category::Section)).ok_or("not a wall")?;
         let Some(Geometry::Linear { start, end, level }) = wall.geometry else { return Err("not a wall".into()) };
+        if wall.pinned { return Err(format!("{} is pinned: unpin it first", wall.name)); }
         let old = if at_start { start } else { end };
         if (to[0] - old[0]).hypot(to[1] - old[1]) < 1e-9 { return Err("nothing changes".into()); }
         if wall.category == Category::Section {
@@ -178,6 +181,7 @@ impl Document {
         let mut ops = Vec::new();
         for e in self.elements().filter(|e| e.category == Category::Wall) {
             let Some(Geometry::Linear { start: s, end: t, level: l }) = e.geometry else { continue };
+            if e.id != id && e.pinned && l == level && (close(s) || close(t)) { return Err(format!("{} is pinned and joined here: unpin it first", e.name)); }
             let (ns, nt) = if e.id == id { if at_start { (to, t) } else { (s, to) } }
                 else if l == level { (if close(s) { to } else { s }, if close(t) { to } else { t }) } else { continue };
             if (ns, nt) != (s, t) {
@@ -202,6 +206,7 @@ impl Document {
     /// at the corner of their lines.
     pub fn trim_corner_commands(&self, a: ElementId, pick_a: P, b: ElementId, pick_b: P) -> Result<Vec<Command>, String> {
         if a == b { return Err("pick two different elements".into()); }
+        if let Some(p) = [a, b].iter().find_map(|i| self.get(*i).filter(|e| e.pinned)) { return Err(format!("{} is pinned: unpin it first", p.name)); }
         let (la, lb) = (self.line_of(a).filter(|_| self.get(a).is_some_and(|e| e.category != Category::Grid)).ok_or("trim: pick walls or beams")?,
             self.line_of(b).filter(|_| self.get(b).is_some_and(|e| e.category != Category::Grid)).ok_or("trim: pick walls or beams")?);
         let v = super::line_meet(la.0, [la.1[0] - la.0[0], la.1[1] - la.0[1]], lb.0, [lb.1[0] - lb.0[0], lb.1[1] - lb.0[1]]).ok_or("the two lines are parallel and never meet")?;
@@ -316,6 +321,7 @@ impl Document {
         let mut ops = Vec::new();
         for mut e in copies {
             e.id = map[&e.id];
+            e.pinned = false;
             e.parent = e.parent.map(re);
             e.geometry = e.geometry.map(|g| match g {
                 Geometry::InWall { host, along_m } => Geometry::InWall { host: re(host), along_m },

@@ -13,6 +13,7 @@ mod view_notes;
 mod model_edit;
 mod type_editor;
 mod wall_shapes;
+mod modify_tools;
 mod export;
 mod import;
 mod file;
@@ -41,8 +42,8 @@ enum View {
     Marked(u64, u8),
     /// the plan of a level added with the Level tool
     Level(u64) }
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool { Select, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TempDim { Length(ElementId), Distance(ElementId, ElementId) }
@@ -108,6 +109,8 @@ struct Desktop {
     measured: Option<([f64; 2], [f64; 2])>,
     /// Align, Trim/Extend and Offset: the element picked first (and where), and the offset distance and whether it copies
     edit_ref: Option<(ElementId, [f64; 2])>,
+    /// What Copy or Cut put on the clipboard (Ctrl+C, Ctrl+X), pasted with Ctrl+V.
+    clipboard: Option<openbim_document::Clipboard>,
     offset_mm: f64,
     offset_copy: bool,
     /// the element the points picked so far are about: a Copy goes on making copies of it
@@ -258,7 +261,7 @@ impl Desktop {
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
-            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_sides: 6, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, temp_edit: None, temp_text: String::new(), temp_labels: Vec::new(), measured: None, edit_ref: None, offset_mm: 1000.0, offset_copy: false, edit_src: Vec::new(), multi: Vec::new(), marquee: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
+            axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_sides: 6, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, temp_edit: None, temp_text: String::new(), temp_labels: Vec::new(), measured: None, edit_ref: None, clipboard: None, offset_mm: 1000.0, offset_copy: false, edit_src: Vec::new(), multi: Vec::new(), marquee: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, stair_shape: openbim_document::StairShape::Straight, stair_railing: openbim_document::RailingSides::Both, opening_host: None, opening_cands: Vec::new(), shaft_base_mm: 0.0, shaft_top: None, shaft_top_mm: 0.0, opening_sill_mm: 900.0, opening_head_mm: 2100.0, opening_from: None, view_corner: None, view_drag: None, view_edit: None, section_xf: None, elev_marks: None, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
@@ -294,6 +297,8 @@ impl Desktop {
         self.run_sizes.clear();
         self.message = match tool {
             Tool::Select => "Select a sample element. Tab cycles; Esc cancels.".into(),
+            Tool::Paste => "Paste: move the pointer and click to put the elements down (Esc ends).".into(),
+            Tool::MatchType => "Match Type Properties: click the element whose type to copy, then the elements that should get it (Esc ends).".into(),
             Tool::Duct => { self.fit_run_system(); "Duct: click the points of the run in a plan view; elbows and reducers are placed for you. Enter or Finish places it (Backspace takes a point back, Esc ends).".into() }
             Tool::Pipe => { self.fit_run_system(); "Pipe: click the points of the run in a plan view; elbows and reducers are placed for you. Enter or Finish places it (Backspace takes a point back, Esc ends).".into() }
             Tool::EndPoint => "End point: click an open end of a duct or pipe to mark the source (pump, fan) or a terminal (coil, diffuser, fixture, sprinkler) and what it takes. Esc ends.".into(),
@@ -397,6 +402,15 @@ impl Desktop {
             "trim" => self.choose_tool(Tool::Trim),
             "offset" => self.choose_tool(Tool::Offset),
             "copy" => self.choose_tool(Tool::Copy),
+            "copy_clipboard" => self.copy_to_clipboard(false),
+            "cut" => self.copy_to_clipboard(true),
+            "paste" => self.paste_start(),
+            "paste_same_place" => self.paste_same_place(),
+            "match_type" => self.choose_tool(Tool::MatchType),
+            "pin" => self.pin_selected(true),
+            "unpin" => self.pin_selected(false),
+            "select_instances" => self.select_all_instances(false),
+            "create_similar" => self.create_similar(),
             "rotate" => self.choose_tool(Tool::Rotate),
             "mirror" => self.choose_tool(Tool::Mirror),
             "delete" => self.delete_selected(),
@@ -433,6 +447,7 @@ impl Desktop {
             "save_as" => self.save_file(true),
             "project_parameters" => self.types_dialog = Some(model_edit::TypesDialog::default()),
             "undo" => self.undo_document(),
+            "redo" => self.redo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
             "zoom_out" => self.zoom = (self.zoom / 1.25).max(0.3),
             _ => self.message = format!("{label} is not implemented in this UI prototype"),
@@ -469,7 +484,7 @@ impl Desktop {
                         for cmd in group.commands {
                             let roofing = self.tool == Tool::Slab && matches!(self.slab_kind_pick, openbim_document::SlabKind::Roof | openbim_document::SlabKind::Ceiling);
                             let active = (cmd.id == "roof" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Roof) || (cmd.id == "ceiling" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Ceiling) || (!matches!(cmd.id, "roof" | "ceiling") && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
-                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("railing", Tool::Railing) | ("section", Tool::Section) | ("elevation", Tool::Elevation) | ("shaft", Tool::Shaft) | ("opening_vertical", Tool::VerticalOpening) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
+                                ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("railing", Tool::Railing) | ("section", Tool::Section) | ("elevation", Tool::Elevation) | ("shaft", Tool::Shaft) | ("opening_vertical", Tool::VerticalOpening) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("paste", Tool::Paste) | ("match_type", Tool::MatchType) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
                             if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }
@@ -487,6 +502,14 @@ impl Desktop {
 }
 
 impl Desktop {
+    fn redo_document(&mut self) {
+        match self.document.redo() {
+            Ok(true) => { self.sync_duct_controls(); self.message = "Redid the transaction".into(); },
+            Ok(false) => self.message = "Nothing to redo".into(),
+            Err(err) => self.message = format!("Redo rejected: {err:?}"),
+        }
+    }
+
     fn undo_document(&mut self) {
         match self.document.undo() {
             Ok(true) => { self.sync_duct_controls(); self.message = "Undid last document transaction".into(); },
@@ -508,7 +531,11 @@ impl eframe::App for Desktop {
                 self.select_element(Some(ids[next]));
             }
         }
-        if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
+        self.clipboard_events(&ctx);
+        // Ctrl+Y (also Ctrl+Shift+Z) redoes, Ctrl+Z undoes, as in Revit
+        let redo = !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.command && (i.key_pressed(egui::Key::Y) || (i.modifiers.shift && i.key_pressed(egui::Key::Z))));
+        if redo { self.redo_document(); }
+        else if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
             self.undo_document();
         }
         egui::Panel::top("header").show(ui, |ui| {

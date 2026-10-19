@@ -119,10 +119,10 @@ pub fn element_record(e: &Element) -> String {
     let ly: Vec<String> = e.layers.iter().map(|l| format!("{}:{:?}:{}:{}", esc(&l.material), l.thickness_m, l.function.code(), if l.wraps { 'T' } else { 'F' })).collect();
     let lc = e.core.map_or(String::new(), |(a, b)| format!("{a},{b}"));
     format!(
-        "E|id={}|cat={cat}|name={}|w={:?}|h={:?}|el={:?}|sl={}|geo={}|sec={section}|use={usage}|mat={}|out={}|sk={}|se={}|je={}{}|sp={:?}|an={:?}|par={}|cnt={}|fam={}|tn={}|ov={}|tx={}|tid={}|tf={tf}|ly={}|lc={lc}",
+        "E|id={}|cat={cat}|name={}|w={:?}|h={:?}|el={:?}|sl={}|geo={}|sec={section}|use={usage}|mat={}|out={}|sk={}|se={}|je={}{}|sp={:?}|an={:?}|par={}|cnt={}|fam={}|tn={}|ov={}|tx={}|tid={}|tf={tf}|ly={}|lc={lc}|pn={}",
         e.id.0, esc(&e.name), e.width_m, e.height_m, e.elevation_m, e.slope_ratio.map_or(String::new(), |s| format!("{s:?}")), geometry_text(e.geometry),
         e.material.name(), outline.join(";"), e.slab_kind.name(), e.slope_edges.iter().map(|b| if *b { 'T' } else { 'F' }).collect::<String>(), if e.join_ends[0] { 'T' } else { 'F' }, if e.join_ends[1] { 'T' } else { 'F' },
-        e.spacing_m, e.angle_deg, id(e.parent), e.count, esc(&e.family), esc(&e.type_name), ov.join(";"), tx.join(";"), id(e.type_id), ly.join(";"),
+        e.spacing_m, e.angle_deg, id(e.parent), e.count, esc(&e.family), esc(&e.type_name), ov.join(";"), tx.join(";"), id(e.type_id), ly.join(";"), if e.pinned { 'T' } else { 'F' },
     )
 }
 
@@ -322,6 +322,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
                 "" => None,
                 s => { let (a, b) = s.split_once(',').ok_or("a core without ','")?; Some((int(a)? as usize, int(b)? as usize)) }
             },
+            pinned: f.get("pn").copied() == Some("T"),
             revision: 0,
         });
     }

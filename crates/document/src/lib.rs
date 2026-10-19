@@ -27,6 +27,8 @@ pub mod native;
 mod rebar;
 mod types;
 mod layers;
+mod modify;
+pub use modify::{plan_points, Clipboard};
 pub use layers::{centre_shift, check as check_layers, core_faces, core_range, thickness as layers_thickness, LayerFunction, LocationLine, WallLayer, MAX_LAYERS};
 pub mod compute;
 pub mod compute_elec;
@@ -336,6 +338,8 @@ pub struct Element {
     /// Whether each end of a beam (start, end) is joined to the column it ends in: a joined end is cut back to the
     /// face of the column. All true for everything but a beam that has had a join disallowed.
     pub join_ends: [bool; 2],
+    /// Pinned in place (Revit's Pin): it cannot be moved, turned, mirrored, trimmed or deleted until it is unpinned.
+    pub pinned: bool,
     /// Beam system: the distance between its beams, and the direction of the beams (degrees from the x axis).
     pub spacing_m: f64,
     pub angle_deg: f64,
@@ -484,6 +488,7 @@ pub enum Command {
     SetRoof { id: ElementId, slope_ratio: f64, edges: Vec<bool> },
     /// Allow or disallow the join of a beam's start and end with the columns they end in.
     SetJoins { id: ElementId, start: bool, end: bool },
+    SetPinned { id: ElementId, pinned: bool },
     /// The spacing and direction of a beam system.
     SetBeamSystem { id: ElementId, spacing_m: f64, angle_deg: f64 },
     /// The beam system a beam belongs to.
@@ -535,6 +540,8 @@ pub struct Document {
     revision: u64,
     /// Undo checkpoints are local, bounded by the hosting application's policy.
     history: Vec<(BTreeMap<ElementId, Element>, Option<Site>, MepData)>,
+    /// What undo took back, newest last; any new transaction empties it, as in Revit.
+    future: Vec<(BTreeMap<ElementId, Element>, Option<Site>, MepData)>,
 }
 
 impl Document {
@@ -1034,7 +1041,8 @@ impl Document {
     pub fn elements(&self) -> impl Iterator<Item = &Element> { self.elements.values() }
     pub fn can_undo(&self) -> bool { !self.history.is_empty() }
     /// Establish a loaded/new sample as the undo baseline, without changing its revision.
-    pub fn clear_undo_history(&mut self) { self.history.clear(); }
+    pub fn clear_undo_history(&mut self) { self.history.clear(); self.future.clear(); }
+    pub fn can_redo(&self) -> bool { !self.future.is_empty() }
 
     /// Apply a batch atomically. A failed batch never updates state or history.
     /// The expected document revision protects against stale UI commands;
@@ -1058,7 +1066,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None, layers: Vec::new(), core: None,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], pinned: false, spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None, layers: Vec::new(), core: None,
                     };
                     // a type is made in steps: what it is a type of is set by the next command
                     if *category != Category::Type && !element.valid() { return Err(EditError::InvalidElement); }
@@ -1130,6 +1138,12 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if !matches!(el.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.parent = *parent;
+                    el.revision = revision;
+                }
+                Command::SetPinned { id, pinned } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category == Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.pinned = *pinned;
                     el.revision = revision;
                 }
                 Command::SetJoins { id, start, end } => {
@@ -1222,6 +1236,7 @@ impl Document {
         let trial_mep = trial_mep.pruned(&trial);
         trial_mep.check(&trial)?;
         self.history.push((std::mem::replace(&mut self.elements, trial), std::mem::replace(&mut self.site, trial_site), std::mem::replace(&mut self.mep, trial_mep)));
+        self.future.clear();
         self.revision = revision;
         Ok(revision)
     }
@@ -1231,9 +1246,22 @@ impl Document {
     pub fn undo(&mut self) -> Result<bool, EditError> {
         if self.history.is_empty() { return Ok(false); }
         let revision = self.revision.checked_add(1).ok_or(EditError::RevisionOverflow)?;
-        (self.elements, self.site, self.mep) = self.history.pop().expect("checked history");
+        let before = self.history.pop().expect("checked history");
+        self.future.push((std::mem::replace(&mut self.elements, before.0), std::mem::replace(&mut self.site, before.1), std::mem::replace(&mut self.mep, before.2)));
         self.revision = revision;
         // Elements restored by undo are changed at the new document revision.
+        for el in self.elements.values_mut() { el.revision = revision; }
+        Ok(true)
+    }
+
+    /// Put back what the last undo took away (Ctrl+Y). False when there is nothing to redo. Like undo it is a
+    /// document change and takes a new revision.
+    pub fn redo(&mut self) -> Result<bool, EditError> {
+        if self.future.is_empty() { return Ok(false); }
+        let revision = self.revision.checked_add(1).ok_or(EditError::RevisionOverflow)?;
+        let after = self.future.pop().expect("checked future");
+        self.history.push((std::mem::replace(&mut self.elements, after.0), std::mem::replace(&mut self.site, after.1), std::mem::replace(&mut self.mep, after.2)));
+        self.revision = revision;
         for el in self.elements.values_mut() { el.revision = revision; }
         Ok(true)
     }
@@ -1268,6 +1296,31 @@ mod tests {
         assert_eq!((d.site(), d.get(ElementId(7)).is_none()), (Some(site), true));
         assert_eq!(d.undo(), Ok(true));
         assert_eq!(d.site(), None);
+    }
+
+    #[test]
+    fn redo_puts_back_what_undo_took_and_a_new_edit_ends_it() {
+        let mut d = Document::new();
+        assert_eq!((d.can_redo(), d.redo()), (false, Ok(false)));
+        d.transact(0, &[create(1)]).unwrap();
+        d.transact(1, &[Command::Resize { id: ElementId(1), width_m: 0.5, height_m: 0.4 }]).unwrap();
+        d.undo().unwrap();
+        d.undo().unwrap();
+        assert!(d.get(ElementId(1)).is_none());
+        assert!(d.can_redo());
+        assert_eq!(d.redo(), Ok(true));
+        assert_eq!(d.get(ElementId(1)).unwrap().width_m, 0.2);
+        assert_eq!(d.redo(), Ok(true));
+        assert_eq!(d.get(ElementId(1)).unwrap().width_m, 0.5);
+        assert_eq!((d.can_redo(), d.revision()), (false, 6), "undo and redo each take a revision");
+        // redone work can be undone again
+        assert_eq!(d.undo(), Ok(true));
+        assert_eq!(d.get(ElementId(1)).unwrap().width_m, 0.2);
+        // a new edit after an undo ends the redo chain
+        assert!(d.can_redo());
+        d.transact(d.revision(), &[create(2)]).unwrap();
+        assert_eq!((d.can_redo(), d.redo()), (false, Ok(false)));
+        assert!(d.get(ElementId(2)).is_some());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# Revit UX parity audit (2026-10-18, updated at commit 8af490b)
+# Revit UX parity audit (2026-10-18, updated 2026-10-19)
 
 Standing rule: every tool mimics Revit's user experience. Verified by automated event tests (simulated mouse and keys) and by reading the code. Not verified side by side with Revit, and not clicked by hand.
 
@@ -20,6 +20,13 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Wall end grips: drag an end, joined walls follow | done; no flip arrow |
 | Temporary dimensions on a selected wall: its length, and the distance to the nearest parallel wall, beam or grid on each side; click a number, type another, Enter: the wall changes in one undo step | done for one selected wall; no dimensions to ends or to perpendicular walls, no "convert to permanent", no witness-line grips |
 | Spacebar on a selected wall flips it (ends swap, doors keep their place) | done |
+| Redo (Ctrl+Y, also Ctrl+Shift+Z; the quick-access button) | done: undo puts what it took on a redo list, any new edit empties it, as in Revit; each takes a revision |
+| Select All Instances (Modify > Select) | done for the same type, in the whole project (Visible in View exists in the document call but has no button yet; no right-click menu) |
+| Cut, Copy, Paste (Ctrl+X, Ctrl+C, Ctrl+V; Modify > Clipboard) | done in plan views: the clipboard keeps the data, so a cut can be pasted; the pasted elements follow the pointer by their centre with an orange ghost and a click puts them down (tool stays on, Esc ends), doors, windows and tags go with their wall, a copy is not pinned, one undo takes a paste back. A door, window or tag alone cannot be copied (select its wall too) |
+| Paste Aligned to Same Place | done: same position, on the level of the open plan view (so it also copies a floor plan to the other level). Aligned to Selected Levels / Selected Views / Current View: missing; paste in elevations, sections and 3D: missing |
+| Match Type Properties (Modify > Clipboard) | done for elements that have a type (walls, ducts, pipes, ...) and for family instances of one family: click the source, then each target; stays on, Esc ends. Plan views only; an element with no type cannot be a source (make a type first) |
+| Pin / Unpin (PN, UP; Properties "Pinned") | done: a pinned element cannot be moved, rotated, mirrored, trimmed, dragged by a wall end, aligned or deleted (nor can a wall joined to a pinned wall end be dragged); a pushpin is drawn on it in the plan; saved with the model. Revit's exact rule for deleting a pinned element was not checked (here it is refused). The PN and UP shortcuts are not bound |
+| Create Similar (Modify > Create) | done for walls (type), ducts and pipes (size, elevation, system), components, columns, beams, beam systems, trusses, footings, slabs/roofs/ceilings (kind), railings, stairs, rooms, grids, rebar, levels: it chooses the tool that made the element with its type and sizes; the other values of the tool are the tool's own defaults |
 | Joined duct or pipe run | refuses to move, with a message |
 | Trim/Extend to Corner: two walls or beams, each picked on the part to keep | done; no Trim to single boundary, no multiple trim |
 | Align: reference then element; reference stays until Esc | done for walls, beams, grids on their lines (axis to axis, not face to face); no Multiple Alignment, no lock |
@@ -166,10 +173,10 @@ Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". 
 | By Face (perpendicular to the face of a sloping roof), Dormer, openings in curved walls, arc / polygon / circle sketch of a shaft, shaft symbol options, a slab split in two by a shaft (only the larger piece is drawn in 3D; the file is right) | missing |
 
 ## Books review (2026-10-19)
-The Revit MEP 2024 and Architecture 2026 books were read against the app: `docs/revit-book-review.md` (project doc `claude/revit-book-review.md`). It adds the rows this audit lacked for the Duct/Pipe placement tab (toggles, justification, slope, insulation), systems and Generate Layout, spaces and zones, electrical circuits, schedules, sheets, view range and Visibility/Graphics, other dimension types, and the modify tools not yet built (Redo, Create Similar, Select All Instances, Copy/Paste, Match Type, Pin, Split, Array). The Redo button in the ribbon has nothing behind it.
+The Revit MEP 2024 and Architecture 2026 books were read against the app: `docs/revit-book-review.md` (project doc `claude/revit-book-review.md`). It adds the rows this audit lacked for the Duct/Pipe placement tab (toggles, justification, slope, insulation), systems and Generate Layout, spaces and zones, electrical circuits, schedules, sheets, view range and Visibility/Graphics, other dimension types, and the modify tools not yet built (Redo, Create Similar, Select All Instances, Copy/Paste, Match Type, Pin, Split, Array). Redo and the Create Similar group were built from it (see Select-mode editing).
 
 ## Still missing for every element
-Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level 1 and Level 2 are fixed tabs.
+Split Element, Array, Scale, Group, Selection Filter, Save/Load selection. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level 1 and Level 2 are fixed tabs.
 
 ## Not working at all
 All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cable tray, conduit, lighting, devices, curtain wall, ramp, area, opening by face / vertical / dormer, detail, callout, view templates, link model, clash checks, worksets, phases; dimension types other than Aligned.
@@ -179,6 +186,6 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 2. (Railings, L and U stairs, the railing on a stair, vertical opening, roof cuts, layered wall types and polygon/circle/arc wall modes are done.) Butt/Miter joins and associative dimensions.
 3. True curved walls, Butt/Miter configuration, layer cleanup at wall joins by priority.
 4. Associative dimensions.
-5. From the books review (order in section 6 of `docs/revit-book-review.md`): Redo and the Create Similar group; Duct/Pipe placement tab with slope and Mechanical Settings; insulation; Generate Layout and systems; schedules, sheets and view range; spaces and zones; electrical circuits.
+5. From the books review (order in section 6 of `docs/revit-book-review.md`): (Redo, Select All Instances, Cut/Copy/Paste, Match Type, Pin and Create Similar are done.) Duct/Pipe placement tab with slope and Mechanical Settings; insulation; Generate Layout and systems; schedules, sheets and view range; spaces and zones; electrical circuits.
 
 The 3D view (editing in 3D, the orbit control at the top right, GPU needs) is its own topic: `docs/3d-view-parity-plan.md` (project doc `claude/3d-view-parity-plan.md`). To be cleared at a later stage, on the owner's request of 2026-10-19.
