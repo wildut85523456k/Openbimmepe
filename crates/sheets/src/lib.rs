@@ -16,6 +16,7 @@ pub mod import;
 pub mod model;
 pub mod paper;
 pub mod pdf;
+pub mod profile;
 pub mod render;
 pub mod titleblock;
 pub mod visibility;

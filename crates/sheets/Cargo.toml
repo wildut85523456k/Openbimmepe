@@ -9,6 +9,8 @@ publish = false
 [dependencies]
 # Pinned upstream fix uses quick-xml >=0.41 and zip >=9; replace with a release when available.
 calamine = { git = "https://github.com/tafia/calamine.git", rev = "39ebf5d851543e4f3dc5964baeadd383eb17a3ae" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 proptest = "1"
