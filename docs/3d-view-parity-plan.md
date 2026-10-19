@@ -74,7 +74,7 @@ What Revit does that needs more than this (K): ray-traced Realistic (cloud or lo
 1. **Navigation, no GPU change** (section 3): draggable cube, compass, Home, arrows, Navigation Bar with zoom tools, orthographic camera. Then Steering Wheels (rewind history, orbit, pan, zoom, look, walk) after the eye-height camera exists. About the size of one earlier audit item for the first part.
 2. **Selection in 3D**: window / crossing, Tab cycling, Select All Instances; Hide / Isolate (temporary) and Reveal.
 3. **Work plane** (levels, faces, reference planes) and **Move / Rotate / Copy / Mirror / Align** from picks on it. Then **drawing in 3D** (Wall, Beam, Column, Duct, Pipe).
-4. **Performance, needs real hardware to measure**: incremental batch update per element, BVH for picking, instancing for families, frustum culling, MSAA, blend for transparency, thicker lines. Do this once a model of realistic size and a reference laptop are chosen.
+4. **Performance, needs real hardware to measure.** First: ask the card for its own buffer limit and split the model in several buffers (today more than about 2.2 million triangles stops the program), then the notice of section 6. Then: incremental batch update per element, BVH for picking, instancing for families, frustum culling, MSAA, blend for transparency, thicker lines. Do this once a model of realistic size and a reference laptop are chosen.
 5. **View properties** (Visibility/Graphics, detail level, crop region, view templates), shared with plans, elevations and sections.
 
 ## 6. Decisions (owner, 2026-10-19)
@@ -107,9 +107,24 @@ The owner's rule: Revit's Windows conditions (Windows 11, DirectX 11) apply on W
 | **NVIDIA laptops and desktops of 2023 (GTX 1650, RTX 3050 4 GB, RTX 4050 6 GB)** | 16 GB common | Their own 4 to 6 GB | Vulkan with NVIDIA's own driver (K) | **Yes, but a 4 GB card is exactly at the floor**: nothing is left over for a big model (see below) |
 | Machine with 8 GB of memory, a virtual machine, a remote desktop, or Linux with no Vulkan driver | | | Software Vulkan only (this container runs the tests on one such driver, `lvp`) | **No.** Works, but far too slow to be called interactive |
 
-**Why 4 GB of graphics memory is tight for a large model (from the code, not measured).** The 3D view stores every triangle as three separate corners of 40 bytes each, **120 bytes per triangle**, with no shared corners. A model of 10 million triangles is therefore about 1.2 GB; a copy for the selection and the line buffers add to it, and so does the colour and depth buffer. On a 4 GB card the practical limit is around **15 to 20 million triangles** before step 4 (instancing, shared corners, culling) is done; a heavy MEP project may reach that. The first measurement with the owner's IFC will give the actual count.
+**Why the size of the model is limited by the equipment (from the code; the buffer limit below was reproduced by a test, the memory figures are arithmetic).** The 3D view stores every triangle as three separate corners of 40 bytes each, **120 bytes per triangle**, with no shared corners. Two limits follow:
+
+1. **Graphics memory.** 10 million triangles are about 1.2 GB, plus the selection copy, the line buffer, the shadow map and the colour and depth buffers. On a 4 GB card the practical limit is around 15 to 20 million triangles; a 6 or 8 GB card roughly doubles it. A heavy MEP project may reach this.
+2. **A single buffer limit, found on 2026-10-19, that is reached first.** The app asks the graphics driver for wgpu's default limits, whose largest single buffer is **256 MiB**, and the whole model is uploaded as **one** buffer. A test on this container's software Vulkan device (same default limits) uploaded 2.0 million triangles (240 MB) without a problem and **failed with a panic at 2.3 million triangles**. So today the 3D view cannot show more than about **2.2 million triangles whatever the card**, and a larger model stops the program instead of showing a warning. Real cards allow far larger buffers (the app can ask for the card's own limit), and the buffer can be split in pieces; both are part of step 4, and the first of its jobs.
 
 Wgpu's published floor is not stated on its own pages. The WebGPU project's requirement page, which describes the same API family, lists Vulkan 1.1 on Linux, Direct3D 12 feature level 11_1 (or 11_0 with resource binding tier 2) on Windows, and all Apple-silicon Macs on macOS. Used here as a guide, not as a guarantee for this program.
+
+### Model size against equipment: a notice for users (owner, 2026-10-19)
+
+Decision: a large project needs a graphics card with 6 or 8 GB of memory, and this is a **physical limit of the user's equipment** that the app tells its users plainly, not a defect hidden behind a crash.
+
+Proposed behaviour, to build with step 4:
+- **Before opening a model** (and when the model grows): count the triangles of the 3D batch, estimate the graphics memory needed (120 bytes per triangle now; the figure changes when the corners are shared), and compare it with the card.
+- **Notice in plain words** when it will not fit comfortably, for example "This model needs about 3.1 GB of graphics memory; this computer has 4 GB. The 3D view may be slow or unavailable. Plans, sections and schedules are not affected", with the choices: open in plans only, show a simplified 3D (boxes for families, hide categories), or continue.
+- **The 3D view never stops the program** because of size: an upload that is too large is refused with the notice above.
+- **A "Model and equipment" line** in the status bar or an About box shows triangles, estimated graphics memory, the card's name and the graphics API in use, so users and support can see the same numbers.
+- **Not yet solved: reading the card's memory.** wgpu's adapter information gives the name and API but **not** the amount of graphics memory. Per platform it would come from: DXGI on Windows, Metal's recommended working-set size on macOS, and the Vulkan memory-heap sizes on Linux (all reachable, none through wgpu's public interface; some need unsafe code, which the viewport crate forbids, so a small separate crate would hold it). Until then the notice uses a setting the user can change ("graphics memory: auto / 4 / 6 / 8 / 12 / 16 GB") and the default of Revit's entry class.
+- **Where this sits relative to Revit:** Revit does not warn in this way; it slows down. This is an addition, agreed with the owner.
 
 ### Navigation Bar and Steering Wheels
 
