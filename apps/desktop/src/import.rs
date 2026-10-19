@@ -616,11 +616,15 @@ mod tests {
         d.place_beam_system(ElementId(11), &BeamSystemSpec { outline: vec![[0.5, 0.5], [7.5, 0.5], [7.5, 5.5], [0.5, 5.5]], spacing_m: 1.5, angle_deg: 0.0, width_m: 0.15, depth_m: 0.3, elevation_m: -0.2, section: Section::Rectangle, usage: Usage::Joist, material: Material::Timber }).unwrap();
         d.place_truss(ElementId(11), &TrussSpec { start: [1.0, 5.8], end: [7.0, 5.8], spacing_m: 1.5, depth_m: 1.0, member_m: 0.1, elevation_m: 0.1, material: Material::Steel }).unwrap();
         let door = FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("rise".into(), 0.0)], angle_deg: 0.0, elevation_m: 0.0 };
-        d.place_roof(ElementId(11), &openbim_document::RoofSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true, false, true, false], material: Material::Timber }).unwrap();
+        let roof = d.place_roof(ElementId(11), &openbim_document::RoofSpec { outline: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true, false, true, false], material: Material::Timber }).unwrap();
         d.place_stair(ElementId(10), &openbim_document::StairSpec { start: [1.0, 1.0], toward: [1.0, 9.0], width_m: 1.0, rise_m: 3.0, risers: 18, tread_m: 0.28, base_offset_m: 0.0 }).unwrap();
         d.place_railing(ElementId(10), &openbim_document::RailingSpec::new(vec![[1.5, 1.0], [1.5, 5.0], [2.5, 5.0]])).unwrap();
         d.place_stair_with_railing(ElementId(10), &openbim_document::StairSpec { start: [5.0, 1.0], toward: [5.0, 9.0], width_m: 1.0, rise_m: 3.0, risers: 17, tread_m: 0.28, base_offset_m: 0.0 }, openbim_document::StairShape::U { left: false }, openbim_document::RailingSides::Both).unwrap();
         d.place_wall_opening(ElementId(22), 5.0, 6.0, 0.5, 2.0).unwrap();
+        // vertical openings: one in the roof (cut in its shape) and one in a floor (a void of the slab)
+        d.place_vertical_opening(roof, &[[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]).unwrap();
+        let floor = d.elements().find(|e| e.category == Category::Slab && !e.is_roof() && e.slab_kind == openbim_document::SlabKind::Floor).expect("the model has a floor").id;
+        d.place_vertical_opening(floor, &[[0.5, 4.5], [1.5, 4.5], [1.5, 5.5], [0.5, 5.5]]).unwrap();
         d.place_shaft(ElementId(10), &openbim_document::ShaftSpec { outline: vec![[6.5, 0.5], [7.1, 0.5], [7.1, 1.1], [6.5, 1.1]], top: ElementId(11), base_offset_m: 0.0, top_offset_m: 0.0 }).unwrap();
         d.place_ceiling(ElementId(10), vec![[0.2, 0.2], [3.8, 0.2], [3.8, 5.8], [0.2, 5.8]], 2.7, 0.02, Material::Unspecified).unwrap();
         d.place_family_in_wall(ElementId(20), 3.0, &FamilySpec { overrides: vec![], ..door.clone() }).unwrap();
@@ -740,7 +744,9 @@ mod tests {
             assert!(out.text.matches("IFCFACETEDBREP(").count() >= 36, "{schema:?}: the parts of the railing");
             // the shaft voids the floor above it; the wall opening voids its wall; the door and the window void theirs
             assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Shaft Opening 1")).count(), 1, "{schema:?}: the shaft is an opening of the floor");
-            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 4, "{schema:?}: door, window, wall opening and shaft");
+            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 5, "{schema:?}: door, window, wall opening, shaft and the vertical opening in the floor");
+            // the one in the roof is cut in the roof's shape, not a void of its own
+            assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Vertical Opening")).count(), 1, "{schema:?}");
             assert!(out.text.contains("Pset_StairCommon") && out.text.contains(".STRAIGHT_RUN_STAIR."), "{schema:?}");
             assert_eq!(out.text.matches("IFCROOF(").count(), 1, "{schema:?}");
             assert!(out.text.contains(".GABLE_ROOF.") && out.text.contains("IFCFACETEDBREP"), "{schema:?}: the roof is a gable solid");

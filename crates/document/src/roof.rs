@@ -26,7 +26,7 @@ pub struct RoofSpec {
     pub material: Material,
 }
 
-fn cross(o: P, a: P, b: P) -> f64 { (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]) }
+pub(crate) fn cross(o: P, a: P, b: P) -> f64 { (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]) }
 
 /// Whether the polygon never turns the other way.
 pub fn is_convex(r: &[P]) -> bool {
@@ -143,6 +143,82 @@ pub fn mesh(outline: &[P], edges: &[bool], slope: f64, z0: f64, thickness: f64) 
         }
     }
     Some(Mesh { vertices, faces: out })
+}
+
+/// How far from the segment `p`-`q` the point `a` is.
+fn seg_dist(a: P, p: P, q: P) -> f64 {
+    let d = [q[0] - p[0], q[1] - p[1]];
+    let l2 = d[0] * d[0] + d[1] * d[1];
+    let t = if l2 > 0.0 { (((a[0] - p[0]) * d[0] + (a[1] - p[1]) * d[1]) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    (p[0] + d[0] * t - a[0]).hypot(p[1] + d[1] * t - a[1])
+}
+
+/// Whether the segment `a`-`b` lies along one edge of any of the rings.
+fn along_a_ring(a: P, b: P, rings: &[&[P]]) -> bool {
+    rings.iter().any(|r| (0..r.len()).any(|k| { let (p, q) = (r[k], r[(k + 1) % r.len()]); seg_dist(a, p, q) < 1e-7 && seg_dist(b, p, q) < 1e-7 }))
+}
+
+/// The same solid with vertical holes cut through it where `holes` (outlines in plan) lie: each top face is cut in plan
+/// and keeps its slope, and a wall goes down every edge that is on the footprint or on a hole.
+pub fn mesh_cut(outline: &[P], edges: &[bool], slope: f64, z0: f64, thickness: f64, holes: &[Vec<P>]) -> Option<Mesh> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    if holes.is_empty() { return mesh(outline, edges, slope, z0, thickness); }
+    let faces = top_faces(outline, edges, slope, z0)?;
+    let (ring, _) = ccw(outline, edges);
+    let drop = thickness * (1.0 + slope * slope).sqrt();
+    let walls_on: Vec<&[P]> = std::iter::once(ring.as_slice()).chain(holes.iter().map(|h| h.as_slice())).collect();
+    let area = |r: &[P]| (0..r.len()).map(|i| { let (a, b) = (r[i], r[(i + 1) % r.len()]); a[0] * b[1] - b[0] * a[1] }).sum::<f64>() / 2.0;
+    let (mut vertices, mut out): (Vec<[f64; 3]>, Vec<Vec<usize>>) = (Vec::new(), Vec::new());
+    for f in &faces {
+        // the plane of the face: z = a x + b y + c, from the three points that span the most
+        let mut best = (0.0, [0, 1, 2]);
+        for i in 0..f.len() { for j in i + 1..f.len() { for k in j + 1..f.len() {
+            let c = cross([f[i][0], f[i][1]], [f[j][0], f[j][1]], [f[k][0], f[k][1]]).abs();
+            if c > best.0 { best = (c, [i, j, k]); }
+        } } }
+        if best.0 < 1e-12 { continue; }
+        let [p, q, r] = best.1.map(|i| f[i]);
+        let det = (q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1]);
+        let a = ((q[2] - p[2]) * (r[1] - p[1]) - (r[2] - p[2]) * (q[1] - p[1])) / det;
+        let b = ((r[2] - p[2]) * (q[0] - p[0]) - (q[2] - p[2]) * (r[0] - p[0])) / det;
+        let z_at = |x: f64, y: f64| p[2] + a * (x - p[0]) + b * (y - p[1]);
+        let plan: Vec<P> = f.iter().map(|v| [v[0], v[1]]).collect();
+        for shape in plan.overlay(&holes.to_vec(), OverlayRule::Difference, FillRule::NonZero) {
+            if shape.is_empty() || shape[0].len() < 3 { continue; }
+            let rings: Vec<Vec<P>> = shape.iter().enumerate().map(|(i, r)| {
+                let mut r = r.clone();
+                if (area(&r) > 0.0) != (i == 0) { r.reverse(); }
+                r
+            }).collect();
+            let pts: Vec<P> = rings.iter().flatten().copied().collect();
+            let mut starts = Vec::new();
+            let mut n = rings[0].len();
+            for h in &rings[1..] { starts.push(n); n += h.len(); }
+            let flat: Vec<f64> = pts.iter().flat_map(|v| [v[0], v[1]]).collect();
+            let Ok(idx) = earcutr::earcut(&flat, &starts, 2) else { continue };
+            if idx.len() % 3 != 0 { continue; }
+            let (top, bot) = (vertices.len(), vertices.len() + pts.len());
+            vertices.extend(pts.iter().map(|v| [v[0], v[1], z_at(v[0], v[1])]));
+            vertices.extend(pts.iter().map(|v| [v[0], v[1], z_at(v[0], v[1]) - drop]));
+            for t in idx.chunks(3) {
+                let up = cross(pts[t[0]], pts[t[1]], pts[t[2]]) > 0.0;
+                let (b2, c2) = if up { (t[1], t[2]) } else { (t[2], t[1]) };
+                out.push(vec![top + t[0], top + b2, top + c2]);
+                out.push(vec![bot + t[0], bot + c2, bot + b2]);
+            }
+            let mut start = 0;
+            for rg in &rings {
+                for k in 0..rg.len() {
+                    let j = (k + 1) % rg.len();
+                    if along_a_ring(rg[k], rg[j], &walls_on) { out.push(vec![bot + start + k, bot + start + j, top + start + j, top + start + k]); }
+                }
+                start += rg.len();
+            }
+        }
+    }
+    (!out.is_empty()).then_some(Mesh { vertices, faces: out })
 }
 
 /// What a roof measures, from its shape.

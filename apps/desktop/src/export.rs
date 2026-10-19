@@ -133,7 +133,9 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             (Category::Slab, Some(Geometry::Area { level })) if el.is_roof() => {
                 let z0 = level_of(level).ok_or("a roof lies on a level that is gone")? + el.elevation_m;
                 let slope = el.slope_ratio.unwrap_or(0.0);
-                let mesh = openbim_document::roof_mesh(&el.outline, &el.slope_edges, slope, z0, el.height_m).ok_or_else(|| format!("roof {} has no shape (a footprint with reflex corners needs every edge to slope)", el.name))?;
+                // shafts and vertical openings cut it straight through; the cut is in its shape
+                let cut = if doc.cuts_of(el.id).is_empty() { openbim_document::roof_mesh(&el.outline, &el.slope_edges, slope, z0, el.height_m) } else { doc.mesh(el.id) };
+                let mesh = cut.ok_or_else(|| format!("roof {} has no shape (a footprint with reflex corners needs every edge to slope)", el.name))?;
                 let sloping = el.slope_edges.iter().filter(|b| **b).count();
                 let shape = if sloping == 0 || slope == 0.0 { "FLAT_ROOF" } else { match sloping { 1 => "SHED_ROOF", 2 => "GABLE_ROOF", _ => "HIP_ROOF" } };
                 roofs.push(openbim_ifc::RoofItem { id: el.id.0, name: el.name.clone(), eaves_z: z0, verts: mesh.vertices, faces: mesh.faces, shape });
@@ -254,7 +256,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     for (si, item) in slabs.iter_mut().enumerate() {
         let id = openbim_document::ElementId(item.id);
         if doc.get(id).is_none_or(|e| e.category != Category::Slab) { continue; }
-        if doc.shafts_through(id).is_empty() { continue; }
+        if doc.cuts_of(id).is_empty() { continue; }
         if for_view {
             let Some(shape) = doc.cut_shapes(id).into_iter().next() else { continue };
             item.slab.outline = shape.outline;

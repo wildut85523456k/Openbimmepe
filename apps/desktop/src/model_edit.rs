@@ -399,7 +399,42 @@ impl Desktop {
         if closing && self.slab_points.len() >= 3 { return self.finish_slab(level); }
         if self.slab_points.last() == Some(&at) { return; }
         self.slab_points.push(at);
-        self.message = if self.tool == crate::Tool::Railing { format!("Railing: {} points; Enter finishes the path", self.slab_points.len()) } else { format!("Slab: {} corners; Enter closes the outline", self.slab_points.len()) };
+        self.message = if self.tool == crate::Tool::VerticalOpening { format!("Vertical Opening: {} corners; Enter closes the outline", self.slab_points.len()) } else if self.tool == crate::Tool::Railing { format!("Railing: {} points; Enter finishes the path", self.slab_points.len()) } else { format!("Slab: {} corners; Enter closes the outline", self.slab_points.len()) };
+    }
+
+    /// The floors, roofs and ceilings on `level` that lie under the plan point `at`, the likeliest first: floors, then
+    /// roofs, then ceilings.
+    pub(crate) fn hosts_at(&self, level: ElementId, at: [f64; 2]) -> Vec<ElementId> {
+        let rank = |e: &openbim_document::Element| if e.is_roof() { 1 } else if e.slab_kind == openbim_document::SlabKind::Ceiling { 2 } else { 0 };
+        let mut hits: Vec<_> = self.document.elements()
+            .filter(|e| e.category == Category::Slab && matches!(e.geometry, Some(Geometry::Area { level: l }) if l == level)
+                && openbim_document::RoomShape { outline: e.outline.clone(), holes: Vec::new() }.contains(at))
+            .map(|e| (rank(e), e.id)).collect();
+        hits.sort();
+        hits.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// A click of the Vertical Opening tool before it has a host: the floor, roof or ceiling under the pointer.
+    pub(crate) fn vertical_host_click(&mut self, level: ElementId, at: [f64; 2]) {
+        self.opening_cands = self.hosts_at(level, at);
+        let Some(first) = self.opening_cands.first().copied() else { self.message = "Vertical Opening: click a floor, roof or ceiling of this level".into(); return };
+        self.opening_host = Some(first);
+        self.message = self.host_message();
+    }
+
+    /// Tab: the next floor, roof or ceiling under the click.
+    pub(crate) fn vertical_host_next(&mut self) {
+        let Some(h) = self.opening_host else { return };
+        if self.opening_cands.len() < 2 { return; }
+        let at = self.opening_cands.iter().position(|c| *c == h).map_or(0, |i| (i + 1) % self.opening_cands.len());
+        self.opening_host = Some(self.opening_cands[at]);
+        self.message = self.host_message();
+    }
+
+    fn host_message(&self) -> String {
+        let name = self.opening_host.and_then(|h| self.document.get(h)).map_or("-".to_string(), |h| h.name.clone());
+        let more = if self.opening_cands.len() > 1 { format!(" ({} under the click: Tab takes the next)", self.opening_cands.len()) } else { String::new() };
+        format!("Vertical Opening in {name}{more}: click the corners of the opening")
     }
 
     /// A click of the Wall Opening tool on `wall`, `along_m` from its start: the first click is one end of the opening, the
@@ -452,6 +487,18 @@ impl Desktop {
                     self.message = format!("Shaft {} placed; it cuts {cut} floor{} and ceilings; undo removes it", id.0, if cut == 1 { "" } else { "s" });
                 }
                 Err(error) => self.message = format!("Shaft rejected ({error:?}): it must go up from its base; Backspace takes a corner back"),
+            }
+            return;
+        }
+        if self.tool == crate::Tool::VerticalOpening {
+            let Some(host) = self.opening_host else { self.message = "Vertical Opening: pick the floor, roof or ceiling first".into(); return };
+            match self.document.place_vertical_opening(host, &self.slab_points) {
+                Ok(id) => {
+                    self.slab_points.clear();
+                    let over = self.document.cuts_of(host).contains(&id);
+                    self.message = format!("Vertical opening {} placed in {}{}; undo removes it", id.0, self.document.get(host).map_or("-", |h| h.name.as_str()), if over { "" } else { " (it is not over the element, so it cuts nothing)" });
+                }
+                Err(error) => self.message = format!("Vertical opening rejected ({error:?}): the outline must be a simple polygon; Backspace takes a corner back"),
             }
             return;
         }

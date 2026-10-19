@@ -210,7 +210,9 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             // a beam made by a beam system points at it; a landing and the second run of a stair point at the first run
             let beam = el.category == Category::Beam && elements.get(&p).is_some_and(|s| matches!(s.category, Category::BeamSystem | Category::Truss));
             let stair = matches!(el.category, Category::Stair | Category::Railing) && p != el.id && elements.get(&p).is_some_and(|s| s.category == Category::Stair && s.parent.is_none());
-            if !(beam || stair) { return Err(EditError::InvalidElement); }
+            // a vertical opening points at the floor, roof or ceiling it is cut in
+            let opening = el.category == Category::Opening && elements.get(&p).is_some_and(|s| s.category == Category::Slab && matches!(s.geometry, Some(Geometry::Area { .. })));
+            if !(beam || stair || opening) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
             None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family),
@@ -288,6 +290,11 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             Some(Geometry::Area { level }) if el.category == Category::Railing => {
                 valid_path(&el.outline) && el.elevation_m.abs() <= 1e6
                     && (el.spacing_m == 0.0 || path_length(&el.outline) / el.spacing_m <= 5000.0)
+                    && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+            }
+            Some(Geometry::Area { level }) if el.category == Category::Opening => {
+                // a vertical opening: an outline in plan, in a host
+                valid_ring(&el.outline) && el.parent.is_some() && el.count == 0
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Area { level }) if el.category == Category::Stair => {
@@ -494,6 +501,8 @@ impl Document {
     pub fn mesh(&self, id: ElementId) -> Option<Mesh> {
         let el = self.get(id)?;
         if el.category == Category::Elevation { return None; }
+        // an opening is a hole in something else, not a body
+        if Self::is_vertical_opening(el) { return None; }
         if let Some(Geometry::Point { at, level, top }) = el.geometry {
             // the section stood on its point from the foot to the top level; the end faces of an I-section are
             // concave polygons, which a plan does not mind (the 3D view meshes columns itself)
@@ -544,7 +553,9 @@ impl Document {
         if let (Some(Geometry::Area { level }), true) = (el.geometry, el.is_roof()) {
             // a roof by footprint: sloped planes from the eaves
             let z0 = self.get(level)?.elevation_m + el.elevation_m;
-            return crate::roof::mesh(&el.outline, &el.slope_edges, el.slope_ratio.unwrap_or(0.0), z0, el.height_m).or_else(|| {
+            // shafts and vertical openings cut it straight through
+            let holes: Vec<Vec<[f64; 2]>> = self.cuts_of(id).iter().filter_map(|c| self.get(*c)).map(|c| c.outline.clone()).collect();
+            return crate::roof::mesh_cut(&el.outline, &el.slope_edges, el.slope_ratio.unwrap_or(0.0), z0, el.height_m, &holes).or_else(|| {
                 // not sloping (or not a shape that can): flat, as a slab
                 crate::roof::mesh(&el.outline, &vec![false; el.outline.len()], 0.0, z0, el.height_m)
             });
@@ -557,7 +568,7 @@ impl Document {
             let top = self.get(level)?.elevation_m + el.elevation_m + if el.slab_kind == crate::SlabKind::Ceiling { el.height_m } else { 0.0 };
             let bottom = top - el.height_m;
             // shafts cut it: the pieces that are left, with their holes
-            if el.category == Category::Slab && !self.shafts_through(id).is_empty() {
+            if el.category == Category::Slab && !self.cuts_of(id).is_empty() {
                 let mut mesh = Mesh { vertices: Vec::new(), faces: Vec::new() };
                 for shape in self.cut_shapes(id) {
                     let m = openbim_family::meshing::prism(&shape.outline, &shape.holes, bottom, top)?;

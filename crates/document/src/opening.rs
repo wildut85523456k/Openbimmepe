@@ -2,7 +2,7 @@
 //! along the wall to another and from a sill height to a head height (`Geometry::InWall`: the middle of the opening
 //! along the wall, `width_m` wide, `height_m` high, its sill `elevation_m` above the base of the wall). A **shaft** is
 //! an outline in plan between a base and a top level (`Geometry::Shaft`) that cuts every floor, foundation slab and
-//! ceiling it passes through. Roofs are not cut yet.
+//! ceiling or roof it passes through. A **vertical opening** (an opening with an outline in plan that points at its host) cuts only the one floor, roof or ceiling it is made in.
 use crate::{Category, Command, Document, EditError, ElementId, Geometry, RoomShape, SlabKind};
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay_rule::OverlayRule;
@@ -61,10 +61,18 @@ impl Document {
         Some((self.get(level)?.elevation_m + base_offset_m, self.get(top)?.elevation_m + top_offset_m))
     }
 
-    /// The heights a floor, foundation slab or ceiling takes: from its underside to its top.
+    /// The heights a floor, foundation slab, ceiling or roof takes: from its underside to its top (for a roof, from the
+    /// lowest underside to the highest top).
     fn slab_range(&self, id: ElementId) -> Option<(f64, f64)> {
-        let e = self.get(id).filter(|e| e.category == Category::Slab && !e.is_roof())?;
+        let e = self.get(id).filter(|e| e.category == Category::Slab)?;
         let Some(Geometry::Area { level }) = e.geometry else { return None };
+        if e.is_roof() {
+            let slope = e.slope_ratio.unwrap_or(0.0);
+            let z0 = self.get(level)?.elevation_m + e.elevation_m;
+            let faces = crate::roof::top_faces(&e.outline, &e.slope_edges, slope, z0)?;
+            let zs = faces.iter().flatten().map(|p| p[2]);
+            return Some((zs.clone().fold(f64::MAX, f64::min) - e.height_m * (1.0 + slope * slope).sqrt(), zs.fold(f64::MIN, f64::max)));
+        }
         let top = self.get(level)?.elevation_m + e.elevation_m + if e.slab_kind == SlabKind::Ceiling { e.height_m } else { 0.0 };
         Some((top - e.height_m, top))
     }
@@ -79,6 +87,36 @@ impl Document {
         }).map(|s| s.id).collect()
     }
 
+    /// A vertical opening: a hole cut straight through the one floor, roof or ceiling `host`, whatever else is at its height.
+    pub fn place_vertical_opening(&mut self, host: ElementId, outline: &[P]) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        let level = match self.get(host) {
+            Some(h) if h.category == Category::Slab => match h.geometry { Some(Geometry::Area { level }) => level, _ => return Err(EditError::InvalidElement) },
+            _ => return Err(EditError::InvalidElement),
+        };
+        let n = self.elements.values().filter(|e| Self::is_vertical_opening(e)).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Opening, name: format!("Vertical Opening {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetOutline { id, outline: outline.to_vec() },
+            Command::SetGeometry { id, geometry: Geometry::Area { level } },
+            Command::SetParent { id, parent: Some(host) },
+        ])?;
+        Ok(id)
+    }
+
+    /// Whether `e` is a vertical opening (an opening with an outline in plan on a level, pointing at its host).
+    pub fn is_vertical_opening(e: &crate::Element) -> bool { e.category == Category::Opening && matches!(e.geometry, Some(Geometry::Area { .. })) }
+
+    /// Everything that cuts the floor, roof or ceiling `id`: the shafts through it and the vertical openings made in it
+    /// that lie over it, in element order.
+    pub fn cuts_of(&self, id: ElementId) -> Vec<ElementId> {
+        let mut cuts = self.shafts_through(id);
+        let outline = self.get(id).map(|e| e.outline.clone()).unwrap_or_default();
+        cuts.extend(self.elements().filter(|o| Self::is_vertical_opening(o) && o.parent == Some(id) && !Self::clip(&outline, &o.outline).is_empty()).map(|o| o.id));
+        cuts.sort();
+        cuts
+    }
+
     /// Where `cutter` lies over `outline`, as rings.
     fn clip(outline: &[P], cutter: &[P]) -> Vec<Vec<P>> {
         let subject: Vec<P> = outline.to_vec();
@@ -90,7 +128,7 @@ impl Document {
     /// For each shaft that cuts the slab `id`, its name and the part of it that lies over the slab.
     pub fn shaft_cuts(&self, id: ElementId) -> Vec<(String, Vec<P>)> {
         let outline = self.get(id).map(|e| e.outline.clone()).unwrap_or_default();
-        self.shafts_through(id).into_iter().flat_map(|s| {
+        self.cuts_of(id).into_iter().flat_map(|s| {
             let e = self.get(s);
             let name = e.map(|e| e.name.clone()).unwrap_or_default();
             let ring = e.map(|e| e.outline.clone()).unwrap_or_default();
@@ -102,7 +140,7 @@ impl Document {
     /// shaft cuts is one piece, its outline.
     pub fn cut_shapes(&self, id: ElementId) -> Vec<RoomShape> {
         let Some(e) = self.get(id) else { return Vec::new() };
-        let shafts = self.shafts_through(id);
+        let shafts = self.cuts_of(id);
         if shafts.is_empty() { return vec![RoomShape { outline: ccw(e.outline.clone()), holes: Vec::new() }]; }
         let subject: Vec<P> = e.outline.clone();
         let clip: Vec<Vec<P>> = shafts.iter().filter_map(|s| self.get(*s)).map(|s| s.outline.clone()).collect();
@@ -215,5 +253,119 @@ mod tests {
         let ops = d.delete_commands(&[w]).unwrap();
         d.transact(d.revision(), &ops).unwrap();
         assert!(d.get(o).is_none());
+    }
+
+    fn volume(m: &crate::Mesh) -> f64 {
+        let mut vol = 0.0;
+        for f in &m.faces {
+            for k in 1..f.len() - 1 {
+                let (a, b, c) = (m.vertices[f[0]], m.vertices[f[k]], m.vertices[f[k + 1]]);
+                vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0;
+            }
+        }
+        vol
+    }
+
+    fn open_edges(m: &crate::Mesh) -> Vec<String> {
+        let key = |p: [f64; 3]| ((p[0] * 1e6).round() as i64, (p[1] * 1e6).round() as i64, (p[2] * 1e6).round() as i64);
+        let mut seen = std::collections::HashMap::new();
+        for f in &m.faces { for k in 0..f.len() { *seen.entry((key(m.vertices[f[k]]), key(m.vertices[f[(k + 1) % f.len()]]))).or_insert(0) += 1; } }
+        seen.iter().filter(|((a, b), n)| **n != 1 || !seen.contains_key(&(*b, *a))).map(|((a, b), n)| format!("{a:?}->{b:?} x{n}")).collect()
+    }
+
+    fn closed(m: &crate::Mesh) -> bool {
+        let key = |p: [f64; 3]| ((p[0] * 1e6).round() as i64, (p[1] * 1e6).round() as i64, (p[2] * 1e6).round() as i64);
+        let mut seen = std::collections::HashMap::new();
+        for f in &m.faces { for k in 0..f.len() { *seen.entry((key(m.vertices[f[k]]), key(m.vertices[f[(k + 1) % f.len()]]))).or_insert(0) += 1; } }
+        seen.iter().all(|((a, b), n)| *n == 1 && seen.contains_key(&(*b, *a)))
+    }
+
+    #[test]
+    fn a_vertical_opening_cuts_the_one_floor_it_is_made_in_and_goes_with_it() {
+        let (mut d, _l0, _l1, f0, f1) = building();
+        let o = d.place_vertical_opening(f1, &square(4.0, 4.0, 2.0)).unwrap();
+        assert_eq!(d.get(o).unwrap().parent, Some(f1));
+        // the floor below, at the same place, is not cut
+        assert_eq!(d.cuts_of(f1), vec![o]);
+        assert!(d.cuts_of(f0).is_empty());
+        let m = d.mesh(f1).unwrap();
+        assert!((volume(&m) - 96.0 * 0.2).abs() < 1e-9, "{}", volume(&m));
+        assert!((volume(&d.mesh(f0).unwrap()) - 100.0 * 0.2).abs() < 1e-9);
+        // the opening is not a body
+        assert!(d.mesh(o).is_none());
+        // the shapes and the voids the exports and views take
+        let shapes = d.cut_shapes(f1);
+        assert_eq!((shapes.len(), shapes[0].holes.len()), (1, 1));
+        assert_eq!(d.shaft_cuts(f1).len(), 1);
+        assert_eq!(d.shaft_cuts(f1)[0].0, "Vertical Opening 1");
+        // an opening over nothing of its host cuts nothing; a host that is not a floor, roof or ceiling is refused
+        let far = d.place_vertical_opening(f1, &square(30.0, 30.0, 1.0)).unwrap();
+        assert_eq!(d.cuts_of(f1), vec![o]);
+        assert!(d.place_vertical_opening(ElementId(1), &square(1.0, 1.0, 1.0)).is_err());
+        assert!(d.place_vertical_opening(f1, &[[0.0, 0.0], [1.0, 1.0]]).is_err());
+        let _ = far;
+        // one undo takes it away; the floor is whole again
+        let mut probe = d.clone();
+        probe.undo().unwrap();
+        probe.undo().unwrap();
+        assert!(probe.get(o).is_none() && (volume(&probe.mesh(f1).unwrap()) - 20.0).abs() < 1e-9);
+        // moved with its floor; saved and read back; copied; deleted with the floor
+        let ops = d.transform_commands(&[f1], crate::Xf::Move([1.0, 0.0])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert_eq!(d.get(o).unwrap().outline[0][0], 5.0);
+        let (els, site) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
+        let mut back = Document::new();
+        back.transact(back.revision(), &crate::native::restore_commands(els, site)).unwrap();
+        assert_eq!(back.cuts_of(f1), vec![o]);
+        let (ops, _) = d.copy_commands(&[f1], crate::Xf::Move([0.0, 20.0])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert_eq!(d.elements().filter(|e| Document::is_vertical_opening(e)).count(), 4);
+        let ops = d.delete_commands(&[f1]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(d.get(o).is_none() && d.get(far).is_none());
+    }
+
+    fn hip_roof(d: &mut Document, level: ElementId) -> ElementId {
+        d.place_roof(level, &crate::RoofSpec { outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]], thickness_m: 0.2, base_offset_m: 0.0, slope_ratio: 0.5, edges: vec![true; 4], material: crate::Material::Timber }).unwrap()
+    }
+
+    #[test]
+    fn a_roof_is_cut_by_a_vertical_opening_and_by_a_shaft_keeping_its_slope_and_staying_closed() {
+        let (mut d, l0, l1, _f0, _f1) = building();
+        let roof = hip_roof(&mut d, l1);
+        let whole = d.mesh(roof).unwrap();
+        let per_m2 = 0.2 * 1.25f64.sqrt();
+        assert!((volume(&whole) - 60.0 * per_m2).abs() < 1e-9 && closed(&whole));
+        // a hole in one plane
+        let o = d.place_vertical_opening(roof, &square(1.0, 1.0, 1.0)).unwrap();
+        let m = d.mesh(roof).unwrap();
+        assert!((volume(&m) - 59.0 * per_m2).abs() < 1e-6, "{}", volume(&m));
+        assert!(closed(&m), "a hole inside a plane");
+        // the walls of the hole are vertical and go the thickness of the roof
+        assert!(m.faces.iter().any(|f| f.len() == 4 && f.iter().all(|&i| (m.vertices[i][0] - 1.0).abs() < 1e-9 || (m.vertices[i][0] - 2.0).abs() < 1e-9) && f.iter().map(|&i| m.vertices[i][2]).fold(f64::MIN, f64::max) - f.iter().map(|&i| m.vertices[i][2]).fold(f64::MAX, f64::min) > 0.2));
+        // a hole across the ridge (3 m up, 3 m from the long edges), and one over a corner of the eaves
+        let across = d.place_vertical_opening(roof, &[[4.0, 2.0], [6.0, 2.0], [6.0, 4.0], [4.0, 4.0]]).unwrap();
+        let corner = d.place_vertical_opening(roof, &square(-1.0, -1.0, 1.5)).unwrap();
+        let m = d.mesh(roof).unwrap();
+        let cut_area = 1.0 + 4.0 + 0.25;
+        assert!((volume(&m) - (60.0 - cut_area) * per_m2).abs() < 1e-6, "{}", volume(&m));
+        assert!(closed(&m), "holes across the ridge and over the eaves: {:#?}", open_edges(&m));
+        // the cut keeps the slope: the highest point is still the ridge (1.5 up at 0.5), minus nothing
+        let top = m.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max);
+        assert!((top - (3.0 + 1.5)).abs() < 1e-9, "{top}");
+        let _ = (across, corner, o);
+        // a shaft passes through it too: from the ground to the level above the roof's level
+        let (mut d, l0b, l1b, _, _) = building();
+        let _ = (l0, l1);
+        let roof = hip_roof(&mut d, l1b);
+        let s = d.place_shaft(l0b, &ShaftSpec { outline: square(1.0, 1.0, 1.0), top: l1b, base_offset_m: 0.0, top_offset_m: 0.5 }).unwrap();
+        assert_eq!(d.cuts_of(roof), vec![s]);
+        let m = d.mesh(roof).unwrap();
+        assert!((volume(&m) - 59.0 * per_m2).abs() < 1e-6 && closed(&m));
+        // a shaft that ends under the roof does not
+        let (mut d, l0c, l1c, _, _) = building();
+        let roof = hip_roof(&mut d, l1c);
+        d.place_shaft(l0c, &ShaftSpec { outline: square(1.0, 1.0, 1.0), top: l1c, base_offset_m: 0.0, top_offset_m: -0.5 }).unwrap();
+        assert!(d.cuts_of(roof).is_empty());
     }
 }

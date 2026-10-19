@@ -521,6 +521,22 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         });
         return;
     }
+    if app.tool == crate::Tool::VerticalOpening {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Create Vertical Opening");
+            ui.separator();
+            let level = app.plan_level();
+            match app.opening_host.and_then(|h| app.document.get(h)) {
+                Some(h) => { ui.label(format!("Host: {}", h.name)); }
+                None => { ui.label("Host: click a floor, roof or ceiling"); }
+            }
+            ui.label(format!("{} corners", app.slab_points.len()));
+            if ui.add_enabled(app.slab_points.len() >= 3 && app.opening_host.is_some(), egui::Button::new("Finish")).clicked() { app.finish_slab(level); }
+            if ui.add_enabled(!app.slab_points.is_empty(), egui::Button::new("Clear")).clicked() { app.slab_points.clear(); }
+            if ui.add_enabled(app.opening_host.is_some(), egui::Button::new("Pick another host")).clicked() { app.opening_host = None; app.opening_cands.clear(); app.slab_points.clear(); }
+        });
+        return;
+    }
     if app.tool == crate::Tool::Shaft {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Create Shaft Opening");
@@ -675,7 +691,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         ui.separator();
         let fields = if el.category == openbim_document::Category::Grid {
             &[Field::X1, Field::Y1, Field::X2, Field::Y2][..]
-        } else if matches!(el.geometry, Some(openbim_document::Geometry::Shaft { .. })) { &[][..] } else { dimensions(el.category, app.section_pick) };
+        } else if matches!(el.geometry, Some(openbim_document::Geometry::Shaft { .. })) || openbim_document::Document::is_vertical_opening(&el) { &[][..] } else { dimensions(el.category, app.section_pick) };
         for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
         let pending = app.has_pending_edit();
         if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() {
@@ -803,7 +819,11 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Constraints", &query, &[("Beam System", name)]);
                         if ui.button("Select system").clicked() { app.select_element(Some(p)); }
                     }
-                    if matches!(el.geometry, Some(Geometry::Shaft { .. })) { shaft_group(app, ui, el); } else {
+                    if openbim_document::Document::is_vertical_opening(el) {
+                        let name = el.parent.and_then(|p| app.document.get(p)).map_or("Missing host", |h| h.name.as_str());
+                        read_only_group(ui, "Constraints", &query, &[("Host", name)]);
+                        if let Some(p) = el.parent { if ui.button("Select host").clicked() { app.select_element(Some(p)); } }
+                    } else if matches!(el.geometry, Some(Geometry::Shaft { .. })) { shaft_group(app, ui, el); } else {
                         edit_group(app, ui, "Dimensions", &query, el.category, dimensions(el.category, app.section_pick));
                     }
                     if el.category == openbim_document::Category::Elevation {

@@ -304,6 +304,12 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     faces.push((f32::MIN / 2.0, el.id, ring.clone(), Color32::TRANSPARENT));
                     opening_marks.push((el.id, ring, true));
                 }
+                // a vertical opening: on the level of its host
+                Some(Geometry::Area { level }) if level == level_id => {
+                    let ring: Vec<Pos2> = el.outline.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                    faces.push((f32::MIN / 2.0, el.id, ring.clone(), Color32::TRANSPARENT));
+                    opening_marks.push((el.id, ring, true));
+                }
                 _ => {}
             }
         }
@@ -405,7 +411,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let drawing = !three_d && !matches!(app.tool, crate::Tool::Select | crate::Tool::Rebar | crate::Tool::WallFooting | crate::Tool::Level);
     let pick: Option<Pos2> = if !drawing { None } else if response.clicked() { response.interact_pointer_pos() }
         else if response.drag_started_by(egui::PointerButton::Primary) {
-            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::Shaft | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair | crate::Tool::Section);
+            let starts = matches!(app.tool, crate::Tool::Wall | crate::Tool::Grid | crate::Tool::Beam | crate::Tool::Truss | crate::Tool::Duct | crate::Tool::Pipe | crate::Tool::Slab | crate::Tool::Shaft | crate::Tool::VerticalOpening | crate::Tool::BeamSystem | crate::Tool::Cable | crate::Tool::Move | crate::Tool::Copy | crate::Tool::Mirror | crate::Tool::Dimension | crate::Tool::Measure | crate::Tool::Stair | crate::Tool::Section);
             let pending = !app.edit_pts.is_empty() || app.beam_start.is_some() || !app.wall_pts.is_empty() || !app.slab_points.is_empty() || !app.run_points.is_empty() || app.cable_from.is_some();
             if starts && !pending { ui.input(|i| i.pointer.press_origin()) } else { None }
         }
@@ -851,7 +857,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if pick.is_some() { if let Some(p) = pick { app.footing_click(level_id, to_model(p)); } }
-    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Shaft | crate::Tool::Railing) && !three_d {
+    } else if matches!(app.tool, crate::Tool::Slab | crate::Tool::BeamSystem | crate::Tool::Shaft | crate::Tool::Railing | crate::Tool::VerticalOpening) && !three_d {
         // corners snapped to 50 mm; Enter or a click on the first corner closes the outline
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
@@ -872,14 +878,26 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
         for w in pts.windows(2) { painter.line_segment([w[0], w[1]], stroke); }
         for (i, p) in pts.iter().enumerate() { painter.circle_filled(*p, if i == 0 { 5.0 } else { 3.5 }, stroke.color); }
+        // Vertical Opening: the host is outlined while the opening is drawn; Tab takes the next one under the click
+        if app.tool == crate::Tool::VerticalOpening {
+            if let Some(h) = app.opening_host.and_then(|h| app.document.get(h)) {
+                let ring: Vec<Pos2> = h.outline.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                painter.add(egui::Shape::closed_line(ring, Stroke::new(1.5, Color32::from_rgb(70, 130, 200).gamma_multiply(0.7))));
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Tab)) && app.slab_points.is_empty() { app.vertical_host_next(); }
+        }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if app.slab_points.is_empty() { app.choose_tool(crate::Tool::Select); } else { app.slab_points.clear(); }
+            if app.slab_points.is_empty() {
+                if app.tool == crate::Tool::VerticalOpening && app.opening_host.is_some() { app.opening_host = None; app.opening_cands.clear(); app.message = "Vertical Opening: click the floor, roof or ceiling to cut".into(); }
+                else { app.choose_tool(crate::Tool::Select); }
+            } else { app.slab_points.clear(); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.slab_points.pop();
         } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= if app.tool == crate::Tool::Railing { 2 } else { 3 } { app.finish_slab(level_id);
         } else if pick.is_some() {
             if let Some(p) = pick {
                 let closing = app.tool != crate::Tool::Railing && pts.first().is_some_and(|f| f.distance(p) < 10.0);
-                app.slab_click(level_id, to_model(p), closing);
+                if app.tool == crate::Tool::VerticalOpening && app.opening_host.is_none() { app.vertical_host_click(level_id, to_model(p)); }
+                else { app.slab_click(level_id, to_model(p), closing); }
             }
         }
     } else if app.tool == crate::Tool::Column && !three_d {
@@ -2418,6 +2436,63 @@ mod tests {
         app.document.undo().unwrap();
         let Some(Geometry::Linear { start: s3, .. }) = app.document.get(id).unwrap().geometry else { panic!() };
         assert_eq!(s3, start);
+    }
+    #[test]
+    fn vertical_opening_picks_its_host_with_tab_cuts_only_that_one_and_its_symbol_is_picked_in_the_plan() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        // a floor and a roof over the same ground on the level
+        let floor = app.document.place_slab(level, &openbim_document::SlabSpec { outline: vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], thickness_m: 0.2, top_offset_m: 0.0, kind: openbim_document::SlabKind::Floor, material: openbim_document::Material::Concrete }).unwrap();
+        let roof = app.document.place_roof(level, &openbim_document::RoofSpec { outline: vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], thickness_m: 0.2, base_offset_m: 3.0, slope_ratio: 0.3, edges: vec![true; 4], material: openbim_document::Material::Timber }).unwrap();
+        let area = |a: &Desktop, id| a.document.cut_shapes(id).iter().map(|s| s.area()).sum::<f64>();
+        app.run_command("opening_vertical", "Vertical");
+        assert!(app.tool == crate::Tool::VerticalOpening && app.message.contains("Vertical Opening"), "{}", app.message);
+        let click = |app: &mut Desktop, at: Pos2| {
+            frame(&ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, app, vec![button(at, true)]);
+            frame(&ctx, screen, app, vec![button(at, false)]);
+        };
+        // the first click picks the floor; Tab takes the roof and Tab again the floor
+        click(&mut app, Pos2::new(340.0, 340.0));
+        assert_eq!(app.opening_host, Some(floor), "{}", app.message);
+        assert!(app.message.contains("2 under the click"), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Tab)]);
+        assert_eq!(app.opening_host, Some(roof), "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Tab)]);
+        assert_eq!(app.opening_host, Some(floor));
+        // the corners, then Enter
+        for at in [Pos2::new(300.0, 300.0), Pos2::new(380.0, 300.0), Pos2::new(380.0, 380.0), Pos2::new(300.0, 380.0)] { click(&mut app, at); }
+        assert_eq!(app.slab_points.len(), 4, "{}", app.message);
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        let openings: Vec<ElementId> = app.document.elements().filter(|e| openbim_document::Document::is_vertical_opening(e)).map(|e| e.id).collect();
+        assert_eq!(openings.len(), 1, "{}", app.message);
+        assert!(app.message.contains("Vertical opening") && app.message.contains("placed"), "{}", app.message);
+        assert_eq!(app.document.get(openings[0]).unwrap().parent, Some(floor));
+        // only the floor is cut
+        assert!(area(&app, floor) < 80.0 - 0.1 && app.document.cuts_of(roof).is_empty(), "{}", area(&app, floor));
+        // Esc forgets the host, Esc again leaves the tool
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::VerticalOpening && app.opening_host.is_none());
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select);
+        // the symbol is picked on its middle, and Properties shows the host
+        click(&mut app, Pos2::new(340.0, 340.0));
+        assert_eq!(app.selected_id(), Some(openings[0]), "{}", app.message);
+        // a second one in the roof: pick it with Tab; the roof is cut in its shape and the floor is as it was
+        app.run_command("opening_vertical", "Vertical");
+        click(&mut app, Pos2::new(500.0, 500.0));
+        if app.opening_host != Some(roof) { frame(&ctx, screen, &mut app, vec![key(egui::Key::Tab)]); }
+        assert_eq!(app.opening_host, Some(roof), "{}", app.message);
+        for at in [Pos2::new(500.0, 500.0), Pos2::new(540.0, 500.0), Pos2::new(540.0, 540.0), Pos2::new(500.0, 540.0)] { click(&mut app, at); }
+        frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(app.document.cuts_of(roof).len(), 1, "{}", app.message);
+        let before = app.document.mesh(roof).unwrap();
+        assert!(before.faces.len() > 10);
+        // undo takes the roof's opening away; the roof is whole again
+        assert_eq!(app.document.undo(), Ok(true));
+        assert!(app.document.cuts_of(roof).is_empty());
     }
     #[test]
     fn shaft_tool_sketches_an_outline_cuts_the_floor_above_and_shows_its_symbol_and_wall_opening_tool_picks_two_ends() {

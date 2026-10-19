@@ -2461,6 +2461,7 @@ dependencies = [
 name = "openbim-document"
 version = "0.0.1"
 dependencies = [
+ "earcutr",
  "i_overlay",
  "openbim-calc",
  "openbim-family",

@@ -76,7 +76,7 @@ Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, S
 | Roof 3D solid, plan drawn under walls and picked last, moves/rotates/mirrors keeping the right edges sloping, saved, undo | done |
 | Derived figures: surface area, plan area, rise above the eaves | done (Properties) |
 | IFC: IfcRoof with HIP/GABLE/SHED/FLAT_ROOF and a closed faceted solid in IFC2X3, IFC4 and IFC4.3; the app's own file brings it back unchanged | done; a roof from another program is not read (reported as skipped); no layers, material layers or roof types |
-| Roof by Extrusion, Roof Soffit, Fascia, Gutter, Join/Cut Roof, Attach Walls to Roof, Dormer, slope arrows, ridge/hip/valley editing, roof openings | missing |
+| Roof by Extrusion, Roof Soffit, Fascia, Gutter, Join/Cut Roof, Attach Walls to Roof, Dormer, slope arrows, ridge/hip/valley editing | missing; roof openings (Vertical Opening, Shaft) are done, see Opening |
 
 ## Elevations and sections (done 2026-10-19, read-only)
 | Revit behaviour | State |
@@ -147,17 +147,20 @@ Source: Autodesk help, "Railing System Type Properties" and "Modify a Railing". 
 ## Opening (Wall, Shaft; done 2026-10-19)
 | Revit | This app |
 |---|---|
-| Architecture > Opening panel: By Face, Shaft, Wall, Vertical, Dormer | the five buttons are there; Shaft and Wall work, By Face, Vertical and Dormer say they are not implemented. All five use my placeholder copy of the opening icon (the approved set has one icon) |
+| Architecture > Opening panel: By Face, Shaft, Wall, Vertical, Dormer | the five buttons are there; Shaft, Wall and Vertical work, By Face and Dormer say they are not implemented. All five use my placeholder copy of the opening icon (the approved set has one icon) |
 | Wall Opening: pick a wall, sketch a rectangle (in an elevation or section view) | done in a plan view (click one end on a wall, then the other end on the same wall) and in an elevation or section view (two opposite corners); the sill and head heights are in the options bar (900 / 2100 are my defaults). The opening is a rectangle and follows its wall; deleting the wall deletes it |
 | Wall Opening in 3D | done: the wall is cut (same cut as a door or window) |
 | Wall Opening in plan | dashed jambs across the wall; it can be picked on them; the wall's own plan lines are not broken |
 | Shaft Opening: sketch a boundary, Base Constraint / Base Offset / Top Constraint / Top Offset, Finish | done: click the corners (snapped to 50 mm), Enter / first corner / Finish closes; Base is the plan's level, Top defaults to the level above and is chosen in the options bar ("Up to level"), both offsets are editable there and in Properties afterwards |
-| A shaft cuts every floor, foundation slab and ceiling it passes through | done, by height: a slab is cut when its thickness overlaps the shaft's range (so a shaft from Level 1 to Level 2 cuts the floor of Level 2, not the floor of Level 1). A shaft that overlaps only a corner of a slab notches it. Roofs are not cut yet |
+| A shaft cuts every floor, foundation slab and ceiling it passes through | done, by height: a slab is cut when its thickness overlaps the shaft's range (so a shaft from Level 1 to Level 2 cuts the floor of Level 2, not the floor of Level 1). A shaft that overlaps only a corner of a slab notches it. A shaft also cuts a roof whose height range it overlaps (the roof is cut straight through, keeping its slope) |
 | Shaft in plan | dashed outline crossed by two lines on every level it passes through; picked on its symbol |
 | Shaft in 3D | the slabs have the hole or the notch; the shaft itself is not drawn |
 | Move / rotate / mirror / copy / delete / undo, saved | done |
 | IFC: IfcOpeningElement + IfcRelVoidsElement for the wall opening (in its wall) and for each shaft in each slab it cuts (the file keeps the whole slab outline and the opening is the part of the shaft over the slab, so Revit does the cut), all three schemas; slab quantities take the voids off; the app's own file brings every opening back unchanged | done; an opening written by another program is not read |
-| Vertical opening (cuts one floor, roof or ceiling you pick), By Face, Dormer, openings in curved walls, arc / polygon / circle sketch of a shaft, shaft symbol options, a roof cut by a shaft, a slab split in two by a shaft (only the larger piece is drawn in 3D; the file is right) | missing |
+| Vertical Opening (Autodesk: cuts a vertical opening through one roof, floor or ceiling): click the Vertical button, click the floor, roof or ceiling in a plan (Tab takes the next one under the click), click the corners (50 mm snap), Enter / first corner / Finish closes it; Esc steps back to the host choice, then out | done; it cuts only that element, however much else is at its height. It is an Opening that points at its host: it goes with it (move, copy, delete, undo, save), Properties shows the host with a Select host button, and the plan shows it as a dashed outline crossed by two lines on the host's level |
+| A vertical opening in 3D, elevation, section | done: a floor or ceiling has the hole; a roof is cut in its sloped shape with vertical walls the roof's thickness deep |
+| IFC: a vertical opening in a floor is an IfcOpeningElement + IfcRelVoidsElement like a shaft's; in a roof the hole is in the roof's shape (the roof is a faceted solid), with no opening element; the app's own file brings every one back unchanged | done in all three schemas; a ceiling's hole is in the app but not in the file (the covering carries no voids) |
+| By Face (perpendicular to the face of a sloping roof), Dormer, openings in curved walls, arc / polygon / circle sketch of a shaft, shaft symbol options, a slab split in two by a shaft (only the larger piece is drawn in 3D; the file is right) | missing |
 
 ## Still missing for every element
 Split Element. The Offset and Wall Joins icons are placeholders I drew (the approved icon set has none): replace them with approved art. Level 1 and Level 2 are fixed tabs.
@@ -167,7 +170,7 @@ All MEP fittings and equipment placement buttons except Duct/Pipe/Component, cab
 
 ## Suggested order
 1. (Room, Roof, Ceiling, Stair, Opening, elevations/sections, selecting, wall openings and moving things in them, the Elevation tool and dragging section ends are done.)
-2. (Railings, L and U stairs and the railing on a stair are done.) Vertical opening and roof cuts.
+2. (Railings, L and U stairs, the railing on a stair, vertical opening and roof cuts are done.) Layered wall types, then polygon/arc wall modes, Butt/Miter joins and associative dimensions.
 3. Layered wall types, polygon/arc wall draw modes, Butt/Miter configuration.
 4. Associative dimensions.
 
