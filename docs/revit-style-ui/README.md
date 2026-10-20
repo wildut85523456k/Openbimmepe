@@ -17,6 +17,7 @@ Source: user-provided *Revit-Style App UI.pdf* (one-page Systems / Place Duct co
 - [03 — Implementation architecture](03-implementation-architecture.md): Rust command boundary, GUI toolkit evaluation, state and multi-user concerns.
 - [04 — Automation](04-visual-automation.md): Dynamo-like graph app (OpenBIM Graph) and MCP server for AI automation runs.
 - [05 — Prioritized implementation backlog](05-backlog.md): dependencies, phases and verifiable exit criteria.
+- [06 — MEP schematic automation](06-mep-schematic-automation.md): single-line schematic generation from the design model — zones, grid layout, per-discipline annotations (proposed 20 Oct 2026).
 
 ## Evidence versus proposals
 **Observed in supplied PDF:** Systems ribbon tools (Mechanical Equipment, Air Terminal, Duct, Duct Fitting, Flex Duct, Pipe, Pipe Fitting, Plumbing Fixture, Sprinkler, Cable Tray, Lighting Fixture, Device, Component, Model Line); contextual **Modify | Place Duct** bar (Width, Height, Middle Elevation, Inherit Elevation, Inherit Size, Apply); docked Properties and Project Browser; Level 1 / 3D / M-101 tabs; plan with AHU, terminals, grids, rooms; ViewCube, drawing scale and Mechanical workset status.
