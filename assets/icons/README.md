@@ -19,7 +19,7 @@ python3 assets/icons/make_ifc_icons.py    # redraws ifc_import / ifc_export
 ## Known limits
 
 - The source crops are about 75–130 px. The ribbon shows them at 32 px, which is sharp on 2× screens; larger sizes need higher-resolution artwork.
-- Electrical switch and socket keep the supplied **EU** designs, while the first calculation profile is British practice (BS 1363). A profile-specific icon may be needed.
+- Electrical switch and socket use **British BS 1363** style (rectangular three-pin socket, rocker switch), matching the first calculation profile (British practice, decision of 15 Oct 2026).
 - There is no separate cast-in anchor drawing yet.
 - Choose an asset licence before external distribution (`LICENSE.md`).
 

@@ -2,7 +2,7 @@
 
 The project icon manifest contains **87 named commands**. The v0.2 generator outputs **174 SVG resources** (light + dark), a Qt `icons.qrc`, and a browser preview `gallery.html`.
 
-The new `isometric.py` contains editable original 48×48 isometric artwork for Architecture, Structure, HVAC, Plumbing and Electrical, with an explicit **2D blue Model Line** exception. `generate.py` retains simpler 24×24 drawings for general editing and coordination operations where 3D pictures are less informative.
+The `isometric.py` module is currently an empty stub (no isometric icons on this branch). `generate.py` retains simpler 24×24 drawings for all operations. The approved 3D PNGs in `approved-3d/` are the source of truth for the embedded icons; `make_rust_icons.py` derives the transparent PNGs in `rust/`.
 
 Run:
 ```sh
