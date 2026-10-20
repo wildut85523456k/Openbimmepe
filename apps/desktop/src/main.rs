@@ -157,6 +157,8 @@ struct Desktop {
     /// family tool: the family and type to place, and the selected instance's type
     family_pick: String,
     family_type: String,
+    /// the kind of family the picker offers while placing: a door command offers doors only, none offers every family
+    family_kind: Option<openbim_family::Category>,
     /// the instance values of the selected family instance, as edited
     family_values: Vec<(String, f64)>,
     family_texts: Vec<crate::export::TextInput>,
@@ -287,7 +289,7 @@ impl Desktop {
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
             axis_mm: [1000.0, 2000.0, 7000.0, 2000.0], beam_start: None, wall_pts: Vec::new(), wall_ids: Vec::new(), wall_loc: 0, wall_chain_on: true, wall_mode: 0, wall_sides: 6, wall_type: None, wall_flip: false, wall_type_name: String::new(), wall_len: String::new(), tag_leader: true, edit_pts: Vec::new(), edit_num: String::new(), drag: None, temp_edit: None, temp_text: String::new(), temp_labels: Vec::new(), measured: None, edit_ref: None, clipboard: None, offset_mm: 1000.0, offset_copy: false, edit_src: Vec::new(), multi: Vec::new(), marquee: None, mirror_copy: true, level_elev_mm: 6000.0, level_name: String::new(), beam_level: None,
-            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_opts: mep_tool::RunOpts::default(), run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, stair_shape: openbim_document::StairShape::Straight, stair_railing: openbim_document::RailingSides::Both, opening_host: None, opening_cands: Vec::new(), shaft_base_mm: 0.0, shaft_top: None, shaft_top_mm: 0.0, opening_sill_mm: 900.0, opening_head_mm: 2100.0, opening_from: None, view_corner: None, view_drag: None, view_edit: None, section_xf: None, elev_marks: None, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
+            slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_opts: mep_tool::RunOpts::default(), run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_kind: None, family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, stair_shape: openbim_document::StairShape::Straight, stair_railing: openbim_document::RailingSides::Both, opening_host: None, opening_cands: Vec::new(), shaft_base_mm: 0.0, shaft_top: None, shaft_top_mm: 0.0, opening_sill_mm: 900.0, opening_head_mm: 2100.0, opening_from: None, view_corner: None, view_drag: None, view_edit: None, section_xf: None, elev_marks: None, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
             property_query: String::new(), browser_query: String::new(),
@@ -299,6 +301,7 @@ impl Desktop {
     }
 
     fn choose_tool(&mut self, tool: Tool) {
+        if tool != Tool::Family { self.family_kind = None; }
         self.tool = tool;
         self.beam_start = None;
         self.wall_pts.clear();
@@ -456,9 +459,9 @@ impl Desktop {
             "roof" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm) = (openbim_document::SlabKind::Roof, 200.0, 0.0); self.choose_tool(Tool::Slab) }
             "footing" => self.choose_tool(Tool::WallFooting),
             "truss" => self.choose_tool(Tool::Truss),
-            "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.choose_tool(Tool::Family) }
-            "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.choose_tool(Tool::Family) }
-            "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.choose_tool(Tool::Family) }
+            "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Door); self.choose_tool(Tool::Family) }
+            "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Window); self.choose_tool(Tool::Family) }
+            "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "rebar" => { (self.width_mm, self.height_mm, self.elevation_mm, self.spacing_mm, self.bar_count) = (16.0, 8.0, 40.0, 200.0, 3.0); self.choose_tool(Tool::Rebar) }
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),

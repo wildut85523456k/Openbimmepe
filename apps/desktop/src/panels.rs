@@ -261,6 +261,8 @@ fn type_maker(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Eleme
 /// The family to place and its type, from the library.
 fn family_combos(app: &mut Desktop, ui: &mut egui::Ui) {
     let lib = crate::export::library();
+    // while a door/window/component command is placing, offer only that kind of family, as Revit's Type Selector does
+    let lib: Vec<_> = lib.iter().filter(|f| app.family_kind.is_none_or(|k| f.category() == k)).collect();
     ui.label("Family");
     egui::ComboBox::from_id_salt("family_pick").selected_text(app.family_pick.clone()).show_ui(ui, |ui| {
         for f in lib { if ui.selectable_value(&mut app.family_pick, f.name().to_string(), f.name()).clicked() { app.family_type.clear(); } }
@@ -1029,6 +1031,18 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::SampleElement;
+
+    #[test]
+    fn a_door_command_offers_only_door_families() {
+        let mut app = Desktop::sample();
+        app.run_command("door", "Door");
+        assert_eq!(app.family_kind, Some(openbim_family::Category::Door));
+        let offered: Vec<_> = crate::export::library().iter().filter(|f| app.family_kind.is_none_or(|k| f.category() == k)).collect();
+        assert!(!offered.is_empty() && offered.iter().all(|f| f.category() == openbim_family::Category::Door), "{:?}", offered.iter().map(|f| f.name()).collect::<Vec<_>>());
+        // leaving the tool offers every family again
+        app.choose_tool(crate::Tool::Select);
+        assert_eq!(app.family_kind, None);
+    }
 
     #[test]
     fn browser_search_keeps_ancestors_of_matching_views() {
