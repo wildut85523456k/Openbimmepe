@@ -19,17 +19,24 @@ sufficient for the current prototype; enlarging them does not add source detail.
 All runtime PNGs are committed in `approved-3d`; no separate download or ZIP
 installation is needed. The egui desktop app embeds the PNGs via `apps/desktop/src/icons.rs`.
 
-To reproduce source crops (Pillow is needed only for this authoring step):
+To regenerate the transparent PNGs (Pillow needed):
 
 ```sh
-python3 assets/icons/extract_catalog.py   # catalog crops (skips socket/switch replacements)
 python3 assets/icons/make_rust_icons.py    # approved-3d/*.png -> rust/*.png (transparent)
 ```
 
-`catalog-provenance.json` records crop coordinates and hashes. Socket and switch
-are marked as `replacement: true` (British BS 1363 style, not catalog crops).
+> **Historical:** The catalog extraction command below requires `manifest.json`,
+> which is not present on this branch. It is retained for reference only and
+> will fail with FileNotFoundError. Socket and switch are marked as
+> `replacement: true` in `catalog-provenance.json` (British BS 1363 style,
+> not catalog crops) and are preserved by the extractor's SKIP set.
 
-> **Historical:** The Qt/gallery instructions below are no longer applicable.
+```sh
+# Historical — requires absent manifest.json, will fail:
+python3 assets/icons/extract_catalog.py
+```
+
+> **Historical:** The Qt/gallery instructions are no longer applicable.
 > The `manifest.json` and `apps/desktop-qt` project are not present on this branch.
 > The egui app uses the approved PNGs directly; `make_rust_icons.py` derives the
 > transparent PNGs in `rust/`.
@@ -37,7 +44,6 @@ are marked as `replacement: true` (British BS 1363 style, not catalog crops).
 ## Review
 
 ```sh
-python3 -m unittest discover -s assets/icons -p 'test_*.py'
 cargo test -p openbim-desktop --release   # embedded icon validity/uniqueness tests
 ```
 
