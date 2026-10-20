@@ -10,8 +10,9 @@
 use crate::mep::{EndDemand, EndRole, MepNode};
 use crate::{Category, Command, Document, EditError, ElementId, Geometry};
 use openbim_family::mep::System;
+use openbim_schematic::layout::Connection;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// First number of a schematic zone (kept apart from elements, fittings and electrical nodes).
 pub const ZONE_BASE: u64 = 1 << 45;
@@ -234,6 +235,11 @@ pub struct SchematicDraft {
     pub ambiguities: Vec<ZoneAmbiguity>,
     /// terminal end points on a fitting port, with no plan position of their own yet
     pub unplaced_endpoints: usize,
+    /// the connectivity the grid engine wires: between the boards of the electrical family (their node
+    /// ids) and between the groups of the hydraulic/air family (their stable group ids). Empty until
+    /// the extraction populates it from the model's cables and links.
+    #[serde(default)]
+    pub connections: Vec<Connection>,
 }
 
 impl SchematicDraft {
@@ -244,6 +250,88 @@ impl SchematicDraft {
     pub fn from_json(text: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(text)
     }
+}
+
+/// The stable id the grid engine and the renderer use for the n-th group of a hydraulic/air draft:
+/// a small number that cannot collide with an electrical node id (those start at `NODE_BASE`), so it
+/// is safe to use in `Connection`s and `LayoutElement`s alike.
+pub(crate) fn group_element_id(index: usize) -> u64 {
+    index as u64 + 1
+}
+
+/// The union-find key of a run/fitting node: run element ids are small, fitting ids start at
+/// `FITTING_BASE`, so the two id spaces never overlap.
+fn node_key(n: &MepNode) -> u64 {
+    match n {
+        MepNode::Run(id) => id.0,
+        MepNode::Fitting(id) => *id,
+    }
+}
+
+/// Walk the union-find parent map to a root. The links form a tree of runs and fittings, so the
+/// chain always terminates.
+fn uf_find(parent: &HashMap<u64, u64>, mut x: u64) -> u64 {
+    while let Some(&p) = parent.get(&x) {
+        if p == x {
+            break;
+        }
+        x = p;
+    }
+    x
+}
+
+/// The connectivity the grid engine wires for a hydraulic/air draft: two groups join when their runs
+/// are on one connected duct/pipe, traced through the links by union-find. The connection ids are the
+/// groups' [`group_element_id`]s, matching the ids the renderer assigns to the group slots.
+fn group_connections(doc: &Document, draft: &SchematicDraft) -> Vec<Connection> {
+    let mep = doc.mep();
+    let mut parent: HashMap<u64, u64> = HashMap::new();
+    for (a, b) in &mep.links {
+        let (ka, kb) = (node_key(&a.node), node_key(&b.node));
+        parent.entry(ka).or_insert(ka);
+        parent.entry(kb).or_insert(kb);
+        let (ra, rb) = (uf_find(&parent, ka), uf_find(&parent, kb));
+        if ra != rb {
+            parent.insert(ra, rb);
+        }
+    }
+    // one component-set per group, filled from its terminal end points' run networks
+    let mut comps: Vec<HashSet<u64>> = vec![HashSet::new(); draft.groups.len()];
+    for ep in &mep.endpoints {
+        if ep.role != EndRole::Terminal {
+            continue;
+        }
+        let MepNode::Run(run) = ep.port.node else {
+            continue;
+        };
+        let Some(el) = doc.get(run) else {
+            continue;
+        };
+        let Some(Geometry::Linear { start, end, level }) = el.geometry else {
+            continue;
+        };
+        let system = crate::compute::system_of_run(doc, run);
+        if Discipline::of_system(system) != Some(draft.discipline) {
+            continue;
+        }
+        let at = if ep.port.port == 0 { start } else { end };
+        let mut containing = mep.zones.iter().filter(|z| z.level == level && z.rect.contains(at)).collect::<Vec<_>>();
+        containing.sort_by_key(|z| z.id);
+        let zone = if containing.is_empty() { None } else { Some(containing[0].id) };
+        if let Some(i) = draft.groups.iter().position(|g| g.zone == zone && g.level == level && g.system == system) {
+            comps[i].insert(uf_find(&parent, node_key(&ep.port.node)));
+        }
+    }
+    let mut out: Vec<Connection> = Vec::new();
+    for i in 0..comps.len() {
+        for j in (i + 1)..comps.len() {
+            if !comps[i].is_empty() && !comps[j].is_empty() && comps[i].iter().any(|c| comps[j].contains(c)) {
+                let (a, b) = (group_element_id(i), group_element_id(j));
+                out.push(Connection { a: a.min(b), b: a.max(b) });
+            }
+        }
+    }
+    out
 }
 
 fn system_as_code<S: serde::Serializer>(system: &System, ser: S) -> Result<S::Ok, S::Error> {
@@ -277,6 +365,7 @@ pub fn extract_schematic(doc: &Document, discipline: Discipline) -> SchematicDra
         groups: Vec::new(),
         ambiguities: Vec::new(),
         unplaced_endpoints: 0,
+        connections: Vec::new(),
     };
     let mep = doc.mep();
     if discipline.family() == Family::Electrical {
@@ -293,6 +382,16 @@ pub fn extract_schematic(doc: &Document, discipline: Discipline) -> SchematicDra
                 }
             }
         }
+        // cables between two boards the draft pulled become wires on the single-line
+        let boards: HashSet<u64> = draft.nodes.iter().map(|n| n.id).collect();
+        draft.connections = mep
+            .elec_cables
+            .iter()
+            .filter(|c| boards.contains(&c.from) && boards.contains(&c.to))
+            .map(|c| Connection { a: c.from.min(c.to), b: c.from.max(c.to) })
+            .collect();
+        draft.connections.sort_by_key(|c| (c.a, c.b));
+        draft.connections.dedup();
         return draft;
     }
     let mut acc: BTreeMap<(Option<ElementId>, u8), (ElementId, usize, f64)> = BTreeMap::new();
@@ -363,6 +462,7 @@ pub fn extract_schematic(doc: &Document, discipline: Discipline) -> SchematicDra
             flow_m3s,
         });
     }
+    draft.connections = group_connections(doc, &draft);
     draft
 }
 

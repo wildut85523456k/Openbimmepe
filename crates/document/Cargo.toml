@@ -16,6 +16,7 @@ openbim-route = { path = "../route" }
 openbim-family = { path = "../family" }
 openbim-place = { path = "../place" }
 openbim-calc = { path = "../calc" }
+openbim-schematic = { path = "../schematic" }
 i_overlay = "4"
 earcutr = "0.5.0"
 rayon = "1.10"
