@@ -2628,6 +2628,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-schematic"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "openbim-sheets"
 version = "0.0.1"
 dependencies = [
