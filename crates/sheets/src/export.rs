@@ -1,6 +1,7 @@
 //! Shared, side-effect-free PDF/DXF command for desktop and batch callers.
 //! Destination selection, overwrite policy and filesystem writes belong to the caller.
 use std::collections::BTreeSet;
+use crate::annotations::{append_markers, ViewMarkers};
 
 use crate::dxf::write_dxf;
 use crate::model::{PrintContext, SheetSet};
@@ -49,6 +50,12 @@ pub struct ExportBundle {
 
 impl ExportCommand {
     pub fn execute(&self, source: ExportSource<'_>) -> Result<ExportBundle, SheetError> {
+        self.execute_with_markers(source, &ViewMarkers::new())
+    }
+
+    /// Export view-anchored grid/axis markers with fixed paper-size graphics.
+    /// Existing callers without annotations retain the original execute API.
+    pub fn execute_with_markers(&self, source: ExportSource<'_>, markers: &ViewMarkers) -> Result<ExportBundle, SheetError> {
         if self.sheets.is_empty() {
             return Err(SheetError::BadValue {
                 what: "export selection", value: "select at least one sheet".into(),
@@ -78,10 +85,13 @@ impl ExportCommand {
         source.profile.validate()?;
         let weights = source.profile.line_weights()?;
         let rendered = self.sheets.iter().map(|number| {
-            render_sheet_with_mode(
+            let mut rendered = render_sheet_with_mode(
                 source.set, source.views, source.contents, &weights,
                 number, source.context, source.profile.mode,
-            )
+            )?;
+            append_markers(source.set.sheet(number).expect("preflight checked sheet"), source.views,
+                markers, &weights, source.profile.mode, &mut rendered)?;
+            Ok::<_, SheetError>(rendered)
         }).collect::<Result<Vec<_>, _>>()?;
         match self.format {
             ExportFormat::Pdf => {

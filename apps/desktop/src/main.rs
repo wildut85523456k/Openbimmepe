@@ -25,6 +25,8 @@ mod view_ui;
 mod pdf;
 mod sheet_draw;
 mod sheet_ui;
+mod plan_export;
+mod print_dialog;
 mod mep_settings_ui;
 mod compute_ui;
 mod elec_ui;
@@ -238,6 +240,8 @@ struct Desktop {
     /// the export window, while it is open
     export_dialog: Option<model_edit::ExportDialog>,
     import_dialog: Option<model_edit::ImportDialog>,
+    /// the print / export plan dialog (PRT-006): current plan view to PDF/DXF with a print profile
+    print_dialog: print_dialog::PrintDialog,
     /// the name for a new type
     type_name_input: String,
     warnings_cache: (u64, Vec<openbim_document::Warning>),
@@ -289,7 +293,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap,
         }
     }
@@ -374,6 +378,7 @@ impl Desktop {
             }
             ui.separator();
             ui.label("Project1 (SAMPLE)");
+            if ui.button("Print / Export").clicked() { self.print_dialog.open = true; }
             ui.separator();
             for (label, ws) in [
                 ("Design", Workspace::Design), ("Coordination", Workspace::Coordination),
@@ -572,6 +577,10 @@ impl eframe::App for Desktop {
         else if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
             self.undo_document();
         }
+        // Ctrl+P opens Print / Export globally, even while a toolbar button or text field owns focus.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::P)) {
+            self.print_dialog.open = true;
+        }
         egui::Panel::top("header").show(ui, |ui| {
             self.toolbar(ui);
             self.ribbon(ui);
@@ -611,6 +620,7 @@ impl eframe::App for Desktop {
         self.sheet_props_window(&ctx);
         self.add_view_window(&ctx);
         self.print_window(&ctx);
+        self.print_dialog.show(&ctx, &self.document, self.view, self.workspace == Workspace::Design);
         self.vis_graphics_window(&ctx);
         self.layout_window(&ctx);
         self.type_editor_window(&ctx);

@@ -23,7 +23,7 @@ pub enum PrintMode {
 }
 
 impl PrintMode {
-    fn base_colour(self, rgb: [u8; 3]) -> [u8; 3] {
+    pub(crate) fn base_colour(self, rgb: [u8; 3]) -> [u8; 3] {
         match self {
             Self::Colour => rgb,
             // Rounded BT.601 luma on the encoded RGB channels, deliberately deterministic.
@@ -105,7 +105,7 @@ pub fn layer_name(code: char, category: &str) -> String {
     format!("{code}-{c}")
 }
 
-fn halftone(c: [u8; 3]) -> [u8; 3] {
+pub(crate) fn halftone(c: [u8; 3]) -> [u8; 3] {
     [((u16::from(c[0]) + 255) / 2) as u8, ((u16::from(c[1]) + 255) / 2) as u8, ((u16::from(c[2]) + 255) / 2) as u8]
 }
 

@@ -2525,6 +2525,7 @@ dependencies = [
  "openbim-keymap",
  "openbim-place",
  "openbim-route",
+ "openbim-sheets",
  "openbim-view",
  "openbim-viewport-egui",
  "rayon",

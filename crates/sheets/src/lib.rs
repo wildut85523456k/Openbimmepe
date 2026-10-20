@@ -11,6 +11,7 @@
 //! No standard values are built in: paper sizes are geometry, margins, line weights, templates and
 //! discipline defaults are editable data. Everything is a pure function of its inputs.
 
+pub mod annotations;
 pub mod dxf;
 pub mod export;
 pub mod import;

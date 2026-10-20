@@ -21,6 +21,7 @@ openbim-family = { path = "../../crates/family" }
 openbim-route = { path = "../../crates/route" }
 openbim-view = { path = "../../crates/view" }
 openbim-viewport-egui = { path = "../../crates/viewport-egui" }
+openbim-sheets = { path = "../../crates/sheets" }
 rfd = "0.17.2"
 rayon = "1.10"
 
