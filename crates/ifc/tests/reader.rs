@@ -474,3 +474,62 @@ fn valid_unicode_and_delimiter_text_in_headers_survive() {
     assert_eq!(got.schema, "IFC4");
     assert_eq!(got.get(1).unwrap().args[0].as_str(), Some("é😀 é"));
 }
+
+#[test]
+fn writer_literal_backslashes_survive_headers_and_data() {
+    for value in [
+        r"C:\X\GG.ifc",
+        r"C:\X2\D800\X0\file.ifc",
+        r"C:\S\file.ifc",
+        r"literal \X\41 and \X2\0041\X0\",
+        r"two \\ and trailing \",
+    ] {
+        let mut writer = openbim_ifc::step::Step::default();
+        let id = writer.add(format!("IFCLABEL({})", openbim_ifc::step::string(value)));
+        // Isolate DATA decoding from header acceptance, then exercise both together.
+        for name in ["safe.ifc", value] {
+            let text = writer.finish(name, "t", false);
+            let got = step_read::parse(&text).unwrap_or_else(|e| panic!("{value:?}: {e}"));
+            assert_eq!(got.get(id).unwrap().args[0].as_str(), Some(value));
+        }
+    }
+}
+
+#[test]
+fn nonsharp_i_profile_attributes_are_explicitly_rejected() {
+    for (optional, attribute) in [
+        ("0.1,$,$", "FilletRadius"),
+        ("$,0.1,$", "FlangeEdgeRadius"),
+        ("$,$,0.1", "FlangeSlope"),
+        ("$,$,-0.1", "FlangeSlope"),
+    ] {
+        let text = length_fixture(
+            1.0,
+            "$",
+            &format!("IFCISHAPEPROFILEDEF(.AREA.,$,#8,2.,3.,0.2,0.3,{optional})"),
+        );
+        let err = reader::read(&text).expect_err("must not silently substitute a sharp I-profile");
+        assert!(matches!(err, reader::Error::Invalid(_)));
+        let message = err.to_string();
+        assert!(message.contains("#9 IFCISHAPEPROFILEDEF"), "{message}");
+        assert!(message.contains(attribute), "{message}");
+    }
+}
+
+#[test]
+fn sharp_i_profile_null_and_zero_attributes_preserve_geometry() {
+    let fixture = |optional| {
+        length_fixture(
+            1.0,
+            "$",
+            &format!("IFCISHAPEPROFILEDEF(.AREA.,$,#8,2.,3.,0.2,0.3{optional})"),
+        )
+    };
+    let plain = reader::read(&fixture("")).unwrap();
+    for optional in [",$,$,$", ",0.,0.,0.", ",$,0.,-0."] {
+        let got = reader::read(&fixture(optional)).unwrap();
+        assert_eq!(plain.members[0].body, got.members[0].body);
+        assert!(got.diagnostics.is_empty());
+        assert!(got.skipped.is_empty());
+    }
+}

@@ -247,7 +247,11 @@ fn decode_escapes(raw: &[u8]) -> Result<String, ()> {
     let mut out = String::new();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && b[i..].starts_with(b"\\X2\\") {
+        if b[i..].starts_with(b"\\\\") {
+            // A writer-escaped literal must not become an escape introducer.
+            out.push('\\');
+            i += 2;
+        } else if b[i..].starts_with(b"\\X2\\") {
             let end = i + 4 + find(&b[i + 4..], b"\\X0\\").ok_or(())?;
             let hex = &b[i + 4..end];
             if hex.len() % 4 != 0 {

@@ -614,6 +614,23 @@ fn canonical_lengths(f: &mut StepFile) -> Result<(), ReadError> {
                 e.class
             )));
         }
+        if e.class == "IFCISHAPEPROFILEDEF" {
+            for (i, attribute) in [
+                (7, "FilletRadius"),
+                (8, "FlangeEdgeRadius"),
+                (9, "FlangeSlope"),
+            ] {
+                if let Some(value) = e.args.get(i) {
+                    if !matches!(value, Value::Null | Value::Derived) && value.as_f64() != Some(0.0)
+                    {
+                        return Err(ReadError::Invalid(format!(
+                            "#{id} {}: {attribute} must be zero or omitted; only sharp parallel-flange I-profiles are supported",
+                            e.class
+                        )));
+                    }
+                }
+            }
+        }
         if matches!(
             e.class.as_str(),
             "IFCAXIS2PLACEMENT3D" | "IFCAXIS2PLACEMENT2D"
@@ -690,7 +707,8 @@ fn canonical_lengths(f: &mut StepFile) -> Result<(), ReadError> {
     Ok(())
 }
 
-/// Reads an IFC file into canonical metres. Unsupported booleans reject the whole import.
+/// Reads an IFC file into canonical metres. Unsupported booleans and non-sharp/sloped
+/// I-profiles reject the whole import rather than substituting unevaluated geometry.
 pub fn read(text: &str) -> Result<Imported, ReadError> {
     let mut f = parse(text)?;
     canonical_lengths(&mut f)?;
