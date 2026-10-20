@@ -13,7 +13,7 @@ use std::sync::Arc;
 pub fn scene_meshes(doc: &Document) -> Option<Arc<Vec<openbim_view::ElementMesh>>> {
     type Cached = Option<((u64, usize, u64), Option<Arc<Vec<openbim_view::ElementMesh>>>)>;
     thread_local! { static CACHE: std::cell::RefCell<Cached> = const { std::cell::RefCell::new(None) }; }
-    if doc.elements().all(|e| e.category != Category::Family && e.category != Category::Opening) && doc.mep().insulations.is_empty() { return None; }
+    if doc.elements().all(|e| e.category != Category::Family && e.category != Category::Opening) && doc.mep().insulations.is_empty() && doc.mep().fittings.is_empty() { return None; }
     let key = (doc.revision(), doc.elements().count(), doc.elements().map(|e| e.id.0.wrapping_mul(31).wrapping_add(e.revision)).fold(0u64, u64::wrapping_add));
     CACHE.with(|c| {
         if let Some((k, v)) = c.borrow().as_ref() { if *k == key { return v.clone(); } }
@@ -62,7 +62,10 @@ pub fn batch(doc: &Document) -> Batch {
         meshes.push((Element { kind: k, id: el.id.0 }, mesh, matches!(el.category, Category::Slab | Category::Footing | Category::WallFooting | Category::Rebar | Category::Railing)));
     }
     if let Some(scene) = scene_meshes(doc) {
-        for em in scene.iter().filter(|em| doc.get(ElementId(em.element.id)).is_some()) {
+        // A fitting is not a document element (its id comes from the route, not the element store), so `doc.get`
+        // cannot find it: keep fittings and their insulation by id, and everything else by being a document element.
+        let fitting_ids: HashSet<u64> = scene.iter().filter(|em| em.element.kind == Kind::Fitting).map(|em| em.element.id).collect();
+        for em in scene.iter().filter(|em| em.element.kind == Kind::Fitting || fitting_ids.contains(&em.element.id) || doc.get(ElementId(em.element.id)).is_some()) {
             let entry = (em.element, doc_mesh(em), true);
             // the insulation of a duct or pipe has the number of the run, and is a mesh of its own beside the run's
             match meshes.iter().position(|(e, _, _)| e.id == em.element.id && (em.element.kind == Kind::Insulation) == (e.kind == Kind::Insulation)) { Some(i) => meshes[i] = entry, None => meshes.push(entry) }
@@ -231,7 +234,16 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let wanted: HashSet<Element> = app.selected_id().and_then(|id| element(&app.document, id)).into_iter().collect();
     app.view3d.select(wanted.clone());
     app.view3d.ui(ui);
-    if *app.view3d.selection() != wanted {
+    if app.tool == crate::Tool::Family {
+        // a click in 3D places the family: a door or window goes into the wall under the click, anything else stands
+        // on the level of what it was dropped on. The hit is consumed so one click places one element.
+        if let Some(hit) = app.view3d.last_hit.take() {
+            let id = ElementId(hit.element.id);
+            let wall = app.document.get(id).is_some_and(|e| e.category == Category::Wall).then_some(id);
+            let level = app.document.get(id).and_then(|e| match e.geometry { Some(Geometry::Linear { level, .. }) | Some(Geometry::Placed { level, .. }) => Some(level), _ => None }).unwrap_or(ElementId(10));
+            app.family_click(level, [hit.point[0], hit.point[1]], wall);
+        }
+    } else if *app.view3d.selection() != wanted {
         let id = app.view3d.selection().iter().next().map(|e| ElementId(e.id));
         app.select_element(id);
     }
@@ -255,6 +267,38 @@ mod tests {
         }
         // levels and grids are not solids
         assert!(b.elements.iter().all(|e| matches!(e.kind, Kind::Wall | Kind::Segment | Kind::Family)));
+    }
+
+    #[test]
+    fn the_three_d_view_draws_the_elbows_of_a_routed_duct() {
+        use openbim_family::mep::{Domain, System};
+        use openbim_place::penetrations::RunSize;
+        let mut doc = Document::spatial_sample();
+        let off = openbim_route::snaps::Snaps::new(openbim_route::snaps::SnapSettings::off());
+        let rect = RunSize::Rect { width: 0.4, height: 0.3, roll: 0.0 };
+        let duct = openbim_route::route_path(&[[1.0, 0.8, 2.7], [5.0, 0.8, 2.7], [5.0, 1.8, 2.7]], &[rect, rect], &crate::export::tests_support::prefs(Domain::Duct, System::SupplyAir), &off).unwrap();
+        doc.place_mep_route(ElementId(10), &duct).unwrap();
+        // the elbow where the two legs meet is drawn: it is not a document element (its id is from the route),
+        // but the 3D batch keeps it, so the ductwork is not left with a gap
+        let b = batch(&doc);
+        assert!(b.elements.iter().any(|e| e.kind == Kind::Fitting), "the elbow is in the 3D view: {:?}", b.elements.iter().map(|e| e.kind).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_click_in_the_three_d_view_places_a_door_in_the_wall_under_it() {
+        let ctx = egui::Context::default();
+        let mut app = Desktop::sample();
+        app.view = crate::View::ThreeD;
+        app.run_command("door", "Door");
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
+        let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+        // what the wgpu viewport reports for a click on that wall
+        app.view3d.last_hit = Some(openbim_viewport_egui::Hit { triangle: 0, element: Element { kind: Kind::Wall, id: wall.0 }, face: FaceKind::Side, distance: 1.0, point: [mid[0], mid[1], 1.0] });
+        let out = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1000.0, 700.0))), ..Default::default() }, |ui| { egui::CentralPanel::default().show(ui, |ui| show(&mut app, ui)); });
+        out.drop_without_applying_deltas();
+        assert!(app.document.elements().any(|e| e.category == Category::Family), "the door is placed in 3D: {}", app.message);
+        assert!(app.view3d.last_hit.is_none(), "one click places one element");
     }
 
     #[test]
