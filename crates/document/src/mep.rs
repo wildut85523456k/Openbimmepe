@@ -196,6 +196,9 @@ pub struct MepData {
     pub elec_cables: Vec<crate::elec::ElecCable>,
     /// run ends joined to equipment connectors
     pub equip_links: Vec<EquipLink>,
+    /// the single-line schematic views generated from this model (doc 06, SCH-003): undoable views,
+    /// regenerated from the model on every generation, so they are session-only and not part of `is_empty`
+    pub schematics: Vec<crate::SchematicView>,
 }
 
 impl MepData {
@@ -250,6 +253,8 @@ impl MepData {
             elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().map(|mut n| { if n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family)) { n.element = None; n.connector.clear(); } n }).collect(),
             elec_cables: { let keep: std::collections::BTreeSet<u64> = self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).map(|n| n.id).collect(); self.elec_cables.iter().filter(|c| keep.contains(&c.from) && keep.contains(&c.to)).cloned().collect() },
             zones: self.zones.iter().filter(|z| elements.get(&z.level).is_some_and(|l| l.category == Category::Level)).cloned().collect(),
+            // schematic views are regenerated from the model, so they survive element deletion as-is
+            schematics: self.schematics.clone(),
         }
     }
 

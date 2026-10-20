@@ -2543,6 +2543,7 @@ dependencies = [
  "openbim-geom",
  "openbim-place",
  "openbim-route",
+ "openbim-schematic",
  "rayon",
  "serde",
  "serde_json",
@@ -2625,6 +2626,14 @@ dependencies = [
  "openbim-geom",
  "openbim-place",
  "proptest",
+]
+
+[[package]]
+name = "openbim-schematic"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,0 +1,68 @@
+{
+  "name": "schematic-layout-v1",
+  "spec": "../06-mep-schematic-automation.md (grid layout)",
+  "units": "positions in metres of sheet space; keys are canonical quantities (m3/s, A) normalized by the SCH-001 extraction",
+  "input": {
+    "levels": [
+      { "id": 1, "name": "Level 1", "elevation_m": 0.0 },
+      { "id": 2, "name": "Level 2", "elevation_m": 3.0 },
+      { "id": 3, "name": "Atrium", "elevation_m": 3.0 }
+    ],
+    "elements": [
+      { "id": 10, "level": 1, "key": 100.0, "footprint": 0.02 },
+      { "id": 11, "level": 1, "key": 100.0, "footprint": 0.02 },
+      { "id": 12, "level": 1, "key": 50.0, "footprint": 0.03 },
+      { "id": 13, "level": 1, "key": 100.0, "footprint": 0.02 },
+      { "id": 30, "level": 3, "key": 1.0, "footprint": 0.01 },
+      { "id": 20, "level": 2, "key": 1e1, "footprint": 0.02 },
+      { "id": 21, "level": 2, "key": 5.0, "footprint": 0.02 }
+    ],
+    "connections": [
+      { "a": 10, "b": 11 },
+      { "a": 20, "b": 21 },
+      { "a": 10, "b": 20 },
+      { "a": 99, "b": 10 }
+    ],
+    "mode": "uniform",
+    "row_pitch": 0.05,
+    "column_pitch": 0.04,
+    "min_slot": 0.01
+  },
+  "expected": {
+    "note": "Hand-computed from the rules in 06 (grid layout), not produced by the generator. Covers: level order with an elevation tie broken by name then id; the column total order with a key tie resolved by the barycenter passes capped at 8 (level 1 oscillates between two states and lands on [10, 11, 13, 12]); a disconnected element after the connected ones at the same key; both spacing modes; straight and elbow wires; an unresolved connection; a key written as 1e1 (equivalent representation of 10.0).",
+    "rows": [
+      { "level": 1, "row": 0 },
+      { "level": 3, "row": 1 },
+      { "level": 2, "row": 2 }
+    ],
+    "order": [
+      { "level": 1, "elements": [10, 11, 13, 12] },
+      { "level": 3, "elements": [30] },
+      { "level": 2, "elements": [20, 21] }
+    ],
+    "slots_uniform": [
+      { "element": 10, "x": 0.0, "y": 0.0 },
+      { "element": 11, "x": 0.04, "y": 0.0 },
+      { "element": 13, "x": 0.08, "y": 0.0 },
+      { "element": 12, "x": 0.12, "y": 0.0 },
+      { "element": 30, "x": 0.0, "y": 0.05 },
+      { "element": 20, "x": 0.0, "y": 0.1 },
+      { "element": 21, "x": 0.04, "y": 0.1 }
+    ],
+    "slots_footprint": [
+      { "element": 10, "x": 0.0, "y": 0.0 },
+      { "element": 11, "x": 0.06, "y": 0.0 },
+      { "element": 13, "x": 0.12, "y": 0.0 },
+      { "element": 12, "x": 0.18, "y": 0.0 },
+      { "element": 30, "x": 0.0, "y": 0.05 },
+      { "element": 20, "x": 0.0, "y": 0.1 },
+      { "element": 21, "x": 0.06, "y": 0.1 }
+    ],
+    "wires_uniform": [
+      { "a": 10, "b": 11, "via": [] },
+      { "a": 20, "b": 21, "via": [] },
+      { "a": 10, "b": 20, "via": [[0.02, 0.025], [0.02, 0.125]] }
+    ],
+    "unresolved_connections": [{ "a": 10, "b": 99 }]
+  }
+}
