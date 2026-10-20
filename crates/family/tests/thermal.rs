@@ -5,11 +5,36 @@ use openbim_family::*;
 use proptest::prelude::*;
 
 #[allow(clippy::too_many_arguments)] // a test helper taking the eight window numbers
-fn solve_u(w: f64, h: f64, fr: f64, mw: f64, ug: f64, uf: f64, psi: f64, n: u32) -> Result<(Compiled, Instance), FamilyError> {
+fn solve_u(
+    w: f64,
+    h: f64,
+    fr: f64,
+    mw: f64,
+    ug: f64,
+    uf: f64,
+    psi: f64,
+    n: u32,
+) -> Result<(Compiled, Instance), FamilyError> {
     let mut f = window();
-    f.types.push(TypeDef { name: "t".into(), values: vec![("width".into(), w), ("height".into(), h), ("frame".into(), fr), ("mullion_w".into(), mw), ("ug".into(), ug), ("uf".into(), uf), ("psi".into(), psi)], ..Default::default() });
+    f.types.push(TypeDef {
+        name: "t".into(),
+        values: vec![
+            ("width".into(), w),
+            ("height".into(), h),
+            ("frame".into(), fr),
+            ("mullion_w".into(), mw),
+            ("ug".into(), ug),
+            ("uf".into(), uf),
+            ("psi".into(), psi),
+        ],
+        ..Default::default()
+    });
     let c = compile_library(&[f]).unwrap().remove(0);
-    let i = c.solve(&Request { type_name: Some("t"), overrides: vec![("mullions", n as f64)], ..Default::default() })?;
+    let i = c.solve(&Request {
+        type_name: Some("t"),
+        overrides: vec![("mullions", n as f64)],
+        ..Default::default()
+    })?;
     Ok((c, i))
 }
 
@@ -26,7 +51,9 @@ fn the_default_window_has_the_hand_calculated_u_value() {
     assert!((c.value(&i, "u_window").unwrap() - uw).abs() < 1e-12);
     assert!((uw - (1.2947 + 0.526 + 0.3924) / 1.44).abs() < 1e-3);
     let names: Vec<&str> = c.derived_values(&i).iter().map(|d| d.0).collect();
-    assert!(names.contains(&"u_window") && names.contains(&"glass_area") && !names.contains(&"x_left"));
+    assert!(
+        names.contains(&"u_window") && names.contains(&"glass_area") && !names.contains(&"x_left")
+    );
 }
 
 proptest! {

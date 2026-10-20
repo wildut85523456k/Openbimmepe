@@ -44,6 +44,7 @@ pub(crate) fn kind_colour(k: Kind) -> [f64; 3] {
         Kind::Wall => [0.82, 0.80, 0.76],
         Kind::Slab => [0.62, 0.62, 0.64],
         Kind::Column => [0.70, 0.66, 0.60],
+        Kind::Beam => [0.66, 0.64, 0.62],
         Kind::Family => [0.45, 0.62, 0.78],
         Kind::Segment => [0.40, 0.58, 0.72],
         Kind::Fitting => [0.30, 0.45, 0.62],

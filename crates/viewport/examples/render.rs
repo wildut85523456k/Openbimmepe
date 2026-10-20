@@ -17,13 +17,13 @@ fn main() {
     let mut inner = WallChain::new(vec![[5.0, 0.0], [5.0, 7.0]], false, 0.15, 3.0);
     inner.tops = vec![Some(vec![[0.0, 3.0], [3.5, 3.6], [7.0, 3.0]])];
     let mut s = Scene {
-        project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![WallItem { id: 1, name: "outer".into(), chain: ring, wall_type: None, room_bounding: true }, WallItem { id: 2, name: "inner".into(), chain: inner, wall_type: None, room_bounding: true }],
         wall_penetrations: vec![], firestops: Default::default(),
         slabs: vec![SlabItem { id: 3, slab: Slab { name: "S".into(), top: 0.0, thickness: 0.25, outline: vec![[-0.3, -0.3], [10.3, -0.3], [10.3, 7.3], [-0.3, 7.3]], fire_rating_min: None }, role: SlabRole::Structure, room_bounding: true }],
         columns: vec![ColumnItem { id: 4, name: "C".into(), footprint: vec![[8.0, 3.0], [8.4, 3.0], [8.4, 3.4], [8.0, 3.4]], base_z: 0.0, height: 3.0, room_bounding: false }],
-        shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     };
     // a ducted fan coil under the ceiling of the left room, a door and a window in the walls, and the pipes and duct
     // that leave its connectors

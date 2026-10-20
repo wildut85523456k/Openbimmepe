@@ -139,6 +139,7 @@ fn scene(g: Option<Georef>) -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![],
@@ -147,7 +148,7 @@ fn scene(g: Option<Georef>) -> Scene {
         slabs: vec![],
         columns: vec![],
         shafts: vec![],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: vec![],
         items: vec![],
@@ -158,7 +159,7 @@ fn scene(g: Option<Georef>) -> Scene {
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(),
+        pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     }
 }
 

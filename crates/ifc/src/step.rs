@@ -80,12 +80,12 @@ impl Step {
         self.lines.is_empty()
     }
     /// The whole file. `name` and `timestamp` go in the header; nothing else varies between runs.
-    pub fn finish(&self, name: &str, timestamp: &str) -> String {
+    pub fn finish(&self, name: &str, timestamp: &str, x43: bool) -> String {
         let mut o = String::new();
         o.push_str("ISO-10303-21;\nHEADER;\n");
-        o.push_str("FILE_DESCRIPTION(('ViewDefinition [ReferenceView_V1.2]'),'2;1');\n");
+        o.push_str(if x43 { "FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');\n" } else { "FILE_DESCRIPTION(('ViewDefinition [ReferenceView_V1.2]'),'2;1');\n" });
         o.push_str(&format!("FILE_NAME({},{},(''),(''),'openbim','openbim','');\n", string(name), string(timestamp)));
-        o.push_str("FILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n");
+        o.push_str(if x43 { "FILE_SCHEMA(('IFC4X3_ADD2'));\nENDSEC;\nDATA;\n" } else { "FILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n" });
         for (i, l) in self.lines.iter().enumerate() {
             o.push_str(&format!("#{}={};\n", i + 1, l));
         }

@@ -12,13 +12,13 @@ fn building() -> Batch {
     ring.openings = vec![vec![Opening { offset: 2.0, width: 1.2, sill: 0.9, height: 1.2 }], vec![], vec![], vec![]];
     let inner = WallChain::new(vec![[5.0, 0.0], [5.0, 7.0]], false, 0.15, 3.0);
     let s = Scene {
-        project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![WallItem { id: 1, name: "outer".into(), chain: ring, wall_type: None, room_bounding: true }, WallItem { id: 2, name: "inner".into(), chain: inner, wall_type: None, room_bounding: true }],
         wall_penetrations: vec![], firestops: Default::default(),
         slabs: vec![SlabItem { id: 3, slab: Slab { name: "S".into(), top: 0.0, thickness: 0.25, outline: vec![[-0.3, -0.3], [10.3, -0.3], [10.3, 7.3], [-0.3, 7.3]], fire_rating_min: None }, role: SlabRole::Structure, room_bounding: true }],
         columns: vec![ColumnItem { id: 4, name: "C".into(), footprint: vec![[8.0, 3.0], [8.4, 3.0], [8.4, 3.4], [8.0, 3.4]], base_z: 0.0, height: 3.0, room_bounding: false }],
-        shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     };
     Batch::new(&MeshCache::new().update(&s).unwrap().meshes)
 }
@@ -184,4 +184,47 @@ fn the_shadow_follows_the_sun_and_night_has_none() {
     let night = render_at(1.0);
     let bright = |px: &[u8]| px.chunks(4).filter(|p| p[..3] != [255, 255, 255]).map(|p| p[0] as u32 + p[1] as u32 + p[2] as u32).max().unwrap_or(0);
     assert!(bright(&night) < bright(&am), "night {} against morning {}", bright(&night), bright(&am));
+}
+
+/// `n` separate triangles on a grid, all one element.
+fn many_triangles(n: usize) -> Batch {
+    let mut b = Batch { origin: [0.0; 3], verts: vec![], tris: vec![], tri_element: vec![], tri_face: vec![], tri_material: vec![], elements: vec![openbim_view::Element { kind: openbim_view::Kind::Wall, id: 1 }], materials: vec![] };
+    for i in 0..n {
+        let (x, y) = ((i % 1000) as f32, (i / 1000) as f32);
+        let k = b.verts.len() as u32;
+        b.verts.extend([[x, y, 0.0], [x + 0.9, y, 0.0], [x, y + 0.9, 0.0]]);
+        b.tris.push([k, k + 1, k + 2]);
+        b.tri_element.push(0);
+        b.tri_face.push(openbim_view::FaceKind::Top);
+        b.tri_material.push(u32::MAX);
+    }
+    b
+}
+
+#[test]
+fn a_model_of_more_than_one_buffer_is_uploaded_in_parts_and_drawn() {
+    // 2.3 million triangles are 276 MB of corners: more than the 256 MiB a single buffer may be with the limits the
+    // program runs with, which stopped the program before the data was split
+    let Some((device, queue)) = device() else { eprintln!("no wgpu adapter; skipped"); return };
+    let b = many_triangles(2_300_000);
+    let gpu = Gpu::new(&device, wgpu::TextureFormat::Bgra8Unorm);
+    let scene = gpu.try_upload(&device, &b, Style::Shaded, None).expect("uploads");
+    assert!(scene.fill_parts() > 1, "{} parts", scene.fill_parts());
+    assert_eq!(scene.fill_vertices(), 6_900_000);
+    // the whole is drawn: the far corner of the grid is on the picture
+    let mut cam = Camera::default_3d([500.0, 1150.0, 0.0], 1500.0);
+    cam.pitch = 1.5;
+    let px = render_rgba(&device, &queue, &gpu, &scene, &cam, [200, 150]);
+    assert!(ink(&px) > 100, "the picture is blank");
+}
+
+#[test]
+fn a_model_over_the_memory_budget_is_refused_with_the_reason_instead_of_stopping() {
+    let Some((device, _queue)) = device() else { eprintln!("no wgpu adapter; skipped"); return };
+    let b = many_triangles(10_000);
+    let gpu = Gpu::new(&device, wgpu::TextureFormat::Bgra8Unorm);
+    assert_eq!(fill_bytes(10_000), 10_000 * 120);
+    let why = gpu.try_upload(&device, &b, Style::Shaded, Some(1_000_000)).err().expect("refused");
+    assert!(why.contains("10000 triangles") && why.contains("graphics memory"), "{why}");
+    assert!(gpu.try_upload(&device, &b, Style::Shaded, Some(2_000_000)).is_ok());
 }

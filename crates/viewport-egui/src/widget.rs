@@ -78,16 +78,23 @@ fn face_name(l: &CubeLabels, d: CubeDir) -> &str {
 }
 
 /// What the callback needs to keep between frames: the pipelines and the uploaded scene.
-struct Resources { gpu: Gpu, scene: Option<(u64, Style, u64, Scene)>, target: Option<Target> }
+struct Resources { gpu: Gpu, scene: Option<(u64, Style, u64, Scene)>, target: Option<Target>, failed: Option<(u64, Style)> }
 
-struct Draw { sun: Sun, camera: Camera, style: Style, generation: u64, batch: Option<Arc<Batch>>, size_px: [u32; 2], section: Option<SectionBox>, selection: Arc<HashSet<Element>>, selection_generation: u64 }
+struct Draw { budget: Option<u64>, problem: Arc<std::sync::Mutex<Option<String>>>, sun: Sun, camera: Camera, style: Style, generation: u64, batch: Option<Arc<Batch>>, size_px: [u32; 2], section: Option<SectionBox>, selection: Arc<HashSet<Element>>, selection_generation: u64 }
+
+impl Draw {
+    fn say(&self, why: Option<String>) { if let Ok(mut p) = self.problem.lock() { *p = why; } }
+}
 
 impl CallbackTrait for Draw {
     fn prepare(&self, device: &wgpu::Device, queue: &wgpu::Queue, _screen: &ScreenDescriptor, encoder: &mut wgpu::CommandEncoder, res: &mut CallbackResources) -> Vec<wgpu::CommandBuffer> {
         let Some(r) = res.get_mut::<Resources>() else { return Vec::new() };
         let Some(batch) = &self.batch else { r.scene = None; return Vec::new() };
-        if !matches!(&r.scene, Some((g, s, _, _)) if *g == self.generation && *s == self.style) {
-            r.scene = Some((self.generation, self.style, u64::MAX, r.gpu.upload(device, batch, self.style)));
+        if !matches!(&r.scene, Some((g, s, _, _)) if *g == self.generation && *s == self.style) && r.failed != Some((self.generation, self.style)) {
+            match r.gpu.try_upload(device, batch, self.style, self.budget) {
+                Ok(scene) => { r.scene = Some((self.generation, self.style, u64::MAX, scene)); r.failed = None; self.say(None); }
+                Err(why) => { r.scene = None; r.failed = Some((self.generation, self.style)); self.say(Some(why)); }
+            }
         }
         if let Some((_, _, sg, scene)) = &mut r.scene {
             scene.sun = self.sun;
@@ -141,18 +148,24 @@ pub struct Viewport3d {
     anim: Option<(Camera, Camera, f64)>,
     batch: Option<Arc<Batch>>,
     generation: u64,
+    /// Bytes of graphics memory a model may take; a larger one is not drawn and `problem` says why. None: no check.
+    pub memory_budget: Option<u64>,
+    problem: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl Viewport3d {
     /// Call once at start-up with `frame.wgpu_render_state()`.
     pub fn init(rs: &RenderState) {
         let gpu = Gpu::new(&rs.device, rs.target_format);
-        rs.renderer.write().callback_resources.insert(Resources { gpu, scene: None, target: None });
+        rs.renderer.write().callback_resources.insert(Resources { gpu, scene: None, target: None, failed: None });
     }
 
     pub fn new() -> Viewport3d {
-        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, sun: Sun::default(), labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0 }
+        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, sun: Sun::default(), labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0, memory_budget: None, problem: Arc::new(std::sync::Mutex::new(None)) }
     }
+
+    /// Why the model could not be put on the graphics card (too large for `memory_budget`), if that is so.
+    pub fn problem(&self) -> Option<String> { self.problem.lock().ok().and_then(|p| p.clone()) }
 
     /// Show a new batch (after an edit). The camera is not moved.
     pub fn set_batch(&mut self, b: Arc<Batch>) { self.batch = Some(b); self.generation += 1; }
@@ -219,8 +232,11 @@ impl Viewport3d {
 
         let now = ui.input(|i| i.time);
         if self.step_animation(now) { ui.ctx().request_repaint(); }
-        let draw = Draw { sun: self.sun, camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), section: self.section, selection: self.selection.clone(), selection_generation: self.selection_generation, size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
+        let draw = Draw { budget: self.memory_budget, problem: self.problem.clone(), sun: self.sun, camera: self.camera, style: self.style, generation: self.generation, batch: self.batch.clone(), section: self.section, selection: self.selection.clone(), selection_generation: self.selection_generation, size_px: [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32] };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, draw));
+        if let Some(why) = self.problem() {
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("The 3D view cannot show this model: {why}.\nPlans, sections and schedules are not affected."), FontId::proportional(14.0), ui.visuals().weak_text_color());
+        }
         self.paint_datums(ui, rect);
         self.paint_cube(ui, &cells, over_cube);
         resp

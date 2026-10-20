@@ -1,6 +1,20 @@
 # 04 — Automation: Dynamo-like graph app and MCP server
 
-Status: **design agreed 16 Oct 2026; not implemented.** It replaces the 15 Oct study. The full record is the Claude Doc "Automation: Dynamo-like Graph App and MCP Server".
+Status: **native foundation implemented; full workflow remains a target**. See
+[implementation status](../automation.md) and [interaction contract](../automation-wire-interactions.md).
+
+Decision: use an independent Rust graph/runtime and egui desktop editor, with
+external Python processes. Dynamo, DesignScript, Revit APIs and .NET are not
+runtime dependencies. The candidate approaches below record the original study;
+embedded Python and compatibility importers are not commitments.
+
+Current scope: typed JSON graphs, snapshot previews, atomic apply/undo, inline
+block editors, connector drag/release, manually adjusted curves, a restricted
+numeric Python worker and a separate read-only snapshot MCP server. Docking,
+search, graph debugger, general scripting, live MCP and full BIM node families
+remain incomplete. The proposed Python API below is still illustrative.
+
+Design agreed 16 Oct 2026 (full record: the Claude Doc "Automation: Dynamo-like Graph App and MCP Server"); the paragraph above says how much of it exists.
 
 ## Decisions
 

@@ -9,6 +9,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, c)| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: None, room_bounding: true }).collect(),
@@ -17,7 +18,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         slabs: slabs.into_iter().enumerate().map(|(i, slab)| SlabItem { id: 50 + i as u64, slab, room_bounding: true, role: Default::default() }).collect(),
         columns: vec![],
         shafts: vec![],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: vec![],
         items: vec![],
@@ -28,7 +29,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(),
+        pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     }
 }
 fn room(outline: &[[f64; 2]], level: usize) -> Room {

@@ -1,0 +1,12 @@
+[package]
+name = "openbim-calc"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Sizing and losses of a branched pipe or duct network: flows from the end points, sizes from a catalogue, pressure drops, the most resistant path"
+
+[dependencies]
+rayon = "1.12.0"
+
+[lints.rust]
+unsafe_code = "forbid"

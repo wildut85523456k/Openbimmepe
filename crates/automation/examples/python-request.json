@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "request_id": "example-python-offset",
+  "snapshot": {
+    "document_id": "example-document",
+    "revision": 42,
+    "elements": [
+      { "id": 1, "category": "Duct", "name": "Supply duct", "width_m": 0.2,
+        "height_m": 0.3, "elevation_m": 2.7, "slope_ratio": 0.01 }
+    ]
+  },
+  "graph": {
+    "version": 1,
+    "nodes": [
+      { "id": 1, "kind": { "Selection": { "ids": [1] } }, "position": [20, 30] },
+      { "id": 2, "kind": { "Read": { "property": "Elevation" } }, "position": [290, 30] },
+      { "id": 3, "kind": { "Python": { "expression": "x + 0.3", "quantity": "Length" } }, "position": [560, 30] },
+      { "id": 4, "kind": { "Set": { "property": "Elevation" } }, "position": [560, 210] }
+    ],
+    "wires": [
+      { "from": 1, "to": 2, "input": 0 },
+      { "from": 2, "to": 3, "input": 0 },
+      { "from": 1, "to": 4, "input": 0 },
+      { "from": 3, "to": 4, "input": 1 }
+    ]
+  }
+}

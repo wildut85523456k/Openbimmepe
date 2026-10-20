@@ -11,6 +11,8 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+pub mod profile;
+
 pub const MAX_WALLS: usize = 10_000_000;
 pub const MAX_OPENINGS_PER_WALL: usize = 1_000;
 pub const MAX_PROFILE_VERTS: usize = 4_096;

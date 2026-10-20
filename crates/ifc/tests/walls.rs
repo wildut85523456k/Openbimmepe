@@ -13,6 +13,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
     Scene {
         project_name: "P".into(),
         project_key: 1,
+        beams: vec![], materials: Default::default(),
         timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: walls.into_iter().enumerate().map(|(i, (c, t))| WallItem { id: 10 + i as u64, name: format!("W{i}"), chain: c, wall_type: t, room_bounding: true }).collect(),
@@ -21,7 +22,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
         slabs: vec![],
         columns: vec![],
         shafts: vec![],
-        floor_penetrations: vec![],
+        floor_penetrations: vec![], slab_voids: vec![],
         networks: vec![],
         families: vec![],
         items: vec![],
@@ -32,7 +33,7 @@ fn scene(walls: Vec<(WallChain, Option<usize>)>, types: Vec<WallType>, joins: Ve
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(),
+        pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     }
 }
 fn brick() -> WallType {

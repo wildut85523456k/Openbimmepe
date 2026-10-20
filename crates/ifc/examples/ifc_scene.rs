@@ -208,6 +208,7 @@ pub fn build_scene(edit: bool) -> Scene {
             openbim_ifc::boundaries::SeparationLine { id: A | 972, level: 1, a: [2.0, 7.0], b: [2.0, 3.075] },
         ],
         project_key: 0x0123_4567_89ab,
+        beams: vec![], materials: Default::default(),
         timestamp: "2026-10-15T00:00:00".into(),
         levels,
         walls: vec![WallItem { id: A | 1, name: "Outer wall".into(), chain: built.chains[0].clone(), wall_type: Some(0), room_bounding: true }, WallItem { id: A | 3, name: "Upper wall".into(), chain: built.chains[1].clone(), wall_type: Some(1), room_bounding: true }, WallItem { id: A | 4, name: "Partition".into(), chain: partition.clone(), wall_type: Some(1), room_bounding: true }],
@@ -223,7 +224,7 @@ pub fn build_scene(edit: bool) -> Scene {
             SlabItem { id: A | 6, slab: Slab { name: "L1 false ceiling".into(), top: 5.57, thickness: 0.02, outline: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]], fire_rating_min: None }, room_bounding: true, role: SlabRole::Ceiling },
         ],
         shafts: vec![void],
-        floor_penetrations: floor_pens,
+        floor_penetrations: floor_pens, slab_voids: vec![],
         networks: vec![net],
         families: fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect(),
         items,
@@ -233,7 +234,7 @@ pub fn build_scene(edit: bool) -> Scene {
             RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[3.575, 0.1], [9.9, 0.1], [9.9, 7.9], [7.3, 7.9], [7.3, 7.7], [6.7, 7.7], [6.7, 7.9], [3.575, 7.9]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } },
             RoomItem { id: A | 961, room: Room { name: "Store".into(), usage: "store".into(), occupancy: 0.0, level: 1, outline: vec![[2.0, 3.075], [6.0, 3.075], [6.0, 7.0], [2.0, 7.0]], holes: vec![], height: 2.8 } },
         ],
-        pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
+        types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![], pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
     }
 }
 

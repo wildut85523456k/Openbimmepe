@@ -1,15 +1,31 @@
 use openbim_family::expr::*;
 use openbim_family::*;
 
-fn ev(src: &str) -> Result<f64, ExprError> { Expr::parse(src, &|_| None)?.eval(&[]) }
+fn ev(src: &str) -> Result<f64, ExprError> {
+    Expr::parse(src, &|_| None)?.eval(&[])
+}
 fn ev_with(src: &str, names: &[&str], vals: &[f64]) -> Result<f64, ExprError> {
     Expr::parse(src, &|n| names.iter().position(|x| *x == n))?.eval(vals)
 }
-fn close(a: f64, b: f64) -> bool { (a - b).abs() < 1e-12 }
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-12
+}
 
 #[test]
 fn units_turn_into_metres_and_degrees() {
-    for (s, v) in [("1000 mm", 1.0), ("1000mm", 1.0), ("2.5 cm", 0.025), ("3 m", 3.0), ("2 km", 2000.0), ("12 in", 0.3048), ("1 ft", 0.3048), ("90 deg", 90.0), ("1 rad", 180.0 / std::f64::consts::PI), ("1e3 mm", 1.0), ("0.5m", 0.5)] {
+    for (s, v) in [
+        ("1000 mm", 1.0),
+        ("1000mm", 1.0),
+        ("2.5 cm", 0.025),
+        ("3 m", 3.0),
+        ("2 km", 2000.0),
+        ("12 in", 0.3048),
+        ("1 ft", 0.3048),
+        ("90 deg", 90.0),
+        ("1 rad", 180.0 / std::f64::consts::PI),
+        ("1e3 mm", 1.0),
+        ("0.5m", 0.5),
+    ] {
         assert!(close(ev(s).unwrap(), v), "{s} = {:?}", ev(s));
     }
     // units bind to their number
@@ -30,7 +46,15 @@ fn units_turn_into_metres_and_degrees() {
 
 #[test]
 fn names_may_have_spaces_and_accents() {
-    let names = ["Rough Width", "Largeur_allège", "Width", "Épaisseur", "_x", "a.b c", "Hauteur de linteau"];
+    let names = [
+        "Rough Width",
+        "Largeur_allège",
+        "Width",
+        "Épaisseur",
+        "_x",
+        "a.b c",
+        "Hauteur de linteau",
+    ];
     let vals = [2.0, 3.0, 5.0, 7.0, 11.0, 13.0, 17.0];
     let e = |s: &str| ev_with(s, &names, &vals);
     assert_eq!(e("Rough Width * 2").unwrap(), 4.0);
@@ -46,19 +70,50 @@ fn names_may_have_spaces_and_accents() {
     assert!(matches!(e("Width Épaisseur"), Err(ExprError::Syntax(_))));
     assert!(matches!(e("Rough"), Err(ExprError::UnknownName(n)) if n == "Rough"));
     assert!(matches!(e("Rough Wid"), Err(ExprError::UnknownName(n)) if n == "Rough"));
-    assert!(matches!(e("Rough  Width"), Err(ExprError::UnknownName(_)) | Err(ExprError::Syntax(_))));
+    assert!(matches!(
+        e("Rough  Width"),
+        Err(ExprError::UnknownName(_)) | Err(ExprError::Syntax(_))
+    ));
     // a name starting with a digit is not a name
     assert!(e("2x").is_err());
 }
 
 #[test]
 fn name_rules() {
-    let ok = |n: &str| Family { name: "F".into(), values: vec![ValueDef::input(n, 1.0, 0.0, 2.0, Scope::Instance)], ..Default::default() }.compile().is_ok();
-    for n in ["Rough Width", "Largeur_allège", "Épaisseur", "_x", "a", "A B C", "größe", "幅 1", "x2", "Width 2"] { assert!(ok(n), "{n}"); }
-    for n in ["", " x", "x ", "a  b", "2x", "x-y", "x\ty", "a.b", "x(", "2 x", "x\u{0}"] { assert!(!ok(n), "{n:?}"); }
+    let ok = |n: &str| {
+        Family {
+            name: "F".into(),
+            values: vec![ValueDef::input(n, 1.0, 0.0, 2.0, Scope::Instance)],
+            ..Default::default()
+        }
+        .compile()
+        .is_ok()
+    };
+    for n in [
+        "Rough Width",
+        "Largeur_allège",
+        "Épaisseur",
+        "_x",
+        "a",
+        "A B C",
+        "größe",
+        "幅 1",
+        "x2",
+        "Width 2",
+    ] {
+        assert!(ok(n), "{n}");
+    }
+    for n in [
+        "", " x", "x ", "a  b", "2x", "x-y", "x\ty", "a.b", "x(", "2 x", "x\u{0}",
+    ] {
+        assert!(!ok(n), "{n:?}");
+    }
     assert!(ok(&"x".repeat(64)));
     assert!(!ok(&"x".repeat(65)));
-    assert!(ok(&"é".repeat(64)), "64 characters even when each takes two bytes");
+    assert!(
+        ok(&"é".repeat(64)),
+        "64 characters even when each takes two bytes"
+    );
     assert!(!ok(&"é".repeat(65)));
     // a family that uses such names in formulas end to end
     let f = Family {
@@ -75,7 +130,12 @@ fn name_rules() {
     let i = c.solve(&Request::default()).unwrap();
     assert!(close(c.value(&i, "Clear Width").unwrap(), 1.0));
     assert!(close(c.value(&i, "Clear Width mm").unwrap(), 1000.0));
-    let i = c.solve(&Request { overrides: vec![("Rough Width", 2.0)], ..Default::default() }).unwrap();
+    let i = c
+        .solve(&Request {
+            overrides: vec![("Rough Width", 2.0)],
+            ..Default::default()
+        })
+        .unwrap();
     assert!(close(c.value(&i, "Clear Width").unwrap(), 1.8));
 }
 
@@ -107,14 +167,51 @@ fn equality_and_the_revit_style_logic_functions() {
     assert_eq!(ev("1 && 0 || 1").unwrap(), 1.0);
     assert_eq!(ev("!0").unwrap(), 1.0);
     // short circuit: the second condition is not evaluated when the first decides
-    assert_eq!(ev_with("and(w > 0, 1 / w < 5)", &["w"], &[0.0]).unwrap(), 0.0);
-    assert_eq!(ev_with("or(w = 0, 1 / w < 5)", &["w"], &[0.0]).unwrap(), 1.0);
-    assert!(matches!(ev_with("and(1, 1 / w < 5)", &["w"], &[0.0]), Err(ExprError::DivByZero)));
+    assert_eq!(
+        ev_with("and(w > 0, 1 / w < 5)", &["w"], &[0.0]).unwrap(),
+        0.0
+    );
+    assert_eq!(
+        ev_with("or(w = 0, 1 / w < 5)", &["w"], &[0.0]).unwrap(),
+        1.0
+    );
+    assert!(matches!(
+        ev_with("and(1, 1 / w < 5)", &["w"], &[0.0]),
+        Err(ExprError::DivByZero)
+    ));
     // arity
-    assert!(matches!(ev("and(1)"), Err(ExprError::Arity { expected: 2, got: 1, .. })));
-    assert!(matches!(ev("or()"), Err(ExprError::Arity { expected: 2, got: 0, .. })));
-    assert!(matches!(ev("not()"), Err(ExprError::Arity { expected: 1, got: 0, .. })));
-    assert!(matches!(ev("not(1, 2)"), Err(ExprError::Arity { expected: 1, got: 2, .. })));
+    assert!(matches!(
+        ev("and(1)"),
+        Err(ExprError::Arity {
+            expected: 2,
+            got: 1,
+            ..
+        })
+    ));
+    assert!(matches!(
+        ev("or()"),
+        Err(ExprError::Arity {
+            expected: 2,
+            got: 0,
+            ..
+        })
+    ));
+    assert!(matches!(
+        ev("not()"),
+        Err(ExprError::Arity {
+            expected: 1,
+            got: 0,
+            ..
+        })
+    ));
+    assert!(matches!(
+        ev("not(1, 2)"),
+        Err(ExprError::Arity {
+            expected: 1,
+            got: 2,
+            ..
+        })
+    ));
     let sixteen = format!("and({})", vec!["1"; 16].join(", "));
     let seventeen = format!("and({})", vec!["1"; 17].join(", "));
     assert_eq!(ev(&sixteen).unwrap(), 1.0);
@@ -139,35 +236,74 @@ fn longest_name_wins_and_long_names_work() {
     assert_eq!(ev_with("Rough + Rough Width", &names, &vals).unwrap(), 11.0);
     assert_eq!(ev_with("Rough * 2", &names, &vals).unwrap(), 2.0);
     // a dot only joins when a letter follows
-    assert!(matches!(ev_with("x.5", &names, &vals), Err(ExprError::Syntax(_))));
-    assert!(matches!(ev_with("x. 5", &names, &vals), Err(ExprError::Syntax(_))));
+    assert!(matches!(
+        ev_with("x.5", &names, &vals),
+        Err(ExprError::Syntax(_))
+    ));
+    assert!(matches!(
+        ev_with("x. 5", &names, &vals),
+        Err(ExprError::Syntax(_))
+    ));
     assert_eq!(ev_with("x .5", &names, &vals).map_err(|_| ()), Err(()));
     // the longest allowed name: 32 one-letter words
     let long = vec!["a"; 32].join(" ");
     assert_eq!(long.len(), 63);
     assert_eq!(ev_with(&long, &[long.as_str()], &[5.0]).unwrap(), 5.0);
     let long31 = vec!["a"; 31].join(" ");
-    assert_eq!(ev_with(&format!("{long31} + 1"), &[long31.as_str()], &[5.0]).unwrap(), 6.0);
+    assert_eq!(
+        ev_with(&format!("{long31} + 1"), &[long31.as_str()], &[5.0]).unwrap(),
+        6.0
+    );
 }
 
 #[test]
 fn sine_and_cosine_of_a_tiny_angle_next_to_a_multiple_of_90_are_right() {
     // rem_euclid(360) of a tiny negative angle rounds up to exactly 360: that is quadrant 0, not 4 (which read as -1)
-    for tiny in ["0 - 0.00000000000001", "0 - 0.000000000000001", "360 - 0.00000000000001", "720 - 0.00000000000001"] {
+    for tiny in [
+        "0 - 0.00000000000001",
+        "0 - 0.000000000000001",
+        "360 - 0.00000000000001",
+        "720 - 0.00000000000001",
+    ] {
         assert!(ev(&format!("sin({tiny})")).unwrap().abs() < 1e-9, "{tiny}");
-        assert!((ev(&format!("cos({tiny})")).unwrap() - 1.0).abs() < 1e-9, "{tiny}");
+        assert!(
+            (ev(&format!("cos({tiny})")).unwrap() - 1.0).abs() < 1e-9,
+            "{tiny}"
+        );
     }
-    for (a, s, c) in [(90.0, 1.0, 0.0), (180.0, 0.0, -1.0), (270.0, -1.0, 0.0), (360.0, 0.0, 1.0), (-90.0, -1.0, 0.0), (-180.0, 0.0, -1.0), (-270.0, 1.0, 0.0), (450.0, 1.0, 0.0), (-360.0, 0.0, 1.0)] {
-        assert!((ev(&format!("sin({a})")).unwrap() - s).abs() < 1e-12, "sin {a}");
-        assert!((ev(&format!("cos({a})")).unwrap() - c).abs() < 1e-12, "cos {a}");
+    for (a, s, c) in [
+        (90.0, 1.0, 0.0),
+        (180.0, 0.0, -1.0),
+        (270.0, -1.0, 0.0),
+        (360.0, 0.0, 1.0),
+        (-90.0, -1.0, 0.0),
+        (-180.0, 0.0, -1.0),
+        (-270.0, 1.0, 0.0),
+        (450.0, 1.0, 0.0),
+        (-360.0, 0.0, 1.0),
+    ] {
+        assert!(
+            (ev(&format!("sin({a})")).unwrap() - s).abs() < 1e-12,
+            "sin {a}"
+        );
+        assert!(
+            (ev(&format!("cos({a})")).unwrap() - c).abs() < 1e-12,
+            "cos {a}"
+        );
     }
     // just beside the exact multiples of 90 the values are continuous
     for k in 0..8 {
         let a = 90.0 * k as f64;
         for d in [-1e-9, 1e-9, -1e-13, 1e-13] {
             let x = a + d;
-            assert!((ev(&format!("sin({x})")).unwrap() - x.to_radians().sin()).abs() < 1e-9, "sin {x}");
-            assert!((ev(&format!("cos({x})")).unwrap() - x.to_radians().cos()).abs() < 1e-9, "cos {x}");
+            assert!(
+                (ev(&format!("sin({x})")).unwrap() - x.to_radians().sin()).abs() < 1e-9,
+                "sin {x}"
+            );
+            assert!(
+                (ev(&format!("cos({x})")).unwrap() - x.to_radians().cos()).abs() < 1e-9,
+                "cos {x}"
+            );
         }
     }
 }

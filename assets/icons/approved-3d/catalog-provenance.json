@@ -1,0 +1,901 @@
+{
+  "source": "catalog-source/catalog.png",
+  "source_sha256": "4defcbd3e60a7270d3c06f72968855b320714e729c497b156a4cf06eed673107",
+  "assets": {
+    "wall": {
+      "crop": [
+        16,
+        46,
+        92,
+        130
+      ],
+      "sha256": "9023bb6093ce647b59a263abbe774e84ea53762c972aaad9889895123ea8efc7"
+    },
+    "door": {
+      "crop": [
+        100,
+        46,
+        177,
+        130
+      ],
+      "sha256": "bbf8cecca62e2c153cb4badba99a58794afef93e6d73dbb5b22a8cae8e7b447f"
+    },
+    "window": {
+      "crop": [
+        185,
+        46,
+        263,
+        130
+      ],
+      "sha256": "8c9d02792c3dcda01dcdaafd4c3534e96104f1380bd8daa3fd33f7d994aed5f8"
+    },
+    "curtain_wall": {
+      "crop": [
+        271,
+        46,
+        355,
+        130
+      ],
+      "sha256": "3c74c9d206a2de5be204667f2982e9c66d339dd4b0577f9b5603fea928db86ce"
+    },
+    "floor": {
+      "crop": [
+        363,
+        46,
+        452,
+        130
+      ],
+      "sha256": "76e447e1526ce090054f7ce0b67347621d70a749567c16ffbfde021a256d9a4f"
+    },
+    "roof": {
+      "crop": [
+        460,
+        46,
+        543,
+        130
+      ],
+      "sha256": "dd6ec8a3a5b7e111ec5ea8e9cd47097d78ce73e88a24164d4e5cf295b402d338"
+    },
+    "ceiling": {
+      "crop": [
+        551,
+        46,
+        634,
+        130
+      ],
+      "sha256": "a02e70aaa76d930a1e1f66d19c453484a6919683eff5d35374e796046e703f07"
+    },
+    "column": {
+      "crop": [
+        642,
+        46,
+        720,
+        130
+      ],
+      "sha256": "57480a72d072f024c4f51413bdabefa820218ad1436c7acd6cf5b9139cb3024a"
+    },
+    "room": {
+      "crop": [
+        728,
+        46,
+        807,
+        130
+      ],
+      "sha256": "465e385277c84ea4636f55f7a74424a025833abb3149ec1ea4fd62b2665c7f0e"
+    },
+    "area": {
+      "crop": [
+        815,
+        46,
+        898,
+        130
+      ],
+      "sha256": "6f75c88ae67ab764d4595ad25842369e3b54c3aa8ba952edeea60db76372691f"
+    },
+    "stair": {
+      "crop": [
+        906,
+        46,
+        988,
+        130
+      ],
+      "sha256": "a56ccc95d3d64f7c0eaeaa82b0d0f58c36371e4044388df06bcc04db7af9323a"
+    },
+    "railing": {
+      "crop": [
+        996,
+        46,
+        1077,
+        130
+      ],
+      "sha256": "36cfcf8fbfd285e9133c9586ccb8421f62e1264b51bf2f96de63a0367433588e"
+    },
+    "railing_solid": {
+      "crop": [
+        1085,
+        46,
+        1167,
+        130
+      ],
+      "sha256": "8e53189143753c6017aa62433ec5203e959be038493620ca1b8093f8c1a81ff0"
+    },
+    "ramp": {
+      "crop": [
+        1175,
+        46,
+        1258,
+        130
+      ],
+      "sha256": "74ffc810d625d101f5af1935e8e9eb9aff68f496b6bf8660ca2038a0a7461eb9"
+    },
+    "model_line": {
+      "crop": [
+        1266,
+        46,
+        1347,
+        130
+      ],
+      "sha256": "8380f4e113ef76a564e34c7dc4605c8eb925f92f765948ef8f44a60c8bb30a33"
+    },
+    "component": {
+      "crop": [
+        1355,
+        46,
+        1436,
+        130
+      ],
+      "sha256": "353a9e7f5319aaf2eac2d8c62b7b888b2bc8d8387ff08d97f1c8888d0732956d"
+    },
+    "opening": {
+      "crop": [
+        1444,
+        46,
+        1521,
+        130
+      ],
+      "sha256": "01e6e03dc054b07cbeaab67d56db7efdc11218deae3540568c3867debf631169"
+    },
+    "structural_column": {
+      "crop": [
+        16,
+        218,
+        91,
+        310
+      ],
+      "sha256": "2cf342e09736fd25abe6c3979b6302ed970d30122d25c3c7acc521508d3a1c29"
+    },
+    "beam": {
+      "crop": [
+        99,
+        218,
+        176,
+        310
+      ],
+      "sha256": "54704f514a1368d0880afea0864d6a3e3ec68d333d2ec1c6f17b9b3414ad68da"
+    },
+    "truss": {
+      "crop": [
+        269,
+        218,
+        350,
+        310
+      ],
+      "sha256": "7e6e6cef769ea7dcf571533b0c7e61969c7c5d1879693ac3a767f0755fd3c598"
+    },
+    "foundation": {
+      "crop": [
+        358,
+        218,
+        441,
+        310
+      ],
+      "sha256": "eba765c19b703d61b3f33255f4072a19e8db6e0c8d057dec6e8e69ea65ec3042"
+    },
+    "structural_floor": {
+      "crop": [
+        449,
+        218,
+        537,
+        310
+      ],
+      "sha256": "be738ef832e5dc11b10405f1538b1cbda6154ceef0fff04f9673c53a76a28995"
+    },
+    "structural_wall": {
+      "crop": [
+        545,
+        218,
+        629,
+        310
+      ],
+      "sha256": "1759599f9e73b93b40fb348c42d49ac4054d5a8ee8195059a50b2bcea27a2a3c"
+    },
+    "rebar": {
+      "crop": [
+        637,
+        218,
+        716,
+        310
+      ],
+      "sha256": "b75f860600f28c52c291acf8a659bb615dc25f8f23186e23d55731fafe5306bc"
+    },
+    "connection": {
+      "crop": [
+        724,
+        218,
+        802,
+        310
+      ],
+      "sha256": "56ceeb21142b1a92a35e3a67a0b814d285f9e0a4db7737f66d70b34af9c2773b"
+    },
+    "slab": {
+      "crop": [
+        810,
+        218,
+        897,
+        310
+      ],
+      "sha256": "cbc9d747cde49ba06306af922faeab1eeeb08be529f91861735dd5fd2bebcb87"
+    },
+    "framing": {
+      "crop": [
+        905,
+        218,
+        995,
+        310
+      ],
+      "sha256": "0b81c8cc2c1fa503040dea6b4da339a733d496104aa5f5c4988156cb31e53413"
+    },
+    "footing": {
+      "crop": [
+        1003,
+        218,
+        1087,
+        310
+      ],
+      "sha256": "556933f940936d566abddc85556053e6c0feef6a0ec0a8c53f31a7c879e56fe1"
+    },
+    "anchor": {
+      "crop": [
+        1095,
+        218,
+        1178,
+        310
+      ],
+      "sha256": "18e2a5b2e4ce6ed28499ecf39769c0dc39e7250ff25e62874527da390b4bd7e0"
+    },
+    "pier": {
+      "crop": [
+        1186,
+        218,
+        1263,
+        310
+      ],
+      "sha256": "881b7bdcdee1374afef6a8975e08bded369b8b15441eb934f8cb877beee71f85"
+    },
+    "shear_wall": {
+      "crop": [
+        1271,
+        218,
+        1348,
+        310
+      ],
+      "sha256": "541819890b73c9968e6985fac26aea1928efa87556f74ffef3537d5c86aa2f6c"
+    },
+    "brace_frame": {
+      "crop": [
+        1356,
+        218,
+        1434,
+        310
+      ],
+      "sha256": "585758721919881e82da21d9a591849a1e18d5cd362f7049274d8c811993c371"
+    },
+    "structural_section": {
+      "crop": [
+        1442,
+        218,
+        1521,
+        310
+      ],
+      "sha256": "237d19e3cccae54fb4d7726dd56eb821d5067c938f5c0c420a21c4c8e3c6d892"
+    },
+    "duct": {
+      "crop": [
+        16,
+        395,
+        92,
+        478
+      ],
+      "sha256": "c3a2104fc8e25446130844c9ff65f4a5b12e5a2ea4cc21b4ca6a891aa51ee523"
+    },
+    "duct_fitting": {
+      "crop": [
+        100,
+        395,
+        177,
+        478
+      ],
+      "sha256": "826b9a3a19259daf25c3bd1dc2bae14f1bb6f962cfe6eb9ce7c2d7f29f03d488"
+    },
+    "duct_elbow": {
+      "crop": [
+        185,
+        395,
+        260,
+        478
+      ],
+      "sha256": "214e7ab4976833bace97310b9d399039b6d2353a31872f1a7aa766ff4fc9cd81"
+    },
+    "duct_transition": {
+      "crop": [
+        268,
+        395,
+        346,
+        478
+      ],
+      "sha256": "347cc78db314c7439400b40db706e02fe6bdbce54197d426926c8aecd4d488fc"
+    },
+    "flex_duct": {
+      "crop": [
+        354,
+        395,
+        437,
+        478
+      ],
+      "sha256": "4030a86fc0c8fd58db6c81a1aadd4e7a5ad4c15f001a323d119e787ca8f8152b"
+    },
+    "air_terminal": {
+      "crop": [
+        445,
+        395,
+        530,
+        478
+      ],
+      "sha256": "36a9cbcaab25c71872e37ed35fc816641eddde07b270150fdd2d803979bcc764"
+    },
+    "vav_box": {
+      "crop": [
+        538,
+        395,
+        612,
+        478
+      ],
+      "sha256": "fb7b17c9e747001683e5f8264cfbfaec9ee6e91327433c8f6fd287c69df889ce"
+    },
+    "ahu": {
+      "crop": [
+        620,
+        395,
+        706,
+        478
+      ],
+      "sha256": "219b193428aad1d4b264376f57cda3c64afc8a0a1ad364587264b6baaddb4e0a"
+    },
+    "fan": {
+      "crop": [
+        714,
+        395,
+        804,
+        478
+      ],
+      "sha256": "9d493e8c5d1919eecefc5a0edeeb0c1dbf33140b0683afca4a709034349712fb"
+    },
+    "damper": {
+      "crop": [
+        812,
+        395,
+        890,
+        478
+      ],
+      "sha256": "c191ed8d95498e22aa0ff5d980212713d90752081b6ed0d04aae74de79193f04"
+    },
+    "duct_insulation": {
+      "crop": [
+        898,
+        395,
+        987,
+        478
+      ],
+      "sha256": "291e8a76bd43f17f39fc8b2c4fa95b6092ff238065c0777e2d24b69498f2a1e3"
+    },
+    "grille": {
+      "crop": [
+        995,
+        395,
+        1073,
+        478
+      ],
+      "sha256": "b6365dd4279dd116834287f0fbae05c24e4889ffe86dbb1dcd051903e3327345"
+    },
+    "diffuser": {
+      "crop": [
+        1081,
+        395,
+        1167,
+        478
+      ],
+      "sha256": "d691f75556e8f1f7294e68c0aa8369a495ce4258aa9910a31238aee75cb78a74"
+    },
+    "mechanical_equipment": {
+      "crop": [
+        1175,
+        395,
+        1290,
+        478
+      ],
+      "sha256": "c17b185adfa88170c2333e3504d90af0e3a13473fbcb4f1c2bb44df439292734"
+    },
+    "chiller": {
+      "crop": [
+        1298,
+        395,
+        1416,
+        478
+      ],
+      "sha256": "164ab3e57dce2185ef5ce5a093ad6d5f3ed034653639f7a77799c81697504960"
+    },
+    "cooling_tower": {
+      "crop": [
+        1424,
+        395,
+        1521,
+        478
+      ],
+      "sha256": "67edb3d8abd6be504343d738cdd9d6d502bb902e4dc1d3b2b0f911849f2fe4b2"
+    },
+    "pipe": {
+      "crop": [
+        16,
+        569,
+        92,
+        652
+      ],
+      "sha256": "ece71f20e305b665d220bf20f82cc4b877d0704a61a6825bf161d31fb4ff7f5e"
+    },
+    "pipe_fitting": {
+      "crop": [
+        100,
+        569,
+        177,
+        652
+      ],
+      "sha256": "96c5fcbe8667d8f3ecdd4257629717fe81026d81ebd83fad1c79a373351349a8"
+    },
+    "pipe_elbow": {
+      "crop": [
+        185,
+        569,
+        261,
+        652
+      ],
+      "sha256": "b270400b10dcb144bac2ba9c940bcb24f66abe0811bc981154c0bde9865372cc"
+    },
+    "pipe_tee": {
+      "crop": [
+        269,
+        569,
+        346,
+        652
+      ],
+      "sha256": "641a4ee752732cc7f4185dc9621a87b55af578448a30c5d198539ff8bc8b199f"
+    },
+    "pipe_transition": {
+      "crop": [
+        354,
+        569,
+        438,
+        652
+      ],
+      "sha256": "9c4ded8a2982affbb916a6d785cf0a6d60399cb1c162a250f12e593076b0cf60"
+    },
+    "valve": {
+      "crop": [
+        446,
+        569,
+        529,
+        652
+      ],
+      "sha256": "49c96283a753ea2d7fa1e1052ae8f81a147393e64c2e77a88913c140a512563a"
+    },
+    "valve_ball": {
+      "crop": [
+        537,
+        569,
+        616,
+        652
+      ],
+      "sha256": "67a41c8b29c0aab309b187a792b47a645b1cc9a5ef2102d809555dcf725a6c2c"
+    },
+    "valve_butterfly": {
+      "crop": [
+        624,
+        569,
+        706,
+        652
+      ],
+      "sha256": "9c1efa37885b582a07ce578043f15822d34c476af5364542fc359a95e864e5dc"
+    },
+    "pump": {
+      "crop": [
+        714,
+        569,
+        805,
+        652
+      ],
+      "sha256": "cac848b7dc1d9876db8218e4778646601363ebe2c6d5543a32143174e37301d5"
+    },
+    "plumbing_fixture": {
+      "crop": [
+        813,
+        569,
+        894,
+        652
+      ],
+      "sha256": "2b1e622ffcbb1a41cc941d14bd5a5dc445bd69965161c737fab2ddea07b9b660"
+    },
+    "sprinkler": {
+      "crop": [
+        902,
+        569,
+        987,
+        652
+      ],
+      "sha256": "fb4d7f3d7177bb537465115354ffdd2ff9ccc155b589728a6330186b78c4cf27"
+    },
+    "pipe_insulation": {
+      "crop": [
+        995,
+        569,
+        1083,
+        652
+      ],
+      "sha256": "9e830d0f2ef254ad424ff73c2ae4e7084552c730a0094a69989f75170580a773"
+    },
+    "hanger": {
+      "crop": [
+        1091,
+        569,
+        1163,
+        652
+      ],
+      "sha256": "16c1cc918e797cb31648201348e87cc42041a9232487e82bf41af68fc8f24037"
+    },
+    "support": {
+      "crop": [
+        1171,
+        569,
+        1244,
+        652
+      ],
+      "sha256": "91ffd281f2acb979c7102a970a34efd96451f2048a193fc19f73625a10d89f7e"
+    },
+    "drain": {
+      "crop": [
+        1252,
+        569,
+        1326,
+        652
+      ],
+      "sha256": "7ae8875b349a6965133f5f32e915f93de6d3b7c9158a186f39f1f32d43545d58"
+    },
+    "cleanout": {
+      "crop": [
+        1334,
+        569,
+        1413,
+        652
+      ],
+      "sha256": "ed8fa2e3cf7102e66a5866cb47a3ad5b5fc85cef1119a37aab14ce062ae56db0"
+    },
+    "backflow_preventer": {
+      "crop": [
+        1421,
+        569,
+        1521,
+        652
+      ],
+      "sha256": "2ec5ebb8cba6bf2f1fec1cedddb9bb7e9b244e5ab8009f8596ddc4cf74649d80"
+    },
+    "cable_tray": {
+      "crop": [
+        16,
+        743,
+        94,
+        824
+      ],
+      "sha256": "322b5ada42b4d8ee60cb0b78bf25312673a8fa5cadd29cdfdc00bbf78c70f4cc"
+    },
+    "cable_tray_fitting": {
+      "crop": [
+        102,
+        743,
+        178,
+        824
+      ],
+      "sha256": "36e1fae8520ba020b803daee86555585804b05d7378d9421d1732832b720ac85"
+    },
+    "conduit": {
+      "crop": [
+        186,
+        743,
+        264,
+        824
+      ],
+      "sha256": "403f800e497f00b07f5ae88711499e167a5dcf40a0560fbdc42cd6ed89d2481e"
+    },
+    "conduit_fitting": {
+      "crop": [
+        272,
+        743,
+        349,
+        824
+      ],
+      "sha256": "a8b1903d68332b06c4616acf6e7974ac2b806bd885f84a78952956ee36d6a6f8"
+    },
+    "lighting_fixture": {
+      "crop": [
+        357,
+        743,
+        452,
+        824
+      ],
+      "sha256": "1fa81659bfae97038eb8e8a01ed483b1fa39cc0aa8883fa6964eaf71e5afdda0"
+    },
+    "light_pendant": {
+      "crop": [
+        460,
+        743,
+        543,
+        824
+      ],
+      "sha256": "7a0a1bd0704210312338d43ba65e17df8cb6a8086cc4139da0190b7061025c6b"
+    },
+    "light_surface": {
+      "crop": [
+        551,
+        743,
+        635,
+        824
+      ],
+      "sha256": "8d7dcbd81dbbe7782dc94327c89aed023fe8243428eace148bdac73473df0c17"
+    },
+    "switch": {
+      "crop": [
+        643,
+        743,
+        719,
+        824
+      ],
+      "sha256": "41e361ca8d73f1ba6d31a994ca8c6e571532855c4e063602d23dc7a35df7741d"
+    },
+    "socket": {
+      "crop": [
+        727,
+        743,
+        804,
+        824
+      ],
+      "sha256": "adc74a8400e17aafd63df505259245a45b715035c655f01629ba365331bd8ef4"
+    },
+    "panel": {
+      "crop": [
+        812,
+        743,
+        892,
+        824
+      ],
+      "sha256": "cb9182be96a13a4836db3f8f50a9f9f9a1fede9f041962b69a18f4157904d719"
+    },
+    "transformer": {
+      "crop": [
+        900,
+        743,
+        990,
+        824
+      ],
+      "sha256": "1a55c9a9e8f46c2880d94f6d5b77ec7391c936a601b7058735f5a182d28461ac"
+    },
+    "generator": {
+      "crop": [
+        998,
+        743,
+        1093,
+        824
+      ],
+      "sha256": "9afffe6c6b862ef3daffb0bdfbac03f1ff40e3c3542fc284dc896fc06ef7a21f"
+    },
+    "disconnect": {
+      "crop": [
+        1101,
+        743,
+        1177,
+        824
+      ],
+      "sha256": "c393f452a29d5cd90334e44596febfe1766d01044bd83e857f4d5f2c2e856e13"
+    },
+    "junction_box": {
+      "crop": [
+        1185,
+        743,
+        1266,
+        824
+      ],
+      "sha256": "d7123ffe71e989c63a3a8145745e5dcda77101c20958845c9e57b1e4a8b58d79"
+    },
+    "pull_box": {
+      "crop": [
+        1274,
+        743,
+        1347,
+        824
+      ],
+      "sha256": "421c3d6588f051ab2a3ec2f3da8b502915a01cacb432d929f7776962a119a28a"
+    },
+    "raceway": {
+      "crop": [
+        1355,
+        743,
+        1440,
+        824
+      ],
+      "sha256": "08548cca7573f6973d541b607e015f458f64b0509e1af2c9938adf8d2acd5951"
+    },
+    "device": {
+      "crop": [
+        1448,
+        743,
+        1521,
+        824
+      ],
+      "sha256": "f19bd2c86ceb5eb5cf8dc67db1117ffdff4b9e9ffeb6ce21573a683df9cc872a"
+    },
+    "ifc_import": {
+      "crop": [
+        16,
+        912,
+        91,
+        977
+      ],
+      "sha256": "a2cae2677a5be4ac39f44351f0050b25a098c35836176049348434d20abe1d07"
+    },
+    "ifc_export": {
+      "crop": [
+        99,
+        912,
+        178,
+        977
+      ],
+      "sha256": "2beefc6224839ab7311f4bb5a85fcfc897d7a2bcc9a08b57b075d13d2d0b91fb"
+    },
+    "link_model": {
+      "crop": [
+        186,
+        912,
+        266,
+        977
+      ],
+      "sha256": "9446359d86c2467f4a4c745052f977aecb7efcc681063ad3c58116d73cc07c88"
+    },
+    "clash": {
+      "crop": [
+        274,
+        912,
+        377,
+        977
+      ],
+      "sha256": "a1a4abd2e7d33454a35a21d881e70bf76641e6e1b71d02bd09d71c35c2f001a2"
+    },
+    "interference_check": {
+      "crop": [
+        385,
+        912,
+        486,
+        977
+      ],
+      "sha256": "22e7d92742e67ebda69f61c17c86a64259c5a26f8d1a60a7152ba445e3062ed6"
+    },
+    "workset": {
+      "crop": [
+        494,
+        912,
+        571,
+        977
+      ],
+      "sha256": "0cc326a4b5de92302e11251b8b1a2d8b8441998761371a1728e9a6efd106b579"
+    },
+    "phase": {
+      "crop": [
+        579,
+        912,
+        657,
+        977
+      ],
+      "sha256": "1eb73bfd639d86b9a683669994b6cd83c0c4665e71f218a8755bc618bf04d61f"
+    },
+    "grid": {
+      "crop": [
+        665,
+        912,
+        739,
+        977
+      ],
+      "sha256": "f96bc820fb1b5bc6b8a94d78b2503ff37ee20002eb5a4b3d9e4418e2f6664b21"
+    },
+    "level": {
+      "crop": [
+        747,
+        912,
+        842,
+        977
+      ],
+      "sha256": "f542a6e849d7d5de3d6fcc033eff6aaa32bedcf39d00635723769b749bd49f4d"
+    },
+    "section": {
+      "crop": [
+        850,
+        912,
+        930,
+        977
+      ],
+      "sha256": "a7f410568aa69869a6f70626e3fd5743f3a46d82a3b7d41676116e506c020edd"
+    },
+    "elevation": {
+      "crop": [
+        938,
+        912,
+        1019,
+        977
+      ],
+      "sha256": "1dba95752fb73c4d9faac266f95084073eeb3b33bfbdc9dc387d36d7bf6a4295"
+    },
+    "detail": {
+      "crop": [
+        1027,
+        912,
+        1110,
+        977
+      ],
+      "sha256": "888fb30c38da7f04ac365145fcd32ccfa43b4bcb25ead916aa9bf30cadfebe67"
+    },
+    "dimension": {
+      "crop": [
+        1118,
+        912,
+        1216,
+        977
+      ],
+      "sha256": "433c010812c65d3a7ab061ef8169e5e07f7eff2f7f2767cfb9279f645320d34e"
+    },
+    "tag": {
+      "crop": [
+        1224,
+        912,
+        1320,
+        977
+      ],
+      "sha256": "031562e65a28c702b6985e5297a83d1711474dc0e6fe60ec60c016fa2168f04e"
+    },
+    "revision": {
+      "crop": [
+        1328,
+        912,
+        1434,
+        977
+      ],
+      "sha256": "189aea7caf082b626268a46ed336a28b0576fc2e54a33815e7b6537e9fce0c0d"
+    },
+    "view": {
+      "crop": [
+        1442,
+        912,
+        1521,
+        977
+      ],
+      "sha256": "03e20d5b9c2b5f4ffd2c4005456a93baec5aa9edfeec893452dd74bec6190417"
+    },
+    "brace": {
+      "alias_of": "brace_frame",
+      "reason": "Unlabeled duplicate omitted"
+    }
+  }
+}

@@ -27,7 +27,10 @@ pub const MAX_TURN: f64 = 150.0;
 #[derive(Debug, Clone)]
 pub enum ProfileDef {
     Polygon(Vec<(String, String)>),
-    Circle { c: (String, String), r: String },
+    Circle {
+        c: (String, String),
+        r: String,
+    },
     /// a polygon held by locks and dimensions; every number is a formula, so family parameters drive it
     Sketch(SketchDef),
 }
@@ -37,11 +40,31 @@ pub enum ProfileDef {
 pub enum SketchCon {
     /// relations that carry no number (parallel, horizontal, ...)
     Rel(openbim_sketch::Constraint),
-    Fixed { p: usize, x: String, y: String },
-    Distance { a: usize, b: usize, d: String },
-    DistanceX { a: usize, b: usize, d: String },
-    DistanceY { a: usize, b: usize, d: String },
-    Angle { l1: usize, l2: usize, degrees: String },
+    Fixed {
+        p: usize,
+        x: String,
+        y: String,
+    },
+    Distance {
+        a: usize,
+        b: usize,
+        d: String,
+    },
+    DistanceX {
+        a: usize,
+        b: usize,
+        d: String,
+    },
+    DistanceY {
+        a: usize,
+        b: usize,
+        d: String,
+    },
+    Angle {
+        l1: usize,
+        l2: usize,
+        degrees: String,
+    },
 }
 
 /// Points as first drawn (formulas), the first `loop_len` of which form the outline in order, then constraints.
@@ -57,39 +80,117 @@ pub struct SketchDef {
 impl SketchDef {
     /// All the points are the outline.
     pub fn new(points: &[(&str, &str)]) -> Self {
-        SketchDef { points: points.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(), loop_len: points.len(), lines: vec![], constraints: vec![] }
+        SketchDef {
+            points: points
+                .iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect(),
+            loop_len: points.len(),
+            lines: vec![],
+            constraints: vec![],
+        }
     }
     /// Add a construction point that is not part of the outline.
-    pub fn extra_point(mut self, x: &str, y: &str) -> Self { self.points.push((x.into(), y.into())); self }
-    pub fn line(mut self, a: usize, b: usize) -> Self { self.lines.push((a, b)); self }
-    pub fn rel(mut self, c: openbim_sketch::Constraint) -> Self { self.constraints.push(SketchCon::Rel(c)); self }
-    pub fn fixed(mut self, p: usize, x: &str, y: &str) -> Self { self.constraints.push(SketchCon::Fixed { p, x: x.into(), y: y.into() }); self }
-    pub fn distance(mut self, a: usize, b: usize, d: &str) -> Self { self.constraints.push(SketchCon::Distance { a, b, d: d.into() }); self }
-    pub fn distance_x(mut self, a: usize, b: usize, d: &str) -> Self { self.constraints.push(SketchCon::DistanceX { a, b, d: d.into() }); self }
-    pub fn distance_y(mut self, a: usize, b: usize, d: &str) -> Self { self.constraints.push(SketchCon::DistanceY { a, b, d: d.into() }); self }
-    pub fn angle(mut self, l1: usize, l2: usize, degrees: &str) -> Self { self.constraints.push(SketchCon::Angle { l1, l2, degrees: degrees.into() }); self }
+    pub fn extra_point(mut self, x: &str, y: &str) -> Self {
+        self.points.push((x.into(), y.into()));
+        self
+    }
+    pub fn line(mut self, a: usize, b: usize) -> Self {
+        self.lines.push((a, b));
+        self
+    }
+    pub fn rel(mut self, c: openbim_sketch::Constraint) -> Self {
+        self.constraints.push(SketchCon::Rel(c));
+        self
+    }
+    pub fn fixed(mut self, p: usize, x: &str, y: &str) -> Self {
+        self.constraints.push(SketchCon::Fixed {
+            p,
+            x: x.into(),
+            y: y.into(),
+        });
+        self
+    }
+    pub fn distance(mut self, a: usize, b: usize, d: &str) -> Self {
+        self.constraints
+            .push(SketchCon::Distance { a, b, d: d.into() });
+        self
+    }
+    pub fn distance_x(mut self, a: usize, b: usize, d: &str) -> Self {
+        self.constraints
+            .push(SketchCon::DistanceX { a, b, d: d.into() });
+        self
+    }
+    pub fn distance_y(mut self, a: usize, b: usize, d: &str) -> Self {
+        self.constraints
+            .push(SketchCon::DistanceY { a, b, d: d.into() });
+        self
+    }
+    pub fn angle(mut self, l1: usize, l2: usize, degrees: &str) -> Self {
+        self.constraints.push(SketchCon::Angle {
+            l1,
+            l2,
+            degrees: degrees.into(),
+        });
+        self
+    }
 }
 
 impl ProfileDef {
-    pub fn polygon(pts: &[(&str, &str)]) -> Self { ProfileDef::Polygon(pts.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()) }
-    pub fn rect(u0: &str, v0: &str, u1: &str, v1: &str) -> Self { Self::polygon(&[(u0, v0), (u1, v0), (u1, v1), (u0, v1)]) }
-    pub fn circle(cu: &str, cv: &str, r: &str) -> Self { ProfileDef::Circle { c: (cu.into(), cv.into()), r: r.into() } }
-    pub fn sketch(s: SketchDef) -> Self { ProfileDef::Sketch(s) }
+    pub fn polygon(pts: &[(&str, &str)]) -> Self {
+        ProfileDef::Polygon(
+            pts.iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect(),
+        )
+    }
+    pub fn rect(u0: &str, v0: &str, u1: &str, v1: &str) -> Self {
+        Self::polygon(&[(u0, v0), (u1, v0), (u1, v1), (u0, v1)])
+    }
+    pub fn circle(cu: &str, cv: &str, r: &str) -> Self {
+        ProfileDef::Circle {
+            c: (cu.into(), cv.into()),
+            r: r.into(),
+        }
+    }
+    pub fn sketch(s: SketchDef) -> Self {
+        ProfileDef::Sketch(s)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum FormKind {
     /// the profile is pushed along the plane's normal between the coordinates `from` and `to`
-    Extrusion { plane: Axis, from: String, to: String },
+    Extrusion {
+        plane: Axis,
+        from: String,
+        to: String,
+    },
     /// the axis is a line in the plane: parallel to v at u = `at` (`about_v`), or parallel to u at v = `at`
-    Revolve { plane: Axis, offset: String, about_v: bool, at: String, angle: String },
+    Revolve {
+        plane: Axis,
+        offset: String,
+        about_v: bool,
+        at: String,
+        angle: String,
+    },
     /// the path is in plan (x, y) at height `z`; the profile is drawn in the plane across the path: u to the left of
     /// the direction of travel, v up, with the path point as origin
-    Sweep { z: String, path: Vec<(String, String)> },
+    Sweep {
+        z: String,
+        path: Vec<(String, String)>,
+    },
     /// the profile at `from` changes into the second profile at `to`, point for point (the plane's normal is the axis)
-    Blend { plane: Axis, from: String, to: String },
+    Blend {
+        plane: Axis,
+        from: String,
+        to: String,
+    },
     /// a sweep whose profile changes from the first profile at the start of the path to the second at its end
-    SweptBlend { z: String, path: Vec<(String, String)> },
+    SweptBlend {
+        z: String,
+        path: Vec<(String, String)>,
+    },
 }
 
 /// Which part of the profile sits on the sweep path, or on the axis of a revolve.
@@ -122,29 +223,141 @@ pub struct FormDef {
 
 impl FormDef {
     pub fn extrusion(name: &str, plane: Axis, from: &str, to: &str, outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Extrusion { plane, from: from.into(), to: to.into() }, outer, holes: vec![], material: None, visible: None, align: None, void: false, second: None }
+        FormDef {
+            name: name.into(),
+            kind: FormKind::Extrusion {
+                plane,
+                from: from.into(),
+                to: to.into(),
+            },
+            outer,
+            holes: vec![],
+            material: None,
+            visible: None,
+            align: None,
+            void: false,
+            second: None,
+        }
     }
-    pub fn revolve(name: &str, plane: Axis, offset: &str, about_v: bool, at: &str, angle: &str, outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Revolve { plane, offset: offset.into(), about_v, at: at.into(), angle: angle.into() }, outer, holes: vec![], material: None, visible: None, align: None, void: false, second: None }
+    pub fn revolve(
+        name: &str,
+        plane: Axis,
+        offset: &str,
+        about_v: bool,
+        at: &str,
+        angle: &str,
+        outer: ProfileDef,
+    ) -> Self {
+        FormDef {
+            name: name.into(),
+            kind: FormKind::Revolve {
+                plane,
+                offset: offset.into(),
+                about_v,
+                at: at.into(),
+                angle: angle.into(),
+            },
+            outer,
+            holes: vec![],
+            material: None,
+            visible: None,
+            align: None,
+            void: false,
+            second: None,
+        }
     }
     pub fn sweep(name: &str, z: &str, path: &[(&str, &str)], outer: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Sweep { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer, holes: vec![], material: None, visible: None, align: None, void: false, second: None }
+        FormDef {
+            name: name.into(),
+            kind: FormKind::Sweep {
+                z: z.into(),
+                path: path
+                    .iter()
+                    .map(|(a, b)| (a.to_string(), b.to_string()))
+                    .collect(),
+            },
+            outer,
+            holes: vec![],
+            material: None,
+            visible: None,
+            align: None,
+            void: false,
+            second: None,
+        }
     }
     /// A solid whose section changes from `bottom` at `from` to `top` at `to`. The profiles need the same number of
     /// points (or both be circles); point 0 of one pairs with point 0 of the other, after both are put counter-clockwise.
-    pub fn blend(name: &str, plane: Axis, from: &str, to: &str, bottom: ProfileDef, top: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::Blend { plane, from: from.into(), to: to.into() }, outer: bottom, holes: vec![], material: None, visible: None, align: None, void: false, second: Some(top) }
+    pub fn blend(
+        name: &str,
+        plane: Axis,
+        from: &str,
+        to: &str,
+        bottom: ProfileDef,
+        top: ProfileDef,
+    ) -> Self {
+        FormDef {
+            name: name.into(),
+            kind: FormKind::Blend {
+                plane,
+                from: from.into(),
+                to: to.into(),
+            },
+            outer: bottom,
+            holes: vec![],
+            material: None,
+            visible: None,
+            align: None,
+            void: false,
+            second: Some(top),
+        }
     }
     /// A sweep whose section changes along the path from `start` to `end`, in proportion to the distance along it.
-    pub fn swept_blend(name: &str, z: &str, path: &[(&str, &str)], start: ProfileDef, end: ProfileDef) -> Self {
-        FormDef { name: name.into(), kind: FormKind::SweptBlend { z: z.into(), path: path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() }, outer: start, holes: vec![], material: None, visible: None, align: None, void: false, second: Some(end) }
+    pub fn swept_blend(
+        name: &str,
+        z: &str,
+        path: &[(&str, &str)],
+        start: ProfileDef,
+        end: ProfileDef,
+    ) -> Self {
+        FormDef {
+            name: name.into(),
+            kind: FormKind::SweptBlend {
+                z: z.into(),
+                path: path
+                    .iter()
+                    .map(|(a, b)| (a.to_string(), b.to_string()))
+                    .collect(),
+            },
+            outer: start,
+            holes: vec![],
+            material: None,
+            visible: None,
+            align: None,
+            void: false,
+            second: Some(end),
+        }
     }
     /// Make this form a void: it cuts the other solids of the family.
-    pub fn void(mut self) -> Self { self.void = true; self }
-    pub fn align(mut self, a: Align) -> Self { self.align = Some(a); self }
-    pub fn hole(mut self, p: ProfileDef) -> Self { self.holes.push(p); self }
-    pub fn material(mut self, value_name: &str) -> Self { self.material = Some(value_name.into()); self }
-    pub fn visible_if(mut self, f: &str) -> Self { self.visible = Some(f.into()); self }
+    pub fn void(mut self) -> Self {
+        self.void = true;
+        self
+    }
+    pub fn align(mut self, a: Align) -> Self {
+        self.align = Some(a);
+        self
+    }
+    pub fn hole(mut self, p: ProfileDef) -> Self {
+        self.holes.push(p);
+        self
+    }
+    pub fn material(mut self, value_name: &str) -> Self {
+        self.material = Some(value_name.into());
+        self
+    }
+    pub fn visible_if(mut self, f: &str) -> Self {
+        self.visible = Some(f.into());
+        self
+    }
 }
 
 // ---------- compiled ----------
@@ -171,11 +384,31 @@ pub(crate) enum CLoop {
     Sketch(CSketch),
 }
 pub(crate) enum CKind {
-    Extrusion { plane: Axis, from: Expr, to: Expr },
-    Revolve { plane: Axis, offset: Expr, about_v: bool, at: Expr, angle: Expr },
-    Sweep { z: Expr, path: Vec<[Expr; 2]> },
-    Blend { plane: Axis, from: Expr, to: Expr },
-    SweptBlend { z: Expr, path: Vec<[Expr; 2]> },
+    Extrusion {
+        plane: Axis,
+        from: Expr,
+        to: Expr,
+    },
+    Revolve {
+        plane: Axis,
+        offset: Expr,
+        about_v: bool,
+        at: Expr,
+        angle: Expr,
+    },
+    Sweep {
+        z: Expr,
+        path: Vec<[Expr; 2]>,
+    },
+    Blend {
+        plane: Axis,
+        from: Expr,
+        to: Expr,
+    },
+    SweptBlend {
+        z: Expr,
+        path: Vec<[Expr; 2]>,
+    },
 }
 pub(crate) struct CForm {
     pub name: String,
@@ -189,26 +422,52 @@ pub(crate) struct CForm {
     second: Option<CLoop>,
 }
 
-fn bad(name: &str, why: &'static str) -> FamilyError { FamilyError::Form { name: name.into(), why } }
+fn bad(name: &str, why: &'static str) -> FamilyError {
+    FamilyError::Form {
+        name: name.into(),
+        why,
+    }
+}
 
-fn compile_loop(name: &str, what: &str, p: &ProfileDef, parse: Parse) -> Result<CLoop, FamilyError> {
+fn compile_loop(
+    name: &str,
+    what: &str,
+    p: &ProfileDef,
+    parse: Parse,
+) -> Result<CLoop, FamilyError> {
     let pe = |part: String, s: &str| parse(&format!("form {name}.{what}.{part}"), s, false, LEN);
     let pa = |part: String, s: &str| parse(&format!("form {name}.{what}.{part}"), s, false, ANG);
     match p {
         ProfileDef::Polygon(pts) => {
-            if pts.len() < 3 { return Err(bad(name, "a polygon profile needs at least 3 points")); }
-            if pts.len() > MAX_POINTS { return Err(FamilyError::TooMany("points in a profile")); }
+            if pts.len() < 3 {
+                return Err(bad(name, "a polygon profile needs at least 3 points"));
+            }
+            if pts.len() > MAX_POINTS {
+                return Err(FamilyError::TooMany("points in a profile"));
+            }
             let mut out = Vec::with_capacity(pts.len());
-            for (i, (u, v)) in pts.iter().enumerate() { out.push([pe(format!("u{i}"), u)?, pe(format!("v{i}"), v)?]); }
+            for (i, (u, v)) in pts.iter().enumerate() {
+                out.push([pe(format!("u{i}"), u)?, pe(format!("v{i}"), v)?]);
+            }
             Ok(CLoop::Poly(out))
         }
         ProfileDef::Sketch(sk) => {
-            if sk.loop_len < 3 || sk.loop_len > sk.points.len() { return Err(bad(name, "a sketch outline needs at least 3 of its points")); }
-            if sk.points.len() > openbim_sketch::MAX_POINTS { return Err(FamilyError::TooMany("points in a profile")); }
-            if sk.constraints.len() > openbim_sketch::MAX_CONSTRAINTS { return Err(FamilyError::TooMany("sketch constraints")); }
-            if sk.loop_len + sk.lines.len() > openbim_sketch::MAX_LINES { return Err(FamilyError::TooMany("lines in a sketch")); }
+            if sk.loop_len < 3 || sk.loop_len > sk.points.len() {
+                return Err(bad(name, "a sketch outline needs at least 3 of its points"));
+            }
+            if sk.points.len() > openbim_sketch::MAX_POINTS {
+                return Err(FamilyError::TooMany("points in a profile"));
+            }
+            if sk.constraints.len() > openbim_sketch::MAX_CONSTRAINTS {
+                return Err(FamilyError::TooMany("sketch constraints"));
+            }
+            if sk.loop_len + sk.lines.len() > openbim_sketch::MAX_LINES {
+                return Err(FamilyError::TooMany("lines in a sketch"));
+            }
             let mut points = Vec::with_capacity(sk.points.len());
-            for (i, (u, v)) in sk.points.iter().enumerate() { points.push([pe(format!("u{i}"), u)?, pe(format!("v{i}"), v)?]); }
+            for (i, (u, v)) in sk.points.iter().enumerate() {
+                points.push([pe(format!("u{i}"), u)?, pe(format!("v{i}"), v)?]);
+            }
             let mut cons = Vec::with_capacity(sk.constraints.len());
             for (k, c) in sk.constraints.iter().enumerate() {
                 let e = |part: &str, s: &str| pe(format!("c{k}.{part}"), s);
@@ -219,48 +478,144 @@ fn compile_loop(name: &str, what: &str, p: &ProfileDef, parse: Parse) -> Result<
                     SketchCon::Distance { a, b, d } => CCon::Distance(*a, *b, e("d", d)?),
                     SketchCon::DistanceX { a, b, d } => CCon::DistanceX(*a, *b, e("d", d)?),
                     SketchCon::DistanceY { a, b, d } => CCon::DistanceY(*a, *b, e("d", d)?),
-                    SketchCon::Angle { l1, l2, degrees } => CCon::Angle(*l1, *l2, ea("degrees", degrees)?),
+                    SketchCon::Angle { l1, l2, degrees } => {
+                        CCon::Angle(*l1, *l2, ea("degrees", degrees)?)
+                    }
                 });
             }
-            Ok(CLoop::Sketch(CSketch { points, loop_len: sk.loop_len, lines: sk.lines.clone(), cons }))
+            Ok(CLoop::Sketch(CSketch {
+                points,
+                loop_len: sk.loop_len,
+                lines: sk.lines.clone(),
+                cons,
+            }))
         }
-        ProfileDef::Circle { c, r } => Ok(CLoop::Circle([pe("cu".into(), &c.0)?, pe("cv".into(), &c.1)?], pe("r".into(), r)?)),
+        ProfileDef::Circle { c, r } => Ok(CLoop::Circle(
+            [pe("cu".into(), &c.0)?, pe("cv".into(), &c.1)?],
+            pe("r".into(), r)?,
+        )),
     }
 }
 
-pub(crate) fn compile(forms: &[FormDef], parse: Parse, material_slot: &dyn Fn(&str, &str) -> Result<usize, FamilyError>) -> Result<Vec<CForm>, FamilyError> {
-    if forms.len() > MAX_FORMS { return Err(FamilyError::TooMany("forms")); }
+pub(crate) fn compile(
+    forms: &[FormDef],
+    parse: Parse,
+    material_slot: &dyn Fn(&str, &str) -> Result<usize, FamilyError>,
+) -> Result<Vec<CForm>, FamilyError> {
+    if forms.len() > MAX_FORMS {
+        return Err(FamilyError::TooMany("forms"));
+    }
     let mut out: Vec<CForm> = Vec::new();
     for f in forms {
-        if !crate::valid_name(&f.name) { return Err(FamilyError::BadName(f.name.clone())); }
-        if out.iter().any(|o| o.name == f.name) { return Err(FamilyError::DuplicateName(f.name.clone())); }
+        if !crate::valid_name(&f.name) {
+            return Err(FamilyError::BadName(f.name.clone()));
+        }
+        if out.iter().any(|o| o.name == f.name) {
+            return Err(FamilyError::DuplicateName(f.name.clone()));
+        }
         let pe = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false, LEN);
         let pa = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false, ANG);
         let pn = |part: &str, s: &str| parse(&format!("form {}.{}", f.name, part), s, false, NUM);
         let kind = match &f.kind {
-            FormKind::Extrusion { plane, from, to } => CKind::Extrusion { plane: *plane, from: pe("from", from)?, to: pe("to", to)? },
-            FormKind::Revolve { plane, offset, about_v, at, angle } => CKind::Revolve { plane: *plane, offset: pe("offset", offset)?, about_v: *about_v, at: pe("at", at)?, angle: pa("angle", angle)? },
+            FormKind::Extrusion { plane, from, to } => CKind::Extrusion {
+                plane: *plane,
+                from: pe("from", from)?,
+                to: pe("to", to)?,
+            },
+            FormKind::Revolve {
+                plane,
+                offset,
+                about_v,
+                at,
+                angle,
+            } => CKind::Revolve {
+                plane: *plane,
+                offset: pe("offset", offset)?,
+                about_v: *about_v,
+                at: pe("at", at)?,
+                angle: pa("angle", angle)?,
+            },
             FormKind::Sweep { z, path } | FormKind::SweptBlend { z, path } => {
-                if path.len() < 2 { return Err(bad(&f.name, "a sweep path needs at least 2 points")); }
-                if path.len() > MAX_PATH { return Err(FamilyError::TooMany("points in a sweep path")); }
+                if path.len() < 2 {
+                    return Err(bad(&f.name, "a sweep path needs at least 2 points"));
+                }
+                if path.len() > MAX_PATH {
+                    return Err(FamilyError::TooMany("points in a sweep path"));
+                }
                 let mut p = Vec::new();
-                for (i, (x, y)) in path.iter().enumerate() { p.push([pe(&format!("path.x{i}"), x)?, pe(&format!("path.y{i}"), y)?]); }
-                if matches!(f.kind, FormKind::Sweep { .. }) { CKind::Sweep { z: pe("z", z)?, path: p } } else { CKind::SweptBlend { z: pe("z", z)?, path: p } }
+                for (i, (x, y)) in path.iter().enumerate() {
+                    p.push([pe(&format!("path.x{i}"), x)?, pe(&format!("path.y{i}"), y)?]);
+                }
+                if matches!(f.kind, FormKind::Sweep { .. }) {
+                    CKind::Sweep {
+                        z: pe("z", z)?,
+                        path: p,
+                    }
+                } else {
+                    CKind::SweptBlend {
+                        z: pe("z", z)?,
+                        path: p,
+                    }
+                }
             }
-            FormKind::Blend { plane, from, to } => CKind::Blend { plane: *plane, from: pe("from", from)?, to: pe("to", to)? },
+            FormKind::Blend { plane, from, to } => CKind::Blend {
+                plane: *plane,
+                from: pe("from", from)?,
+                to: pe("to", to)?,
+            },
         };
         let blends = matches!(f.kind, FormKind::Blend { .. } | FormKind::SweptBlend { .. });
-        if blends != f.second.is_some() { return Err(bad(&f.name, if blends { "a blend needs a second profile" } else { "only a blend has a second profile" })); }
-        if blends && !f.holes.is_empty() { return Err(bad(&f.name, "a blend cannot have holes")); }
-        let second = match &f.second { Some(sp) => Some(compile_loop(&f.name, "second", sp, parse)?), None => None };
-        if f.holes.len() > MAX_HOLES { return Err(FamilyError::TooMany("holes in a profile")); }
+        if blends != f.second.is_some() {
+            return Err(bad(
+                &f.name,
+                if blends {
+                    "a blend needs a second profile"
+                } else {
+                    "only a blend has a second profile"
+                },
+            ));
+        }
+        if blends && !f.holes.is_empty() {
+            return Err(bad(&f.name, "a blend cannot have holes"));
+        }
+        let second = match &f.second {
+            Some(sp) => Some(compile_loop(&f.name, "second", sp, parse)?),
+            None => None,
+        };
+        if f.holes.len() > MAX_HOLES {
+            return Err(FamilyError::TooMany("holes in a profile"));
+        }
         let outer = compile_loop(&f.name, "outer", &f.outer, parse)?;
         let mut holes = Vec::new();
-        for (i, h) in f.holes.iter().enumerate() { holes.push(compile_loop(&f.name, &format!("hole{i}"), h, parse)?); }
-        let material = match &f.material { Some(m) => Some(material_slot(&f.name, m)?), None => None };
-        let visible = match &f.visible { Some(v) => Some(pn("visible", v)?), None => None };
-        if f.align.is_some() && !matches!(f.kind, FormKind::Sweep { .. } | FormKind::Revolve { .. }) { return Err(bad(&f.name, "only a sweep or a revolve can be aligned to its path or axis")); }
-        out.push(CForm { name: f.name.clone(), align: f.align, kind, outer, holes, material, visible, void: f.void, second });
+        for (i, h) in f.holes.iter().enumerate() {
+            holes.push(compile_loop(&f.name, &format!("hole{i}"), h, parse)?);
+        }
+        let material = match &f.material {
+            Some(m) => Some(material_slot(&f.name, m)?),
+            None => None,
+        };
+        let visible = match &f.visible {
+            Some(v) => Some(pn("visible", v)?),
+            None => None,
+        };
+        if f.align.is_some() && !matches!(f.kind, FormKind::Sweep { .. } | FormKind::Revolve { .. })
+        {
+            return Err(bad(
+                &f.name,
+                "only a sweep or a revolve can be aligned to its path or axis",
+            ));
+        }
+        out.push(CForm {
+            name: f.name.clone(),
+            align: f.align,
+            kind,
+            outer,
+            holes,
+            material,
+            visible,
+            void: f.void,
+            second,
+        });
     }
     Ok(out)
 }
@@ -271,18 +626,43 @@ pub(crate) fn compile(forms: &[FormDef], parse: Parse, material_slot: &dyn Fn(&s
 pub enum Loop {
     /// counter-clockwise, no repeated first point
     Poly(Vec<[f64; 2]>),
-    Circle { c: [f64; 2], r: f64 },
+    Circle {
+        c: [f64; 2],
+        r: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FormGeom {
-    Extrusion { plane: Axis, from: f64, to: f64 },
-    Revolve { plane: Axis, offset: f64, about_v: bool, at: f64, angle: f64 },
-    Sweep { z: f64, path: Vec<[f64; 2]> },
+    Extrusion {
+        plane: Axis,
+        from: f64,
+        to: f64,
+    },
+    Revolve {
+        plane: Axis,
+        offset: f64,
+        about_v: bool,
+        at: f64,
+        angle: f64,
+    },
+    Sweep {
+        z: f64,
+        path: Vec<[f64; 2]>,
+    },
     /// `Form::outer` at `from`, `top` at `to`; the two loops are of the same kind and have as many points
-    Blend { plane: Axis, from: f64, to: f64, top: Loop },
+    Blend {
+        plane: Axis,
+        from: f64,
+        to: f64,
+        top: Loop,
+    },
     /// `Form::outer` at the start of the path, `end` at its end
-    SweptBlend { z: f64, path: Vec<[f64; 2]>, end: Loop },
+    SweptBlend {
+        z: f64,
+        path: Vec<[f64; 2]>,
+        end: Loop,
+    },
 }
 
 /// A solved form. `xf` and `dz` move it into the family's frame when it came from a nested family.
@@ -301,9 +681,15 @@ pub struct Form {
 
 type P2 = [f64; 2];
 
-fn sub(a: P2, b: P2) -> P2 { [a[0] - b[0], a[1] - b[1]] }
-fn cross(a: P2, b: P2) -> f64 { a[0] * b[1] - a[1] * b[0] }
-fn dot(a: P2, b: P2) -> f64 { a[0] * b[0] + a[1] * b[1] }
+fn sub(a: P2, b: P2) -> P2 {
+    [a[0] - b[0], a[1] - b[1]]
+}
+fn cross(a: P2, b: P2) -> f64 {
+    a[0] * b[1] - a[1] * b[0]
+}
+fn dot(a: P2, b: P2) -> f64 {
+    a[0] * b[0] + a[1] * b[1]
+}
 
 fn signed_area(p: &[P2]) -> f64 {
     let n = p.len();
@@ -335,7 +721,12 @@ fn moments(l: &Loop) -> (f64, f64, f64) {
 /// Net area and first moments of outer minus holes.
 pub fn net_moments(outer: &Loop, holes: &[Loop]) -> (f64, f64, f64) {
     let (mut a, mut mu, mut mv) = moments(outer);
-    for h in holes { let m = moments(h); a -= m.0; mu -= m.1; mv -= m.2; }
+    for h in holes {
+        let m = moments(h);
+        a -= m.0;
+        mu -= m.1;
+        mv -= m.2;
+    }
     (a, mu, mv)
 }
 
@@ -343,17 +734,38 @@ pub fn net_moments(outer: &Loop, holes: &[Loop]) -> (f64, f64, f64) {
 fn seg_dist_pt(a: P2, b: P2, p: P2) -> f64 {
     let ab = sub(b, a);
     let l2 = dot(ab, ab);
-    let t = if l2 == 0.0 { 0.0 } else { (dot(sub(p, a), ab) / l2).clamp(0.0, 1.0) };
+    let t = if l2 == 0.0 {
+        0.0
+    } else {
+        (dot(sub(p, a), ab) / l2).clamp(0.0, 1.0)
+    };
     let q = [a[0] + ab[0] * t, a[1] + ab[1] * t];
     let d = sub(p, q);
     (d[0] * d[0] + d[1] * d[1]).sqrt()
 }
-fn orient(a: P2, b: P2, c: P2) -> f64 { cross(sub(b, a), sub(c, a)) }
+fn orient(a: P2, b: P2, c: P2) -> f64 {
+    cross(sub(b, a), sub(c, a))
+}
 /// segments share at least a point
 fn segs_touch(a: P2, b: P2, c: P2, d: P2) -> bool {
-    let (o1, o2, o3, o4) = (orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b));
-    if ((o1 > 0.0 && o2 < 0.0) || (o1 < 0.0 && o2 > 0.0)) && ((o3 > 0.0 && o4 < 0.0) || (o3 < 0.0 && o4 > 0.0)) { return true; }
-    let on = |p: P2, q: P2, r: P2| orient(p, q, r) == 0.0 && r[0] >= p[0].min(q[0]) && r[0] <= p[0].max(q[0]) && r[1] >= p[1].min(q[1]) && r[1] <= p[1].max(q[1]);
+    let (o1, o2, o3, o4) = (
+        orient(a, b, c),
+        orient(a, b, d),
+        orient(c, d, a),
+        orient(c, d, b),
+    );
+    if ((o1 > 0.0 && o2 < 0.0) || (o1 < 0.0 && o2 > 0.0))
+        && ((o3 > 0.0 && o4 < 0.0) || (o3 < 0.0 && o4 > 0.0))
+    {
+        return true;
+    }
+    let on = |p: P2, q: P2, r: P2| {
+        orient(p, q, r) == 0.0
+            && r[0] >= p[0].min(q[0])
+            && r[0] <= p[0].max(q[0])
+            && r[1] >= p[1].min(q[1])
+            && r[1] <= p[1].max(q[1])
+    };
     on(a, b, c) || on(a, b, d) || on(c, d, a) || on(c, d, b)
 }
 fn point_in_poly(p: &[P2], q: P2) -> bool {
@@ -361,7 +773,11 @@ fn point_in_poly(p: &[P2], q: P2) -> bool {
     let mut inside = false;
     for i in 0..n {
         let (a, b) = (p[i], p[(i + 1) % n]);
-        if (a[1] > q[1]) != (b[1] > q[1]) && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) + a[0] { inside = !inside; }
+        if (a[1] > q[1]) != (b[1] > q[1])
+            && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) + a[0]
+        {
+            inside = !inside;
+        }
     }
     inside
 }
@@ -372,8 +788,12 @@ fn poly_simple(p: &[P2]) -> bool {
         for j in i + 1..n {
             let (c, d) = (p[j], p[(j + 1) % n]);
             let adjacent = j == i + 1 || (i == 0 && j == n - 1);
-            if adjacent { continue; }
-            if segs_touch(a, b, c, d) { return false; }
+            if adjacent {
+                continue;
+            }
+            if segs_touch(a, b, c, d) {
+                return false;
+            }
         }
     }
     true
@@ -381,14 +801,23 @@ fn poly_simple(p: &[P2]) -> bool {
 
 fn loops_disjoint(a: &Loop, b: &Loop) -> bool {
     match (a, b) {
-        (Loop::Circle { c: c1, r: r1 }, Loop::Circle { c: c2, r: r2 }) => { let d = sub(*c1, *c2); (d[0] * d[0] + d[1] * d[1]).sqrt() > r1 + r2 }
+        (Loop::Circle { c: c1, r: r1 }, Loop::Circle { c: c2, r: r2 }) => {
+            let d = sub(*c1, *c2);
+            (d[0] * d[0] + d[1] * d[1]).sqrt() > r1 + r2
+        }
         (Loop::Circle { c, r }, Loop::Poly(p)) | (Loop::Poly(p), Loop::Circle { c, r }) => {
             let n = p.len();
             (0..n).all(|i| seg_dist_pt(p[i], p[(i + 1) % n], *c) > *r) && !point_in_poly(p, *c)
         }
         (Loop::Poly(p), Loop::Poly(q)) => {
             let (n, m) = (p.len(), q.len());
-            for i in 0..n { for j in 0..m { if segs_touch(p[i], p[(i + 1) % n], q[j], q[(j + 1) % m]) { return false; } } }
+            for i in 0..n {
+                for j in 0..m {
+                    if segs_touch(p[i], p[(i + 1) % n], q[j], q[(j + 1) % m]) {
+                        return false;
+                    }
+                }
+            }
             !point_in_poly(p, q[0]) && !point_in_poly(q, p[0])
         }
     }
@@ -396,12 +825,27 @@ fn loops_disjoint(a: &Loop, b: &Loop) -> bool {
 /// `inner` lies strictly inside `outer`
 fn loop_inside(inner: &Loop, outer: &Loop) -> bool {
     match (inner, outer) {
-        (Loop::Circle { c: c1, r: r1 }, Loop::Circle { c: c2, r: r2 }) => { let d = sub(*c1, *c2); (d[0] * d[0] + d[1] * d[1]).sqrt() + r1 < *r2 }
-        (Loop::Poly(p), Loop::Circle { c, r }) => p.iter().all(|q| { let d = sub(*q, *c); (d[0] * d[0] + d[1] * d[1]).sqrt() < *r }),
-        (Loop::Circle { c, r }, Loop::Poly(q)) => { let n = q.len(); point_in_poly(q, *c) && (0..n).all(|i| seg_dist_pt(q[i], q[(i + 1) % n], *c) > *r) }
+        (Loop::Circle { c: c1, r: r1 }, Loop::Circle { c: c2, r: r2 }) => {
+            let d = sub(*c1, *c2);
+            (d[0] * d[0] + d[1] * d[1]).sqrt() + r1 < *r2
+        }
+        (Loop::Poly(p), Loop::Circle { c, r }) => p.iter().all(|q| {
+            let d = sub(*q, *c);
+            (d[0] * d[0] + d[1] * d[1]).sqrt() < *r
+        }),
+        (Loop::Circle { c, r }, Loop::Poly(q)) => {
+            let n = q.len();
+            point_in_poly(q, *c) && (0..n).all(|i| seg_dist_pt(q[i], q[(i + 1) % n], *c) > *r)
+        }
         (Loop::Poly(p), Loop::Poly(q)) => {
             let (n, m) = (p.len(), q.len());
-            for i in 0..n { for j in 0..m { if segs_touch(p[i], p[(i + 1) % n], q[j], q[(j + 1) % m]) { return false; } } }
+            for i in 0..n {
+                for j in 0..m {
+                    if segs_touch(p[i], p[(i + 1) % n], q[j], q[(j + 1) % m]) {
+                        return false;
+                    }
+                }
+            }
             point_in_poly(q, p[0])
         }
     }
@@ -409,48 +853,104 @@ fn loop_inside(inner: &Loop, outer: &Loop) -> bool {
 
 fn solve_loop(name: &str, c: &CLoop, vals: &[f64]) -> Result<Loop, FamilyError> {
     let ev = |e: &Expr, part: &str| -> Result<f64, FamilyError> {
-        let v = e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.{part}"), err })?;
-        if v.abs() > MAX_COORD { return Err(bad(name, "a coordinate is not a finite number within 100 m")); }
+        let v = e.eval(vals).map_err(|err| FamilyError::Formula {
+            name: format!("form {name}.{part}"),
+            err,
+        })?;
+        if v.abs() > MAX_COORD {
+            return Err(bad(
+                name,
+                "a coordinate is not a finite number within 100 m",
+            ));
+        }
         Ok(v)
     };
-    let raw = |e: &Expr, part: &str| -> Result<f64, FamilyError> { e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.{part}"), err }) };
+    let raw = |e: &Expr, part: &str| -> Result<f64, FamilyError> {
+        e.eval(vals).map_err(|err| FamilyError::Formula {
+            name: format!("form {name}.{part}"),
+            err,
+        })
+    };
     match c {
         CLoop::Circle(ce, r) => {
             let (cu, cv, rr) = (ev(&ce[0], "cu")?, ev(&ce[1], "cv")?, ev(r, "r")?);
-            if rr < 0.0 || std::f64::consts::PI * rr * rr < MIN_AREA { return Err(bad(name, "the circle is too small")); }
+            if rr < 0.0 || std::f64::consts::PI * rr * rr < MIN_AREA {
+                return Err(bad(name, "the circle is too small"));
+            }
             Ok(Loop::Circle { c: [cu, cv], r: rr })
         }
         CLoop::Poly(_) | CLoop::Sketch(_) => {
             let mut p: Vec<P2> = Vec::new();
             match c {
-                CLoop::Poly(pts) => { for q in pts { p.push([ev(&q[0], "u")?, ev(&q[1], "v")?]); } }
+                CLoop::Poly(pts) => {
+                    for q in pts {
+                        p.push([ev(&q[0], "u")?, ev(&q[1], "v")?]);
+                    }
+                }
                 CLoop::Sketch(cs) => p = solve_sketch(name, cs, &ev, &raw)?,
                 CLoop::Circle(..) => {}
             }
-            if !poly_simple(&p) { return Err(bad(name, "the profile crosses or touches itself")); }
+            if !poly_simple(&p) {
+                return Err(bad(name, "the profile crosses or touches itself"));
+            }
             let a = signed_area(&p);
-            if a.abs() < MIN_AREA { return Err(bad(name, "the profile has no area")); }
-            if a < 0.0 { p.reverse(); }
+            if a.abs() < MIN_AREA {
+                return Err(bad(name, "the profile has no area"));
+            }
+            if a < 0.0 {
+                p.reverse();
+            }
             Ok(Loop::Poly(p))
         }
     }
 }
 
 /// Evaluate the sketch's formulas, let the solver settle it, and return its outline.
-fn solve_sketch(name: &str, cs: &CSketch, ev: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>, raw: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>) -> Result<Vec<P2>, FamilyError> {
+fn solve_sketch(
+    name: &str,
+    cs: &CSketch,
+    ev: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>,
+    raw: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>,
+) -> Result<Vec<P2>, FamilyError> {
     use openbim_sketch::{Constraint, Sketch, SketchError, Status};
     let mut sk = Sketch::default();
-    for q in &cs.points { sk.point(ev(&q[0], "u")?, ev(&q[1], "v")?); }
-    for k in 0..cs.loop_len { sk.line(k, (k + 1) % cs.loop_len); }
-    for &(a, b) in &cs.lines { sk.line(a, b); }
+    for q in &cs.points {
+        sk.point(ev(&q[0], "u")?, ev(&q[1], "v")?);
+    }
+    for k in 0..cs.loop_len {
+        sk.line(k, (k + 1) % cs.loop_len);
+    }
+    for &(a, b) in &cs.lines {
+        sk.line(a, b);
+    }
     for c in &cs.cons {
         sk.constrain(match c {
             CCon::Rel(r) => *r,
-            CCon::Fixed(p, x, y) => Constraint::Fixed { p: *p, x: ev(x, "x")?, y: ev(y, "y")? },
-            CCon::Distance(a, b, d) => Constraint::Distance { a: *a, b: *b, d: ev(d, "d")? },
-            CCon::DistanceX(a, b, d) => Constraint::DistanceX { a: *a, b: *b, d: ev(d, "d")? },
-            CCon::DistanceY(a, b, d) => Constraint::DistanceY { a: *a, b: *b, d: ev(d, "d")? },
-            CCon::Angle(l1, l2, d) => Constraint::Angle { l1: *l1, l2: *l2, degrees: raw(d, "degrees")? },
+            CCon::Fixed(p, x, y) => Constraint::Fixed {
+                p: *p,
+                x: ev(x, "x")?,
+                y: ev(y, "y")?,
+            },
+            CCon::Distance(a, b, d) => Constraint::Distance {
+                a: *a,
+                b: *b,
+                d: ev(d, "d")?,
+            },
+            CCon::DistanceX(a, b, d) => Constraint::DistanceX {
+                a: *a,
+                b: *b,
+                d: ev(d, "d")?,
+            },
+            CCon::DistanceY(a, b, d) => Constraint::DistanceY {
+                a: *a,
+                b: *b,
+                d: ev(d, "d")?,
+            },
+            CCon::Angle(l1, l2, d) => Constraint::Angle {
+                l1: *l1,
+                l2: *l2,
+                degrees: raw(d, "degrees")?,
+            },
         });
     }
     let sol = sk.solve().map_err(|e| bad(name, match e {
@@ -458,64 +958,151 @@ fn solve_sketch(name: &str, cs: &CSketch, ev: &dyn Fn(&Expr, &str) -> Result<f64
         SketchError::BadIndex { .. } | SketchError::DegenerateLine(_) => "a sketch constraint or line refers to a point, line or circle that is not there",
         SketchError::BadValue { .. } | SketchError::NotFinite(_) => "a sketch dimension is not a usable number",
     }))?;
-    if !matches!(sol.status, Status::Solved) { return Err(bad(name, "the sketch constraints conflict with each other")); }
+    if !matches!(sol.status, Status::Solved) {
+        return Err(bad(name, "the sketch constraints conflict with each other"));
+    }
     let out: Vec<P2> = sol.points[..cs.loop_len].to_vec();
-    if out.iter().any(|q| q[0].abs() > MAX_COORD || q[1].abs() > MAX_COORD) { return Err(bad(name, "the sketch ends outside 100 m")); }
+    if out
+        .iter()
+        .any(|q| q[0].abs() > MAX_COORD || q[1].abs() > MAX_COORD)
+    {
+        return Err(bad(name, "the sketch ends outside 100 m"));
+    }
     Ok(out)
 }
 
-fn solve_profile(name: &str, outer: &CLoop, holes: &[CLoop], vals: &[f64]) -> Result<(Loop, Vec<Loop>), FamilyError> {
+fn solve_profile(
+    name: &str,
+    outer: &CLoop,
+    holes: &[CLoop],
+    vals: &[f64],
+) -> Result<(Loop, Vec<Loop>), FamilyError> {
     let o = solve_loop(name, outer, vals)?;
     let mut hs: Vec<Loop> = Vec::new();
     for h in holes {
         let hl = solve_loop(name, h, vals)?;
-        if !loop_inside(&hl, &o) { return Err(bad(name, "a hole must lie inside the outer profile without touching it")); }
-        if hs.iter().any(|x| !loops_disjoint(x, &hl)) { return Err(bad(name, "holes must not touch or overlap each other")); }
+        if !loop_inside(&hl, &o) {
+            return Err(bad(
+                name,
+                "a hole must lie inside the outer profile without touching it",
+            ));
+        }
+        if hs.iter().any(|x| !loops_disjoint(x, &hl)) {
+            return Err(bad(name, "holes must not touch or overlap each other"));
+        }
         hs.push(hl);
     }
     Ok((o, hs))
 }
 
 fn poly_pts(l: &Loop) -> Vec<P2> {
-    match l { Loop::Poly(p) => p.clone(), Loop::Circle { c, r } => vec![[c[0] - r, c[1] - r], [c[0] + r, c[1] + r]] }
+    match l {
+        Loop::Poly(p) => p.clone(),
+        Loop::Circle { c, r } => vec![[c[0] - r, c[1] - r], [c[0] + r, c[1] + r]],
+    }
 }
 
 /// every point of the loop satisfies `f`
-fn loop_all(l: &Loop, f: &dyn Fn(P2) -> bool) -> bool { poly_pts(l).into_iter().all(f) }
+fn loop_all(l: &Loop, f: &dyn Fn(P2) -> bool) -> bool {
+    poly_pts(l).into_iter().all(f)
+}
 
 fn shift(l: &Loop, d: P2) -> Loop {
-    match l { Loop::Poly(p) => Loop::Poly(p.iter().map(|q| [q[0] + d[0], q[1] + d[1]]).collect()), Loop::Circle { c, r } => Loop::Circle { c: [c[0] + d[0], c[1] + d[1]], r: *r } }
+    match l {
+        Loop::Poly(p) => Loop::Poly(p.iter().map(|q| [q[0] + d[0], q[1] + d[1]]).collect()),
+        Loop::Circle { c, r } => Loop::Circle {
+            c: [c[0] + d[0], c[1] + d[1]],
+            r: *r,
+        },
+    }
 }
 
 fn path_turns(path: &[P2]) -> Vec<f64> {
-    (1..path.len() - 1).map(|i| { let (a, b) = (sub(path[i], path[i - 1]), sub(path[i + 1], path[i])); cross(a, b).atan2(dot(a, b)) }).collect()
+    (1..path.len() - 1)
+        .map(|i| {
+            let (a, b) = (sub(path[i], path[i - 1]), sub(path[i + 1], path[i]));
+            cross(a, b).atan2(dot(a, b))
+        })
+        .collect()
 }
 
 /// The second profile of a blend, which has to be of the same kind as the first and have as many points.
-fn solve_second(name: &str, second: Option<&CLoop>, first: &Loop, vals: &[f64]) -> Result<Loop, FamilyError> {
-    let l = solve_loop(name, second.ok_or_else(|| bad(name, "a blend needs a second profile"))?, vals)?;
+fn solve_second(
+    name: &str,
+    second: Option<&CLoop>,
+    first: &Loop,
+    vals: &[f64],
+) -> Result<Loop, FamilyError> {
+    let l = solve_loop(
+        name,
+        second.ok_or_else(|| bad(name, "a blend needs a second profile"))?,
+        vals,
+    )?;
     match (first, &l) {
         (Loop::Circle { .. }, Loop::Circle { .. }) => Ok(l),
         (Loop::Poly(a), Loop::Poly(b)) if a.len() == b.len() => Ok(l),
-        _ => Err(bad(name, "the two profiles of a blend need the same number of points (or both be circles)")),
+        _ => Err(bad(
+            name,
+            "the two profiles of a blend need the same number of points (or both be circles)",
+        )),
     }
 }
 
 /// Check a sweep path and give its height and points. `profiles` are the profiles that travel along it.
-fn solve_path(name: &str, z: &Expr, path: &[[Expr; 2]], ev: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>, profiles: &[&Loop]) -> Result<(f64, Vec<P2>), FamilyError> {
+fn solve_path(
+    name: &str,
+    z: &Expr,
+    path: &[[Expr; 2]],
+    ev: &dyn Fn(&Expr, &str) -> Result<f64, FamilyError>,
+    profiles: &[&Loop],
+) -> Result<(f64, Vec<P2>), FamilyError> {
     let z = ev(z, "z")?;
     let mut p = Vec::with_capacity(path.len());
-    for q in path { p.push([ev(&q[0], "path.x")?, ev(&q[1], "path.y")?]); }
-    let len: Vec<f64> = (1..p.len()).map(|i| { let d = sub(p[i], p[i - 1]); (d[0] * d[0] + d[1] * d[1]).sqrt() }).collect();
-    if len.iter().any(|l| *l < crate::MIN_SIZE) { return Err(bad(name, "two path points coincide")); }
+    for q in path {
+        p.push([ev(&q[0], "path.x")?, ev(&q[1], "path.y")?]);
+    }
+    let len: Vec<f64> = (1..p.len())
+        .map(|i| {
+            let d = sub(p[i], p[i - 1]);
+            (d[0] * d[0] + d[1] * d[1]).sqrt()
+        })
+        .collect();
+    if len.iter().any(|l| *l < crate::MIN_SIZE) {
+        return Err(bad(name, "two path points coincide"));
+    }
     let turns = path_turns(&p);
-    if turns.iter().any(|t| t.abs().to_degrees() > MAX_TURN) { return Err(bad(name, "a path corner turns more than 150 degrees")); }
+    if turns.iter().any(|t| t.abs().to_degrees() > MAX_TURN) {
+        return Err(bad(name, "a path corner turns more than 150 degrees"));
+    }
     // the mitre cuts at both ends of a piece must not pass each other
-    let umax = profiles.iter().flat_map(|l| poly_pts(l)).map(|q| q[0].abs()).fold(0.0, f64::max);
-    let lead = |i: usize| if i == 0 || i == p.len() - 1 { 0.0 } else { umax * (turns[i - 1].abs() / 2.0).tan() };
-    for (i, li) in len.iter().enumerate() { if lead(i) + lead(i + 1) >= *li { return Err(bad(name, "the profile is too wide for a corner of the path")); } }
+    let umax = profiles
+        .iter()
+        .flat_map(|l| poly_pts(l))
+        .map(|q| q[0].abs())
+        .fold(0.0, f64::max);
+    let lead = |i: usize| {
+        if i == 0 || i == p.len() - 1 {
+            0.0
+        } else {
+            umax * (turns[i - 1].abs() / 2.0).tan()
+        }
+    };
+    for (i, li) in len.iter().enumerate() {
+        if lead(i) + lead(i + 1) >= *li {
+            return Err(bad(
+                name,
+                "the profile is too wide for a corner of the path",
+            ));
+        }
+    }
     // the path may not cross itself
-    for i in 0..len.len() { for j in i + 2..len.len() { if segs_touch(p[i], p[i + 1], p[j], p[j + 1]) { return Err(bad(name, "the path crosses itself")); } } }
+    for i in 0..len.len() {
+        for j in i + 2..len.len() {
+            if segs_touch(p[i], p[i + 1], p[j], p[j + 1]) {
+                return Err(bad(name, "the path crosses itself"));
+            }
+        }
+    }
     Ok((z, p))
 }
 
@@ -523,32 +1110,60 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
     let mut out = Vec::new();
     for (index, f) in forms.iter().enumerate() {
         if let Some(v) = &f.visible {
-            let x = v.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {}.visible", f.name), err })?;
-            if x == 0.0 { continue; }
+            let x = v.eval(vals).map_err(|err| FamilyError::Formula {
+                name: format!("form {}.visible", f.name),
+                err,
+            })?;
+            if x == 0.0 {
+                continue;
+            }
         }
         let name = f.name.as_str();
         let ev = |e: &Expr, part: &str| -> Result<f64, FamilyError> {
-            let v = e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.{part}"), err })?;
-            if v.abs() > MAX_COORD { return Err(bad(name, "a value is not a finite number within 100 m")); }
+            let v = e.eval(vals).map_err(|err| FamilyError::Formula {
+                name: format!("form {name}.{part}"),
+                err,
+            })?;
+            if v.abs() > MAX_COORD {
+                return Err(bad(name, "a value is not a finite number within 100 m"));
+            }
             Ok(v)
         };
         let (mut outer, mut holes) = solve_profile(name, &f.outer, &f.holes, vals)?;
         if let Some(a) = f.align {
             // bounds of the outer profile; the profile moves so that the chosen part sits on the path or axis
             let pts = poly_pts(&outer);
-            let (u0, u1) = (pts.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max));
-            let (v0, v1) = (pts.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max));
+            let (u0, u1) = (
+                pts.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min),
+                pts.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max),
+            );
+            let (v0, v1) = (
+                pts.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min),
+                pts.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max),
+            );
             let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
             match &f.kind {
                 CKind::Sweep { .. } => {
-                    let d = match a { Align::Centre => [-um, -vm], Align::Bottom => [-um, -v0], Align::Top => [-um, -v1], Align::Left => [-u0, -vm], Align::Right => [-u1, -vm] };
+                    let d = match a {
+                        Align::Centre => [-um, -vm],
+                        Align::Bottom => [-um, -v0],
+                        Align::Top => [-um, -v1],
+                        Align::Left => [-u0, -vm],
+                        Align::Right => [-u1, -vm],
+                    };
                     outer = shift(&outer, d);
                     holes = holes.iter().map(|h| shift(h, d)).collect();
                 }
                 CKind::Revolve { about_v, .. } => {
                     // the axis is parallel to v (about_v) or to u; it can lie along the edges it is parallel to, or through the middle
-                    let ok = match a { Align::Centre => true, Align::Left | Align::Right => *about_v, Align::Bottom | Align::Top => !*about_v };
-                    if !ok { return Err(bad(name, "an axis parallel to v can lie on the left or right edge or the centre, an axis parallel to u on the bottom or top edge or the centre")); }
+                    let ok = match a {
+                        Align::Centre => true,
+                        Align::Left | Align::Right => *about_v,
+                        Align::Bottom | Align::Top => !*about_v,
+                    };
+                    if !ok {
+                        return Err(bad(name, "an axis parallel to v can lie on the left or right edge or the centre, an axis parallel to u on the bottom or top edge or the centre"));
+                    }
                 }
                 CKind::Extrusion { .. } | CKind::Blend { .. } | CKind::SweptBlend { .. } => {}
             }
@@ -556,27 +1171,66 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
         let geom = match &f.kind {
             CKind::Extrusion { plane, from, to } => {
                 let (from, to) = (ev(from, "from")?, ev(to, "to")?);
-                if to - from <= crate::MIN_SIZE { return Err(bad(name, "the extrusion needs a positive length")); }
-                FormGeom::Extrusion { plane: *plane, from, to }
+                if to - from <= crate::MIN_SIZE {
+                    return Err(bad(name, "the extrusion needs a positive length"));
+                }
+                FormGeom::Extrusion {
+                    plane: *plane,
+                    from,
+                    to,
+                }
             }
-            CKind::Revolve { plane, offset, about_v, at, angle } => {
+            CKind::Revolve {
+                plane,
+                offset,
+                about_v,
+                at,
+                angle,
+            } => {
                 let (offset, at) = (ev(offset, "offset")?, ev(at, "at")?);
                 // an aligned revolve puts the axis on the profile itself, whatever `at` says
                 let at = match f.align {
                     Some(a) => {
                         let pts = poly_pts(&outer);
-                        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q[if *about_v { 0 } else { 1 }]), h.max(q[if *about_v { 0 } else { 1 }])));
-                        match a { Align::Centre => (lo + hi) / 2.0, Align::Left | Align::Bottom => lo, Align::Right | Align::Top => hi }
+                        let (lo, hi) =
+                            pts.iter()
+                                .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| {
+                                    (
+                                        l.min(q[if *about_v { 0 } else { 1 }]),
+                                        h.max(q[if *about_v { 0 } else { 1 }]),
+                                    )
+                                });
+                        match a {
+                            Align::Centre => (lo + hi) / 2.0,
+                            Align::Left | Align::Bottom => lo,
+                            Align::Right | Align::Top => hi,
+                        }
                     }
                     None => at,
                 };
-                let angle = angle.eval(vals).map_err(|err| FamilyError::Formula { name: format!("form {name}.angle"), err })?;
-                if !(angle > 0.0 && angle <= 360.0) { return Err(bad(name, "the angle must be above 0 and at most 360 degrees")); }
+                let angle = angle.eval(vals).map_err(|err| FamilyError::Formula {
+                    name: format!("form {name}.angle"),
+                    err,
+                })?;
+                if !(angle > 0.0 && angle <= 360.0) {
+                    return Err(bad(
+                        name,
+                        "the angle must be above 0 and at most 360 degrees",
+                    ));
+                }
                 let k = if *about_v { 0 } else { 1 };
                 let left = loop_all(&outer, &|p| p[k] >= at);
                 let right = loop_all(&outer, &|p| p[k] <= at);
-                if !(left || right) { return Err(bad(name, "the profile crosses the axis of revolution")); }
-                FormGeom::Revolve { plane: *plane, offset, about_v: *about_v, at, angle }
+                if !(left || right) {
+                    return Err(bad(name, "the profile crosses the axis of revolution"));
+                }
+                FormGeom::Revolve {
+                    plane: *plane,
+                    offset,
+                    about_v: *about_v,
+                    at,
+                    angle,
+                }
             }
             CKind::Sweep { z, path } => {
                 let p = solve_path(name, z, path, &ev, &[&outer])?;
@@ -584,62 +1238,112 @@ pub(crate) fn solve_forms(forms: &[CForm], vals: &[f64]) -> Result<Vec<Form>, Fa
             }
             CKind::Blend { plane, from, to } => {
                 let (from, to) = (ev(from, "from")?, ev(to, "to")?);
-                if to - from <= crate::MIN_SIZE { return Err(bad(name, "the blend needs a positive length")); }
+                if to - from <= crate::MIN_SIZE {
+                    return Err(bad(name, "the blend needs a positive length"));
+                }
                 let top = solve_second(name, f.second.as_ref(), &outer, vals)?;
-                FormGeom::Blend { plane: *plane, from, to, top }
+                FormGeom::Blend {
+                    plane: *plane,
+                    from,
+                    to,
+                    top,
+                }
             }
             CKind::SweptBlend { z, path } => {
                 let end = solve_second(name, f.second.as_ref(), &outer, vals)?;
                 let p = solve_path(name, z, path, &ev, &[&outer, &end])?;
-                FormGeom::SweptBlend { z: p.0, path: p.1, end }
+                FormGeom::SweptBlend {
+                    z: p.0,
+                    path: p.1,
+                    end,
+                }
             }
         };
-        out.push(Form { index, geom, outer, holes, xf: Xf::IDENTITY, dz: 0.0, void: f.void });
+        out.push(Form {
+            index,
+            geom,
+            outer,
+            holes,
+            xf: Xf::IDENTITY,
+            dz: 0.0,
+            void: f.void,
+        });
     }
     Ok(out)
 }
 
 // ---------- measures ----------
 
-fn area_of(l: &Loop) -> f64 { moments(l).0 }
+fn area_of(l: &Loop) -> f64 {
+    moments(l).0
+}
 
 /// The loop `t` of the way from `a` to `b` (same kind, same number of points).
 pub(crate) fn lerp_loop(a: &Loop, b: &Loop, t: f64) -> Loop {
     match (a, b) {
-        (Loop::Poly(p), Loop::Poly(q)) => Loop::Poly(p.iter().zip(q).map(|(x, y)| [x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t]).collect()),
-        (Loop::Circle { c, r }, Loop::Circle { c: c2, r: r2 }) => Loop::Circle { c: [c[0] + (c2[0] - c[0]) * t, c[1] + (c2[1] - c[1]) * t], r: r + (r2 - r) * t },
+        (Loop::Poly(p), Loop::Poly(q)) => Loop::Poly(
+            p.iter()
+                .zip(q)
+                .map(|(x, y)| [x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t])
+                .collect(),
+        ),
+        (Loop::Circle { c, r }, Loop::Circle { c: c2, r: r2 }) => Loop::Circle {
+            c: [c[0] + (c2[0] - c[0]) * t, c[1] + (c2[1] - c[1]) * t],
+            r: r + (r2 - r) * t,
+        },
         _ => a.clone(),
     }
 }
 
 fn map3(plane: Axis, offset: f64, u: f64, v: f64) -> [f64; 3] {
-    match plane { Axis::Z => [u, v, offset], Axis::X => [offset, u, v], Axis::Y => [v, offset, u] }
+    match plane {
+        Axis::Z => [u, v, offset],
+        Axis::X => [offset, u, v],
+        Axis::Y => [v, offset, u],
+    }
 }
 
 impl Form {
     /// Net profile area (outer minus holes).
-    pub fn profile_area(&self) -> f64 { net_moments(&self.outer, &self.holes).0 }
+    pub fn profile_area(&self) -> f64 {
+        net_moments(&self.outer, &self.holes).0
+    }
 
     /// Exact volume in cubic metres.
     pub fn volume(&self) -> f64 {
         let (a, mu, mv) = net_moments(&self.outer, &self.holes);
         match &self.geom {
             FormGeom::Extrusion { from, to, .. } => a * (to - from),
-            FormGeom::Revolve { about_v, at, angle, .. } => {
+            FormGeom::Revolve {
+                about_v, at, angle, ..
+            } => {
                 // Pappus: turning angle times the first moment about the axis
                 let m = if *about_v { mu - at * a } else { mv - at * a };
                 angle.to_radians() * m.abs()
             }
             FormGeom::Sweep { path, .. } => {
-                let total: f64 = (1..path.len()).map(|i| { let d = sub(path[i], path[i - 1]); (d[0] * d[0] + d[1] * d[1]).sqrt() }).sum();
+                let total: f64 = (1..path.len())
+                    .map(|i| {
+                        let d = sub(path[i], path[i - 1]);
+                        (d[0] * d[0] + d[1] * d[1]).sqrt()
+                    })
+                    .sum();
                 let t: f64 = path_turns(path).iter().map(|th| (th / 2.0).tan()).sum();
                 a * total - 2.0 * mu * t
             }
             // the area of a section is quadratic in the distance along, so Simpson's rule is exact
-            FormGeom::Blend { from, to, top, .. } => (to - from) / 6.0 * (a + 4.0 * area_of(&lerp_loop(&self.outer, top, 0.5)) + area_of(top)),
+            FormGeom::Blend { from, to, top, .. } => {
+                (to - from) / 6.0
+                    * (a + 4.0 * area_of(&lerp_loop(&self.outer, top, 0.5)) + area_of(top))
+            }
             // exact for a straight path; at a bend the mitre is not taken into account
             FormGeom::SweptBlend { path, end, .. } => {
-                let lens: Vec<f64> = (1..path.len()).map(|i| { let d = sub(path[i], path[i - 1]); (d[0] * d[0] + d[1] * d[1]).sqrt() }).collect();
+                let lens: Vec<f64> = (1..path.len())
+                    .map(|i| {
+                        let d = sub(path[i], path[i - 1]);
+                        (d[0] * d[0] + d[1] * d[1]).sqrt()
+                    })
+                    .collect();
                 let total: f64 = lens.iter().sum();
                 let mut at = 0.0;
                 let mut v = 0.0;
@@ -658,48 +1362,101 @@ impl Form {
     pub fn bounds_local(&self) -> ([f64; 3], [f64; 3]) {
         let mut lo = [f64::INFINITY; 3];
         let mut hi = [f64::NEG_INFINITY; 3];
-        let mut add = |p: [f64; 3]| { for k in 0..3 { lo[k] = lo[k].min(p[k]); hi[k] = hi[k].max(p[k]); } };
+        let mut add = |p: [f64; 3]| {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        };
         let (ul, vl) = match &self.outer {
             Loop::Circle { c, r } => ((c[0] - r, c[0] + r), (c[1] - r, c[1] + r)),
             Loop::Poly(p) => (
-                (p.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max)),
-                (p.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max)),
+                (
+                    p.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min),
+                    p.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max),
+                ),
+                (
+                    p.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min),
+                    p.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max),
+                ),
             ),
         };
         match &self.geom {
             FormGeom::Extrusion { plane, from, to } => {
-                for w in [*from, *to] { for u in [ul.0, ul.1] { for v in [vl.0, vl.1] { add(map3(*plane, w, u, v)); } } }
+                for w in [*from, *to] {
+                    for u in [ul.0, ul.1] {
+                        for v in [vl.0, vl.1] {
+                            add(map3(*plane, w, u, v));
+                        }
+                    }
+                }
             }
-            FormGeom::Blend { plane, from, to, top } => {
+            FormGeom::Blend {
+                plane,
+                from,
+                to,
+                top,
+            } => {
                 // a blend is the hull of its two profiles: the boxes of both, each at its own end
                 for (l, w) in [(&self.outer, *from), (top, *to)] {
                     let p = poly_pts(l);
-                    let (u0, u1) = (p.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max));
-                    let (v0, v1) = (p.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max));
-                    for u in [u0, u1] { for v in [v0, v1] { add(map3(*plane, w, u, v)); } }
+                    let (u0, u1) = (
+                        p.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min),
+                        p.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max),
+                    );
+                    let (v0, v1) = (
+                        p.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min),
+                        p.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max),
+                    );
+                    for u in [u0, u1] {
+                        for v in [v0, v1] {
+                            add(map3(*plane, w, u, v));
+                        }
+                    }
                 }
             }
-            FormGeom::Revolve { plane, offset, about_v, at, angle } => {
+            FormGeom::Revolve {
+                plane,
+                offset,
+                about_v,
+                at,
+                angle,
+            } => {
                 // every corner of the profile box, turned to the end angles and to each quarter turn in between
                 let mut angles = vec![0.0, *angle];
                 let mut q = 90.0;
-                while q < *angle { angles.push(q); q += 90.0; }
+                while q < *angle {
+                    angles.push(q);
+                    q += 90.0;
+                }
                 let to_p = |u: f64, v: f64| map3(*plane, *offset, u, v);
-                let (axis_pt, axis_dir) = if *about_v { (to_p(*at, 0.0), unit_of(*plane, false)) } else { (to_p(0.0, *at), unit_of(*plane, true)) };
+                let (axis_pt, axis_dir) = if *about_v {
+                    (to_p(*at, 0.0), unit_of(*plane, false))
+                } else {
+                    (to_p(0.0, *at), unit_of(*plane, true))
+                };
                 // Each coordinate of a turned point is plus or minus its radial distance times a cosine or sine of the
                 // angle, or plus or minus its position along the axis. The turn angle only matters at 0, at the end and
                 // at quarter turns, and the profile only matters at its corners (polygon) or at the axis-parallel
                 // extremes (circle), so those are the only points to try.
                 let mut pts: Vec<[f64; 3]> = Vec::new();
                 match &self.outer {
-                    Loop::Poly(p) => for q in p { pts.push(to_p(q[0], q[1])); },
+                    Loop::Poly(p) => {
+                        for q in p {
+                            pts.push(to_p(q[0], q[1]));
+                        }
+                    }
                     Loop::Circle { c, r } => {
                         // the extreme radial and axial values of a circle are on its axis-parallel extremes
-                        for (du, dv) in [(*r, 0.0), (-*r, 0.0), (0.0, *r), (0.0, -*r)] { pts.push(to_p(c[0] + du, c[1] + dv)); }
+                        for (du, dv) in [(*r, 0.0), (-*r, 0.0), (0.0, *r), (0.0, -*r)] {
+                            pts.push(to_p(c[0] + du, c[1] + dv));
+                        }
                     }
                 }
                 for p in pts {
-                    for a in &angles { add(rotate_about(p, axis_pt, axis_dir, a.to_radians())); }
+                    for a in &angles {
+                        add(rotate_about(p, axis_pt, axis_dir, a.to_radians()));
+                    }
                 }
             }
             FormGeom::Sweep { z, path } | FormGeom::SweptBlend { z, path, .. } => {
@@ -707,20 +1464,46 @@ impl Form {
                 let (ul, vl) = match &self.geom {
                     FormGeom::SweptBlend { end, .. } => {
                         let e = poly_pts(end);
-                        let (eu, ev) = ((e.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min), e.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max)), (e.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), e.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max)));
-                        ((ul.0.min(eu.0), ul.1.max(eu.1)), (vl.0.min(ev.0), vl.1.max(ev.1)))
+                        let (eu, ev) = (
+                            (
+                                e.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min),
+                                e.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max),
+                            ),
+                            (
+                                e.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min),
+                                e.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max),
+                            ),
+                        );
+                        (
+                            (ul.0.min(eu.0), ul.1.max(eu.1)),
+                            (vl.0.min(ev.0), vl.1.max(ev.1)),
+                        )
                     }
                     _ => (ul, vl),
                 };
                 let n = path.len();
-                let dirs: Vec<P2> = (1..n).map(|i| { let d = sub(path[i], path[i - 1]); let l = (d[0] * d[0] + d[1] * d[1]).sqrt(); [d[0] / l, d[1] / l] }).collect();
+                let dirs: Vec<P2> = (1..n)
+                    .map(|i| {
+                        let d = sub(path[i], path[i - 1]);
+                        let l = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                        [d[0] / l, d[1] / l]
+                    })
+                    .collect();
                 for i in 0..n {
-                    let m = if i == 0 { left(dirs[0]) } else if i == n - 1 { left(dirs[n - 2]) } else {
+                    let m = if i == 0 {
+                        left(dirs[0])
+                    } else if i == n - 1 {
+                        left(dirs[n - 2])
+                    } else {
                         let (na, nb) = (left(dirs[i - 1]), left(dirs[i]));
                         let k = 1.0 + dot(na, nb);
                         [(na[0] + nb[0]) / k, (na[1] + nb[1]) / k]
                     };
-                    for u in [ul.0, ul.1] { for v in [vl.0, vl.1] { add([path[i][0] + u * m[0], path[i][1] + u * m[1], z + v]); } }
+                    for u in [ul.0, ul.1] {
+                        for v in [vl.0, vl.1] {
+                            add([path[i][0] + u * m[0], path[i][1] + u * m[1], z + v]);
+                        }
+                    }
                 }
             }
         }
@@ -728,24 +1511,52 @@ impl Form {
     }
 }
 
-fn left(d: P2) -> P2 { [-d[1], d[0]] }
+fn left(d: P2) -> P2 {
+    [-d[1], d[0]]
+}
 
 /// 3D unit vector of the profile's v axis (`u_dir` false) or u axis (`u_dir` true) in a work plane
 fn unit_of(plane: Axis, u_dir: bool) -> [f64; 3] {
-    let (u, v) = match plane { Axis::Z => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), Axis::X => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]), Axis::Y => ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]) };
-    if u_dir { u } else { v }
+    let (u, v) = match plane {
+        Axis::Z => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        Axis::X => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+        Axis::Y => ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
+    };
+    if u_dir {
+        u
+    } else {
+        v
+    }
 }
 
 fn rotate_about(p: [f64; 3], o: [f64; 3], a: [f64; 3], t: f64) -> [f64; 3] {
     let v = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
     let (s, c) = (t.sin(), t.cos());
-    let cr = [a[1] * v[2] - a[2] * v[1], a[2] * v[0] - a[0] * v[2], a[0] * v[1] - a[1] * v[0]];
+    let cr = [
+        a[1] * v[2] - a[2] * v[1],
+        a[2] * v[0] - a[0] * v[2],
+        a[0] * v[1] - a[1] * v[0],
+    ];
     let d = a[0] * v[0] + a[1] * v[1] + a[2] * v[2];
     // exact values at quarter turns, so bounds are not blurred by rounding
     let (s, c) = (snap(s), snap(c));
-    [o[0] + v[0] * c + cr[0] * s + a[0] * d * (1.0 - c), o[1] + v[1] * c + cr[1] * s + a[1] * d * (1.0 - c), o[2] + v[2] * c + cr[2] * s + a[2] * d * (1.0 - c)]
+    [
+        o[0] + v[0] * c + cr[0] * s + a[0] * d * (1.0 - c),
+        o[1] + v[1] * c + cr[1] * s + a[1] * d * (1.0 - c),
+        o[2] + v[2] * c + cr[2] * s + a[2] * d * (1.0 - c),
+    ]
 }
-fn snap(x: f64) -> f64 { if x.abs() < 1e-15 { 0.0 } else if (x - 1.0).abs() < 1e-15 { 1.0 } else if (x + 1.0).abs() < 1e-15 { -1.0 } else { x } }
+fn snap(x: f64) -> f64 {
+    if x.abs() < 1e-15 {
+        0.0
+    } else if (x - 1.0).abs() < 1e-15 {
+        1.0
+    } else if (x + 1.0).abs() < 1e-15 {
+        -1.0
+    } else {
+        x
+    }
+}
 
 impl Form {
     /// Bounds in the family's frame (after `xf` and `dz`): (min, max, exact). The bounds are exact when the form is
@@ -757,10 +1568,17 @@ impl Form {
         for x in [lo[0], hi[0]] {
             for y in [lo[1], hi[1]] {
                 let p = self.xf.apply([x, y]);
-                for k in 0..2 { bl[k] = bl[k].min(p[k]); bh[k] = bh[k].max(p[k]); }
+                for k in 0..2 {
+                    bl[k] = bl[k].min(p[k]);
+                    bh[k] = bh[k].max(p[k]);
+                }
             }
         }
         let exact = self.xf.angle.rem_euclid(90.0) == 0.0;
-        ([bl[0], bl[1], lo[2] + self.dz], [bh[0], bh[1], hi[2] + self.dz], exact)
+        (
+            [bl[0], bl[1], lo[2] + self.dz],
+            [bh[0], bh[1], hi[2] + self.dz],
+            exact,
+        )
     }
 }

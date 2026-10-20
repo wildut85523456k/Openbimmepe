@@ -33,8 +33,8 @@ pub mod step;
 use openbim_arch::{Levels, Room};
 use openbim_family::mep::{up_for, Domain, FlowDir, System};
 use openbim_family::{Compiled, Instance};
-use openbim_geom::WallChain;
-use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab};
+use openbim_geom::{profile::Profile, WallChain};
+use openbim_place::floors::{FloorOpeningKind, FloorPenetration, ShaftVoid, Slab, SlabVoid};
 use openbim_place::penetrations::{Firestops, OpeningShape, Penetration, RunSize};
 use openbim_route::graph::{Network, NodeRef, PortRef};
 use openbim_route::{Fitting, FittingKind};
@@ -66,6 +66,111 @@ pub struct ColumnItem {
     pub room_bounding: bool,
 }
 
+impl ColumnItem {
+    /// A column standing on a section centred at `centre`, from `base_z` up `height`. An I-section has no convex
+    /// footprint, so it is refused for a column that bounds rooms.
+    pub fn from_profile(id: u64, name: &str, profile: &Profile, centre: [f64; 2], base_z: f64, height: f64, room_bounding: bool) -> Result<ColumnItem, String> {
+        profile.check().map_err(str::to_string)?;
+        if room_bounding && matches!(profile, Profile::I { .. }) {
+            return Err("an I-section column cannot bound rooms: its footprint is not convex".into());
+        }
+        let footprint = profile.outline().into_iter().map(|p| [centre[0] + p[0], centre[1] + p[1]]).collect();
+        Ok(ColumnItem { id, name: name.into(), footprint, base_z, height, room_bounding })
+    }
+}
+
+/// What a framing member is for, as Revit's Structural Usage. Bracing and purlins export as `IfcMember`, the rest as
+/// `IfcBeam`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FramingUsage {
+    #[default]
+    Girder,
+    Joist,
+    Purlin,
+    Brace,
+    Other,
+}
+
+impl FramingUsage {
+    pub const ALL: [FramingUsage; 5] = [FramingUsage::Girder, FramingUsage::Joist, FramingUsage::Purlin, FramingUsage::Brace, FramingUsage::Other];
+    pub fn name(self) -> &'static str {
+        match self {
+            FramingUsage::Girder => "Girder",
+            FramingUsage::Joist => "Joist",
+            FramingUsage::Purlin => "Purlin",
+            FramingUsage::Brace => "Brace",
+            FramingUsage::Other => "Other",
+        }
+    }
+    /// The IFC class and its predefined type.
+    fn ifc(self) -> (&'static str, &'static str) {
+        match self {
+            FramingUsage::Girder => ("IFCBEAM", ".BEAM."),
+            FramingUsage::Joist => ("IFCBEAM", ".JOIST."),
+            FramingUsage::Purlin => ("IFCMEMBER", ".PURLIN."),
+            FramingUsage::Brace => ("IFCMEMBER", ".BRACE."),
+            FramingUsage::Other => ("IFCBEAM", ".NOTDEFINED."),
+        }
+    }
+}
+
+/// A beam: a straight member between two points of the model with a section centred on that line. The section's
+/// x lies horizontal across the beam, its y at right angles to both (upright for a level beam).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeamItem {
+    pub id: u64,
+    pub name: String,
+    /// the ends of the centre line (model coordinates, metres)
+    pub a: [f64; 3],
+    pub b: [f64; 3],
+    pub profile: Profile,
+    pub usage: FramingUsage,
+    /// reinforcing bars inside the beam
+    pub bars: Vec<BarItem>,
+}
+
+/// A reinforcing bar: a round bar of `diameter` along a polyline of the model, a stirrup when `shear` is set.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarItem {
+    pub id: u64,
+    pub name: String,
+    pub path: Vec<[f64; 3]>,
+    pub diameter: f64,
+    pub shear: bool,
+}
+
+impl BeamItem {
+    /// A beam of rectangular section.
+    pub fn rect(id: u64, name: &str, a: [f64; 3], b: [f64; 3], width: f64, depth: f64) -> BeamItem {
+        BeamItem { id, name: name.into(), a, b, profile: Profile::Rect { width, depth }, usage: FramingUsage::Girder, bars: Vec::new() }
+    }
+
+    /// The unit vectors along the beam, across it (horizontal) and up out of it; None for a member that is vertical
+    /// (a column), has no length, or has a section that does not check.
+    pub fn axes(&self) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
+        let d = [self.b[0] - self.a[0], self.b[1] - self.a[1], self.b[2] - self.a[2]];
+        let len = self.length();
+        let finite = self.a.iter().chain(&self.b).all(|v| v.is_finite());
+        if !finite || len < 1e-9 || self.profile.check().is_err() {
+            return None;
+        }
+        let u = [d[0] / len, d[1] / len, d[2] / len];
+        // across = up x u, which is horizontal
+        let (sx, sy) = (-u[1], u[0]);
+        let sl = (sx * sx + sy * sy).sqrt();
+        if sl < 1e-9 {
+            return None;
+        }
+        let side = [sx / sl, sy / sl, 0.0];
+        let up = [u[1] * side[2] - u[2] * side[1], u[2] * side[0] - u[0] * side[2], u[0] * side[1] - u[1] * side[0]];
+        Some((u, side, up))
+    }
+    pub fn length(&self) -> f64 {
+        let d = [self.b[0] - self.a[0], self.b[1] - self.a[1], self.b[2] - self.a[2]];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    }
+}
+
 /// What a slab item is. Rooms are slab to slab by default; a floor finish or a false ceiling takes over as the
 /// room's floor or ceiling where there is one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,6 +181,14 @@ pub enum SlabRole {
     FloorFinish,
     /// a false ceiling hung under a slab: written as an IfcCovering (ceiling)
     Ceiling,
+    /// a structural slab on the ground: an IfcSlab BASESLAB, a floor for the rooms above it like Structure
+    Foundation,
+    /// an isolated footing under a column: an IfcFooting PAD_FOOTING, which bounds no room
+    PadFooting,
+    /// a strip footing under a wall: an IfcFooting STRIP_FOOTING, which bounds no room
+    StripFooting,
+    /// the landing between two runs of a stair: an IfcSlab LANDING, which bounds no room
+    Landing,
 }
 
 pub struct SlabItem {
@@ -146,6 +259,100 @@ pub struct RoomItem {
     pub room: Room,
 }
 
+/// A value of a type, written as a property of the type's property set.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TypeProp {
+    Text(String),
+    /// a length in metres
+    Len(f64),
+    Int(i64),
+}
+
+/// A type of beams, columns, slabs or footings: a name, the values it governs and the elements that follow it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeItem {
+    /// the element number of the type in the document (its GlobalId comes from it)
+    pub id: u64,
+    pub name: String,
+    pub class: TypeClass,
+    pub props: Vec<(String, TypeProp)>,
+    /// element numbers of the instances; instances that are not in the file are left out
+    pub instances: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TypeClass {
+    /// IfcBeamType with its IFC4 predefined type, e.g. `BEAM`
+    Beam(&'static str),
+    Column,
+    /// IfcSlabType with its predefined type, e.g. `FLOOR`
+    Slab(&'static str),
+    StripFooting,
+    PadFooting,
+    Wall,
+}
+
+impl TypeClass {
+    fn entity(self) -> (&'static str, &'static str) {
+        match self {
+            TypeClass::Beam(p) => ("IFCBEAMTYPE", p),
+            TypeClass::Column => ("IFCCOLUMNTYPE", "COLUMN"),
+            TypeClass::Slab(p) => ("IFCSLABTYPE", p),
+            TypeClass::StripFooting => ("IFCFOOTINGTYPE", "STRIP_FOOTING"),
+            TypeClass::PadFooting => ("IFCFOOTINGTYPE", "PAD_FOOTING"),
+            TypeClass::Wall => ("IFCWALLTYPE", "STANDARD"),
+        }
+    }
+}
+
+/// The `OpenBIM_Element` property set of a member: what a companion file or a later import matches on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberInfo {
+    pub category: String,
+    /// the name of its type, empty for none
+    pub type_name: String,
+    /// 16 hex digits over the values exported for it; an import that finds another value knows the file was edited elsewhere
+    pub fingerprint: String,
+}
+
+/// A roof by footprint: its solid as faces (each a ring of points, wound outward) and the shape it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoofItem {
+    pub id: u64,
+    pub name: String,
+    /// the height of the eaves, which puts the roof on a storey
+    pub eaves_z: f64,
+    pub verts: Vec<[f64; 3]>,
+    pub faces: Vec<Vec<usize>>,
+    /// IfcRoofTypeEnum: FLAT_ROOF, SHED_ROOF, GABLE_ROOF, HIP_ROOF or NOTDEFINED
+    pub shape: &'static str,
+}
+
+/// A railing: its parts (top rail, posts, balusters) as closed boxes, as faces of points; `base_z` puts it on a storey.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RailingItem {
+    pub id: u64,
+    pub name: String,
+    pub base_z: f64,
+    pub verts: Vec<[f64; 3]>,
+    pub faces: Vec<Vec<usize>>,
+}
+
+/// A straight stair: a stepped block `width` wide that climbs `risers` risers over `risers - 1` treads along `dir`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StairItem {
+    pub id: u64,
+    pub name: String,
+    /// the foot of the first riser, at the middle of the width
+    pub start: [f64; 3],
+    /// the unit direction of the run in plan
+    pub dir: [f64; 2],
+    pub width: f64,
+    pub risers: u32,
+    pub riser_height: f64,
+    pub tread_length: f64,
+}
+
 pub struct Scene {
     pub project_name: String,
     /// 48-bit key that makes the GlobalIds of this project different from every other project's
@@ -159,11 +366,23 @@ pub struct Scene {
     /// firestop records of the wall penetrations (product, installed, inspected), entered by hand or by external software
     pub firestops: Firestops,
     pub slabs: Vec<SlabItem>,
+    /// roofs by footprint, each written as an IfcRoof with a faceted solid
+    pub roofs: Vec<RoofItem>,
+    /// railings, each an IfcRailing whose parts are faceted solids
+    pub railings: Vec<RailingItem>,
+    /// straight stairs, each an IfcStair with its side profile extruded across its width
+    pub stairs: Vec<StairItem>,
     /// structural columns, each a straight prism on a convex footprint
     pub columns: Vec<ColumnItem>,
+    /// beams, each a straight member with a rectangular section
+    pub beams: Vec<BeamItem>,
+    /// the structural material of beams and columns by element number; each name is an `IfcMaterial`
+    pub materials: BTreeMap<u64, String>,
     pub shafts: Vec<ShaftVoid>,
     /// register of openings in slabs, by slab index into `slabs`
     pub floor_penetrations: Vec<FloorPenetration>,
+    /// voids of any outline cut in a slab, by index into `slabs` (the openings of the document's shafts)
+    pub slab_voids: Vec<SlabVoid>,
     pub networks: Vec<Network>,
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
@@ -171,6 +390,12 @@ pub struct Scene {
     /// lighting inputs of rooms, by the room's element number
     pub room_lighting: std::collections::BTreeMap<u64, lighting::RoomLighting>,
     pub wall_types: Vec<walls::WallType>,
+    /// types of beams, columns, slabs and footings: one IFC type object each, linked to its instances
+    pub types: Vec<TypeItem>,
+    /// what the exchange needs to know of each beam, column, slab and footing, by element number (see `MemberInfo`)
+    pub member_info: BTreeMap<u64, MemberInfo>,
+    /// the app's own records of the whole model (see `openbim_document::native`), carried in the project's `OpenBIM_Document` set so that the app can read its own file back with nothing lost; empty for none
+    pub native: Vec<String>,
     /// where one wall element meets another (see `walls::find_joins`)
     pub wall_joins: Vec<walls::WallJoin>,
     /// where the project is on the earth; without it the file has no map and the site has no position
@@ -208,6 +433,10 @@ pub struct Report {
     pub walls: usize,
     pub openings: usize,
     pub slabs: usize,
+    pub roofs: usize,
+    pub railings: usize,
+    pub stairs: usize,
+    pub bars: usize,
     pub segments: usize,
     pub fittings: usize,
     pub ports: usize,
@@ -385,6 +614,8 @@ struct Out<'a> {
     wall_entities: Vec<u32>,
     slab_entities: Vec<u32>,
     column_entities: Vec<u32>,
+    /// every beam, brace and column written: (element number, entity)
+    member_entities: Vec<(u64, u32)>,
     /// the virtual element of each separation line that a boundary used
     virtual_entities: BTreeMap<usize, u32>,
     item_entities: Vec<u32>,
@@ -459,6 +690,19 @@ impl<'a> Out<'a> {
         let a = self.s.add(format!("IFCAXIS2PLACEMENT2D(#{c},$)"));
         let (w, h) = (self.r(w, "size"), self.r(h, "size"));
         self.s.add(format!("IFCRECTANGLEPROFILEDEF(.AREA.,$,#{a},{w},{h})"))
+    }
+    /// The exact profile of a section: a rectangle, a circle or an I-shape.
+    fn section_profile(&mut self, p: &Profile) -> u32 {
+        match *p {
+            Profile::Rect { width, depth } => self.rect_profile(0.0, 0.0, width, depth),
+            Profile::Circle { diameter } => self.circle_profile(diameter / 2.0),
+            Profile::I { width, depth, web, flange } => {
+                let c = self.p2(0.0, 0.0);
+                let a = self.s.add(format!("IFCAXIS2PLACEMENT2D(#{c},$)"));
+                let v = [width, depth, web, flange].map(|x| self.r(x, "size"));
+                self.s.add(format!("IFCISHAPEPROFILEDEF(.AREA.,$,#{a},{},{},{},{},$,$,$)", v[0], v[1], v[2], v[3]))
+            }
+        }
     }
     fn circle_profile(&mut self, radius: f64) -> u32 {
         let c = self.p2(0.0, 0.0);
@@ -593,24 +837,30 @@ fn size_props(size: RunSize) -> Vec<(&'static str, Val)> {
 
 /// Write the scene as IFC4.
 pub fn export(scene: &Scene) -> Result<Exported, ExportError> {
-    export_as(scene, false)
+    export_as(scene, false, false)
+}
+
+/// Write the scene as IFC 4.3 (`IFC4X3_ADD2`), the newest schema. The entities written are the same as in IFC4; the
+/// files of the tests are checked against both schemas with IfcOpenShell.
+pub fn export_ifc4x3(scene: &Scene) -> Result<Exported, ExportError> {
+    export_as(scene, false, true)
 }
 
 /// Write the scene as IFC2X3, the schema DIALux evo reads best: the building shell, rooms, doors and windows.
 /// What 2x3 cannot carry (service networks, wall types, joins, space boundaries, map conversion, luminaires)
 /// is left out and named in the report's warnings.
 pub fn export_ifc2x3(scene: &Scene) -> Result<Exported, ExportError> {
-    export_as(scene, true)
+    export_as(scene, true, false)
 }
 
-fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
+fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError> {
     if scene.project_key > guid::MAX_PROJECT_KEY {
         return Err(ExportError::BadKey);
     }
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), member_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {
@@ -651,6 +901,11 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     };
     let g = o.gen_gid();
     let project = o.s.add(format!("IFCPROJECT({g},$,{},$,$,$,$,(#{ctx}),#{units})", string(&scene.project_name)));
+    if !scene.native.is_empty() {
+        let names: Vec<String> = (0..scene.native.len()).map(|i| format!("R{i:07}")).collect();
+        let props: Vec<(&str, Val)> = names.iter().zip(&scene.native).map(|(n, l)| (n.as_str(), Val::Text(l.clone()))).collect();
+        o.pset(project, "OpenBIM_Document", props);
+    }
     // spatial structure
     // the site carries the whole model, so it is where the file's origin is moved to
     let site_pl = match &scene.georef {
@@ -700,7 +955,12 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
         families::write_families(&mut o)?;
     }
     write_slabs(&mut o)?;
+    write_roofs(&mut o)?;
+    write_railings(&mut o)?;
+    write_stairs(&mut o)?;
     write_columns(&mut o)?;
+    write_beams(&mut o)?;
+    write_member_materials(&mut o);
     write_spaces(&mut o)?;
     if v2 {
         if !scene.networks.is_empty() {
@@ -709,6 +969,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     } else {
         write_networks(&mut o)?;
     }
+    write_member_types(&mut o)?;
 
     // containment, per storey
     let contained = std::mem::take(&mut o.contained);
@@ -723,7 +984,7 @@ fn export_as(scene: &Scene, v2: bool) -> Result<Exported, ExportError> {
     if let Some(id) = o.dup {
         return Err(ExportError::DuplicateId(id));
     }
-    let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp) };
+    let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp, x43) };
     Ok(Exported { text, report: o.report })
 }
 
@@ -788,6 +1049,7 @@ fn write_walls(o: &mut Out) -> Result<(), ExportError> {
         o.contain(st, wall);
         o.report.walls += 1;
         o.wall_entities.push(wall);
+        o.member_entities.push((w.id, wall));
         if let Some(ti) = w.wall_type.filter(|_| !v2) {
             let (t, (_, ls)) = (scene.wall_types.get(ti).ok_or_else(|| ExportError::Unsupported(format!("wall {}: no wall type {ti}", w.name)))?, type_ids[ti]);
             if (t.thickness() - c.thickness).abs() > 1e-9 {
@@ -908,6 +1170,101 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         let e = o.s.add(format!("IFCCOLUMN({g},$,{},$,$,#{pl},#{shape},{})", string(&c.name), o.tail4(".COLUMN.")));
         o.contain(st, e);
         o.column_entities.push(e);
+        o.member_entities.push((c.id, e));
+    }
+    Ok(())
+}
+
+fn write_beams(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for b in &scene.beams {
+        let Some((u, side, _)) = b.axes() else {
+            return Err(ExportError::Unsupported(format!("beam {}: needs two different points that are not one above the other, and a section with positive sizes", b.name)));
+        };
+        let st = o.storey_for(b.a[2].min(b.b[2]));
+        let elev = o.storeys[st].2;
+        let at = [b.a[0], b.a[1], b.a[2] - elev];
+        // the beam is placed at its start, its local z along the beam and its local x across it
+        let pl = o.place(Some(o.storeys[st].1), at, Some(u), Some(side));
+        let prof = o.section_profile(&b.profile);
+        let solid = o.extrusion(prof, [0.0; 3], None, None, b.length());
+        let shape = o.shape(&[solid]);
+        let g = o.gid(b.id, 0);
+        let (class, predefined) = b.usage.ifc();
+        let e = o.s.add(format!("{class}({g},$,{},$,$,#{pl},#{shape},{})", string(&b.name), o.tail4(predefined)));
+        o.contain(st, e);
+        o.member_entities.push((b.id, e));
+        for (k, bar) in b.bars.iter().enumerate() {
+            if bar.path.len() < 2 || bar.diameter.is_nan() || bar.diameter <= 0.0 { return Err(ExportError::Unsupported(format!("bar {}: needs two points and a positive diameter", bar.name))); }
+            let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+            let pts: Vec<String> = bar.path.iter().map(|p| { let id = o.p3([p[0], p[1], p[2] - elev]); format!("#{id}") }).collect();
+            let curve = o.s.add(format!("IFCPOLYLINE(({}))", pts.join(",")));
+            let r = o.r(bar.diameter / 2.0, "size");
+            // IFC2X3 wants the range of the sweep (a polyline counts one for each corner); IFC4 may leave it out
+            let range = if o.v2 { format!("0.,{}.", bar.path.len() - 1) } else { "$,$".to_string() };
+            let solid = o.s.add(format!("IFCSWEPTDISKSOLID(#{curve},{r},$,{range})"));
+            let shape = o.shape(&[solid]);
+            let g = o.gid(bar.id, k as u16);
+            let d = o.r(bar.diameter, "size");
+            let kind = if bar.shear { ".SHEAR." } else { ".MAIN." };
+            // IFC2X3 requires the cross-section area and the role; IFC4 does not
+            let area = if o.v2 { o.r(std::f64::consts::PI * bar.diameter * bar.diameter / 4.0, "size") } else { "$".into() };
+            let rb = o.s.add(format!("IFCREINFORCINGBAR({g},$,{},$,$,#{pl},#{shape},$,$,{d},{area},$,{kind},$)", string(&bar.name)));
+            o.contain(st, rb);
+            o.report.bars += 1;
+        }
+    }
+    Ok(())
+}
+
+/// One `IfcMaterial` for each name used, associated with the beams and columns that have it.
+fn write_member_materials(o: &mut Out) {
+    let scene = o.scene;
+    let mut by_name: BTreeMap<&str, Vec<u32>> = BTreeMap::new();
+    for (id, e) in o.member_entities.clone() {
+        if let Some(name) = scene.materials.get(&id) {
+            by_name.entry(name.as_str()).or_default().push(e);
+        }
+    }
+    for (name, elems) in by_name {
+        let m = o.s.add(format!("IFCMATERIAL({})", string(name)));
+        let g = o.gen_gid();
+        o.s.add(format!("IFCRELASSOCIATESMATERIAL({g},$,$,$,({}),#{m})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
+    }
+}
+
+/// The type objects and the `OpenBIM_Element` set of every beam, column, slab and footing written.
+fn write_member_types(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    let entity_of: BTreeMap<u64, u32> = o.member_entities.iter().copied().collect();
+    for (id, e) in &entity_of {
+        let Some(info) = scene.member_info.get(id) else { continue };
+        o.pset(*e, "OpenBIM_Element", vec![
+            ("ElementNumber", Val::Int(*id as i64)), ("Category", Val::Label(info.category.clone())),
+            ("TypeName", Val::Label(info.type_name.clone())), ("Fingerprint", Val::Ident(info.fingerprint.clone())),
+        ]);
+    }
+    if scene.types.is_empty() { return Ok(()); }
+    if o.v2 {
+        o.report.warnings.push("IFC2X3: member types are not written (the elements keep their values and the OpenBIM_Element set names the type)".into());
+        return Ok(());
+    }
+    for t in &scene.types {
+        let props: Vec<(&str, Val)> = t.props.iter().map(|(n, v)| (n.as_str(), match v {
+            TypeProp::Text(s) => Val::Label(s.clone()),
+            TypeProp::Len(x) => Val::LenAny(*x),
+            TypeProp::Int(i) => Val::Int(*i),
+        })).collect();
+        let ps = o.pset_entity("OpenBIM_Type", props);
+        let (class, predefined) = t.class.entity();
+        let g = o.gid(t.id, 0);
+        let ty = o.s.add(format!("{class}({g},$,{},$,$,(#{ps}),$,$,$,.{predefined}.)", string(&t.name)));
+        let users: Vec<String> = t.instances.iter().filter_map(|i| entity_of.get(i)).map(|e| format!("#{e}")).collect();
+        if !users.is_empty() {
+            let g = o.gen_gid();
+            o.s.add(format!("IFCRELDEFINESBYTYPE({g},$,$,$,({}),#{ty})", users.join(",")));
+        }
+        o.report.types += 1;
     }
     Ok(())
 }
@@ -925,17 +1282,30 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, [0.0, 0.0, bottom], None, None, s.thickness);
         let shape = o.shape(&[solid]);
         let g = o.gid(item.id, 0);
-        if item.role != SlabRole::Structure {
+        if matches!(item.role, SlabRole::PadFooting | SlabRole::StripFooting) {
+            let kind = if item.role == SlabRole::PadFooting { "PAD_FOOTING" } else { "STRIP_FOOTING" };
+            let f = o.s.add(format!("IFCFOOTING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));
+            o.contain(st, f);
+            // keeps the slab numbering that room boundaries use
+            o.slab_entities.push(f);
+            o.member_entities.push((item.id, f));
+            o.report.slabs += 1;
+            continue;
+        }
+        if matches!(item.role, SlabRole::FloorFinish | SlabRole::Ceiling) {
             let kind = if item.role == SlabRole::FloorFinish { "FLOORING" } else { "CEILING" };
             let cov = o.s.add(format!("IFCCOVERING({g},$,{},$,$,#{pl},#{shape},$,.{kind}.)", string(&s.name)));
             o.contain(st, cov);
             o.slab_entities.push(cov);
+            o.member_entities.push((item.id, cov));
             o.report.slabs += 1;
             continue;
         }
-        let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,.FLOOR.)", string(&s.name)));
+        let slab_type = match item.role { SlabRole::Foundation => ".BASESLAB.", SlabRole::Landing => ".LANDING.", _ => ".FLOOR." };
+        let slab = o.s.add(format!("IFCSLAB({g},$,{},$,$,#{pl},#{shape},$,{slab_type})", string(&s.name)));
         o.contain(st, slab);
         o.slab_entities.push(slab);
+        o.member_entities.push((item.id, slab));
         o.report.slabs += 1;
         let mut void_area = 0.0;
         for sh in scene.shafts.iter().filter(|sh| s.top > sh.z_bottom + 1e-6 && s.top < sh.z_top - 1e-6) {
@@ -946,6 +1316,9 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
         }
         for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == si && p.kind == FloorOpeningKind::Cut && p.fits) {
             void_area += p.size_x() * p.size_y();
+        }
+        for v in scene.slab_voids.iter().filter(|v| v.slab == si) {
+            void_area += (0..v.outline.len()).map(|i| { let (a, b) = (v.outline[i], v.outline[(i + 1) % v.outline.len()]); a[0] * b[1] - b[0] * a[1] }).sum::<f64>().abs() / 2.0;
         }
         o.qto(slab, "Qto_SlabBaseQuantities", &quantities::slab(s, void_area));
         if let Some(m) = s.fire_rating_min {
@@ -967,6 +1340,19 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
                 o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
                 o.report.openings += 1;
             }
+        }
+        // voids of any outline (the document's shafts)
+        for v in scene.slab_voids.iter().filter(|v| v.slab == si) {
+            k += 1;
+            let prof = o.poly_profile(&v.outline);
+            let solid = o.extrusion(prof, [0.0, 0.0, bottom - ov], None, None, s.thickness + 2.0 * ov);
+            let opl = o.place(Some(pl), [0.0; 3], None, None);
+            let shape = o.shape(&[solid]);
+            let g = o.gid(item.id, k);
+            let oe = o.s.add(format!("IFCOPENINGELEMENT({g},$,{},$,$,#{opl},#{shape},{})", string(&v.name), o.tail4(".OPENING.")));
+            let g = o.gen_gid();
+            o.s.add(format!("IFCRELVOIDSELEMENT({g},$,$,$,#{slab},#{oe})"));
+            o.report.openings += 1;
         }
         for p in scene.floor_penetrations.iter().filter(|p| p.id.slab == si) {
             if p.kind != FloorOpeningKind::Cut {
@@ -993,6 +1379,117 @@ fn write_slabs(o: &mut Out) -> Result<(), ExportError> {
             }
             o.pset(oe, "OpenBIM_Penetration", props);
         }
+    }
+    Ok(())
+}
+
+/// Roofs by footprint: an IfcRoof whose body is a closed faceted solid, since a roof of several planes is not an extrusion.
+fn write_roofs(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for item in &scene.roofs {
+        if item.faces.is_empty() || item.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= item.verts.len())) {
+            return Err(ExportError::Unsupported(format!("roof {}: a solid without faces", item.name)));
+        }
+        let st = o.storey_for(item.eaves_z);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let pts: Vec<u32> = item.verts.iter().map(|v| o.p3([v[0], v[1], v[2] - elev])).collect();
+        let mut faces = Vec::new();
+        for f in &item.faces {
+            let ring: Vec<String> = f.iter().map(|&i| format!("#{}", pts[i])).collect();
+            let lp = o.s.add(format!("IFCPOLYLOOP(({}))", ring.join(",")));
+            let bound = o.s.add(format!("IFCFACEOUTERBOUND(#{lp},.T.)"));
+            faces.push(format!("#{}", o.s.add(format!("IFCFACE((#{bound}))"))));
+        }
+        let shell = o.s.add(format!("IFCCLOSEDSHELL(({}))", faces.join(",")));
+        let brep = o.s.add(format!("IFCFACETEDBREP(#{shell})"));
+        let rep = o.shape_rep("Brep", &[brep]);
+        let shape = o.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+        let g = o.gid(item.id, 0);
+        let roof = o.s.add(format!("IFCROOF({g},$,{},$,$,#{pl},#{shape},$,.{}.)", string(&item.name), item.shape));
+        o.contain(st, roof);
+        o.member_entities.push((item.id, roof));
+        o.report.roofs += 1;
+    }
+    Ok(())
+}
+
+/// Railings: an IfcRailing whose body is one faceted solid for each of its parts (rails, posts, balusters), which are
+/// the groups of faces that share points.
+fn write_railings(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for item in &scene.railings {
+        if item.faces.is_empty() || item.faces.iter().any(|f| f.len() < 3 || f.iter().any(|&i| i >= item.verts.len())) {
+            return Err(ExportError::Unsupported(format!("railing {}: a solid without faces", item.name)));
+        }
+        let st = o.storey_for(item.base_z);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let pts: Vec<u32> = item.verts.iter().map(|v| o.p3([v[0], v[1], v[2] - elev])).collect();
+        // the parts: faces that share a point belong to one solid
+        let mut part: Vec<usize> = (0..item.verts.len()).collect();
+        fn root(part: &mut [usize], mut i: usize) -> usize { while part[i] != i { part[i] = part[part[i]]; i = part[i]; } i }
+        for f in &item.faces {
+            let r0 = root(&mut part, f[0]);
+            for &i in &f[1..] { let r = root(&mut part, i); part[r] = r0; }
+        }
+        let mut shells: std::collections::BTreeMap<usize, Vec<String>> = std::collections::BTreeMap::new();
+        for f in &item.faces {
+            let ring: Vec<String> = f.iter().map(|&i| format!("#{}", pts[i])).collect();
+            let lp = o.s.add(format!("IFCPOLYLOOP(({}))", ring.join(",")));
+            let bound = o.s.add(format!("IFCFACEOUTERBOUND(#{lp},.T.)"));
+            let face = format!("#{}", o.s.add(format!("IFCFACE((#{bound}))")));
+            let key = root(&mut part, f[0]);
+            shells.entry(key).or_default().push(face);
+        }
+        let mut breps = Vec::new();
+        for faces in shells.values() {
+            let shell = o.s.add(format!("IFCCLOSEDSHELL(({}))", faces.join(",")));
+            breps.push(o.s.add(format!("IFCFACETEDBREP(#{shell})")));
+        }
+        let rep = o.shape_rep("Brep", &breps);
+        let shape = o.s.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+        let g = o.gid(item.id, 0);
+        let railing = o.s.add(format!("IFCRAILING({g},$,{},$,$,#{pl},#{shape},$,.GUARDRAIL.)", string(&item.name)));
+        o.contain(st, railing);
+        o.member_entities.push((item.id, railing));
+        o.report.railings += 1;
+    }
+    Ok(())
+}
+
+/// Stairs: an IfcStair whose body is the side profile of the steps extruded across the width, with the figures of
+/// Pset_StairCommon.
+fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for s in &scene.stairs {
+        if s.risers < 2 || s.riser_height.is_nan() || s.riser_height <= 0.0 || s.tread_length.is_nan() || s.tread_length <= 0.0 || s.width.is_nan() || s.width <= 0.0 || (s.dir[0].hypot(s.dir[1]) - 1.0).abs() > 1e-6 {
+            return Err(ExportError::Unsupported(format!("stair {}: a run with no steps or no direction", s.name)));
+        }
+        let st = o.storey_for(s.start[2]);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        // the profile in (along, up), extruded to the right of the run
+        let mut pts: Vec<[f64; 2]> = vec![[0.0, 0.0]];
+        for i in 1..s.risers {
+            pts.push([f64::from(i - 1) * s.tread_length, f64::from(i) * s.riser_height]);
+            pts.push([f64::from(i) * s.tread_length, f64::from(i) * s.riser_height]);
+        }
+        pts.push([f64::from(s.risers - 1) * s.tread_length, 0.0]);
+        let prof = o.poly_profile(&pts);
+        let right = [s.dir[1], -s.dir[0], 0.0];
+        let origin = [s.start[0] - right[0] * s.width / 2.0, s.start[1] - right[1] * s.width / 2.0, s.start[2] - elev];
+        let solid = o.extrusion(prof, origin, Some(right), Some([s.dir[0], s.dir[1], 0.0]), s.width);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(s.id, 0);
+        let stair = o.s.add(format!("IFCSTAIR({g},$,{},$,$,#{pl},#{shape},$,.STRAIGHT_RUN_STAIR.)", string(&s.name)));
+        o.contain(st, stair);
+        o.member_entities.push((s.id, stair));
+        o.pset(stair, "Pset_StairCommon", vec![
+            ("NumberOfRiser", Val::Int(i64::from(s.risers))), ("NumberOfTreads", Val::Int(i64::from(s.risers - 1))),
+            ("RiserHeight", Val::Len(s.riser_height)), ("TreadLength", Val::Len(s.tread_length)),
+        ]);
+        o.report.stairs += 1;
     }
     Ok(())
 }
@@ -1231,6 +1728,7 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             let g = o.gid(sg.id, 0);
             let e = o.s.add(format!("{class}({g},$,{},$,$,#{pl},#{shape},$,{pre})", string(&r.label)));
             o.contain(st, e);
+            o.member_entities.push((sg.id, e));
             o.report.segments += 1;
             let mut props = size_props(r.size);
             props.push(("System", Val::Label(r.system.ifc_system().into())));

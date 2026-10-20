@@ -21,7 +21,10 @@ fn choosing_a_unit_changes_what_is_shown_and_what_a_bare_number_means() {
     let mut u = DisplayUnits::metric();
     u.set(LENGTH, "ft").unwrap();
     assert_eq!(u.format(0.3048, LENGTH, 3), "1 ft");
-    assert!((u.parse("10", LENGTH).unwrap() - 3.048).abs() < 1e-12, "a bare number is in the unit shown");
+    assert!(
+        (u.parse("10", LENGTH).unwrap() - 3.048).abs() < 1e-12,
+        "a bare number is in the unit shown"
+    );
     u.set(LENGTH, "m").unwrap();
     assert!((u.parse("10", LENGTH).unwrap() - 10.0).abs() < 1e-12);
     u.set(FLOW, "m3/h").unwrap();
@@ -47,14 +50,32 @@ fn typed_values_take_their_own_unit_when_they_have_one() {
 #[test]
 fn what_cannot_be_read_is_refused_with_a_reason() {
     let u = DisplayUnits::metric();
-    assert!(matches!(u.parse("5 furlongs", LENGTH), Err(UnitError::Unknown(_))));
-    assert!(matches!(u.parse("5 kg", LENGTH), Err(UnitError::WrongKind { .. })));
-    assert!(matches!(u.parse("abc", LENGTH), Err(UnitError::NotANumber(_))));
+    assert!(matches!(
+        u.parse("5 furlongs", LENGTH),
+        Err(UnitError::Unknown(_))
+    ));
+    assert!(matches!(
+        u.parse("5 kg", LENGTH),
+        Err(UnitError::WrongKind { .. })
+    ));
+    assert!(matches!(
+        u.parse("abc", LENGTH),
+        Err(UnitError::NotANumber(_))
+    ));
     assert!(matches!(u.parse("", LENGTH), Err(UnitError::NotANumber(_))));
-    assert!(matches!(u.parse("inf", LENGTH), Err(UnitError::NotANumber(_)) | Err(UnitError::Unknown(_))));
-    assert!(matches!(u.parse("NaN mm", LENGTH), Err(UnitError::NotANumber(_)) | Err(UnitError::Unknown(_))));
+    assert!(matches!(
+        u.parse("inf", LENGTH),
+        Err(UnitError::NotANumber(_)) | Err(UnitError::Unknown(_))
+    ));
+    assert!(matches!(
+        u.parse("NaN mm", LENGTH),
+        Err(UnitError::NotANumber(_)) | Err(UnitError::Unknown(_))
+    ));
     let mut u = u;
-    assert!(matches!(u.set(LENGTH, "kg"), Err(UnitError::WrongKind { .. })));
+    assert!(matches!(
+        u.set(LENGTH, "kg"),
+        Err(UnitError::WrongKind { .. })
+    ));
     assert!(matches!(u.set(LENGTH, "nope"), Err(UnitError::Unknown(_))));
     // a refused choice changes nothing
     assert_eq!(u.symbol(LENGTH), Some("mm"));
@@ -65,7 +86,9 @@ fn every_unit_of_the_table_round_trips_and_is_known_to_the_formula_language() {
     let u = DisplayUnits::default();
     for (sym, factor, dim) in UNITS {
         let text = format!("3 {sym}");
-        let v = u.parse(&text, *dim).unwrap_or_else(|e| panic!("{text}: {e}"));
+        let v = u
+            .parse(&text, *dim)
+            .unwrap_or_else(|e| panic!("{text}: {e}"));
         assert!((v - 3.0 * factor).abs() < 1e-9 * factor.max(1.0), "{sym}");
         // shown in that unit, it reads back the same
         let mut c = DisplayUnits::default();

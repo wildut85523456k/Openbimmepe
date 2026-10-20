@@ -58,7 +58,7 @@ fn levels() -> Levels {
     Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap()
 }
 fn scene(walls: Vec<WallItem>) -> Scene {
-    Scene { project_name: "P".into(), project_key: 1, timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
+    Scene { types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![], project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(), levels: levels(), walls, wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default() }
 }
 fn wall(id: u64) -> WallItem {
     WallItem { id, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [4.0, 0.0]], false, 0.2, 3.0), wall_type: None, room_bounding: true }
@@ -72,6 +72,10 @@ fn a_plain_wall_exports_and_exports_again_identically() {
     assert_eq!(a.report.walls, 1);
     assert!(a.text.starts_with("ISO-10303-21;\nHEADER;"));
     assert!(a.text.contains("FILE_SCHEMA(('IFC4'))"));
+    // IFC 4.3 is the same entities under the newer schema name, and as repeatable
+    let n = openbim_ifc::export_ifc4x3(&scene(vec![wall(5)])).unwrap();
+    assert!(n.text.contains("FILE_SCHEMA(('IFC4X3_ADD2'))") && !n.text.contains("FILE_SCHEMA(('IFC4'))"));
+    assert_eq!(n.text.replace("IFC4X3_ADD2", "IFC4").lines().skip(3).collect::<Vec<_>>(), a.text.lines().skip(3).collect::<Vec<_>>());
     assert!(a.text.contains(&format!("IFCWALL('{}'", global_id(1, 0, 5))));
     assert!(a.text.trim_end().ends_with("END-ISO-10303-21;"));
 }
@@ -414,4 +418,48 @@ fn a_blend_is_a_faceted_brep_and_a_void_is_cut_with_a_boolean_result() {
     // the solid and the void are written once each, the void only as the operand of the difference
     assert_eq!(out.text.matches("IFCEXTRUDEDAREASOLID(").count(), walls_only + 2);
     assert_eq!(out.text.matches("IFCBOOLEANRESULT(").count(), 1);
+}
+
+#[test]
+fn a_beam_exports_as_an_ifcbeam_along_its_own_axis_and_a_bad_one_is_refused() {
+    use openbim_ifc::BeamItem;
+    let mut s = scene(vec![wall(5)]);
+    s.beams = vec![BeamItem::rect(9, "B1", [0.0, 1.0, 2.6], [4.0, 1.0, 2.6], 0.2, 0.4)];
+    let a = export(&s).unwrap();
+    assert!(a.text.contains(&format!("IFCBEAM('{}'", global_id(1, 0, 9))), "{}", a.text);
+    assert!(a.text.contains("'B1'") && a.text.contains(".BEAM."));
+    assert!(a.text.contains("IFCRECTANGLEPROFILEDEF(.AREA.,$,#"), "a rectangular section");
+    let solid = a.text.lines().rfind(|l| l.contains("IFCEXTRUDEDAREASOLID")).unwrap();
+    assert!(solid.ends_with(",4.);") || solid.ends_with(",4.0);"), "extruded over its 4 m: {solid}");
+    assert_eq!(a.text, export(&s).unwrap().text, "stable");
+    s.beams[0].b = [0.0, 1.0, 4.0];
+    assert!(export(&s).is_err(), "a vertical member is a column");
+    s.beams[0].b = [4.0, 1.0, 2.6];
+    s.beams[0].profile = openbim_geom::profile::Profile::Rect { width: 0.2, depth: 0.0 };
+    assert!(export(&s).is_err());
+}
+
+#[test]
+fn beams_and_columns_take_round_and_i_sections() {
+    use openbim_geom::profile::Profile;
+    use openbim_ifc::{BeamItem, ColumnItem};
+    let mut s = scene(vec![wall(5)]);
+    let i = Profile::I { width: 0.2, depth: 0.4, web: 0.01, flange: 0.02 };
+    s.beams = vec![
+        BeamItem { id: 9, name: "I".into(), a: [0.0, 1.0, 2.6], b: [4.0, 1.0, 2.6], profile: i, usage: openbim_ifc::FramingUsage::Girder, bars: vec![] },
+        BeamItem { id: 10, name: "R".into(), a: [0.0, 2.0, 2.6], b: [4.0, 2.0, 2.6], profile: Profile::Circle { diameter: 0.3 }, usage: openbim_ifc::FramingUsage::Brace, bars: vec![] },
+    ];
+    let t = export(&s).unwrap().text;
+    assert_eq!((t.matches("IFCBEAM(").count(), t.matches("IFCMEMBER(").count()), (1, 1), "the round one is a brace, so a member");
+    assert!(t.contains("IFCISHAPEPROFILEDEF(.AREA.,$,#") && t.contains(",0.2,0.4,0.01,0.02,$,$,$)"), "{t}");
+    assert!(t.contains("IFCCIRCLEPROFILEDEF(.AREA.,$,#") && t.contains(",0.15)"));
+    // a column on a round or an I section
+    let col = ColumnItem::from_profile(11, "C", &Profile::Circle { diameter: 0.4 }, [2.0, 2.0], 0.0, 3.0, true).unwrap();
+    assert_eq!(col.footprint.len(), 32);
+    let h = ColumnItem::from_profile(12, "H", &i, [5.0, 2.0], 0.0, 3.0, false).unwrap();
+    assert_eq!(h.footprint.len(), 12);
+    assert!(ColumnItem::from_profile(13, "H", &i, [5.0, 2.0], 0.0, 3.0, true).is_err(), "not convex, so no room boundary");
+    assert!(ColumnItem::from_profile(14, "X", &Profile::Circle { diameter: 0.0 }, [0.0, 0.0], 0.0, 3.0, false).is_err());
+    s.columns = vec![col, h];
+    assert_eq!(export(&s).unwrap().text.matches("IFCCOLUMN(").count(), 2);
 }

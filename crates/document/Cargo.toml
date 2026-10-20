@@ -1,0 +1,19 @@
+[package]
+name = "openbim-document"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Initial transactional Rust BIM document core"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+openbim-geom = { path = "../geom" }
+openbim-route = { path = "../route" }
+openbim-family = { path = "../family" }
+openbim-place = { path = "../place" }
+openbim-calc = { path = "../calc" }
+i_overlay = "4"
+earcutr = "0.5.0"
+rayon = "1.10"

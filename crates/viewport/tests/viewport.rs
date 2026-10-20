@@ -101,10 +101,10 @@ fn the_view_cube_snaps_to_faces_edges_and_corners() {
 
 fn model() -> Batch {
     let mut s = Scene {
-        project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
-        walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
-        families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![],
+        families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     };
     // a wall in front of a column, seen from the south
     s.walls = vec![WallItem { id: 1, name: "W".into(), chain: WallChain::new(vec![[-1.0, 0.0], [1.0, 0.0]], false, 0.2, 2.0), wall_type: None, room_bounding: true }];
@@ -162,10 +162,10 @@ fn hidden_line_draws_edges_that_are_seen_and_not_those_behind_a_face() {
 /// where their faces cross. It has to be drawn all the same.
 fn t_junction() -> Batch {
     let mut s = Scene {
-        project_name: "P".into(), project_key: 1, timestamp: "t".into(),
+        project_name: "P".into(), project_key: 1, beams: vec![], materials: Default::default(), timestamp: "t".into(),
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
-        walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], networks: vec![],
-        families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(),
+        walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![],
+        families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     };
     s.walls = vec![
         WallItem { id: 1, name: "A".into(), chain: WallChain::new(vec![[-3.0, 0.0], [3.0, 0.0]], false, 0.2, 2.0), wall_type: None, room_bounding: true },

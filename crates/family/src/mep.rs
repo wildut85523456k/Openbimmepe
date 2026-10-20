@@ -88,7 +88,31 @@ impl Category {
     /// All categories, for menus and tests.
     pub const ALL: [Category; 23] = {
         use Category::*;
-        [Generic, Door, Window, Furniture, AirTerminal, Fan, Damper, Pump, Boiler, Chiller, Coil, UnitaryEquipment, Tank, Valve, SanitaryTerminal, LightFixture, DistributionBoard, Outlet, SwitchingDevice, Sprinkler, DuctFitting, PipeFitting, CableFitting]
+        [
+            Generic,
+            Door,
+            Window,
+            Furniture,
+            AirTerminal,
+            Fan,
+            Damper,
+            Pump,
+            Boiler,
+            Chiller,
+            Coil,
+            UnitaryEquipment,
+            Tank,
+            Valve,
+            SanitaryTerminal,
+            LightFixture,
+            DistributionBoard,
+            Outlet,
+            SwitchingDevice,
+            Sprinkler,
+            DuctFitting,
+            PipeFitting,
+            CableFitting,
+        ]
     };
 }
 
@@ -114,7 +138,13 @@ pub enum Domain {
 }
 
 impl Domain {
-    pub const ALL: [Domain; 5] = [Domain::Duct, Domain::Pipe, Domain::CableTray, Domain::Conduit, Domain::Electrical];
+    pub const ALL: [Domain; 5] = [
+        Domain::Duct,
+        Domain::Pipe,
+        Domain::CableTray,
+        Domain::Conduit,
+        Domain::Electrical,
+    ];
     /// Stable number for saving.
     pub fn code(self) -> u8 {
         Domain::ALL.iter().position(|d| *d == self).unwrap_or(0) as u8
@@ -161,10 +191,27 @@ pub enum System {
 
 impl System {
     pub const ALL: [System; 21] = [
-        System::SupplyAir, System::ReturnAir, System::ExhaustAir, System::OutsideAir, System::ChilledWaterSupply, System::ChilledWaterReturn,
-        System::HeatingWaterSupply, System::HeatingWaterReturn, System::CondenserWaterSupply, System::CondenserWaterReturn, System::DomesticCold,
-        System::DomesticHot, System::Sanitary, System::Vent, System::StormWater, System::Condensate, System::FireProtection, System::Gas,
-        System::Power, System::Data, System::Other,
+        System::SupplyAir,
+        System::ReturnAir,
+        System::ExhaustAir,
+        System::OutsideAir,
+        System::ChilledWaterSupply,
+        System::ChilledWaterReturn,
+        System::HeatingWaterSupply,
+        System::HeatingWaterReturn,
+        System::CondenserWaterSupply,
+        System::CondenserWaterReturn,
+        System::DomesticCold,
+        System::DomesticHot,
+        System::Sanitary,
+        System::Vent,
+        System::StormWater,
+        System::Condensate,
+        System::FireProtection,
+        System::Gas,
+        System::Power,
+        System::Data,
+        System::Other,
     ];
     /// Stable number for saving.
     pub fn code(self) -> u8 {
@@ -268,7 +315,10 @@ impl FlowDir {
         }
     }
     fn joins(self, o: FlowDir) -> bool {
-        !matches!((self, o), (FlowDir::In, FlowDir::In) | (FlowDir::Out, FlowDir::Out))
+        !matches!(
+            (self, o),
+            (FlowDir::In, FlowDir::In) | (FlowDir::Out, FlowDir::Out)
+        )
     }
 }
 
@@ -302,7 +352,10 @@ pub enum ShapeDef {
     Round(String),
     Rect(String, String),
     /// voltage (V) and number of poles (1 to 4)
-    Electrical { voltage: String, poles: String },
+    Electrical {
+        voltage: String,
+        poles: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -328,8 +381,30 @@ pub struct ConnectorDef {
 }
 
 impl ConnectorDef {
-    pub fn new(name: &str, domain: Domain, system: System, flow_dir: FlowDir, at: (&str, &str, &str), dir: Dir, shape: ShapeDef) -> Self {
-        ConnectorDef { name: name.into(), domain, system, flow_dir, at: (at.0.into(), at.1.into(), at.2.into()), dir, shape, flow: None, pressure_drop: None, visible: None, aim: None, roll: None, power_factor: None }
+    pub fn new(
+        name: &str,
+        domain: Domain,
+        system: System,
+        flow_dir: FlowDir,
+        at: (&str, &str, &str),
+        dir: Dir,
+        shape: ShapeDef,
+    ) -> Self {
+        ConnectorDef {
+            name: name.into(),
+            domain,
+            system,
+            flow_dir,
+            at: (at.0.into(), at.1.into(), at.2.into()),
+            dir,
+            shape,
+            flow: None,
+            pressure_drop: None,
+            visible: None,
+            aim: None,
+            roll: None,
+            power_factor: None,
+        }
     }
     pub fn flow(mut self, f: &str) -> Self {
         self.flow = Some(f.into());
@@ -361,25 +436,55 @@ impl ConnectorDef {
 /// A 2D symbol drawn in plan, in the family's own x and y.
 #[derive(Clone, Debug)]
 pub enum PlanDef {
-    Line { a: (String, String), b: (String, String), visible: Option<String> },
-    Circle { c: (String, String), r: String, visible: Option<String> },
+    Line {
+        a: (String, String),
+        b: (String, String),
+        visible: Option<String>,
+    },
+    Circle {
+        c: (String, String),
+        r: String,
+        visible: Option<String>,
+    },
     /// an arc about `c`, counter-clockwise from angle `a0` to angle `a1` (a door swing is one)
-    Arc { c: (String, String), r: String, a0: String, a1: String, visible: Option<String> },
+    Arc {
+        c: (String, String),
+        r: String,
+        a0: String,
+        a1: String,
+        visible: Option<String>,
+    },
 }
 
 impl PlanDef {
     pub fn line(a: (&str, &str), b: (&str, &str)) -> Self {
-        PlanDef::Line { a: (a.0.into(), a.1.into()), b: (b.0.into(), b.1.into()), visible: None }
+        PlanDef::Line {
+            a: (a.0.into(), a.1.into()),
+            b: (b.0.into(), b.1.into()),
+            visible: None,
+        }
     }
     pub fn circle(c: (&str, &str), r: &str) -> Self {
-        PlanDef::Circle { c: (c.0.into(), c.1.into()), r: r.into(), visible: None }
+        PlanDef::Circle {
+            c: (c.0.into(), c.1.into()),
+            r: r.into(),
+            visible: None,
+        }
     }
     pub fn arc(c: (&str, &str), r: &str, a0: &str, a1: &str) -> Self {
-        PlanDef::Arc { c: (c.0.into(), c.1.into()), r: r.into(), a0: a0.into(), a1: a1.into(), visible: None }
+        PlanDef::Arc {
+            c: (c.0.into(), c.1.into()),
+            r: r.into(),
+            a0: a0.into(),
+            a1: a1.into(),
+            visible: None,
+        }
     }
     pub fn visible_if(mut self, f: &str) -> Self {
         match &mut self {
-            PlanDef::Line { visible, .. } | PlanDef::Circle { visible, .. } | PlanDef::Arc { visible, .. } => *visible = Some(f.into()),
+            PlanDef::Line { visible, .. }
+            | PlanDef::Circle { visible, .. }
+            | PlanDef::Arc { visible, .. } => *visible = Some(f.into()),
         }
         self
     }
@@ -416,10 +521,17 @@ pub(crate) enum CPlan {
 }
 
 fn bad(name: &str, why: &'static str) -> FamilyError {
-    FamilyError::Connector { name: name.into(), why }
+    FamilyError::Connector {
+        name: name.into(),
+        why,
+    }
 }
 
-pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) -> Result<(Vec<CConnector>, Vec<CPlan>), FamilyError> {
+pub(crate) fn compile(
+    conns: &[ConnectorDef],
+    plan: &[PlanDef],
+    parse: Parse,
+) -> Result<(Vec<CConnector>, Vec<CPlan>), FamilyError> {
     if conns.len() > MAX_CONNECTORS {
         return Err(FamilyError::TooMany("connectors"));
     }
@@ -435,24 +547,46 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
             return Err(FamilyError::DuplicateName(c.name.clone()));
         }
         if !c.system.domain_ok(c.domain) {
-            return Err(bad(&c.name, "the system does not belong to this kind of connector"));
+            return Err(bad(
+                &c.name,
+                "the system does not belong to this kind of connector",
+            ));
         }
         let lbl = |p: &str| format!("connector {}.{}", c.name, p);
         let p = |part: &str, s: &str| {
-            let w = match part { "diameter" | "width" | "height" | "x" | "y" | "z" => LEN, "azimuth" | "elevation" | "roll" => ANG, "poles" | "visible" | "power_factor" => NUM, _ => Want::Any };
+            let w = match part {
+                "diameter" | "width" | "height" | "x" | "y" | "z" => LEN,
+                "azimuth" | "elevation" | "roll" => ANG,
+                "poles" | "visible" | "power_factor" => NUM,
+                _ => Want::Any,
+            };
             parse(&lbl(part), s, false, w)
         };
         let shape = match (&c.shape, c.domain) {
-            (ShapeDef::Round(d), Domain::Duct | Domain::Pipe | Domain::Conduit) => CShape::Round(p("diameter", d)?),
-            (ShapeDef::Rect(w, h), Domain::Duct | Domain::CableTray) => CShape::Rect(p("width", w)?, p("height", h)?),
-            (ShapeDef::Electrical { voltage, poles }, Domain::Electrical) => CShape::Elec(p("voltage", voltage)?, p("poles", poles)?),
-            _ => return Err(bad(&c.name, "the shape does not fit this kind of connector")),
+            (ShapeDef::Round(d), Domain::Duct | Domain::Pipe | Domain::Conduit) => {
+                CShape::Round(p("diameter", d)?)
+            }
+            (ShapeDef::Rect(w, h), Domain::Duct | Domain::CableTray) => {
+                CShape::Rect(p("width", w)?, p("height", h)?)
+            }
+            (ShapeDef::Electrical { voltage, poles }, Domain::Electrical) => {
+                CShape::Elec(p("voltage", voltage)?, p("poles", poles)?)
+            }
+            _ => {
+                return Err(bad(
+                    &c.name,
+                    "the shape does not fit this kind of connector",
+                ))
+            }
         };
         if c.domain == Domain::Electrical && c.pressure_drop.is_some() {
             return Err(bad(&c.name, "an electrical connector has no pressure drop"));
         }
         if c.power_factor.is_some() && c.domain != Domain::Electrical {
-            return Err(bad(&c.name, "only an electrical connector has a power factor"));
+            return Err(bad(
+                &c.name,
+                "only an electrical connector has a power factor",
+            ));
         }
         if c.roll.is_some() && !matches!(c.shape, ShapeDef::Rect(..)) {
             return Err(bad(&c.name, "only a rectangular connector can be rolled"));
@@ -465,22 +599,83 @@ pub(crate) fn compile(conns: &[ConnectorDef], plan: &[PlanDef], parse: Parse) ->
             at: [p("x", &c.at.0)?, p("y", &c.at.1)?, p("z", &c.at.2)?],
             dir: c.dir,
             shape,
-            flow: match &c.flow { Some(f) => Some(p("flow", f)?), None => None },
-            pdrop: match &c.pressure_drop { Some(f) => Some(p("pressure_drop", f)?), None => None },
-            visible: match &c.visible { Some(f) => Some(p("visible", f)?), None => None },
-            aim: match &c.aim { Some((a, e)) => Some([p("azimuth", a)?, p("elevation", e)?]), None => None },
-            roll: match &c.roll { Some(f) => Some(p("roll", f)?), None => None },
-            pf: match &c.power_factor { Some(f) => Some(p("power_factor", f)?), None => None },
+            flow: match &c.flow {
+                Some(f) => Some(p("flow", f)?),
+                None => None,
+            },
+            pdrop: match &c.pressure_drop {
+                Some(f) => Some(p("pressure_drop", f)?),
+                None => None,
+            },
+            visible: match &c.visible {
+                Some(f) => Some(p("visible", f)?),
+                None => None,
+            },
+            aim: match &c.aim {
+                Some((a, e)) => Some([p("azimuth", a)?, p("elevation", e)?]),
+                None => None,
+            },
+            roll: match &c.roll {
+                Some(f) => Some(p("roll", f)?),
+                None => None,
+            },
+            pf: match &c.power_factor {
+                Some(f) => Some(p("power_factor", f)?),
+                None => None,
+            },
         });
     }
     let mut cp = Vec::new();
     for (i, d) in plan.iter().enumerate() {
-        let p = |part: &str, s: &str| parse(&format!("plan {i}.{part}"), s, false, if part == "visible" { NUM } else if part == "a0" || part == "a1" { ANG } else { LEN });
-        let vis = |v: &Option<String>| -> Result<Option<Expr>, FamilyError> { match v { Some(f) => Ok(Some(p("visible", f)?)), None => Ok(None) } };
+        let p = |part: &str, s: &str| {
+            parse(
+                &format!("plan {i}.{part}"),
+                s,
+                false,
+                if part == "visible" {
+                    NUM
+                } else if part == "a0" || part == "a1" {
+                    ANG
+                } else {
+                    LEN
+                },
+            )
+        };
+        let vis = |v: &Option<String>| -> Result<Option<Expr>, FamilyError> {
+            match v {
+                Some(f) => Ok(Some(p("visible", f)?)),
+                None => Ok(None),
+            }
+        };
         cp.push(match d {
-            PlanDef::Line { a, b, visible } => CPlan::Line([p("x1", &a.0)?, p("y1", &a.1)?, p("x2", &b.0)?, p("y2", &b.1)?], vis(visible)?),
-            PlanDef::Circle { c, r, visible } => CPlan::Circle([p("cx", &c.0)?, p("cy", &c.1)?, p("r", r)?], vis(visible)?),
-            PlanDef::Arc { c, r, a0, a1, visible } => CPlan::Arc([p("cx", &c.0)?, p("cy", &c.1)?, p("r", r)?, p("a0", a0)?, p("a1", a1)?], vis(visible)?),
+            PlanDef::Line { a, b, visible } => CPlan::Line(
+                [
+                    p("x1", &a.0)?,
+                    p("y1", &a.1)?,
+                    p("x2", &b.0)?,
+                    p("y2", &b.1)?,
+                ],
+                vis(visible)?,
+            ),
+            PlanDef::Circle { c, r, visible } => {
+                CPlan::Circle([p("cx", &c.0)?, p("cy", &c.1)?, p("r", r)?], vis(visible)?)
+            }
+            PlanDef::Arc {
+                c,
+                r,
+                a0,
+                a1,
+                visible,
+            } => CPlan::Arc(
+                [
+                    p("cx", &c.0)?,
+                    p("cy", &c.1)?,
+                    p("r", r)?,
+                    p("a0", a0)?,
+                    p("a1", a1)?,
+                ],
+                vis(visible)?,
+            ),
         });
     }
     Ok((out, cp))
@@ -525,7 +720,11 @@ impl Connector {
         match self.size {
             Size::Electrical { voltage, poles } => {
                 let s = self.apparent_power();
-                Some(if poles >= 3 { s / (3f64.sqrt() * voltage) } else { s / voltage })
+                Some(if poles >= 3 {
+                    s / (3f64.sqrt() * voltage)
+                } else {
+                    s / voltage
+                })
             }
             _ => None,
         }
@@ -536,15 +735,26 @@ impl Connector {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlanShape {
     Line([f64; 4]),
-    Circle { c: [f64; 2], r: f64 },
+    Circle {
+        c: [f64; 2],
+        r: f64,
+    },
     /// counter-clockwise from `a0` to `a1`, both in degrees; the sweep is `(a1 - a0)` taken into (0, 360]
-    Arc { c: [f64; 2], r: f64, a0: f64, a1: f64 },
+    Arc {
+        c: [f64; 2],
+        r: f64,
+        a0: f64,
+        a1: f64,
+    },
 }
 
 fn flag(e: &Option<Expr>, vals: &[f64], label: &str) -> Result<bool, FamilyError> {
     match e {
         None => Ok(true),
-        Some(e) => Ok(e.eval(vals).map_err(|err| FamilyError::Formula { name: label.into(), err })? != 0.0),
+        Some(e) => Ok(e.eval(vals).map_err(|err| FamilyError::Formula {
+            name: label.into(),
+            err,
+        })? != 0.0),
     }
 }
 
@@ -553,28 +763,51 @@ fn unit(v: [f64; 3]) -> [f64; 3] {
     [v[0] / n, v[1] / n, v[2] / n]
 }
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 /// Default up for a connector facing `d`: +Z, or +Y when `d` is vertical, made square to `d`; then turned by `roll` degrees about `d`.
 pub fn up_for(d: [f64; 3], roll: f64) -> [f64; 3] {
-    let base = if d[0].abs() < 1e-9 && d[1].abs() < 1e-9 { [0.0, 1.0, 0.0] } else { [0.0, 0.0, 1.0] };
+    let base = if d[0].abs() < 1e-9 && d[1].abs() < 1e-9 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [0.0, 0.0, 1.0]
+    };
     let k = base[0] * d[0] + base[1] * d[1] + base[2] * d[2];
     let u = unit([base[0] - k * d[0], base[1] - k * d[1], base[2] - k * d[2]]);
     let w = cross(d, u);
     let (s, c) = (sin_deg(roll), cos_deg(roll));
-    unit([c * u[0] + s * w[0], c * u[1] + s * w[1], c * u[2] + s * w[2]])
+    unit([
+        c * u[0] + s * w[0],
+        c * u[1] + s * w[1],
+        c * u[2] + s * w[2],
+    ])
 }
 
-pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Connector>, FamilyError> {
+pub(crate) fn solve_connectors(
+    cs: &[CConnector],
+    vals: &[f64],
+) -> Result<Vec<Connector>, FamilyError> {
     let mut out = Vec::with_capacity(cs.len());
     for c in cs {
         if !flag(&c.visible, vals, &format!("connector {}.visible", c.name))? {
             continue;
         }
-        let ev = |part: &str, e: &Expr| e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("connector {}.{}", c.name, part), err });
+        let ev = |part: &str, e: &Expr| {
+            e.eval(vals).map_err(|err| FamilyError::Formula {
+                name: format!("connector {}.{}", c.name, part),
+                err,
+            })
+        };
         let pos = [ev("x", &c.at[0])?, ev("y", &c.at[1])?, ev("z", &c.at[2])?];
         if pos.iter().any(|v| !v.is_finite() || v.abs() > MAX_DIM) {
-            return Err(bad(&c.name, "the position is not a finite point within 100 m"));
+            return Err(bad(
+                &c.name,
+                "the position is not a finite point within 100 m",
+            ));
         }
         let dim = |part: &str, e: &Expr| -> Result<f64, FamilyError> {
             let v = ev(part, e)?;
@@ -584,8 +817,13 @@ pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Co
             Ok(v)
         };
         let size = match &c.shape {
-            CShape::Round(d) => Size::Round { diameter: dim("diameter", d)? },
-            CShape::Rect(w, h) => Size::Rect { width: dim("width", w)?, height: dim("height", h)? },
+            CShape::Round(d) => Size::Round {
+                diameter: dim("diameter", d)?,
+            },
+            CShape::Rect(w, h) => Size::Rect {
+                width: dim("width", w)?,
+                height: dim("height", h)?,
+            },
             CShape::Elec(v, p) => {
                 let poles = ev("poles", p)?;
                 if poles.fract() != 0.0 || !(1.0..=4.0).contains(&poles) {
@@ -593,9 +831,15 @@ pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Co
                 }
                 let volts = ev("voltage", v)?;
                 if !(volts > 0.0 && volts <= 1.0e6) {
-                    return Err(bad(&c.name, "voltage must be more than 0 and at most 1,000,000"));
+                    return Err(bad(
+                        &c.name,
+                        "voltage must be more than 0 and at most 1,000,000",
+                    ));
                 }
-                Size::Electrical { voltage: volts, poles: poles as u8 }
+                Size::Electrical {
+                    voltage: volts,
+                    poles: poles as u8,
+                }
             }
         };
         let nonneg = |part: &str, e: &Option<Expr>| -> Result<f64, FamilyError> {
@@ -604,7 +848,10 @@ pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Co
                 Some(e) => {
                     let v = ev(part, e)?;
                     if !(v >= 0.0 && v.is_finite()) {
-                        return Err(bad(&c.name, "flow and pressure drop cannot be negative or infinite"));
+                        return Err(bad(
+                            &c.name,
+                            "flow and pressure drop cannot be negative or infinite",
+                        ));
                     }
                     Ok(v)
                 }
@@ -617,7 +864,11 @@ pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Co
                 if !(az.is_finite() && el.is_finite() && el.abs() <= 90.0) {
                     return Err(bad(&c.name, "elevation must be from -90 to 90 degrees"));
                 }
-                unit([cos_deg(el) * cos_deg(az), cos_deg(el) * sin_deg(az), sin_deg(el)])
+                unit([
+                    cos_deg(el) * cos_deg(az),
+                    cos_deg(el) * sin_deg(az),
+                    sin_deg(el),
+                ])
             }
         };
         let roll = match &c.roll {
@@ -635,7 +886,10 @@ pub(crate) fn solve_connectors(cs: &[CConnector], vals: &[f64]) -> Result<Vec<Co
             Some(f) => {
                 let v = ev("power_factor", f)?;
                 if !(v > 0.0 && v <= 1.0) {
-                    return Err(bad(&c.name, "power factor must be more than 0 and at most 1"));
+                    return Err(bad(
+                        &c.name,
+                        "power factor must be more than 0 and at most 1",
+                    ));
                 }
                 v
             }
@@ -661,9 +915,15 @@ pub(crate) fn solve_plan(ps: &[CPlan], vals: &[f64]) -> Result<Vec<PlanShape>, F
     let mut out = Vec::with_capacity(ps.len());
     for (i, p) in ps.iter().enumerate() {
         let ev = |part: &str, e: &Expr| -> Result<f64, FamilyError> {
-            let v = e.eval(vals).map_err(|err| FamilyError::Formula { name: format!("plan {i}.{part}"), err })?;
+            let v = e.eval(vals).map_err(|err| FamilyError::Formula {
+                name: format!("plan {i}.{part}"),
+                err,
+            })?;
             if !v.is_finite() || v.abs() > MAX_DIM {
-                return Err(FamilyError::Plan { index: i, why: "a coordinate is not a finite number within 100 m" });
+                return Err(FamilyError::Plan {
+                    index: i,
+                    why: "a coordinate is not a finite number within 100 m",
+                });
             }
             Ok(v)
         };
@@ -672,9 +932,17 @@ pub(crate) fn solve_plan(ps: &[CPlan], vals: &[f64]) -> Result<Vec<PlanShape>, F
                 if !flag(vis, vals, &format!("plan {i}.visible"))? {
                     continue;
                 }
-                let l = [ev("x1", &e[0])?, ev("y1", &e[1])?, ev("x2", &e[2])?, ev("y2", &e[3])?];
+                let l = [
+                    ev("x1", &e[0])?,
+                    ev("y1", &e[1])?,
+                    ev("x2", &e[2])?,
+                    ev("y2", &e[3])?,
+                ];
                 if l[0] == l[2] && l[1] == l[3] {
-                    return Err(FamilyError::Plan { index: i, why: "a line has no length" });
+                    return Err(FamilyError::Plan {
+                        index: i,
+                        why: "a line has no length",
+                    });
                 }
                 out.push(PlanShape::Line(l));
             }
@@ -684,7 +952,10 @@ pub(crate) fn solve_plan(ps: &[CPlan], vals: &[f64]) -> Result<Vec<PlanShape>, F
                 }
                 let (cx, cy, r) = (ev("cx", &e[0])?, ev("cy", &e[1])?, ev("r", &e[2])?);
                 if r <= 0.0 {
-                    return Err(FamilyError::Plan { index: i, why: "a circle needs a radius above 0" });
+                    return Err(FamilyError::Plan {
+                        index: i,
+                        why: "a circle needs a radius above 0",
+                    });
                 }
                 out.push(PlanShape::Circle { c: [cx, cy], r });
             }
@@ -694,17 +965,40 @@ pub(crate) fn solve_plan(ps: &[CPlan], vals: &[f64]) -> Result<Vec<PlanShape>, F
                 }
                 let (cx, cy, r) = (ev("cx", &e[0])?, ev("cy", &e[1])?, ev("r", &e[2])?);
                 if r <= 0.0 {
-                    return Err(FamilyError::Plan { index: i, why: "an arc needs a radius above 0" });
+                    return Err(FamilyError::Plan {
+                        index: i,
+                        why: "an arc needs a radius above 0",
+                    });
                 }
                 // angles are degrees; they are only meaningful modulo 360, so any finite value is fine
-                let (a0, a1) = (e[3].eval(vals).map_err(|err| FamilyError::Formula { name: format!("plan {i}.a0"), err })?, e[4].eval(vals).map_err(|err| FamilyError::Formula { name: format!("plan {i}.a1"), err })?);
+                let (a0, a1) = (
+                    e[3].eval(vals).map_err(|err| FamilyError::Formula {
+                        name: format!("plan {i}.a0"),
+                        err,
+                    })?,
+                    e[4].eval(vals).map_err(|err| FamilyError::Formula {
+                        name: format!("plan {i}.a1"),
+                        err,
+                    })?,
+                );
                 if !a0.is_finite() || !a1.is_finite() {
-                    return Err(FamilyError::Plan { index: i, why: "an angle is not a finite number" });
+                    return Err(FamilyError::Plan {
+                        index: i,
+                        why: "an angle is not a finite number",
+                    });
                 }
                 if (a1 - a0).rem_euclid(360.0) == 0.0 {
-                    return Err(FamilyError::Plan { index: i, why: "an arc has no sweep" });
+                    return Err(FamilyError::Plan {
+                        index: i,
+                        why: "an arc has no sweep",
+                    });
                 }
-                out.push(PlanShape::Arc { c: [cx, cy], r, a0, a1 });
+                out.push(PlanShape::Arc {
+                    c: [cx, cy],
+                    r,
+                    a0,
+                    a1,
+                });
             }
         }
     }
@@ -770,7 +1064,11 @@ pub fn mate(a: &Connector, b: &Connector, tol: f64, resize: Resize) -> Result<()
     if !a.flow_dir.joins(b.flow_dir) {
         return Err(MateError::FlowDirection);
     }
-    let d = [a.pos[0] - b.pos[0], a.pos[1] - b.pos[1], a.pos[2] - b.pos[2]];
+    let d = [
+        a.pos[0] - b.pos[0],
+        a.pos[1] - b.pos[1],
+        a.pos[2] - b.pos[2],
+    ];
     if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() > tol {
         return Err(MateError::Position);
     }
@@ -784,7 +1082,16 @@ pub fn mate(a: &Connector, b: &Connector, tol: f64, resize: Resize) -> Result<()
                 return Err(MateError::Size);
             }
         }
-        (Size::Rect { width: w1, height: h1 }, Size::Rect { width: w2, height: h2 }) => {
+        (
+            Size::Rect {
+                width: w1,
+                height: h1,
+            },
+            Size::Rect {
+                width: w2,
+                height: h2,
+            },
+        ) => {
             let c = (a.up[0] * b.up[0] + a.up[1] * b.up[1] + a.up[2] * b.up[2]).abs();
             let crossed = if c > 1.0 - 1e-6 {
                 false
@@ -798,7 +1105,16 @@ pub fn mate(a: &Connector, b: &Connector, tol: f64, resize: Resize) -> Result<()
                 return Err(MateError::Size);
             }
         }
-        (Size::Electrical { voltage: v1, poles: p1 }, Size::Electrical { voltage: v2, poles: p2 }) => {
+        (
+            Size::Electrical {
+                voltage: v1,
+                poles: p1,
+            },
+            Size::Electrical {
+                voltage: v2,
+                poles: p2,
+            },
+        ) => {
             if (v1 - v2).abs() > 1e-9 {
                 return Err(MateError::Voltage);
             }
