@@ -14,6 +14,12 @@
 //!   `IfcFlowTerminal` that owns the connector ports, until families are exported as types.
 //!
 //! The output is the same bytes for the same input: nothing in it depends on the clock or on hash order.
+//!
+//! The crate also reads IFC back: `step_read` is a STEP (ISO 10303-21) physical-file parser and `reader`
+//! turns an IFC2X3 / IFC4 / IFC4.3 file into the storeys, walls, beams, columns, slabs, footings, ducts and
+//! pipes (extruded profiles) with their property sets, materials and types, counting what it left out.
+pub mod reader;
+pub mod step_read;
 mod families;
 pub mod guid;
 pub mod boundaries;
