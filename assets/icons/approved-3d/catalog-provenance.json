@@ -660,21 +660,13 @@
       "sha256": "8d7dcbd81dbbe7782dc94327c89aed023fe8243428eace148bdac73473df0c17"
     },
     "switch": {
-      "crop": [
-        643,
-        743,
-        719,
-        824
-      ],
+      "replacement": true,
+      "note": "British BS 1363 style replacement (not a catalog crop). Replaces the original EU design to match the first calculation profile (British practice, decision of 15 Oct 2026).",
       "sha256": "6bf849076fb51e44c98d8a793b9b4c1cb7bb17074996a891211d1a17e02078a1"
     },
     "socket": {
-      "crop": [
-        727,
-        743,
-        804,
-        824
-      ],
+      "replacement": true,
+      "note": "British BS 1363 style replacement (not a catalog crop). Replaces the original EU design to match the first calculation profile (British practice, decision of 15 Oct 2026).",
       "sha256": "25948d6b20853ed2cd10f2fd5e92d887dcd869e176b51d60c75bfb005d694cf3"
     },
     "panel": {

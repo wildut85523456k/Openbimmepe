@@ -10,7 +10,7 @@ sufficient for the current prototype; enlarging them does not add source detail.
 - Brace Frame uses the labeled frame. The unlabeled duplicate is excluded.
 - Architecture's concrete column and Structure's steel column have separate IDs.
 - The generic legacy `brace` ID is an explicit alias of `brace_frame`.
-- Electrical switches and sockets retain the supplied EU designs.
+- Electrical switches and sockets were replaced with British BS 1363 style (rectangular three-pin socket, rocker switch) to match the first calculation profile (British practice, decision of 15 Oct 2026).
 - Common commands and four supplemental commands absent from the catalog are
   generated 3D symbols. They are recorded separately from catalog artwork.
 
