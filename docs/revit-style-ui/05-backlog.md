@@ -41,12 +41,20 @@ Statuses below are **not started as UI integration** unless indicated. Existing 
 | AUTO-009 | P0 | Apache-2.0 porting compliance: LICENSE.txt, THIRD_PARTY_NOTICES (Dynamo ABOUT.txt verbatim), PORTING.md, per-file source-SHA header convention, licence/notice delivery with redistributed artifacts (04c §8) | AUTO-008 | Files present; **every** ported file carries its source-SHA header and modification statement; reused fixtures cleared; no closed-source Autodesk code ported; packaged-release contents and notice display verified |
 | PERF-001 | P0 | Incremental edit benchmark, issue #14 | BIM-003 | Demonstrate local rather than global rebuild |
 | PERF-002 | P1 | Spatial index for auto-router, issue #21 | route | Query performance scaling benchmark |
+| PRT-001 | P1 | Portrait sheets: the title block keeps its orientation (today `PaperSize::custom` silently swaps to landscape) | DOC-001 | A 841 x 1189 title block gives a tall PDF page and DXF extents; no silent swap |
+| PRT-002 | P1 | Company print profile as data: named papers, pen table per scale, margins, colour mode | DOC-001 | Team profile loads; the team's 10 AutoCAD media are mapped with a difference report |
+| PRT-003 | P1 | Print modes colour / grayscale / black lines (Revit Print Setup) | DOC-001 | PDF strokes black or grey on request; halftone stays distinguishable |
+| PRT-004 | P1 | DXF colours: nearest of the full ACI palette, or DXF 2000+ with true colour (420) and lineweight (370) | DOC-001 | Olive 122,122,0 no longer exports as red; ezdxf round-trip check |
+| PRT-005 | P2 | Export layer mapping: category to company layer name, colour and pen, fallback to `{D}-{CATEGORY}_W{n}` | PRT-002 | DXF uses company layer names when a mapping is loaded |
+| PRT-006 | P2 | Print / Export dialog in the desktop app (sheet selection, profile, mode, combined or separate files) | PRT-002, GUI-002, AUTO-001 | Same typed command from the UI and the API; UX interaction test |
+| PRT-007 | P3 | Optional direct output to OS printers | PRT-006 | Only if direct plotting is needed; PDF output already covers the team's Adobe PDF use |
+| DOC-PURGE | P1 | Purge Unused: scan, reference chain, opt-in per item, one undoable operation, shared typed command (`apply` needs a scan ID) | BIM-002, AUTO-001 | Exact unused list against an independent count; apply then undo gives an identical snapshot; blind apply refused |
 
 ## Phase gating
 1. **Foundation** — BIM-001/002/003/004 and IFC-001.
 2. **Usable desktop** — GUI-001–005 and FAMILY-001, with reference Place Duct and wall workflows.
 3. **Central collaboration** — COLLAB-001/002/003.
-4. **Discipline completeness** — ARCH, STR, MEP, DOC.
+4. **Discipline completeness** — ARCH, STR, MEP, DOC (with PRT and DOC-PURGE; details in `docs/agent-team/printing-compatibility.md` and `docs/agent-team/purge-unused.md`).
 5. **Automation** — AUTO-000 to AUTO-009, see `04-visual-automation.md` (AUTO-001 starts during Foundation, with BIM-002; AUTO-008 spike and AUTO-009 licence compliance precede A0).
 6. **Schematic automation** — SCH-001–006, see `06-mep-schematic-automation.md`. SCH-001–003 are data, layout and presentation (fixture labels), after MEP-001/GUI-004; SCH-004–006 add the pinned electrical reuse, the exchange study and the live calculated or imported values, so matrix conformance with real values is SCH-006's acceptance (gated on MEP-002, SCH-003, SCH-004 and SCH-005).
 

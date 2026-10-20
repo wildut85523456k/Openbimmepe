@@ -1,0 +1,236 @@
+{
+  "scope": "All entries in current project implementation backlog; not exhaustive Autodesk Revit parity",
+  "base_sha": "2c4e63bd681f55b8a6e7a11e088ce08a925daf37",
+  "limitations": [
+    "No reference Revit version chosen",
+    "No GUI branch build or interaction test",
+    "Branch source filenames are not proof of working features",
+    "Open issues may be stale"
+  ],
+  "entries": [
+    {
+      "id": "BIM-001",
+      "priority": "P0",
+      "task": "Unified typed document model and IDs",
+      "dependencies": "existing crates",
+      "acceptance": "Single document can edit walls, families and MEP networks",
+      "initial_assessment": "PARTIAL / BRANCH: main has domain engines and oplog; provisional document code is on GUI/foundation branches. Typed model and oplog convergence still needs review (#24)."
+    },
+    {
+      "id": "BIM-002",
+      "priority": "P0",
+      "task": "Command registry / previews / undo",
+      "dependencies": "BIM-001, oplog",
+      "acceptance": "Same command callable by UI and API",
+      "initial_assessment": "PARTIAL: oplog provides transaction primitives. A unified UI/API command registry is still a documented target (#37); branch automation exists but does not prove registry completion."
+    },
+    {
+      "id": "BIM-003",
+      "priority": "P0",
+      "task": "Dependency graph and incremental regeneration",
+      "dependencies": "BIM-001",
+      "acceptance": "Edit affects only dependency closure; benchmark",
+      "initial_assessment": "OPEN GAP: incremental dependency-closure regeneration is required; #14 reports whole-model rebuilds. The issue is evidence of a reported gap, not a fresh benchmark."
+    },
+    {
+      "id": "BIM-004",
+      "priority": "P0",
+      "task": "Native project persistence, recovery",
+      "dependencies": "BIM-001/002",
+      "acceptance": "Save/open/crash recovery exact committed state",
+      "initial_assessment": "PARTIAL / UNVERIFIED: oplog and document primitives do not establish native save/open, schema migration and crash recovery acceptance."
+    },
+    {
+      "id": "IFC-001",
+      "priority": "P0",
+      "task": "IFC import, preservation and round-trip",
+      "dependencies": "BIM-001",
+      "acceptance": "Supported classes round-trip without identity loss",
+      "initial_assessment": "PARTIAL: main contains a native Rust IFC writer and independent checker scripts. Import/preservation/round-trip completeness is not established by exporter tests."
+    },
+    {
+      "id": "GUI-001",
+      "priority": "P0",
+      "task": "egui desktop shell (decided 15 Oct 2026; prototype on `feature/rust-gui`)",
+      "dependencies": "BIM-002",
+      "acceptance": "Ribbon with icons, Place Duct end-to-end, measured latency",
+      "initial_assessment": "PROTOTYPE ON BRANCH: origin/feature/rust-gui contains apps/desktop and an expanded workspace; main does not include the desktop app. No GUI build or interaction run performed in this review."
+    },
+    {
+      "id": "GUI-002",
+      "priority": "P0",
+      "task": "Ribbon, context bar and command search",
+      "dependencies": "BIM-002, GUI-001",
+      "acceptance": "PDF Systems ribbon and contextual actions implemented",
+      "initial_assessment": "PROTOTYPE / UNVERIFIED: GUI branch includes ribbon.rs and icons.rs; contextual command completeness and latency remain to be tested."
+    },
+    {
+      "id": "GUI-003",
+      "priority": "P0",
+      "task": "Project Browser, Properties, dock layouts",
+      "dependencies": "BIM-001/002, GUI-001",
+      "acceptance": "Type/instance edits; multi-select; persisted layout",
+      "initial_assessment": "PROTOTYPE / UNVERIFIED: GUI branch includes panels.rs. Type/instance/multiselect/docking/layout persistence need behavioral verification."
+    },
+    {
+      "id": "GUI-004",
+      "priority": "P0",
+      "task": "2D/3D viewport, tabs, selection, snapping",
+      "dependencies": "render, BIM-002",
+      "acceptance": "Plan/3D selection, modify and undo",
+      "initial_assessment": "PROTOTYPE / UNVERIFIED: GUI branch includes model_view.rs and model_edit.rs. Picking, snapping, cross-view selection and undo need real interaction tests."
+    },
+    {
+      "id": "GUI-005",
+      "priority": "P0",
+      "task": "Revit-style shortcuts and mouse defaults",
+      "dependencies": "keymap, GUI-002/004",
+      "acceptance": "Shortcut import, conflicts, cancel, cycle and overrides",
+      "initial_assessment": "PARTIAL: main has keymap presets and tests; full UI integration, Tab/Escape/Space/override behavior still needs verification. #15 must be reconciled with current code."
+    },
+    {
+      "id": "COLLAB-001",
+      "priority": "P0",
+      "task": "Shared-folder sync without a server: segment file per writer, heartbeats, snapshot writer",
+      "dependencies": "BIM-002/004",
+      "acceptance": "Two writers on a server share and on a cloud-synced folder; conflict and recovery test",
+      "initial_assessment": "PARTIAL PRIMITIVES / UNVERIFIED: oplog exists; shared-folder segment protocol, two-writer sync and cloud-folder recovery acceptance have not been demonstrated."
+    },
+    {
+      "id": "COLLAB-002",
+      "priority": "P1",
+      "task": "Element borrowing (required in central mode), locks with change requests, sync UI",
+      "dependencies": "COLLAB-001, GUI",
+      "acceptance": "Real sync and ownership state; no false synced indicators",
+      "initial_assessment": "PLANNED / UNVERIFIED: borrowing, ownership locks, change requests and truthful sync UI require end-to-end evidence."
+    },
+    {
+      "id": "COLLAB-003",
+      "priority": "P1",
+      "task": "Discipline models linked into the central file; clash detection there and in standalone",
+      "dependencies": "COLLAB-001",
+      "acceptance": "Linked models read only; clash report from both modes",
+      "initial_assessment": "PLANNED / UNVERIFIED: linked read-only discipline models and central/standalone clash-report acceptance are not demonstrated."
+    },
+    {
+      "id": "FAMILY-001",
+      "priority": "P0",
+      "task": "Parametric family graphical editor (in the first interface)",
+      "dependencies": "BIM, sketch/family, GUI",
+      "acceptance": "Flex, nested type, host, preview and undo",
+      "initial_assessment": "PARTIAL: main has family/sketch engines; a graphical editor with host/flex/nesting/undo is not established by engine tests."
+    },
+    {
+      "id": "ARCH-001",
+      "priority": "P1",
+      "task": "Full architectural authoring workflows",
+      "dependencies": "FAMILY-001, GUI",
+      "acceptance": "Walls, openings, stairs/roofs etc by staged tests",
+      "initial_assessment": "PARTIAL: main has walls, placement, rooms and arch primitives; complete architectural authoring workflows remain staged targets."
+    },
+    {
+      "id": "STR-001",
+      "priority": "P1",
+      "task": "Structural framing and foundations",
+      "dependencies": "FAMILY-001",
+      "acceptance": "Structural classifications, constraints, sections",
+      "initial_assessment": "PLANNED / UNVERIFIED: structural framing/foundations workflow is a declared backlog target; no complete UI workflow was exercised."
+    },
+    {
+      "id": "MEP-001",
+      "priority": "P1",
+      "task": "Connector/system browser and route editing UI",
+      "dependencies": "route, GUI",
+      "acceptance": "Connectivity reflected in model and UI",
+      "initial_assessment": "PARTIAL: route, fitting/connectivity primitives and branch desktop edits exist; complete system browser and route editing acceptance remains unverified."
+    },
+    {
+      "id": "MEP-002",
+      "priority": "P1",
+      "task": "Hydraulic/airflow/electrical calculation modules",
+      "dependencies": "MEP-001",
+      "acceptance": "Verified reference calculations with units",
+      "initial_assessment": "PLANNED / UNVERIFIED: hydraulic, airflow and electrical calculation modules require units-aware reference validations; no engineering calculation compliance is claimed."
+    },
+    {
+      "id": "DOC-001",
+      "priority": "P1",
+      "task": "Annotations, sheets, schedules, print/export",
+      "dependencies": "BIM, render, GUI",
+      "acceptance": "Repeatable view/sheet output",
+      "initial_assessment": "BRANCH WORK EXISTS: origin/m1c-sheets-printing workspace includes crates/sheets. Annotation/sheets/schedules/printing completeness must be reviewed there; do not duplicate it based on main alone."
+    },
+    {
+      "id": "AUTO-001",
+      "priority": "P0",
+      "task": "Typed command and query API: quantities with units, stable parameter IDs (EN/FR labels)",
+      "dependencies": "BIM-002",
+      "acceptance": "Ribbon uses it; unit-mismatch and label-lookup tests",
+      "initial_assessment": "PARTIAL / BRANCH: GUI branch includes crates/automation with protocol/model code. Unified stable typed command API remains a documented target; do not infer completion from filenames."
+    },
+    {
+      "id": "AUTO-002",
+      "priority": "P1",
+      "task": "Per-element commit rules: element revisions, last writer wins with flag, locks give change requests, all-or-nothing marks",
+      "dependencies": "oplog, COLLAB-002",
+      "acceptance": "Bulk edit of 500 elements with 1 clash applies 499 and reports 1",
+      "initial_assessment": "OPEN DESIGN GAP: #33/#34 track bulk-edit and per-element conflict semantics. Candidate implementation must prove the 499-success/1-conflict case."
+    },
+    {
+      "id": "AUTO-003",
+      "priority": "P1",
+      "task": "MCP server in the app (stdio and local HTTP with token), read-only then accepted proposals",
+      "dependencies": "AUTO-001, AUTO-002",
+      "acceptance": "Firestop CSV via an MCP client: preview, accept, undo; changes logged under the client",
+      "initial_assessment": "PROTOTYPE / BRANCH: GUI branch includes openbim-mcp-server.rs and stdio/protocol tests. Permission scope, accepted proposals and undo still require current behavior checks."
+    },
+    {
+      "id": "AUTO-004",
+      "priority": "P1",
+      "task": "Headless graph engine `openbim-graph`: Dynamo lacing, parallel, cache, versioned graph file",
+      "dependencies": "AUTO-001",
+      "acceptance": "Same graph run twice gives identical change sets; lacing tests",
+      "initial_assessment": "PARTIAL / UNVERIFIED: automation engine code exists on GUI branch, but deterministic graph runs, Dynamo lacing and parallel cache acceptance require separate evidence (#38)."
+    },
+    {
+      "id": "AUTO-005",
+      "priority": "P1",
+      "task": "OpenBIM Graph app (egui, Dynamo-like): library, canvas, Run bar, Watch, 3D preview, Player",
+      "dependencies": "AUTO-004, GUI-002",
+      "acceptance": "Firestop graph end to end; Player runs it from the app",
+      "initial_assessment": "PROTOTYPE / BRANCH: GUI branch includes automation_canvas.rs/groups.rs/slider.rs. Separate-app architecture, Player and firestop end-to-end workflow are not proven."
+    },
+    {
+      "id": "AUTO-006",
+      "priority": "P1",
+      "task": "Python Script node in OpenBIM Graph: worker processes, declared permissions, code warning",
+      "dependencies": "AUTO-005",
+      "acceptance": "Denied permission refused by the app; shared graph with code warns",
+      "initial_assessment": "PROTOTYPE / BRANCH: worker.py, worker.rs and Python tests exist. Permission denial and shared-graph warning acceptance have not been independently exercised."
+    },
+    {
+      "id": "AUTO-007",
+      "priority": "P2",
+      "task": "Discipline node libraries calling the calculation modules",
+      "dependencies": "AUTO-005, MEP-002",
+      "acceptance": "No calculation reimplemented in nodes; standard and edition recorded",
+      "initial_assessment": "PLANNED / UNVERIFIED: discipline libraries must call validated calculation modules and preserve standard/edition metadata (#41)."
+    },
+    {
+      "id": "PERF-001",
+      "priority": "P0",
+      "task": "Incremental edit benchmark, issue #14",
+      "dependencies": "BIM-003",
+      "acceptance": "Demonstrate local rather than global rebuild",
+      "initial_assessment": "OPEN PERFORMANCE GATE: existing benchmark examples are available, but no measured incremental-edit latency/scaling report has been produced in this review."
+    },
+    {
+      "id": "PERF-002",
+      "priority": "P1",
+      "task": "Spatial index for auto-router, issue #21",
+      "dependencies": "route",
+      "acceptance": "Query performance scaling benchmark",
+      "initial_assessment": "OPEN PERFORMANCE GATE: issue #21 reports router scaling. Inspect branch spatial index work and measure identical workloads before recommending replacements."
+    }
+  ]
+}
