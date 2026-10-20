@@ -181,6 +181,9 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
     for (a, b) in &m.links { out.push(format!("L|a={}|b={}", port_text(a), port_text(b))); }
     for t in &m.taps { out.push(format!("P|f={}|r={}|d={:?}", t.fitting, t.run.0, t.distance)); }
     for (r, s) in &m.run_systems { out.push(format!("Z|r={}|sys={}", r.0, s.code())); }
+    for z in &m.zones {
+        out.push(format!("X|id={}|lv={}|x0={:?}|y0={:?}|x1={:?}|y1={:?}|lb={}", z.id.0, z.level.0, z.rect.min[0], z.rect.min[1], z.rect.max[0], z.rect.max[1], esc(&z.label)));
+    }
     for e in &m.endpoints {
         let dem = match e.demand {
             super::EndDemand::None => "N".to_string(),
@@ -240,11 +243,16 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     use openbim_route::{Fitting, FittingKind};
     let mut m = super::MepData::default();
     for line in lines {
-        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|"].iter().any(|p| line.starts_with(p)) { continue; }
+        if !["T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|", "X|"].iter().any(|p| line.starts_with(p)) { continue; }
         let f = fields(line)?;
         let get = |k: &str| f.get(k).copied().ok_or_else(|| format!("a record without '{k}'"));
         let pt = |t: &str| -> Result<[f64; 2], String> { let (a, b) = t.split_once(',').ok_or("a point without ','")?; Ok([num(a)?, num(b)?]) };
         let opt = |t: &str| -> Result<Option<f64>, String> { if t == "N" { Ok(None) } else { num(t).map(Some) } };
+        if line.starts_with("X|") {
+            let rect = crate::schematic::Rect::new([num(get("x0")?)?, num(get("y0")?)?], [num(get("x1")?)?, num(get("y1")?)?])?;
+            m.zones.push(crate::schematic::SchematicZone { id: ElementId(int(get("id")?)?), level: ElementId(int(get("lv")?)?), rect, label: unesc(get("lb")?)? });
+            continue;
+        }
         if line.starts_with("M|") {
             let list = |t: &str| -> Result<Vec<f64>, String> { if t.is_empty() { Ok(Vec::new()) } else { t.split(',').map(num).collect() } };
             let names = |t: &str| -> Result<Vec<String>, String> { if t.is_empty() { Ok(Vec::new()) } else { t.split(';').map(unesc).collect() } };

@@ -34,6 +34,7 @@ pub mod compute;
 pub mod compute_elec;
 pub mod mep;
 mod mepsys;
+pub mod schematic;
 pub mod schedule;
 pub mod viewsettings;
 pub mod sheet;
@@ -47,13 +48,14 @@ pub use sheet::{schedule_ref, schedule_view, view_element, PaperSize, SheetDef, 
 pub use viewsettings::{Detail, RangeClass, ViewCategory, ViewRange, ViewSettings, MAX_SCALE, MIN_SCALE, STANDARD_SCALES};
 pub use schedule::{family_kind, field_info, fields as schedule_fields, FieldInfo, FieldType, FilterOp, RowKind, ScheduleDef, ScheduleField, ScheduleFilter, ScheduleKind, ScheduleSort, ScheduleTable, TableRow, Value as ScheduleValue, MAX_FIELDS, MAX_FILTERS, MAX_SCHEDULES, MAX_SORTS};
 pub use mep::{EquipLink, EndDemand, EndRole, InsulationKind, MepData, MepInsulation, MepSettings, MepSystemDef, MAX_SYSTEM_MEMBERS, MAX_INSULATION_M, MIN_INSULATION_M, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
+pub use schematic::{Discipline, DraftGroup, DraftLevel, DraftNode, Family, Rect, SchematicDraft, SchematicZone, ZoneAmbiguity, MAX_ZONE_LABEL, MAX_ZONES, ZONE_BASE};
 pub use warnings::{Warning, WarningKind};
 pub use edit::Xf;
 pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh, ViewRef};
 
 /// Document-local, stable element identity. Future versions require
 /// a project-scoped ID allocation strategy for collaborative editing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ElementId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

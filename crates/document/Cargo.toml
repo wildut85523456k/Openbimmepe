@@ -9,6 +9,8 @@ description = "Initial transactional Rust BIM document core"
 unsafe_code = "forbid"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 openbim-geom = { path = "../geom" }
 openbim-route = { path = "../route" }
 openbim-family = { path = "../family" }
