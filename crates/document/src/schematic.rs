@@ -80,12 +80,16 @@ pub fn overlapping_zones(zones: &[SchematicZone]) -> Vec<(ElementId, ElementId)>
 pub fn room_fallback_label(doc: &Document, zone: &SchematicZone) -> Option<String> {
     doc.elements()
         .filter(|e| e.category == Category::Room)
+        // a candidate whose name is empty or whitespace-only never wins (06: label precedence); the element
+        // validator refuses such names, so this is a guard for future import paths
+        .filter(|e| !e.name.trim().is_empty())
         .filter_map(|e| match e.geometry {
             Some(Geometry::Room { at, level }) if level == zone.level && zone.rect.contains(at) => {
                 Some(e.name.clone())
             }
             _ => None,
         })
+        // elements iterate by ascending id, so the first match is the lowest element id: the durable order
         .next()
 }
 
@@ -584,6 +588,9 @@ mod tests {
         place_room_element(&mut d, l1, [5.0, 5.0], "Room 101");
         assert_eq!(room_fallback_label(&d, &zc), Some("Room 101".to_string()));
         assert_eq!(zone_display_label(&d, &zc), "Room 101");
+        // a second room inside the same zone: the lower element id wins
+        place_room_element(&mut d, l1, [6.0, 6.0], "Room 102");
+        assert_eq!(room_fallback_label(&d, &zc), Some("Room 101".to_string()));
         // a labelled zone keeps its own label
         let z2 = d.place_zone(l1, [20.0, 20.0], [30.0, 30.0], "Risers").unwrap();
         let z2c = d.zones().iter().find(|z| z.id == z2).unwrap().clone();
