@@ -188,6 +188,8 @@ pub struct MepData {
     /// the system each duct or pipe belongs to, where the designer has said so (otherwise it takes its fittings')
     pub run_systems: Vec<(ElementId, System)>,
     pub endpoints: Vec<MepEndpoint>,
+    /// the schematic zones: named rectangles drawn in plan that group end points (doc 06, SCH-001)
+    pub zones: Vec<crate::schematic::SchematicZone>,
     /// the electrical network: a source, boards and loads
     pub elec_nodes: Vec<crate::elec::ElecNode>,
     /// the cables between them
@@ -197,7 +199,7 @@ pub struct MepData {
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() && self.sheets.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() && self.sheets.is_empty() && self.zones.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -247,6 +249,7 @@ impl MepData {
             equip_links: self.equip_links.iter().filter(|q| alive(&q.port.node) && elements.get(&q.element).is_some_and(|x| x.category == Category::Family)).cloned().collect(),
             elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().map(|mut n| { if n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family)) { n.element = None; n.connector.clear(); } n }).collect(),
             elec_cables: { let keep: std::collections::BTreeSet<u64> = self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).map(|n| n.id).collect(); self.elec_cables.iter().filter(|c| keep.contains(&c.from) && keep.contains(&c.to)).cloned().collect() },
+            zones: self.zones.iter().filter(|z| elements.get(&z.level).is_some_and(|l| l.category == Category::Level)).cloned().collect(),
         }
     }
 

@@ -2544,6 +2544,8 @@ dependencies = [
  "openbim-place",
  "openbim-route",
  "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
