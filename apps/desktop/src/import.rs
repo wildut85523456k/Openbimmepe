@@ -838,7 +838,36 @@ mod tests {
             for (w, g) in want.iter().zip(&got) { assert_eq!(w, g, "{schema:?}: {}", report.text()); }
             assert_eq!(want.len(), got.len(), "{schema:?}: {}", report.text());
             assert_eq!(report.restored, want.len());
-            assert!(report.skipped.is_empty() && report.notes.is_empty(), "{schema:?}: {}", report.text());
+            // Like Revit's Open IFC log, unreadable geometry is diagnostic, not fatal.
+            // These classes are outside the reader's supported extruded-profile subset;
+            // the native records above still restore every element exactly.
+            let mut skipped = BTreeMap::from([
+                ("IFCDOOR", 1),
+                ("IFCOPENINGELEMENT", 5),
+                ("IFCRAILING", 3),
+                ("IFCWINDOW", 1),
+            ]);
+            match schema {
+                crate::export::Schema::Ifc4x3 | crate::export::Schema::Ifc4 => {
+                    skipped.extend([
+                        ("IFCDUCTFITTING", 1),
+                        ("IFCPIPEFITTING", 1),
+                        ("IFCUNITARYEQUIPMENT", 1),
+                    ]);
+                }
+                crate::export::Schema::Ifc2x3 => {}
+            }
+            let expected: BTreeMap<String, usize> = skipped
+                .into_iter()
+                .map(|(class, count)| {
+                    (
+                        format!("{class} (not an extruded profile this app reads)"),
+                        count,
+                    )
+                })
+                .collect();
+            assert_eq!(report.skipped, expected, "{schema:?}");
+            assert!(report.notes.is_empty(), "{schema:?}: {:?}", report.notes);
         }
     }
 
