@@ -1,0 +1,478 @@
+{
+  "connectors": [
+    {
+      "end": {
+        "node_id": "n-create",
+        "port_id": "p-create-in"
+      },
+      "id": "c-size-create",
+      "start": {
+        "node_id": "n-size",
+        "port_id": "p-size-out"
+      }
+    },
+    {
+      "end": {
+        "node_id": "n-python",
+        "port_id": "p-python-in"
+      },
+      "id": "c-size-python",
+      "start": {
+        "node_id": "n-size",
+        "port_id": "p-size-out"
+      }
+    }
+  ],
+  "dependencies": [
+    {
+      "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "id": "core",
+      "version": "1.0.0"
+    },
+    {
+      "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "id": "mep",
+      "version": "1.0.0"
+    },
+    {
+      "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "id": "python",
+      "version": "1.0.0"
+    }
+  ],
+  "description": "Synthetic artifacts; gated levels + explicit guides. Inspect/save only, not executable or installable.",
+  "doc_url": "",
+  "extensions": {
+    "openbim": {
+      "cache": {
+        "mode": "model_identity_snapshot_generation",
+        "network": "uncached",
+        "python": "uncached"
+      },
+      "permissions": {
+        "files": [],
+        "graph_capabilities": [
+          "graph.inspect"
+        ],
+        "model": "propose_own_model",
+        "network": []
+      },
+      "trust": {
+        "code_approval": "revision_bound_informed",
+        "commit_confirmation": "per_run_human",
+        "install_approval": "separate_locked_artifacts",
+        "python_policy": "trusted_local_only"
+      }
+    }
+  },
+  "id": "g-roundtrip",
+  "inputs": [
+    {
+      "binding": {
+        "node_id": "n-size",
+        "port_id": "p-height"
+      },
+      "default": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "2"
+      },
+      "id": "i-height",
+      "label": {
+        "en": "Height",
+        "fr": "Height"
+      },
+      "max": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "10"
+      },
+      "min": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "0"
+      },
+      "nullable": false,
+      "order": 1,
+      "rank": 0,
+      "step": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "0.1"
+      },
+      "type": "quantity",
+      "unit": "m"
+    },
+    {
+      "binding": {
+        "node_id": "n-size",
+        "port_id": "p-width"
+      },
+      "default": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "1"
+      },
+      "id": "i-width",
+      "label": {
+        "en": "Width",
+        "fr": "Width"
+      },
+      "max": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "10"
+      },
+      "min": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "0"
+      },
+      "nullable": false,
+      "order": 0,
+      "rank": 0,
+      "step": {
+        "dimension": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "display_unit": "m",
+        "kind": "quantity",
+        "si": "0.1"
+      },
+      "type": "quantity",
+      "unit": "m"
+    }
+  ],
+  "name": "Serialization-only policy fixture",
+  "nodes": [
+    {
+      "extensions": {
+        "openbim": {
+          "managed_output": {
+            "adopt_generation": null,
+            "create_new": "retain_generations",
+            "detach": "retain_elements_tombstone",
+            "identity": {
+              "key_fields": [
+                "inspection_id"
+              ],
+              "kind": "external_key",
+              "output_slot": "firestop"
+            },
+            "mode": "update_previous",
+            "reorder": "stable_keys",
+            "shrink": "retain"
+          }
+        }
+      },
+      "frozen": false,
+      "id": "n-create",
+      "lacing": "Auto",
+      "parameters": {
+        "record_key": "inspection_id"
+      },
+      "ports": [
+        {
+          "default": null,
+          "direction": "input",
+          "id": "p-create-in",
+          "index": 0,
+          "keep_structure": false,
+          "level": 2,
+          "nullable": false,
+          "rank": 0,
+          "type": "quantity",
+          "use_levels": false,
+          "using_default": false
+        },
+        {
+          "default": null,
+          "direction": "output",
+          "id": "p-create-out",
+          "index": 0,
+          "keep_structure": false,
+          "level": 2,
+          "nullable": false,
+          "rank": 0,
+          "type": "element:Firestop",
+          "use_levels": false,
+          "using_default": false
+        }
+      ],
+      "type": "mep@1.0.0::CreateFirestop"
+    },
+    {
+      "frozen": false,
+      "id": "n-python",
+      "lacing": "Auto",
+      "parameters": {
+        "python_header": "python",
+        "source": "OUT = IN[0]\n"
+      },
+      "ports": [
+        {
+          "default": null,
+          "direction": "input",
+          "id": "p-python-in",
+          "index": 0,
+          "keep_structure": false,
+          "level": 2,
+          "nullable": false,
+          "rank": 0,
+          "type": "quantity",
+          "use_levels": false,
+          "using_default": false
+        },
+        {
+          "default": null,
+          "direction": "output",
+          "id": "p-python-out",
+          "index": 0,
+          "keep_structure": false,
+          "level": 2,
+          "nullable": false,
+          "rank": 0,
+          "type": "quantity",
+          "use_levels": false,
+          "using_default": false
+        }
+      ],
+      "type": "python@1.0.0::Script"
+    },
+    {
+      "call": {
+        "arguments": [
+          {
+            "guides": [
+              {
+                "longest": false,
+                "value": 1
+              }
+            ],
+            "port_id": "p-width"
+          },
+          {
+            "guides": [
+              {
+                "longest": false,
+                "value": 2
+              }
+            ],
+            "port_id": "p-height"
+          }
+        ],
+        "guide_source": "explicit"
+      },
+      "frozen": false,
+      "id": "n-size",
+      "lacing": "Auto",
+      "parameters": {},
+      "ports": [
+        {
+          "default": {
+            "dimension": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "display_unit": "m",
+            "kind": "quantity",
+            "si": "1"
+          },
+          "direction": "input",
+          "id": "p-width",
+          "index": 0,
+          "keep_structure": true,
+          "level": 1,
+          "nullable": false,
+          "rank": 0,
+          "type": "quantity",
+          "use_levels": true,
+          "using_default": true
+        },
+        {
+          "default": {
+            "dimension": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "display_unit": "m",
+            "kind": "quantity",
+            "si": "2"
+          },
+          "direction": "input",
+          "id": "p-height",
+          "index": 1,
+          "keep_structure": false,
+          "level": 2,
+          "nullable": false,
+          "rank": 0,
+          "type": "quantity",
+          "use_levels": false,
+          "using_default": true
+        },
+        {
+          "default": null,
+          "direction": "output",
+          "id": "p-size-out",
+          "index": 0,
+          "keep_structure": false,
+          "level": 2,
+          "nullable": false,
+          "rank": 0,
+          "type": "quantity",
+          "use_levels": false,
+          "using_default": false
+        }
+      ],
+      "type": "core@1.0.0::Size"
+    }
+  ],
+  "outputs": [
+    {
+      "binding": {
+        "node_id": "n-create",
+        "port_id": "p-create-out"
+      },
+      "default": null,
+      "id": "o-firestop",
+      "label": {
+        "en": "Firestop",
+        "fr": "Calfeutrement"
+      },
+      "max": null,
+      "min": null,
+      "nullable": false,
+      "order": 0,
+      "rank": 0,
+      "step": null,
+      "type": "element:Firestop",
+      "unit": null
+    }
+  ],
+  "python": {
+    "abi": "cp312",
+    "build": "fixture-only",
+    "client_api": "openbim@1.0.0",
+    "engine": "CPython",
+    "environment_lock": {
+      "artifacts": [
+        {
+          "name": "example-only",
+          "origin": "https://example.invalid/example_only-1.0.0-py3-none-any.whl",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "version": "1.0.0"
+        }
+      ],
+      "isolation": "venv",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "version": "3.12.0"
+  },
+  "replication_profile": "dynamo-evidence-v1",
+  "schema_version": 1,
+  "view": {
+    "groups": [],
+    "nodes": [
+      {
+        "id": "n-create",
+        "preview": true,
+        "x": 300,
+        "y": 20
+      },
+      {
+        "id": "n-python",
+        "preview": false,
+        "x": 300,
+        "y": 100
+      },
+      {
+        "id": "n-size",
+        "preview": true,
+        "x": 10,
+        "y": 20
+      }
+    ],
+    "notes": [],
+    "reroutes": [],
+    "run_mode": "Manual"
+  }
+}

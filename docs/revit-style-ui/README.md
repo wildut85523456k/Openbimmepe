@@ -16,6 +16,10 @@ Source: user-provided *Revit-Style App UI.pdf* (one-page Systems / Place Duct co
 - [02 — Interaction and workflow acceptance criteria](02-workflows-and-acceptance.md): Architecture, Structure, MEP, collaboration and automation.
 - [03 — Implementation architecture](03-implementation-architecture.md): Rust command boundary, GUI toolkit evaluation, state and multi-user concerns.
 - [04 — Automation](04-visual-automation.md): Dynamo-like graph app (OpenBIM Graph) and MCP server for AI automation runs.
+- [04a — Dynamo review](04a-dynamo-review.md): historical/version-scoped feature evidence and proposed refinements; not proof of complete compatibility.
+- [04b — Replication and serialization contract](04b-replication-and-serialization.md): proposed normative supported subset, exact fixtures, unresolved implementation gates, cache, partial commits and trusted-code boundary.
+- [04c — Dynamo engine port](04c-dynamo-engine-port.md): feasibility study and port plan for re-implementing Dynamo's Code Block/lacing engine semantics in Rust (Apache-2.0, pinned source `8a211c5`).
+- [04d — UI parity checklist](04d-ui-parity.md): feature-by-feature UI parity of OpenBIM Graph with Dynamo for Revit: mapping, adopted additions, acceptance list, exclusions and deliberate differences.
 - [05 — Prioritized implementation backlog](05-backlog.md): dependencies, phases and verifiable exit criteria.
 - [06 — MEP schematic automation](06-mep-schematic-automation.md): single-line schematic generation from the design model — zones, grid layout, per-discipline annotations (proposed 20 Oct 2026).
 

@@ -1,0 +1,425 @@
+{
+  "cases": [
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/blob/8a211c5f306e5b54541fa57081aa1ffa32a65e90/test/Engine/ProtoTest/TD/Associative/Replication.cs#L12-L25",
+      "expected": [
+        6,
+        12,
+        10,
+        8
+      ],
+      "id": "auto-flat",
+      "inputs": [
+        [
+          1,
+          4,
+          7,
+          2
+        ],
+        [
+          5,
+          8,
+          3,
+          6,
+          7,
+          9
+        ]
+      ],
+      "lacing": "Auto",
+      "operation": "scalar_add"
+    },
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/wiki/Replication-and-Replication-Guide-Part-3#2-unroll-to-loops",
+      "expected": [
+        6,
+        12,
+        10,
+        8
+      ],
+      "id": "shortest-flat",
+      "inputs": [
+        [
+          1,
+          4,
+          7,
+          2
+        ],
+        [
+          5,
+          8,
+          3,
+          6,
+          7,
+          9
+        ]
+      ],
+      "lacing": "Shortest",
+      "operation": "scalar_add"
+    },
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/wiki/Replication-and-Replication-Guide-Part-3#2-unroll-to-loops",
+      "expected": [
+        6,
+        12,
+        10,
+        8,
+        9,
+        11
+      ],
+      "id": "longest-flat",
+      "inputs": [
+        [
+          1,
+          4,
+          7,
+          2
+        ],
+        [
+          5,
+          8,
+          3,
+          6,
+          7,
+          9
+        ]
+      ],
+      "lacing": "Longest",
+      "operation": "scalar_add"
+    },
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/wiki/Replication-and-Replication-Guide-Part-3#2-unroll-to-loops",
+      "expected": [
+        [
+          6,
+          9,
+          4
+        ],
+        [
+          9,
+          12,
+          7
+        ]
+      ],
+      "id": "cross-flat",
+      "inputs": [
+        [
+          1,
+          4
+        ],
+        [
+          5,
+          8,
+          3
+        ]
+      ],
+      "lacing": "CrossProduct",
+      "operation": "scalar_add"
+    },
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/wiki/Replication-and-Replication-Guide-Part-3#2-unroll-to-loops",
+      "expected": [
+        6,
+        12
+      ],
+      "guides": [
+        [
+          1
+        ],
+        [
+          1
+        ]
+      ],
+      "id": "guides-zip",
+      "inputs": [
+        [
+          1,
+          4
+        ],
+        [
+          5,
+          8,
+          3
+        ]
+      ],
+      "lacing": "Auto",
+      "operation": "scalar_add"
+    },
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/wiki/Replication-and-Replication-Guide-Part-3#2-unroll-to-loops",
+      "expected": [
+        [
+          6,
+          9
+        ],
+        [
+          9,
+          12
+        ],
+        [
+          4,
+          7
+        ]
+      ],
+      "guides": [
+        [
+          2
+        ],
+        [
+          1
+        ]
+      ],
+      "id": "guides-cross-reversed",
+      "inputs": [
+        [
+          1,
+          4
+        ],
+        [
+          5,
+          8,
+          3
+        ]
+      ],
+      "lacing": "Auto",
+      "operation": "scalar_add"
+    },
+    {
+      "evidence": "https://github.com/DynamoDS/Dynamo/blob/8a211c5f306e5b54541fa57081aa1ffa32a65e90/test/Engine/ProtoTest/TD/Associative/Replication.cs#L70-L84",
+      "expected": [
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "id": "auto-scalar",
+      "inputs": [
+        5,
+        [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      ],
+      "lacing": "Auto",
+      "operation": "scalar_add"
+    },
+    {
+      "engine_at_level": -1,
+      "evidence": "https://github.com/DynamoDS/Dynamo/blob/8a211c5f306e5b54541fa57081aa1ffa32a65e90/test/Engine/ProtoTest/AtLevel/AtLevelTest.cs#L8-L105",
+      "expected": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "id": "level-flat",
+      "inputs": [
+        [
+          [
+            [
+              [
+                1,
+                2
+              ],
+              [
+                3,
+                4
+              ]
+            ]
+          ]
+        ]
+      ],
+      "keep_structure": false,
+      "lacing": "Auto",
+      "operation": "identity_any_rank"
+    },
+    {
+      "engine_at_level": -2,
+      "evidence": "https://github.com/DynamoDS/Dynamo/blob/8a211c5f306e5b54541fa57081aa1ffa32a65e90/test/Engine/ProtoTest/AtLevel/AtLevelTest.cs#L122-L134",
+      "expected": [
+        [
+          3,
+          7
+        ],
+        [
+          11,
+          15
+        ]
+      ],
+      "id": "level-keep",
+      "inputs": [
+        [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              4
+            ]
+          ],
+          [
+            [
+              5,
+              6
+            ],
+            [
+              7,
+              8
+            ]
+          ]
+        ]
+      ],
+      "keep_structure": true,
+      "lacing": "Auto",
+      "operation": "sum_rank_one"
+    }
+  ],
+  "corpus_version": 1,
+  "expected_output_status": "source-derived; not locally executed Dynamo results",
+  "gated_cases": [
+    {
+      "dynamo_expected": null,
+      "evidence_status": "unresolved; no Dynamo result asserted",
+      "expected_diagnostic": "UNRESOLVED_REPLICATION_PROFILE",
+      "id": "empty-longest",
+      "inputs": [
+        [],
+        [
+          1,
+          2
+        ]
+      ],
+      "settings": {
+        "lacing": "Longest"
+      }
+    },
+    {
+      "dynamo_expected": null,
+      "evidence_status": "unresolved; no Dynamo result asserted",
+      "expected_diagnostic": "UNRESOLVED_REPLICATION_PROFILE",
+      "id": "null-auto",
+      "inputs": [
+        null,
+        [
+          1,
+          2
+        ]
+      ],
+      "settings": {
+        "lacing": "Auto"
+      }
+    },
+    {
+      "dynamo_expected": null,
+      "evidence_status": "unresolved; no Dynamo result asserted",
+      "expected_diagnostic": "UNRESOLVED_REPLICATION_PROFILE",
+      "id": "jagged-multi-keep",
+      "inputs": [
+        [
+          [
+            1
+          ],
+          [
+            [
+              2,
+              3
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              4
+            ]
+          ],
+          []
+        ]
+      ],
+      "settings": {
+        "keep_structure": [
+          true,
+          true
+        ],
+        "lacing": "Auto",
+        "levels": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "dynamo_expected": null,
+      "evidence_status": "unresolved; no Dynamo result asserted",
+      "expected_diagnostic": "UNRESOLVED_REPLICATION_PROFILE",
+      "id": "levels-explicit-guides",
+      "inputs": [
+        [
+          [
+            1,
+            2
+          ]
+        ],
+        [
+          3,
+          4
+        ]
+      ],
+      "settings": {
+        "guides": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "lacing": "Auto",
+        "levels": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "dynamo_expected": null,
+      "evidence_status": "unresolved; no Dynamo result asserted",
+      "expected_diagnostic": "UNRESOLVED_REPLICATION_PROFILE",
+      "id": "empty-cross",
+      "inputs": [
+        [],
+        [
+          1,
+          2
+        ]
+      ],
+      "settings": {
+        "lacing": "CrossProduct"
+      }
+    },
+    {
+      "dynamo_expected": null,
+      "evidence_status": "unresolved; no Dynamo result asserted",
+      "expected_diagnostic": "UNRESOLVED_REPLICATION_PROFILE",
+      "id": "disabled-node-override",
+      "inputs": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "settings": {
+        "lacing": "Disabled"
+      }
+    }
+  ],
+  "profile": "dynamo-evidence-v1",
+  "source_sha": "8a211c5f306e5b54541fa57081aa1ffa32a65e90"
+}
