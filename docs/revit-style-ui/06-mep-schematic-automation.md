@@ -2,7 +2,7 @@
 
 Status: **proposed 20 Oct 2026; user decisions recorded below; not implemented.** Companion to 02 (workflows), 04 (automation) and 05 (backlog rows SCH-001–006).
 
-Implementation status of this proposal: nothing in this document is implemented or accepted. A first engine slice — the zone data model, the assignment rules and the extraction query with its JSON dump — exists on the separate local branch `feature/sch-001-schematic-zones` (commit `7672f34`); it is not part of this candidate, it is not reviewed here, and no SCH-001 acceptance is claimed for it.
+Implementation status of this proposal: nothing in this document is implemented or accepted. A first engine slice — the zone data model, the assignment rules and the extraction query with its JSON dump — exists on the separate local branch `feature/sch-001-schematic-zones` (commit `e37996c`); it is not part of this candidate, it is not reviewed here, and no SCH-001 acceptance is claimed for it.
 
 ## Decisions (user, 20 Oct 2026)
 
@@ -31,7 +31,7 @@ Out of scope: the calculation engines themselves (MEP-002 modules; edesign-alike
 - **Durable creation order.** Zone ids are allocated from a reserved base (above element, fitting and electrical-node numbers) and increase by one with each new zone; the id is persisted, so "creation order" is the ascending zone id and survives save, reopen and undo.
 - **Assignment predicate.** An end point belongs to a zone when **both** hold: the zone's level equals the level of the run the end point sits on, and the end point's plan position lies inside the rectangle. A point on the rectangle's edge counts as inside (inclusive boundary). A point with the same plan coordinates on another level never matches.
 - **Overlaps.** Overlapping zones on one level are reported. An end point inside several zones is assigned to the first of them by ascending zone id (creation order) and the ambiguity is reported with every zone that contained it; the designer resolves the overlap.
-- **Label precedence.** A zone's displayed label is: the designer's label, else the name of the room (`IfcSpace`) whose point lies inside the rectangle on that level, else `Zone N`, where N is the zone's number in creation order. Spaces are a fallback labeler and an auto-suggestion source; they never define a group.
+- **Label precedence.** A zone's displayed label is: the designer's label, else the name of the room (`IfcSpace`) whose point lies inside the rectangle on that level, else `Zone N`, where N is the zone's number in creation order. The room candidates are every room of that level with a point inside the rectangle; the winner is the candidate with the lowest element id (the elements' durable creation order), and a candidate whose name is empty or whitespace-only never wins. Spaces are a fallback labeler and an auto-suggestion source; they never define a group.
 - Electrical-family disciplines (electrical, ELV, access control, BMS) pull panels/boards/controllers as schematic nodes; hydraulic/air disciplines (plumbing, chilled water, air, sprinkler) summarize terminal endpoints per zone.
 
 ## Extraction
@@ -48,9 +48,10 @@ Out of scope: the calculation engines themselves (MEP-002 modules; edesign-alike
 - **Rows = levels**, ordered by elevation ascending, then by name, then by id; each row is labeled with the level name.
 - **Columns = the elements of that level, in a total order**, so that the same input always gives the same layout:
   1. the ordering key descending (largest first), on canonical quantities;
-  2. then the connectivity barycenter ascending (fewer crossings);
+  2. then the connectivity barycenter ascending (defined below);
   3. then the stable identity ascending (the element id, or the electrical node's number);
   4. an element with no connection sorts after every connected element at the same ordering key, and among themselves by stable identity.
+- **Barycenter, fully defined.** A connection is undirected and counts once per pair of elements, however many wires join them; only connections between elements of the same level row count. The initial order is the ordering key descending, then stable id ascending. One pass computes, for each element, the mean of the current ranks (zero-based positions in the order the previous pass produced) of its connected neighbors, and re-sorts by (ordering key descending, barycenter ascending, stable id ascending). Passes repeat until the order stops changing, capped at 8 passes; the order after the last pass is the result, so the rule always terminates and the same input always gives the same layout. Ranks, never pixel positions, are the source: positions depend on the spacing mode, ranks do not.
 - Spacing mode, designer-selectable per generation: **uniform** slot pitch (default) or **footprint-proportional**. Both are requirements of SCH-002; neither is implemented yet.
 - Pure function `(elements, levels, connections, mode) → (symbol slots, wire routes)`; golden-testable without a renderer.
 - Fixture `fixtures/schematic-layout-v1.json` is specified by this document and added with SCH-002. Its expected slots and orders are derived independently from the fixture inputs (hand-computed from the rules above), never by calling the generator under test. Comparisons: positions in metres with an absolute tolerance of 1e-9 m; quantities with a relative tolerance of 1e-9; discrete results (orders, ids, level order) compared exactly. The 1e-9 rule applies to numeric values only, not to ordering.
@@ -94,13 +95,13 @@ Acceptance is split by producer: SCH-001–003 deliver the data, the layout and 
 | Phase | Content | Acceptance |
 |---|---|---|
 | SCH-001 | Zone entities, plan assignment, extraction query, JSON dump of the draft (data only) | Zones persist with the model; assignment deterministic (same level, edges inclusive, first by zone id); overlaps and ambiguous end points reported; unzoned and unplaced end points reported; room-name fallback; draft JSON dump |
-| SCH-002 | Grid layout engine, both spacing modes | Golden tests from the fixture: numeric values at 1e-9 (metres; relative for quantities), orders and ids exact, expected results independently derived; largest-to-smallest total order with the barycenter and stable-id tie-breaks; both spacing modes valid |
+| SCH-002 | Grid layout engine, both spacing modes | Golden tests from the fixture: numeric values at 1e-9 (metres; relative for quantities), orders and ids exact, expected results independently derived; largest-to-smallest total order with the barycenter and stable-id tie-breaks; both spacing modes valid; fixtures cover multi-room label fallback, barycenter ties, disconnected and equal-key elements, and equivalent unit representations |
 | SCH-003 | Single-line view, native IEC 60617-style symbols, presentation annotations, `MEP: Generate Schematic` command | Repeatable output; the mandatory annotation matrix is shown with fixture/reference labels (no live calculation claimed); undo/redo; sheet export |
 | SCH-004 | Electrical reuse: pinned crates + `DiagramView` generator | Builds against the pinned SHA; the generated view passes `validate_view`; no calculation reimplemented; the generator is integrated by SCH-006 |
 | SCH-005 | Boundary study revit-alike ↔ edesign-alike | Agreed exchange format and acceptance; single electrical development |
 | SCH-006 | Live values: MEP-002 hydraulic/airflow wiring, imported edesign-alike electrical results, adopted standard editions | Every annotation value traceable to a calculation module or an import, with units and the adopted standard edition recorded; matrix conformance with real values; the editions are resolved before this gate |
 
-Dependencies, all acyclic: SCH-001 → SCH-002 → SCH-003 → SCH-006; SCH-004 follows SCH-002 and feeds SCH-006; SCH-005 feeds SCH-006; MEP-002 feeds SCH-006. SCH-001–003 are unblocked by MEP-001/GUI-004.
+Dependencies, all acyclic, as in the 05 table, which is authoritative for the complete dependency list: SCH-001 on MEP-001, GUI-004 and sketch; SCH-002 on MEP-001 and SCH-001; SCH-003 on SCH-002, DOC-001 and GUI-004; SCH-004 on SCH-002; SCH-005 on SCH-001; SCH-006 on MEP-002, SCH-003, SCH-004 and SCH-005.
 
 ## Acceptance (first)
 
