@@ -45,7 +45,15 @@ def main():
             if name.startswith('_'):
                 continue  # Keep only the labeled Brace Frame as requested.
             if name in SKIP:
-                continue  # Preserve British replacements, not catalog crops.
+                # Preserve British replacements: retain ID and provenance, skip image overwrite.
+                categories[category].append(name)
+                output = destination / (name+'.png')
+                inventory['assets'][name] = {
+                    'replacement': True,
+                    'note': 'British BS 1363 style replacement (not a catalog crop).',
+                    'sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
+                }
+                continue
             bounds = [edges[i]+4, top, edges[i+1]-4, bottom]
             tile = source.crop(bounds)
             side = max(tile.size)

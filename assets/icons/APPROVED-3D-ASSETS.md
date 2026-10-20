@@ -17,54 +17,29 @@ sufficient for the current prototype; enlarging them does not add source detail.
 ## Reproduce the assets and build
 
 All runtime PNGs are committed in `approved-3d`; no separate download or ZIP
-installation is needed. The Qt executable embeds the PNGs, so it does not depend
-on the working directory or an external artwork folder.
+installation is needed. The egui desktop app embeds the PNGs via `apps/desktop/src/icons.rs`.
 
 To reproduce source crops (Pillow is needed only for this authoring step):
 
 ```sh
-python3 assets/icons/extract_catalog.py
-python3 assets/icons/prepare_common.py
+python3 assets/icons/extract_catalog.py   # catalog crops (skips socket/switch replacements)
+python3 assets/icons/make_rust_icons.py    # approved-3d/*.png -> rust/*.png (transparent)
 ```
 
-`catalog-provenance.json` records crop coordinates and hashes. Generated common
-and supplemental sources, prompts, and preparation instructions are recorded in
-`generated-common/`. Build-time packaging uses only Python's standard library:
+`catalog-provenance.json` records crop coordinates and hashes. Socket and switch
+are marked as `replacement: true` (British BS 1363 style, not catalog crops).
 
-```sh
-python3 assets/icons/generate.py --output build/icon-preview --require-approved
-cmake -S apps/desktop-qt -B build/desktop-qt \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" -DOPENBIM_REQUIRE_APPROVED_ICONS=ON
-cmake --build build/desktop-qt --parallel 4
-ctest --test-dir build/desktop-qt --output-on-failure
-```
-
-The default build rejects missing PNGs. `coverage.json` lists every packaged
-command; the embedded-resource test decodes every PNG with Qt. Ribbon commands
-store explicit asset IDs, separate from their display labels. The schematic SVG
-renderer is no longer used by the application.
+> **Historical:** The Qt/gallery instructions below are no longer applicable.
+> The `manifest.json` and `apps/desktop-qt` project are not present on this branch.
+> The egui app uses the approved PNGs directly; `make_rust_icons.py` derives the
+> transparent PNGs in `rust/`.
 
 ## Review
 
 ```sh
 python3 -m unittest discover -s assets/icons -p 'test_*.py'
-build/desktop-qt/openbim-desktop-qt.app/Contents/MacOS/openbim-desktop-qt --verify-icons
+cargo test -p openbim-desktop --release   # embedded icon validity/uniqueness tests
 ```
 
-For a reproducible screenshot, add `--screenshot /path/to/ribbon.png
---ribbon-tab Systems --theme Light` (or Dark). Preview runs use separate settings.
-The HTML gallery includes the full library, including catalog equipment not yet
-exposed as commands in this prototype.
-
-On macOS, after building, `apps/desktop-qt/package-macos.sh build/desktop-qt`
-creates `build/desktop-qt/package/openbim-desktop-qt.app`, bundles only the required
-Qt frameworks and Cocoa/offscreen plugins, and signs the local bundle ad hoc. CMake
-already copies the Rust bridge into the app's Frameworks directory and links it
-through `@rpath`, rather than the build machine's Rust output directory.
-
-## Additional project ribbon tabs
-
-The eight secondary project tabs use `generated-ribbon/` for symbols absent from
-the original catalog. Run `python3 assets/icons/prepare_ribbon.py` after the other
-preparation steps to reproduce their resource files. Panel and command placement
-is recorded in `apps/desktop-qt/RIBBON-REFERENCE.md` with Autodesk references.
+The egui desktop app renders the icons at 24/32/48 px on light/dark backgrounds.
+`docs/icon-display-update.md` records the review steps.
