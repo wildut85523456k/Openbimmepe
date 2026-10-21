@@ -1,4 +1,8 @@
-# Catalog artwork in the Qt ribbon
+# Approved 3D catalog artwork (Qt ribbon pipeline — historical)
+
+> **Historical:** The Qt ribbon was retired; the current app is the egui desktop
+> app. This document describes the approved 3D source artwork in `approved-3d/`
+> and the derived transparent PNGs in `rust/` that the app embeds.
 
 The source is the user's `BIM_CAD Icon Library Catalog.png`, supplied on 15 October
 2026. The exact input is versioned as `catalog-source/catalog.png`. Catalog PNGs
@@ -16,8 +20,10 @@ sufficient for the current prototype; enlarging them does not add source detail.
 
 ## Reproduce the assets and build
 
-All runtime PNGs are committed in `approved-3d`; no separate download or ZIP
-installation is needed. The egui desktop app embeds the PNGs via `apps/desktop/src/icons.rs`.
+All source artwork is committed in `approved-3d`; no separate download or ZIP
+installation is needed. The egui desktop app embeds the derived transparent PNGs
+from `rust/` via `apps/desktop/src/icons.rs`; `make_rust_icons.py` derives them
+from `approved-3d`.
 
 To regenerate the transparent PNGs (Pillow needed):
 
@@ -38,8 +44,8 @@ python3 assets/icons/extract_catalog.py
 
 > **Historical:** The Qt/gallery instructions are no longer applicable.
 > The `manifest.json` and `apps/desktop-qt` project are not present on this branch.
-> The egui app uses the approved PNGs directly; `make_rust_icons.py` derives the
-> transparent PNGs in `rust/`.
+> The egui app embeds the derived transparent PNGs in `rust/`; `make_rust_icons.py`
+> derives them from the `approved-3d/` source artwork.
 
 ## Review
 
