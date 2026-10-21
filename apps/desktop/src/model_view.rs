@@ -5,6 +5,28 @@ use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry, RangeClass};
 
+/// The span of the plan view on a model with nothing in it yet, in metres: enough room to place a
+/// level and a first wall, and close to what Revit shows for a new project.
+const EMPTY_PLAN_SPAN_M: f32 = 10.0;
+
+/// The rectangle the plan view fits to, in projected model units: the extent of every drawn mesh
+/// and every grid. On a model with nothing in it yet (a new project's empty canvas), fall back to a
+/// default view centred on the origin, so that the drawing tools still preview and accept clicks —
+/// as in Revit, where a new project starts with an empty canvas.
+fn plan_bounds(bounds: Rect) -> Rect {
+    if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(EMPTY_PLAN_SPAN_M)) }
+}
+
+/// The plan-view tabs, from the project's levels (lowest first): the first two are the floor and the upper plan,
+/// every other level gets a tab of its own. The tab is named by the level, and `View::Plan` / `View::UpperPlan`
+/// resolve to the document's own levels (`plan_level`), so a new project's first two tabs point at levels that
+/// exist: taking the first two by *position* rather than by the sample's ids 10/11 is what makes that true (A2).
+fn plan_tabs(levels: &[(ElementId, String, f64)]) -> Vec<(String, View)> {
+    levels.iter().enumerate()
+        .map(|(k, (id, name, _))| (name.clone(), match k { 0 => View::Plan, 1 => View::UpperPlan, _ => View::Level(id.0) }))
+        .collect()
+}
+
 fn project(point: [f64; 3], three_d: bool, yaw: f32, pitch: f32) -> (Vec2, f32) {
     let [x, y, z] = point.map(|v| v as f32);
     if !three_d { return (Vec2::new(x, -y), z); }
@@ -51,12 +73,6 @@ fn plan_edges(doc: &openbim_document::Document, level: ElementId) -> Vec<crate::
     out
 }
 
-/// The box a plan is fitted to: what is drawn on it, or a default 20 m square when the plan is empty. Without the
-/// default the viewport would return before the tool branches and no click on an empty canvas could reach a tool (A1).
-fn fit_box(bounds: Rect) -> Rect {
-    if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(20.0)) }
-}
-
 /// Where the pointer at `p` snaps in a plan: as in Revit, to the endpoints, intersections, midpoints and nearest points
 /// of the lines (and the foot of the perpendicular from `base`, the last point picked), else to 50 mm. Shift keeps the
 /// point level or plumb with `base` when nothing was caught. `xf` maps the plan to the screen.
@@ -71,16 +87,12 @@ fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: P
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
+        let level_tabs = plan_tabs(&app.levels());
         let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0)))
             .chain(app.document.elements().filter(|e| e.category == Category::Elevation).flat_map(|e| (0..4u8).filter(move |k| e.count >> k & 1 == 1).map(move |k| (crate::section_ui::name_of_marker(&e.name, k), View::Marked(e.id.0, k)))))
             .collect();
-        // the level tabs are the document's own levels, lowest first (A2): the first two keep the Plan and Upper Plan
-        // views, every other level gets a view of its own. No level id and no level name is hard-coded here.
-        let level_tabs: Vec<(String, View)> = app.levels().into_iter().enumerate()
-            .map(|(k, (id, name, _))| (name, match k { 0 => View::Plan, 1 => View::UpperPlan, _ => View::Level(id.0) }))
-            .collect();
         let tabs = level_tabs.into_iter()
-            .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)])
+            .chain([("{3D}".to_string(), View::ThreeD), ("Mechanical".to_string(), View::Mechanical)])
             .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
             .chain(sections);
         for (label, view) in tabs {
@@ -149,7 +161,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             for [x, y] in [start, end] { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
         }
     }
-    let bounds = fit_box(bounds);
+    let bounds = plan_bounds(bounds);
     let fit = ((rect.width() - 100.0).max(10.0) / bounds.width().max(1.0))
         .min((rect.height() - 90.0).max(10.0) / bounds.height().max(1.0));
     let scale = fit * app.zoom;
@@ -1666,13 +1678,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_plan_is_fitted_to_a_default_box() {
-        assert!(fit_box(Rect::NOTHING).is_finite(), "an empty plan still needs a box to fit");
-        let drawn = Rect::from_min_size(Pos2::new(-1.0, -1.0), Vec2::new(9.0, 7.0));
-        assert_eq!(fit_box(drawn), drawn, "a plan with something on it is fitted to what is drawn");
-    }
-
-    #[test]
     fn a_new_model_has_its_own_levels_and_takes_a_drawn_wall_and_grid() {
         let (ctx, screen) = frames();
         let mut app = Desktop::sample();
@@ -1714,6 +1719,54 @@ mod tests {
         app.choose_tool(crate::Tool::Wall);
         assert!(app.tool == crate::Tool::Select, "the tool must not start without a level");
         assert!(app.message.contains("Add a level first"), "{}", app.message);
+    }
+
+    #[test]
+    fn plan_bounds_falls_back_to_a_default_view_on_an_empty_model() {
+        // a real extent passes through unchanged
+        let real = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(4.0, 3.0));
+        assert_eq!(plan_bounds(real), real);
+        // an empty model (Rect::NOTHING has an infinite min) gets a finite, centred default view
+        let empty = plan_bounds(Rect::NOTHING);
+        assert!(empty.is_finite(), "the fallback bounds must be finite");
+        assert_eq!(empty.center(), Pos2::ZERO, "the empty view is centred on the origin");
+        assert_eq!(empty.width(), EMPTY_PLAN_SPAN_M);
+    }
+
+    #[test]
+    fn a_new_project_starts_with_an_empty_canvas_but_the_drawing_tools_still_work() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.document = openbim_document::Document::new();
+        assert_eq!(app.document.elements().count(), 0, "the test must start from an empty project");
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Level);
+        let before = app.document.elements().count();
+        let p = Pos2::new(500.0, 350.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(p)]);
+        frame(&ctx, screen, &mut app, vec![button(p, true)]);
+        frame(&ctx, screen, &mut app, vec![button(p, false)]);
+        assert!(app.document.elements().count() > before, "the Level tool must place a level on an empty canvas; message: {}", app.message);
+    }
+
+    #[test]
+    fn plan_tabs_name_the_first_two_levels_and_give_every_other_level_its_own_tab() {
+        // the first two levels are the floor and the upper plan, whatever their ids are, and the rest get their own tab
+        let named = vec![(ElementId(10), "Ground".to_string(), 0.0), (ElementId(11), "First".to_string(), 3.0), (ElementId(20), "Roof".to_string(), 9.0)];
+        assert_eq!(plan_tabs(&named), vec![
+            ("Ground".to_string(), View::Plan),
+            ("First".to_string(), View::UpperPlan),
+            ("Roof".to_string(), View::Level(20)),
+        ]);
+        // a project whose levels have other ids (a new project numbers them from 1): the tabs still name the
+        // document's own levels, and `plan_level` resolves the first two to levels that exist
+        let renumbered = vec![(ElementId(1), "Level 1".to_string(), 0.0), (ElementId(2), "Level 2".to_string(), 3.0)];
+        assert_eq!(plan_tabs(&renumbered), vec![
+            ("Level 1".to_string(), View::Plan),
+            ("Level 2".to_string(), View::UpperPlan),
+        ]);
+        // no levels at all (an IFC-loaded project with none): there is no plan tab to offer
+        assert!(plan_tabs(&[]).is_empty());
     }
 
     #[test]

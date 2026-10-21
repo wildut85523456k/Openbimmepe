@@ -222,14 +222,15 @@ mod tests {
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 dialog.show(ui.ctx(), &doc, View::Plan, true);
             });
+            // a run_ui produces texture deltas that must be cleared before the context is dropped,
+            // or egui panics "Dropped TexturesDelta with N unapplied deltas" (as the model_view tests do)
+            output.textures_delta.clear();
             assert!(!output.shapes.is_empty());
             assert_eq!(doc, before);
-            // the frame's textures are handled here: epaint asserts in a debug build when a delta is dropped unapplied
-            output.textures_delta.clear();
         }
         doc.transact(doc.revision(), &[openbim_document::Command::Resize { id: crate::ElementId(1), width_m: 0.4, height_m: 0.3 }]).unwrap();
-        let mut last = ctx.run_ui(egui::RawInput::default(), |ui| dialog.show(ui.ctx(), &doc, View::Plan, true));
-        last.textures_delta.clear();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| dialog.show(ui.ctx(), &doc, View::Plan, true));
+        output.textures_delta.clear();
         assert!(dialog.prepared.is_none());
         assert!(dialog.status.contains("changed"));
     }
