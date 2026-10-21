@@ -219,14 +219,17 @@ mod tests {
         for dark in [false, true] {
             ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             let before = doc.clone();
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 dialog.show(ui.ctx(), &doc, View::Plan, true);
             });
             assert!(!output.shapes.is_empty());
             assert_eq!(doc, before);
+            // the frame's textures are handled here: epaint asserts in a debug build when a delta is dropped unapplied
+            output.textures_delta.clear();
         }
         doc.transact(doc.revision(), &[openbim_document::Command::Resize { id: crate::ElementId(1), width_m: 0.4, height_m: 0.3 }]).unwrap();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| dialog.show(ui.ctx(), &doc, View::Plan, true));
+        let mut last = ctx.run_ui(egui::RawInput::default(), |ui| dialog.show(ui.ctx(), &doc, View::Plan, true));
+        last.textures_delta.clear();
         assert!(dialog.prepared.is_none());
         assert!(dialog.status.contains("changed"));
     }
