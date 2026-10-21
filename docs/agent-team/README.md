@@ -1,6 +1,6 @@
 # Revit-alike development team
 
-Five persistent Hermes profiles are configured for this checkout. They run on demand; no scheduled jobs or automatic merging is enabled. Each retains its own identity and session history. They use the inherited GPT configuration initially; model diversity is optional, not a substitute for independent review.
+Seven persistent Hermes profiles are configured for this checkout. They run on demand; no scheduled jobs or automatic merging is enabled. Each retains its own identity and session history. They use the inherited GPT configuration initially; model diversity is optional, not a substitute for independent review.
 
 | Profile | Responsibility | Deliverable |
 |---|---|---|
@@ -9,6 +9,8 @@ Five persistent Hermes profiles are configured for this checkout. They run on de
 | `bim-review` | Independently inspect and exercise code | Severity-ranked findings and correctness gate |
 | `bim-ux` | Exercise the real app against reference workflows | Interaction evidence, screenshots, parity gaps |
 | `bim-perf` | Measure compilation and runtime multicore behavior | Reproducible raw measurements and scaling report |
+| `bim-reference` | Own the book-to-reference extraction and the citation re-check against a pinned SHA | Reference docs, extraction manifest, citation re-check report |
+| `bim-gap` | Own the gap register: one row per gap, each with a citation, a remediation and an acceptance test | The current register and its change log |
 
 ## Working sequence
 
