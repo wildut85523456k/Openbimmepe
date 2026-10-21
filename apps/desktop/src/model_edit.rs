@@ -327,7 +327,7 @@ impl Desktop {
     pub(crate) fn start_level_rename(&mut self, id: ElementId) {
         self.level_rename_name = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
         self.level_rename_id = Some(id);
-        self.message = format!("Rename the level and press Enter, or Cancel");
+        self.message = "Rename the level and press Enter, or Cancel".into();
     }
 
     /// Commits the draft. The field stays open when the name is refused, so the user can correct it (R4).
