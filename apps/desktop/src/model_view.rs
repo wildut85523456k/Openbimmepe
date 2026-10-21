@@ -1314,6 +1314,71 @@ mod tests {
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
 
+    /// A frame in which the window handles the global keys first and then draws the viewport, as `ui()` does (A3, A4).
+    fn key_frame(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>) {
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() },
+            |ui| { app.global_keys(ui.ctx()); egui::CentralPanel::default().show(ui, |ui| show(app, ui)); });
+        out.textures_delta.clear();
+    }
+    fn key_with(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    #[test]
+    fn escape_steps_back_inside_the_wall_tool_before_leaving_it() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("wall", "Wall");
+        let at = Pos2::new(400.0, 300.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(app.wall_pts.len(), 1, "{}", app.message);
+        // the first Esc takes the pending point back and keeps the tool
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Wall, "Esc inside a chain keeps the tool: {}", app.message);
+        assert!(app.wall_pts.is_empty(), "the point is taken back");
+        // with nothing pending the second Esc leaves it
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+    }
+
+    #[test]
+    fn the_keymap_shortcuts_choose_a_tool_and_ctrl_n_starts_a_new_model() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        // "W A" is the keymap's Wall shortcut, typed one key at a time: half of it starts nothing
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::W)]);
+        assert!(app.tool == crate::Tool::Select, "a half-typed shortcut starts nothing: {}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::A)]);
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        assert_eq!((app.width_mm, app.height_mm), (200.0, 3000.0), "the Wall command's own numbers");
+        // Ctrl+N starts a new model, which brings its two levels with it
+        key_frame(&ctx, screen, &mut app, vec![key_with(egui::Key::N, egui::Modifiers::CTRL)]);
+        assert_eq!(app.levels().len(), 2, "{}", app.message);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+    }
+
+    #[test]
+    fn the_options_bar_does_not_leak_from_one_tool_to_the_next() {
+        let mut app = Desktop::sample();
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0, "the ceiling hangs 2.7 m above its level");
+        app.run_command("door", "Door");
+        assert_eq!(app.slab_offset_mm, 0.0, "a door is not placed 2.7 m up because a ceiling was drawn before it");
+        assert!(app.tool == crate::Tool::Family, "{}", app.message);
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0, "the ceiling gets its own numbers back");
+        app.run_command("wall", "Wall");
+        assert_eq!((app.width_mm, app.height_mm, app.elevation_mm), (200.0, 3000.0, 0.0));
+        app.run_command("duct", "Duct");
+        assert_eq!((app.width_mm, app.height_mm, app.elevation_mm), (400.0, 300.0, 2700.0));
+        app.run_command("door", "Door");
+        assert_eq!(app.slab_offset_mm, 0.0, "and the duct's elevation does not follow the door either");
+    }
+
     #[test]
     fn an_empty_plan_is_fitted_to_a_default_box() {
         assert!(fit_box(Rect::NOTHING).is_finite(), "an empty plan still needs a box to fit");

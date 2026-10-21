@@ -57,6 +57,19 @@ enum View {
     Sheet(u64) }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+/// What the options bar starts from when a command is chosen. A field left `None` is not touched (A5).
+#[derive(Clone, Copy, Default)]
+struct ToolDefaults {
+    width_mm: Option<f64>,
+    height_mm: Option<f64>,
+    elevation_mm: Option<f64>,
+    slab_thickness_mm: Option<f64>,
+    slab_offset_mm: Option<f64>,
+    spacing_mm: Option<f64>,
+    bar_count: Option<f64>,
+    material_pick: Option<openbim_document::Material>,
+}
+
 /// A temporary dimension of the selected wall that is being retyped: its length, or its distance to a neighbour.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TempDim { Length(ElementId), Distance(ElementId, ElementId) }
@@ -252,6 +265,8 @@ struct Desktop {
     zoom: f32,
     pan: Vec2,
     keymap: openbim_keymap::Keymap,
+    /// the keys of a shortcut being typed, replayed through a fresh matcher each key (A4)
+    key_typed: Vec<openbim_keymap::Chord>,
 }
 
 impl Desktop {
@@ -296,8 +311,50 @@ impl Desktop {
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
             show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
-            zoom: 1.0, pan: Vec2::ZERO, keymap,
+            zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(),
         }
+    }
+
+    /// What the options bar starts from when a command is chosen. Without it a tool inherits whatever the previous
+    /// one left there: a door placed after a ceiling stood 2.7 m up, and the fan coil took its elevation from the same
+    /// box (A5). These are the values the commands used to set inline.
+    fn command_defaults(id: &str) -> ToolDefaults {
+        let d = ToolDefaults::default();
+        match id {
+            "duct" => ToolDefaults { width_mm: Some(400.0), height_mm: Some(300.0), elevation_mm: Some(2700.0), ..d },
+            "pipe" => ToolDefaults { width_mm: Some(100.0), height_mm: Some(100.0), elevation_mm: Some(600.0), ..d },
+            "wall" => ToolDefaults { width_mm: Some(200.0), height_mm: Some(3000.0), elevation_mm: Some(0.0), ..d },
+            "railing" => ToolDefaults { width_mm: Some(50.0), height_mm: Some(1100.0), elevation_mm: Some(0.0), spacing_mm: Some(150.0), ..d },
+            "rebar" => ToolDefaults { width_mm: Some(16.0), height_mm: Some(8.0), elevation_mm: Some(40.0), spacing_mm: Some(200.0), bar_count: Some(3.0), ..d },
+            "stair" => ToolDefaults { elevation_mm: Some(0.0), ..d },
+            "ceiling" => ToolDefaults { slab_thickness_mm: Some(20.0), slab_offset_mm: Some(2700.0), material_pick: Some(openbim_document::Material::Unspecified), ..d },
+            "roof" => ToolDefaults { slab_thickness_mm: Some(200.0), slab_offset_mm: Some(0.0), ..d },
+            "floor" | "structural_floor" | "slab" | "foundation" => ToolDefaults { slab_thickness_mm: Some(200.0), slab_offset_mm: Some(0.0), ..d },
+            "footing" => ToolDefaults { slab_offset_mm: Some(0.0), ..d },
+            // a family stands on its level: the elevation of the ceiling or slab drawn before it must not follow it
+            "door" | "window" | "ahu" | "component" => ToolDefaults { slab_offset_mm: Some(0.0), ..d },
+            _ => d,
+        }
+    }
+
+    /// Puts the chosen command's own numbers in the options bar before its arm runs (A5).
+    fn apply_command_defaults(&mut self, id: &str) {
+        let d = Self::command_defaults(id);
+        if let Some(v) = d.width_mm { self.width_mm = v; }
+        if let Some(v) = d.height_mm { self.height_mm = v; }
+        if let Some(v) = d.elevation_mm { self.elevation_mm = v; }
+        if let Some(v) = d.slab_thickness_mm { self.slab_thickness_mm = v; }
+        if let Some(v) = d.slab_offset_mm { self.slab_offset_mm = v; }
+        if let Some(v) = d.spacing_mm { self.spacing_mm = v; }
+        if let Some(v) = d.bar_count { self.bar_count = v; }
+        if let Some(v) = d.material_pick { self.material_pick = v; }
+    }
+
+    /// Whether the tool on show has work in progress that Esc steps back from before the tool is left (A3).
+    fn tool_has_pending_points(&self) -> bool {
+        !self.wall_pts.is_empty() || !self.slab_points.is_empty() || !self.run_points.is_empty() || !self.edit_pts.is_empty()
+            || !self.wall_ids.is_empty() || !self.cable_via.is_empty() || self.beam_start.is_some() || self.cable_from.is_some()
+            || self.opening_from.is_some()
     }
 
     /// The tools that put an element on a level: without one they cannot start (A2).
@@ -415,6 +472,7 @@ impl Desktop {
 
     /// Commands without an implementation yet report it in the status bar.
     fn run_command(&mut self, id: &str, label: &str) {
+        self.apply_command_defaults(id);
         match id {
             "automation_editor" | "automation_player" => {
                 self.workspace = Workspace::Automation;
@@ -425,8 +483,8 @@ impl Desktop {
                 self.automation.show_mcp = true;
                 if id == "automation_snapshot" { self.automation.export_snapshot(&self.document); }
             }
-            "duct" => { (self.width_mm, self.height_mm, self.elevation_mm) = (400.0, 300.0, 2700.0); self.choose_tool(Tool::Duct) }
-            "pipe" => { (self.width_mm, self.height_mm, self.elevation_mm) = (100.0, 100.0, 600.0); self.system_pick = openbim_family::mep::System::ChilledWaterSupply; self.choose_tool(Tool::Pipe) }
+            "duct" => self.choose_tool(Tool::Duct),
+            "pipe" => { self.system_pick = openbim_family::mep::System::ChilledWaterSupply; self.choose_tool(Tool::Pipe) }
             "end_point" => self.choose_tool(Tool::EndPoint),
             "elec_node" => self.choose_tool(Tool::ElecNode),
             "elec_cable" => self.choose_tool(Tool::Cable),
@@ -456,25 +514,25 @@ impl Desktop {
             "mirror" => self.choose_tool(Tool::Mirror),
             "delete" => self.delete_selected(),
             "level" => { self.level_elev_mm = self.levels().last().map_or(0.0, |l| l.2 * 1000.0 + 3000.0); self.level_name.clear(); self.choose_tool(Tool::Level) }
-            "wall" => { (self.width_mm, self.height_mm, self.elevation_mm) = (200.0, 3000.0, 0.0); self.wall_type = None; self.wall_flip = false; self.choose_tool(Tool::Wall) }
+            "wall" => { self.wall_type = None; self.wall_flip = false; self.choose_tool(Tool::Wall) }
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
             "elevation" => { self.edit_pts.clear(); self.choose_tool(Tool::Elevation) }
-            "railing" => { (self.height_mm, self.width_mm, self.spacing_mm, self.elevation_mm) = (1100.0, 50.0, 150.0, 0.0); self.choose_tool(Tool::Railing) }
+            "railing" => self.choose_tool(Tool::Railing),
             "section" => { self.edit_pts.clear(); self.choose_tool(Tool::Section) }
             "opening_vertical" => { self.opening_host = None; self.opening_cands.clear(); self.slab_points.clear(); self.choose_tool(Tool::VerticalOpening) }
             "shaft" => { (self.shaft_base_mm, self.shaft_top_mm, self.shaft_top) = (0.0, 0.0, None); self.choose_tool(Tool::Shaft) }
             "opening_wall" => self.choose_tool(Tool::WallOpening),
-            "stair" => { self.elevation_mm = 0.0; self.edit_pts.clear(); self.choose_tool(Tool::Stair) }
-            "ceiling" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm, self.material_pick) = (openbim_document::SlabKind::Ceiling, 20.0, 2700.0, openbim_document::Material::Unspecified); self.choose_tool(Tool::Slab) }
-            "roof" => { (self.slab_kind_pick, self.slab_thickness_mm, self.slab_offset_mm) = (openbim_document::SlabKind::Roof, 200.0, 0.0); self.choose_tool(Tool::Slab) }
+            "stair" => { self.edit_pts.clear(); self.choose_tool(Tool::Stair) }
+            "ceiling" => { self.slab_kind_pick = openbim_document::SlabKind::Ceiling; self.choose_tool(Tool::Slab) }
+            "roof" => { self.slab_kind_pick = openbim_document::SlabKind::Roof; self.choose_tool(Tool::Slab) }
             "footing" => self.choose_tool(Tool::WallFooting),
             "truss" => self.choose_tool(Tool::Truss),
             "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Door); self.choose_tool(Tool::Family) }
             "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Window); self.choose_tool(Tool::Family) }
             "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
-            "rebar" => { (self.width_mm, self.height_mm, self.elevation_mm, self.spacing_mm, self.bar_count) = (16.0, 8.0, 40.0, 200.0, 3.0); self.choose_tool(Tool::Rebar) }
+            "rebar" => self.choose_tool(Tool::Rebar),
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),
             "slab" => { self.slab_kind_pick = openbim_document::SlabKind::Foundation; self.choose_tool(Tool::Slab) }
@@ -573,10 +631,13 @@ impl Desktop {
     }
 }
 
-impl eframe::App for Desktop {
-    fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.choose_tool(Tool::Select); }
+impl Desktop {
+    /// The keys the whole window answers to, before the ribbon and the viewport are drawn: Esc, Tab, undo/redo,
+    /// Ctrl+P, Ctrl+S/N/O and the keymap's typed shortcuts (A3, A4).
+    fn global_keys(&mut self, ctx: &egui::Context) {
+        // Esc steps back inside the tool first: the viewport clears what is pending, and the tool is left only when
+        // nothing is pending, as in Revit.
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.tool_has_pending_points() { self.choose_tool(Tool::Select); }
         if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
             let ids: Vec<_> = self.document.elements().map(|el| el.id).collect();
             if !ids.is_empty() {
@@ -585,7 +646,6 @@ impl eframe::App for Desktop {
                 self.select_element(Some(ids[next]));
             }
         }
-        self.clipboard_events(&ctx);
         // Ctrl+Y (also Ctrl+Shift+Z) redoes, Ctrl+Z undoes, as in Revit
         let redo = !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.command && (i.key_pressed(egui::Key::Y) || (i.modifiers.shift && i.key_pressed(egui::Key::Z))));
         if redo { self.redo_document(); }
@@ -596,6 +656,79 @@ impl eframe::App for Desktop {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::P)) {
             self.print_dialog.open = true;
         }
+        // Ctrl+S, Ctrl+N and Ctrl+O, as in Revit. They wait for the keyboard, so typing in a field is never stolen.
+        if !ctx.egui_wants_keyboard_input() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) { self.save_file(false); }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::N)) { self.new_model(); }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::O)) { self.open_file(); }
+            self.keymap_keys(ctx);
+        }
+    }
+
+    /// The keymap's typed shortcuts, one key at a time ("W A" for Wall), as Revit does (A4).
+    fn keymap_keys(&mut self, ctx: &egui::Context) {
+        let mut pressed: Vec<char> = Vec::new();
+        ctx.input(|i| {
+            for event in &i.events {
+                if let egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } = event {
+                    if !modifiers.any() { if let Some(c) = key_char(*key) { pressed.push(c); } }
+                }
+            }
+        });
+        for c in pressed { self.keymap_key(&c.to_string()); }
+    }
+
+    /// One key of a typed shortcut. The keys typed so far are replayed through a fresh matcher, because a matcher
+    /// borrows the keymap and cannot be kept from one frame to the next.
+    fn keymap_key(&mut self, name: &str) {
+        let Ok(chord) = openbim_keymap::Chord::new(openbim_keymap::Mods::NONE, name) else { return };
+        self.key_typed.push(chord);
+        let mut matcher = self.keymap.matcher();
+        let mut result = openbim_keymap::Match::Pending;
+        for chord in self.key_typed.clone() { result = matcher.feed(chord); }
+        match result {
+            // the start of a longer shortcut: keep typing
+            openbim_keymap::Match::Pending => {}
+            openbim_keymap::Match::None => self.key_typed.clear(),
+            openbim_keymap::Match::Command(command) => {
+                self.key_typed.clear();
+                match Self::keymap_command_id(&command) {
+                    Some(id) => self.run_command(id, id),
+                    None => self.message = format!("{command} has a shortcut but no command here yet"),
+                }
+            }
+            // several commands share the shortcut: Revit offers them, here they are named
+            openbim_keymap::Match::Choice(commands) => {
+                self.key_typed.clear();
+                self.message = format!("{name} is the shortcut of several commands: {}", commands.join(", "));
+            }
+        }
+    }
+
+    /// The ribbon command a keymap command name stands for (A4).
+    fn keymap_command_id(name: &str) -> Option<&'static str> {
+        Some(match name {
+            "Select" => "select", "Duct" => "duct", "Pipe" => "pipe", "Wall" => "wall", "Beam" => "beam",
+            "Column" => "structural_column", "Slab" => "floor", "Footing" => "foundation", "Wall Footing" => "footing",
+            "Beam System" => "beam_system", "Truss" => "truss", "Rebar" => "rebar", "Family" => "component",
+            _ => return None,
+        })
+    }
+}
+
+/// The letter or digit a key stands for, for the keymap's typed shortcuts (A4).
+fn key_char(key: egui::Key) -> Option<char> {
+    let name = key.name();
+    let mut chars = name.chars();
+    let c = chars.next()?;
+    (chars.next().is_none() && c.is_ascii_alphanumeric()).then(|| c.to_ascii_uppercase())
+}
+
+impl eframe::App for Desktop {
+    fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.global_keys(&ctx);
+        self.clipboard_events(&ctx);
         egui::Panel::top("header").show(ui, |ui| {
             self.toolbar(ui);
             self.ribbon(ui);
