@@ -256,6 +256,7 @@ struct Desktop {
     /// the export window, while it is open
     export_dialog: Option<model_edit::ExportDialog>,
     import_dialog: Option<model_edit::ImportDialog>,
+    load_family_dialog: Option<model_edit::LoadFamilyDialog>,
     /// the print / export plan dialog (PRT-006): current plan view to PDF/DXF with a print profile
     print_dialog: print_dialog::PrintDialog,
     /// the name for a new type
@@ -293,7 +294,8 @@ const IMPLEMENTED: &[&str] = &[
     "ahu", "component", "rebar", "beam_system", "foundation", "slab", "brace", "select", "ifc_export", "ifc_import",
     "new", "open", "save", "save_as", "mep_settings", "duct_insulation", "pipe_insulation", "create_mech_system",
     "create_pipe_system", "generate_layout", "system_browser", "schedule", "sheet", "add_view", "print",
-    "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out"
+    "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out",
+    "load_family",
 ];
 
 impl Desktop {
@@ -340,7 +342,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(),
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -592,6 +594,7 @@ impl Desktop {
             "select" => self.choose_tool(Tool::Select),
             "ifc_export" => self.export_ifc_file(),
             "ifc_import" => self.import_ifc_file(),
+            "load_family" => self.load_family_file(),
             "new" => self.new_model(),
             "open" => self.open_file(),
             "save" => self.save_file(false),
@@ -824,6 +827,7 @@ impl Desktop {
         self.warnings_window(&ctx);
         self.export_window(&ctx);
         self.import_window(&ctx);
+        self.load_family_window(&ctx);
         self.types_window(&ctx);
         self.mep_settings_window(&ctx);
         self.insulation_window(&ctx);

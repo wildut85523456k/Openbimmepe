@@ -8,6 +8,10 @@ pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Sc
 /// The state of the import window.
 pub(crate) struct ImportDialog { pub path: String }
 
+/// The state of the Load Family window: the catalogue file typed or picked.
+#[derive(Default)]
+pub(crate) struct LoadFamilyDialog { pub path: String }
+
 /// The state of the types window: the type being worked on and the name typed for a rename or a copy.
 #[derive(Default)]
 pub(crate) struct TypesDialog { pub picked: Option<ElementId>, pub name: String }
@@ -286,6 +290,51 @@ impl Desktop {
             go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Import")).clicked();
         });
         if go { self.read_ifc(dialog.path.trim()); } else if open { self.import_dialog = Some(dialog); }
+    }
+
+    /// Opens the Load Family window: a catalogue file, what it will do, and the button.
+    pub(crate) fn load_family_file(&mut self) {
+        self.load_family_dialog = Some(LoadFamilyDialog::default());
+    }
+
+    /// The Load Family window. The catalogue is read and checked before anything is created, so a file that names a
+    /// family or a column the library does not have is refused whole and says why.
+    pub(crate) fn load_family_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.load_family_dialog.take() else { return };
+        let (mut open, mut go) = (true, false);
+        egui::Window::new("Load Family").open(&mut open).collapsible(false).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Catalogue");
+                ui.text_edit_singleline(&mut dialog.path);
+                if ui.button("Browse...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("Load Family").add_filter("Family catalogue (tab separated)", &["tsv", "txt", "csv", "tab"]).pick_file() { dialog.path = p.display().to_string(); }
+                }
+            });
+            ui.small("A tab-separated catalogue: a 'family' line naming a family in the library, then a 'type' line naming its inputs, then one line per type. Every row becomes a type of that family in this project.");
+            ui.small("Nothing is created unless the whole file is accepted, so a refused file leaves the project as it was.");
+            go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Load")).clicked();
+        });
+        if go { self.read_family_catalogue(dialog.path.trim()); } else if open { self.load_family_dialog = Some(dialog); }
+    }
+
+    /// Reads the catalogue at `path` into the document's types of a family, as one undoable step.
+    pub(crate) fn read_family_catalogue(&mut self, path: &str) {
+        self.message = match std::fs::read_to_string(path) {
+            Err(e) => format!("Could not read {path}: {e}"),
+            Ok(text) => self.load_family_catalogue_text(&text, path),
+        };
+    }
+
+    /// The same, from the text of a catalogue: what the window and the tests both go through.
+    pub(crate) fn load_family_catalogue_text(&mut self, text: &str, from: &str) -> String {
+        match self.document.load_family_catalogue(text) {
+            Ok(ids) => {
+                let families: Vec<String> = ids.iter().filter_map(|id| self.document.get(*id)).map(|t| t.family.clone()).collect();
+                let names = families.iter().fold(Vec::new(), |mut acc, f| { if !acc.contains(f) { acc.push(f.clone()) } acc });
+                format!("Loaded {} {} for {} from {from}; undo removes them", ids.len(), if ids.len() == 1 { "type" } else { "types" }, names.join(", "))
+            }
+            Err(why) => format!("Catalogue refused, nothing changed: {why}"),
+        }
     }
 
     /// Reads the file at `path` into the document, as one undoable step.
@@ -2126,6 +2175,37 @@ mod tests {
         assert_eq!(app.document.elements().count(), want);
         std::fs::remove_dir_all(&dir).unwrap();
     }
+    #[test]
+    fn the_load_family_window_takes_a_catalogue_into_the_document_and_refuses_a_bad_one_whole() {
+        let mut app = Desktop::sample();
+        app.run_command("load_family", "Load Family");
+        assert!(app.load_family_dialog.is_some(), "the window opens");
+        let before = app.document.types_for(Category::Family).len();
+        // a catalogue of two families: every row becomes a type of the family its table names
+        let text = "family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 250\t0.25\t0.06\nD 300\t0.3\t0.08\nfamily\tAir handling unit\ntype\tair_flow\tpower\nAHU 1.2\t1.2\t4000\n";
+        let message = app.load_family_catalogue_text(text, "range.tsv");
+        assert!(message.contains("3 types") && message.contains("Ceiling diffuser, square") && message.contains("Air handling unit"), "{message}");
+        assert!(message.contains("undo"), "the message says how to take it back: {message}");
+        assert_eq!(app.document.types_for(Category::Family).len(), before + 3);
+        let diffuser = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 250").map(|t| t.id).unwrap();
+        assert_eq!(app.document.family_type_values(diffuser), vec![("neck_d".to_string(), 0.25), ("air_flow".to_string(), 0.06)]);
+        // the whole load is one undo step
+        assert!(app.document.undo().unwrap());
+        assert_eq!(app.document.types_for(Category::Family).len(), before);
+        // a catalogue the library cannot satisfy is refused whole, and the message says why
+        let message = app.load_family_catalogue_text("family\tNonesuch\ntype\tsize\nbig\t1\n", "bad.tsv");
+        assert!(message.contains("refused") && message.contains("Nonesuch"), "{message}");
+        assert_eq!(app.document.types_for(Category::Family).len(), before);
+        let message = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tnot_an_input\nx\t1\n", "bad.tsv");
+        assert!(message.contains("refused") && message.contains("not_an_input"), "{message}");
+        assert_eq!(app.document.types_for(Category::Family).len(), before);
+        // a file that is not there, and a file that is not a catalogue
+        app.read_family_catalogue(std::env::temp_dir().join("no-such-catalogue.tsv").to_str().unwrap());
+        assert!(app.message.contains("Could not read"), "{}", app.message);
+        let message = app.load_family_catalogue_text("this is not a catalogue\n", "junk.tsv");
+        assert!(message.contains("refused"), "{message}");
+    }
+
     #[test]
     fn a_wall_opening_and_a_shaft_cut_the_3d_model_and_are_exported_as_openings_of_what_they_cut() {
         let mut app = Desktop::sample();
