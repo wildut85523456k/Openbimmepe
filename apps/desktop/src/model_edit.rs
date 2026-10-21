@@ -173,6 +173,10 @@ impl Desktop {
                 (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone());
                 self.family_values = crate::export::instance_values_of(&self.document, el).unwrap_or_default();
                 self.family_texts = crate::export::instance_texts_of(&self.document, el).unwrap_or_default();
+                // the type the instance takes, and its own parameters, so the panel can edit the type rather than
+                // this one instance
+                self.family_type_editing = el.type_id;
+                (self.family_type_values, self.family_type_texts) = self.family_type_drafts();
             }
             if el.category == Category::Rebar { (self.spacing_mm, self.bar_count) = (el.spacing_m * 1000.0, f64::from(el.count)); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
@@ -654,6 +658,28 @@ impl Desktop {
         // a changed type brings its own values, so only a same-type edit counts
         el.type_name == self.family_type && now.len() == self.family_values.len()
             && now.iter().zip(&self.family_values).any(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() > 1e-9 || !b.1.is_finite())
+    }
+
+    /// The type-scoped parameters of the selected instance's type, as the type gives them: what the type editor
+    /// shows. Empty when the instance has no type of its own.
+    fn family_type_drafts(&self) -> (Vec<(String, f64)>, Vec<crate::export::TextInput>) {
+        let Some(t) = self.family_type_editing.and_then(|t| self.document.get(t)) else { return (Vec::new(), Vec::new()) };
+        let Some(f) = crate::export::library().iter().find(|f| f.name() == t.family) else { return (Vec::new(), Vec::new()) };
+        crate::export::family_type_inputs(&self.document, t.id, f)
+    }
+
+    /// Applies the type editor: the type takes these values and choices, and every instance of it follows in one
+    /// transaction (an instance's own value still wins over its type's).
+    pub(crate) fn apply_family_type(&mut self) {
+        let Some(t) = self.family_type_editing else { self.message = "Type: select a family instance that has one".into(); return };
+        let texts: Vec<(String, String)> = self.family_type_texts.iter().map(|(n, v, _)| (n.clone(), v.clone())).collect();
+        match self.document.edit_family_type(t, &self.family_type_values.clone(), &texts) {
+            Ok(()) => {
+                let n = self.document.instances_of(t).len();
+                self.message = format!("Type {} changed for {n} {}; undo puts it back", self.document.get(t).map_or("?".into(), |x| x.name.clone()), if n == 1 { "instance" } else { "instances" });
+            }
+            Err(error) => self.message = format!("Type rejected: {error:?}"),
+        }
     }
 
     /// The overrides that make `values` on top of the family's `type_name`: what differs from the type's own.
@@ -2231,6 +2257,52 @@ mod tests {
         assert!(out.text.contains("IFCDISTRIBUTIONPORT("), "with its port");
     }
 
+    #[test]
+    fn an_hvac_system_is_built_from_scratch_with_the_mouse_saved_and_exported() {
+        let mut app = Desktop::sample();
+        // the AHU and the diffuser, from a catalogue
+        let m1 = app.load_family_catalogue_text("family\tAir handling unit\ntype\tair_flow\nAHU-1\t0.3\n", "ahus.tsv");
+        assert!(m1.contains("1 type"), "{m1}");
+        let ahut = app.document.types_for(Category::Family).iter().find(|t| t.name == "AHU-1").map(|t| t.id).unwrap();
+        let m2 = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 400\t0.4\t0.2\n", "diffusers.tsv");
+        assert!(m2.contains("1 type"), "{m2}");
+        let dt = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 400").map(|t| t.id).unwrap();
+        // place the AHU and a diffuser, and give them the loaded types
+        let spec_ahu = FamilySpec { family: "Air handling unit".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let ahu = app.document.place_family(ElementId(10), [1.0, 1.0], &spec_ahu).unwrap();
+        app.document.assign_type(&[ahu], ahut).unwrap();
+        let spec_diff = FamilySpec { family: "Ceiling diffuser, square".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let diff = app.document.place_family(ElementId(10), [5.0, 1.0], &spec_diff).unwrap();
+        app.document.assign_type(&[diff], dt).unwrap();
+        // a duct between them, drawn by clicks
+        app.run_command("duct", "Duct");
+        let level = app.plan_level();
+        for p in [[1.0, 1.0], [5.0, 1.0], [5.0, 1.0]] { app.run_click(p); }
+        app.finish_run(level);
+        // edit the AHU's airflow through the type editor
+        app.select_element(Some(ahu));
+        app.family_type_values.iter_mut().find(|(n, _)| n == "air_flow").unwrap().1 = 0.5;
+        app.apply_family_type();
+        // save, reopen and export
+        let path = std::env::temp_dir().join(format!("openbim-hvac-e2e-{}.obim", std::process::id()));
+        let path = path.to_str().unwrap().to_string();
+        app.write_model(&path);
+        let saved = app.document.clone();
+        let mut reopened = Desktop::sample();
+        reopened.open_path(&path);
+        assert_eq!(reopened.document.elements().count(), saved.elements().count(), "{}", reopened.message);
+        // the AHU's airflow changed, and it came back from the save with its type
+        let ahu2 = reopened.document.elements().find(|e| e.category == Category::Family && e.family == "Air handling unit").expect("the AHU came back");
+        let ahut2 = ahu2.type_id.expect("the AHU came back with its type");
+        let vals = reopened.document.family_type_values(ahut2);
+        assert_eq!(vals.iter().find(|(n, _)| n == "air_flow").map(|(_, v)| *v), Some(0.5), "the edited airflow persisted: {:?}", vals);
+        let out = crate::export::export_ifc_with(&reopened.document, "Office", 1, "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false).unwrap();
+        assert!(out.text.contains("IFCAIRTERMINAL("), "the AHU is an air terminal");
+        assert!(out.text.contains("IFCDUCTSEGMENT("), "the duct is there");
+        assert!(out.text.contains("IFCDISTRIBUTIONPORT("), "and its ports");
+        std::fs::remove_file(&path).ok();
+    }
+
     #[test]
     fn a_wall_opening_and_a_shaft_cut_the_3d_model_and_are_exported_as_openings_of_what_they_cut() {
         let mut app = Desktop::sample();

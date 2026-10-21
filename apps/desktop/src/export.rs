@@ -126,6 +126,21 @@ pub fn instance_texts_of(doc: &openbim_document::Document, el: &openbim_document
         .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect())
 }
 
+/// The type-scoped inputs of a type of a family as that type gives them: the numbers and the texts, for the panel
+/// that edits a type rather than one instance of it. Empty if the type's values do not solve (a value out of the
+/// family's range, say), which is also what every instance of that type would report.
+pub fn family_type_inputs(doc: &openbim_document::Document, type_id: openbim_document::ElementId, f: &openbim_family::Compiled) -> (Vec<(String, f64)>, Vec<TextInput>) {
+    let parts = RequestParts { type_values: doc.family_type_values(type_id), type_texts: doc.family_type_texts(type_id), ..Default::default() };
+    let Ok(inst) = f.solve(&parts.request(None)) else { return (Vec::new(), Vec::new()) };
+    let nums = f.input_values(&inst).into_iter()
+        .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Type))
+        .map(|(n, v)| (n.to_string(), v)).collect();
+    let txts = f.input_texts(&inst).into_iter()
+        .filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Type))
+        .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect();
+    (nums, txts)
+}
+
 /// The instance values of a family (its numbers and yes/no inputs of instance scope, `wall_t` left out because the
 /// wall sets it) as solved for `type_name` with `overrides`; None for an unknown family or values that do not solve.
 pub fn instance_values(family: &str, type_name: &str, overrides: &[(String, f64)]) -> Option<Vec<(String, f64)>> {

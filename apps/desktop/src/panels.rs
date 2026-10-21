@@ -777,6 +777,34 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     if el.category == openbim_document::Category::Family {
                         read_only_group(ui, "Identity Data", &query, &[("Family", &el.family)]);
                         family_type_combo(app, ui, &el.family);
+                        // the instance's own type of a family: its parameters are edited here, once for every
+                        // instance of it, rather than one instance at a time
+                        if let Some(type_id) = el.type_id {
+                            let name = app.document.get(type_id).map_or("Missing type".into(), |t| t.name.clone());
+                            read_only_group(ui, "Type of a Family", &query, &[("Type", &name)]);
+                            if !app.family_type_values.is_empty() || !app.family_type_texts.is_empty() {
+                                egui::CollapsingHeader::new(RichText::new("Type Parameters").strong()).id_salt("family_type_params").default_open(true).show(ui, |ui| {
+                                    egui::Grid::new("family_type_rows").num_columns(2).striped(true).show(ui, |ui| {
+                                        for (name, value) in app.family_type_values.iter_mut() {
+                                            ui.label(name.replace('_', " "));
+                                            ui.add(egui::DragValue::new(value).speed(0.01));
+                                            ui.end_row();
+                                        }
+                                        for (name, value, options) in app.family_type_texts.iter_mut() {
+                                            ui.label(name.replace('_', " "));
+                                            if options.is_empty() { ui.text_edit_singleline(value); } else {
+                                                egui::ComboBox::from_id_salt(("family_type_text", name.as_str())).selected_text(value.clone()).show_ui(ui, |ui| {
+                                                    for o in options.iter() { ui.selectable_value(value, o.clone(), o); }
+                                                });
+                                            }
+                                            ui.end_row();
+                                        }
+                                    });
+                                    ui.small("A type is shared: this changes every instance of it. An instance's own value in Instance Parameters still wins.");
+                                    if ui.button("Apply to the type").clicked() { app.apply_family_type(); }
+                                });
+                            }
+                        }
                         if !app.family_texts.is_empty() {
                             egui::CollapsingHeader::new(RichText::new("Instance Choices and Texts").strong()).id_salt("family_texts").default_open(true).show(ui, |ui| {
                                 egui::Grid::new("family_text_rows").num_columns(2).striped(true).show(ui, |ui| {
