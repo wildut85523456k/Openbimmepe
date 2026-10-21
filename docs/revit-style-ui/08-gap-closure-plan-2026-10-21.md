@@ -17,8 +17,11 @@ analysis, the work classes and the order):
 Baseline: the work began on the shared clone's checkout **`feat/auto-008-obg-ds` at `c90cbc8`**, which
 is *not* `main` (that branch is four commits ahead of it: AUTO-008 and AUTO-009). The candidate
 branches were rebased onto **`main` at `3f7df8b`** before review, and the rebase changed no content.
-The analysis itself was written against `dcf8382`; the six Tier A blockers were re-checked in the tree
-before this record was written (section 2).
+`main` then moved twice more while the work sat in review (`fa28742`, which landed another
+workstream's empty-canvas fix, its level-name tab labels and the print-dialog test fix), so P0 was
+merged with it: two conflicts were resolved by hand and the result was re-verified rather than
+re-reviewed (section 3, "P0 outcome"). The analysis itself was written against `dcf8382`; the six Tier
+A blockers were re-checked in the tree before this record was written (section 2).
 
 Scope: architecture and MEP first; structure only where MEP needs it; the rest of structure is a
 later stage (unchanged, 21 Oct 2026).
@@ -93,6 +96,15 @@ Effort is an estimate in working days, not a commitment.
 door/window → stair → roof → ceiling → room → section → save/reopen → IFC export with element
 counts; plus the ribbon honesty test. This is the gate for every later package: nothing after P0
 is tested except through this harness.
+
+**P0 outcome (21 Oct 2026):** merged as **#67** (`29722bf`); the decisions in section 1 and the mapping
+in section 4 landed as **#65** (`f3ab5d5`). The review evidence — the three review contracts, the
+round-2 and round-3 verdicts (12 gates and 7 delta gates, all PASS), the PR bodies and the reviewers'
+own transcripts — is kept in `docs/audits/2026-10-21-p0-review/`. Two changes carry no independent
+review, only clippy, tests and the pre-push gate, because they came after the last review round: the
+merge with `fa28742` (conflicts in `model_view.rs` and `print_dialog.rs`, resolved by keeping `main`'s
+equivalent helpers and this branch's completion of the level-tab row) and `264508f`, the clippy fix the
+gate demanded. `Desktop::window` is what the exit criteria above are asserted through.
 
 ### P1 — IFC honesty and persistence
 
