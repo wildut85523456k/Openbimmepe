@@ -1379,6 +1379,18 @@ mod tests {
     }
 
     #[test]
+    fn a_level_view_is_named_after_its_level_and_follows_a_rename() {
+        let mut app = Desktop::sample();
+        let level = app.levels()[0].0;
+        app.rename_level(level, "Ground floor");
+        assert_eq!(crate::panels::level_view_name(&app, "Level 1", View::Plan), "Ground floor", "{}", app.message);
+        assert_eq!(crate::panels::level_view_name(&app, "Level 2", View::UpperPlan), "Level 2", "the second level keeps its name");
+        // a view that is not a level keeps the name the browser table gives it
+        let other = Desktop::sample();
+        assert_eq!(crate::panels::level_view_name(&other, "{3D}", View::ThreeD), "{3D}");
+    }
+
+    #[test]
     fn the_ribbon_starts_a_tool_and_a_button_that_is_not_wired_changes_nothing() {
         let (ctx, screen) = frames();
         let mut app = Desktop::sample();

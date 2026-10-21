@@ -926,7 +926,8 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                     read_only_group(ui, "Identity Data", &query, &[("Name", &el.name), ("Element ID", &id)]);
                 });
             } else {
-                read_only_group(ui, "Graphics", &query, &[("View Name", view_name(app.view)), ("Projection", "Orthographic")]);
+                let view_label = level_view_name(app, view_name(app.view), app.view);
+                read_only_group(ui, "Graphics", &query, &[("View Name", view_label.as_str()), ("Projection", "Orthographic")]);
             }
         });
     ui.separator();
@@ -939,6 +940,13 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
         });
     }
     ui.label(RichText::new("In memory / not saved").small().weak());
+}
+
+/// The name of a level view: the level's own name, so renaming a level renames its plan views with it (A2). The
+/// const table's name is the fallback for a project that has no such level.
+pub(crate) fn level_view_name(app: &Desktop, fallback: &str, view: View) -> String {
+    let index = match view { View::Plan => 0, View::UpperPlan => 1, _ => return fallback.to_string() };
+    app.levels().get(index).map_or_else(|| fallback.to_string(), |level| level.1.clone())
 }
 
 pub fn view_name(view: View) -> &'static str {
@@ -974,7 +982,7 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
     if let Some(view) = node.view {
         let active = app.view == view;
         let color = if active { ui.visuals().hyperlink_color } else { ui.visuals().text_color() };
-        let label = RichText::new(node.name).color(color);
+        let label = RichText::new(level_view_name(app, node.name, view)).color(color);
         let label = if active { label.strong() } else { label };
         let response = ui.selectable_label(app.browser_selected == path, label)
             .on_hover_text("Double-click to open view");
