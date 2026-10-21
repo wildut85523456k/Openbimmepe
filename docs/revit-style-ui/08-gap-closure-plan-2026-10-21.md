@@ -1,12 +1,24 @@
-# 08 — Gap closure plan (proposed 21 Oct 2026)
+# 08 — Gap closure: the owner's decisions and the backlog mapping (21 Oct 2026)
 
-Status: **proposed plan**, dated 21 Oct 2026, derived from the gap analysis in
-[07 — Gap analysis](07-gap-analysis-2026-10-21.md) and the owner's decisions of the same date
-(section 1). It is a plan, not a record of implemented behaviour: every item below is unstarted
-unless the acceptance column says otherwise.
+Status: **decision record and mapping**, dated 21 Oct 2026. It records the owner's answers to the
+questions the plan on `main` left open, the row-by-row mapping from that plan to `05-backlog.md`, and
+the acceptance the P0 work was held to. It is not a second plan.
 
-Baseline: `main` at `c90cbc8`. The analysis was written against `dcf8382`; the six Tier A
-blockers were re-checked against `c90cbc8` before this plan was written (section 2).
+Where the analysis and the plan live (both tracked on `main`, and both win over this document on the
+analysis, the work classes and the order):
+
+- `docs/gap-analysis-2026-10-21.md` — the evidence: what can and cannot be built from scratch with
+  the mouse, per discipline, with tiers.
+- `docs/gap-remediation-plan-2026-10-21.md` — the plan: work classes 1–4, rows **B1–B26** and the
+  class 3 rows, each with a remedy, the file it lands in and acceptance.
+- `docs/audits/2026-10-21-arch-audit.md`, `-mep-audit.md`, `-struct-ifc-audit.md` and the
+  `verify-*.md` reports — the line-by-line evidence behind the analysis.
+
+Baseline: the work began on the shared clone's checkout **`feat/auto-008-obg-ds` at `c90cbc8`**, which
+is *not* `main` (that branch is four commits ahead of it: AUTO-008 and AUTO-009). The candidate
+branches were rebased onto **`main` at `3f7df8b`** before review, and the rebase changed no content.
+The analysis itself was written against `dcf8382`; the six Tier A blockers were re-checked in the tree
+before this record was written (section 2).
 
 Scope: architecture and MEP first; structure only where MEP needs it; the rest of structure is a
 later stage (unchanged, 21 Oct 2026).
@@ -135,29 +147,44 @@ collaboration (central model, borrowing), phasing and design options, and the st
 
 ---
 
-## 4. Mapping to `05-backlog.md`
+## 4. Mapping: this record, the plan's rows and the backlog
 
-The backlog keeps one owner per deliverable, so most of this plan **extends an existing row's
-acceptance** rather than adding a second row for the same thing.
+The backlog keeps one owner per deliverable, so most of this work **extends an existing row's
+acceptance** rather than adding a second row for the same thing. The middle column is the row of
+`docs/gap-remediation-plan-2026-10-21.md` on `main`: it owns the remedy, the file it lands in and the
+acceptance, and it is the row to cite.
 
-| Plan item | Backlog row | Change |
-|---|---|---|
-| GAP-01…05, 08, 09 | **GUI-006** (new) | New row: the from-scratch journey and its gates |
-| GAP-07 | **GUI-007** (new) | New row: ribbon honesty |
-| GAP-06, GAP-02 | **BIM-005** (new) | New row: level authoring and validation |
-| GAP-15 | BIM-004 | Acceptance extended: autosave and crash recovery as the first `crates/oplog` consumers |
-| GAP-01, GAP-02 | GUI-004 | Acceptance extended: no click is lost on an empty canvas; the plan tabs come from the document's levels |
-| GAP-04 | GUI-005 | Acceptance extended: the keymap is consulted for real key events |
-| GAP-10…13 | IFC-002 (new) + IFC-001 | New row for export honesty; IFC-001's acceptance names systems, rooms, grids and penetrations |
-| GAP-17, GAP-18 | MEP-003 (new) | New row: the MEP family library; FAMILY-001 keeps the editor |
-| GAP-25 | MEP-005 (new) | New row: the imported electrical calculations and the retirement of the in-repo module |
-| GAP-25 | MEP-002, SCH-004 | Acceptance extended: electrical values come from the pinned crates |
-| GAP-08 | TEST-001 (new) | New row: the harness and the office building |
-| GAP-19 | MEP-004 (new) | New row: the data-hall MEP chain, at P3 where the terminals and systems it needs are |
-| GAP-16 | DOC-002 (new) | New row: docs refresh |
+| This record | The plan's row (on `main`) | Backlog row | Change |
+|---|---|---|---|
+| GAP-01 | B1 default view box | GUI-006 (new), GUI-004 | New row for the from-scratch journey; GUI-004's acceptance says no click is lost on an empty canvas |
+| GAP-02 | B2 level-derived tabs | GUI-006, BIM-005, GUI-004 | GUI-004's acceptance says the plan tabs come from the document's levels |
+| GAP-03 | B3 two-stage Esc | GUI-006 | New row |
+| GAP-04 | B4 keys and keymap; B16 Save As | GUI-005, GUI-006 | GUI-005's acceptance says the keymap is consulted for real key events |
+| GAP-05 | B5 the options-bar leak | GUI-006 | New row |
+| GAP-06 | B6 level validation, rename and delete | BIM-005 (new) | New row |
+| GAP-07 | B17 ribbon honesty | GUI-007 (new) | New row |
+| GAP-08 | — (no plan row) | TEST-001 (new) | New row: the harness and the office building |
+| GAP-09 | — (a decision, not a plan row) | GUI-006 | *New* creates Level 1 and Level 2 |
+| GAP-10 | B7 the run system; B9 user systems | IFC-002 (new) | New row: export honesty |
+| GAP-11 | B8 rooms, grids and the site | IFC-002, IFC-001 | IFC-001's acceptance names systems, rooms, grids and penetrations |
+| GAP-12 | B10 penetrations | IFC-002 | New row |
+| GAP-13 | B11 GlobalIds | IFC-002 | New row |
+| GAP-14 | B12 compute inputs; B13 MEP Settings sizes; B14 the End Point unjoin | IFC-002 | New row |
+| GAP-15 | B20 autosave and recovery | BIM-004 | Acceptance extended: the first `crates/oplog` consumers |
+| GAP-16 | — (documentation) | DOC-002 (new) | New row: docs refresh |
+| GAP-17, GAP-18 | the class 3 MEP content rows | MEP-003 (new) | New row: the family library; FAMILY-001 keeps the editor |
+| GAP-19 | the class 3 system and layout rows | MEP-004 (new) | New row: the data-hall chain, at P3 |
+| GAP-25 | B26 the duplicated electrical calculation | MEP-005 (new) | New row: the imported calculations and the retirement of the in-repo module |
+
+Items of this record with no backlog row of their own (GAP-20…24, GAP-26, GAP-27) are the plan's own
+class 3 and class 4 rows: they are scheduled there, not in `05-backlog.md`, and a backlog row is added
+when one of them becomes the next thing to build.
 
 Phase gating in `05-backlog.md` gains a step 2a: the walking skeleton (GUI-006/007, BIM-005) gates
 the rest of *Usable desktop* and every later phase's tests.
+
+---
+
 
 ---
 
