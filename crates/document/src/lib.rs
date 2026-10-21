@@ -1237,7 +1237,16 @@ impl Document {
                     el.revision = revision;
                 }
                 Command::SetMep(mep) => { trial_mep = (**mep).clone(); }
-                Command::GenerateSchematic { diagram } => { trial_mep.schematics.push((**diagram).clone()); }
+                Command::GenerateSchematic { diagram } => {
+                    // Regenerate the electrical stamp from the live model on every apply (including redo)
+                    // so a stored snapshot can never replay stale or corrupted annotations. Only
+                    // electrical views carry imported results, so only them are re-stamped.
+                    let mut view = (**diagram).clone();
+                    if view.discipline.family() == crate::schematic::Family::Electrical {
+                        crate::schematic_electrical::stamp(&*self, &mut view);
+                    }
+                    trial_mep.schematics.push(view);
+                }
                 Command::Rename { id, name } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }

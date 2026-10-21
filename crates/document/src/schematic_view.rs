@@ -13,11 +13,11 @@
 //! phase — the calculated electrical results live in edesign-alike and are imported by SCH-006; the
 //! hydraulic/airflow pressure drops by MEP-002. Sheet rendering (PDF/DXF) and ribbon binding land in
 //! DOC-001; the OpenBIM Graph command wiring and the rectangle-drag zone tool are GUI-004.
-use crate::schematic::{Discipline, DraftGroup, DraftNode, SchematicDraft, group_element_id};
+use crate::schematic::{group_element_id, Discipline, DraftGroup, DraftNode, SchematicDraft};
 use crate::{Command, Document, EditError};
 use openbim_schematic::layout::{
-    Layout, LayoutElement, LayoutLevel, LayoutInput, SpacingMode, DEFAULT_COLUMN_PITCH, DEFAULT_MIN_SLOT,
-    DEFAULT_ROW_PITCH,
+    Layout, LayoutElement, LayoutInput, LayoutLevel, SpacingMode, DEFAULT_COLUMN_PITCH,
+    DEFAULT_MIN_SLOT, DEFAULT_ROW_PITCH,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -84,7 +84,9 @@ const SYMBOL_FOOTPRINT: f64 = 0.01;
 /// family = current (A), voltage drop (V), voltage drop (%); hydraulic/air = flow, pressure drop.
 fn annotation_labels(d: Discipline) -> Vec<String> {
     let labels: &[&str] = match d {
-        Discipline::Electrical | Discipline::Elv | Discipline::AccessControl | Discipline::Bms => &["A —", "V —", "% —"],
+        Discipline::Electrical | Discipline::Elv | Discipline::AccessControl | Discipline::Bms => {
+            &["A —", "V —", "% —"]
+        }
         Discipline::Plumbing | Discipline::ChilledWater => &["L/s —", "kPa —"],
         Discipline::AirDistribution => &["m³/h —", "Pa —"],
         Discipline::Sprinkler => &["L/s —", "kPa —"],
@@ -110,14 +112,28 @@ impl SchematicDraft {
         let levels: Vec<LayoutLevel> = self
             .levels
             .iter()
-            .map(|l| LayoutLevel { id: l.id.0, name: l.name.clone(), elevation_m: l.elevation_m })
+            .map(|l| LayoutLevel {
+                id: l.id.0,
+                name: l.name.clone(),
+                elevation_m: l.elevation_m,
+            })
             .collect();
         let mut elements: Vec<LayoutElement> = Vec::new();
         for n in &self.nodes {
-            elements.push(LayoutElement { id: n.id, level: n.level.0, key: n.watts, footprint: SYMBOL_FOOTPRINT });
+            elements.push(LayoutElement {
+                id: n.id,
+                level: n.level.0,
+                key: n.watts,
+                footprint: SYMBOL_FOOTPRINT,
+            });
         }
         for (i, g) in self.groups.iter().enumerate() {
-            elements.push(LayoutElement { id: group_element_id(i), level: g.level.0, key: g.flow_m3s, footprint: SYMBOL_FOOTPRINT });
+            elements.push(LayoutElement {
+                id: group_element_id(i),
+                level: g.level.0,
+                key: g.flow_m3s,
+                footprint: SYMBOL_FOOTPRINT,
+            });
         }
         LayoutInput {
             levels,
@@ -144,13 +160,27 @@ impl SchematicDraft {
         };
         // rows = levels in the order the draft sorted them (elevation, name, id) == the grid's rows
         for (row, l) in self.levels.iter().enumerate() {
-            view.rows.push(DiagramRow { level: l.id, label: l.name.clone(), elevation_m: l.elevation_m, row });
+            view.rows.push(DiagramRow {
+                level: l.id,
+                label: l.name.clone(),
+                elevation_m: l.elevation_m,
+                row,
+            });
         }
         let nodes: HashMap<u64, &DraftNode> = self.nodes.iter().map(|n| (n.id, n)).collect();
-        let groups: Vec<(u64, &DraftGroup)> = self.groups.iter().enumerate().map(|(i, g)| (group_element_id(i), g)).collect();
+        let groups: Vec<(u64, &DraftGroup)> = self
+            .groups
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (group_element_id(i), g))
+            .collect();
         for slot in &layout.slots {
             if let Some(n) = nodes.get(&slot.element) {
-                let label = if n.name.is_empty() { format!("Node {}", n.id) } else { n.name.clone() };
+                let label = if n.name.is_empty() {
+                    format!("Node {}", n.id)
+                } else {
+                    n.name.clone()
+                };
                 view.symbols.push(Symbol {
                     element: n.id,
                     kind: SymbolKind::Board,
@@ -167,17 +197,35 @@ impl SchematicDraft {
             }
         }
         // order symbols the way the grid placed them (row then column), so view and layout agree
-        let order: HashMap<u64, usize> = layout.slots.iter().enumerate().map(|(i, s)| (s.element, i)).collect();
-        view.symbols.sort_by_key(|s| order.get(&s.element).copied().unwrap_or(usize::MAX));
+        let order: HashMap<u64, usize> = layout
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.element, i))
+            .collect();
+        view.symbols
+            .sort_by_key(|s| order.get(&s.element).copied().unwrap_or(usize::MAX));
         // the bends the grid computed are the drawn path: straight within a row, an elbow across rows
         for w in &layout.wires {
-            view.wires.push(RenderedWire { a: w.a, b: w.b, bends: w.via.clone() });
+            view.wires.push(RenderedWire {
+                a: w.a,
+                b: w.b,
+                bends: w.via.clone(),
+            });
         }
         for a in &self.ambiguities {
-            view.warnings.push(format!("endpoint at ({}, {}) assigned to one of {} zones", a.at[0], a.at[1], a.zones.len()));
+            view.warnings.push(format!(
+                "endpoint at ({}, {}) assigned to one of {} zones",
+                a.at[0],
+                a.at[1],
+                a.zones.len()
+            ));
         }
         if self.unplaced_endpoints > 0 {
-            view.warnings.push(format!("{} end point(s) on a fitting with no plan position", self.unplaced_endpoints));
+            view.warnings.push(format!(
+                "{} end point(s) on a fitting with no plan position",
+                self.unplaced_endpoints
+            ));
         }
         view
     }
@@ -192,7 +240,11 @@ impl Document {
     /// Generate the single-line schematic for `discipline` in `mode` as one undoable command. The view
     /// is carried by the command: applying it stores the view for the sheet to read, undoing it takes
     /// the view back and regenerating after an edit reflects the latest model.
-    pub fn generate_schematic_commands(&self, discipline: Discipline, mode: SpacingMode) -> Result<Vec<Command>, EditError> {
+    pub fn generate_schematic_commands(
+        &self,
+        discipline: Discipline,
+        mode: SpacingMode,
+    ) -> Result<Vec<Command>, EditError> {
         let draft = crate::schematic::extract_schematic(self, discipline);
         let input = draft.layout_input(mode);
         let mut view = draft.render(&openbim_schematic::layout::layout(&input));
@@ -200,13 +252,19 @@ impl Document {
             crate::schematic_electrical::stamp(self, &mut view);
         }
         for (a, b) in crate::schematic::overlapping_zones(self.zones()) {
-            view.warnings.push(format!("overlapping zones on a level: {a:?} and {b:?}"));
+            view.warnings
+                .push(format!("overlapping zones on a level: {a:?} and {b:?}"));
         }
-        Ok(vec![Command::GenerateSchematic { diagram: Box::new(view) }])
+        Ok(vec![Command::GenerateSchematic {
+            diagram: Box::new(view),
+        }])
     }
 
     /// Like `generate_schematic_commands` but yields the view directly, in the uniform spacing mode.
-    pub fn generate_schematic(&self, discipline: Discipline) -> Result<crate::SchematicView, EditError> {
+    pub fn generate_schematic(
+        &self,
+        discipline: Discipline,
+    ) -> Result<crate::SchematicView, EditError> {
         let cmds = self.generate_schematic_commands(discipline, SpacingMode::Uniform)?;
         match &cmds[0] {
             Command::GenerateSchematic { diagram } => Ok((**diagram).clone()),
@@ -220,26 +278,50 @@ mod tests {
     use super::*;
     use crate::schematic::{Discipline, DraftGroup, DraftLevel, DraftNode, SchematicDraft};
     use crate::{Document, ElementId};
-    use openbim_schematic::layout::{Connection, SpacingMode, layout};
+    use openbim_schematic::layout::{layout, Connection, SpacingMode};
 
     fn draft(discipline: Discipline) -> SchematicDraft {
         SchematicDraft {
             discipline,
             levels: vec![
-                DraftLevel { id: ElementId(1), name: "Level 1".into(), elevation_m: 0.0 },
-                DraftLevel { id: ElementId(2), name: "Level 2".into(), elevation_m: 3.0 },
+                DraftLevel {
+                    id: ElementId(1),
+                    name: "Level 1".into(),
+                    elevation_m: 0.0,
+                },
+                DraftLevel {
+                    id: ElementId(2),
+                    name: "Level 2".into(),
+                    elevation_m: 3.0,
+                },
             ],
             nodes: match discipline {
                 Discipline::Electrical => vec![
-                    DraftNode { id: 1, name: "MSB".into(), level: ElementId(1), at: [0.0, 0.0], watts: 100.0 },
-                    DraftNode { id: 2, name: "DB-2".into(), level: ElementId(2), at: [1.0, 0.0], watts: 50.0 },
+                    DraftNode {
+                        id: 1,
+                        name: "MSB".into(),
+                        level: ElementId(1),
+                        at: [0.0, 0.0],
+                        watts: 100.0,
+                    },
+                    DraftNode {
+                        id: 2,
+                        name: "DB-2".into(),
+                        level: ElementId(2),
+                        at: [1.0, 0.0],
+                        watts: 50.0,
+                    },
                 ],
                 _ => Vec::new(),
             },
             groups: match discipline {
                 Discipline::Plumbing => vec![DraftGroup {
-                    zone: Some(ElementId(crate::schematic::ZONE_BASE)), zone_label: "Wet".into(), level: ElementId(1),
-                    system: openbim_family::mep::System::Sanitary, endpoints: 3, flow_m3s: 0.03,
+                    zone: Some(ElementId(crate::schematic::ZONE_BASE)),
+                    zone_label: "Wet".into(),
+                    level: ElementId(1),
+                    system: openbim_family::mep::System::Sanitary,
+                    endpoints: 3,
+                    flow_m3s: 0.03,
                 }],
                 _ => Vec::new(),
             },
@@ -257,8 +339,17 @@ mod tests {
         let d = draft(Discipline::Electrical);
         let view = d.render(&layout(&d.layout_input(SpacingMode::Uniform)));
         // the two boards, ordered Level 1 then Level 2 (row order)
-        assert_eq!(view.symbols.iter().map(|s| s.element).collect::<Vec<_>>(), vec![1, 2]);
-        assert_eq!(view.symbols.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), vec!["MSB", "DB-2"]);
+        assert_eq!(
+            view.symbols.iter().map(|s| s.element).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            view.symbols
+                .iter()
+                .map(|s| s.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["MSB", "DB-2"]
+        );
         assert!(view.symbols.iter().all(|s| s.kind == SymbolKind::Board));
         // electrical annotations are current, voltage drop V, voltage drop % (three)
         assert!(view.symbols.iter().all(|s| s.annotations.len() == 3));
@@ -285,14 +376,19 @@ mod tests {
         let d = draft(Discipline::Electrical);
         let u = d.render(&layout(&d.layout_input(SpacingMode::Uniform)));
         let f = d.render(&layout(&d.layout_input(SpacingMode::FootprintProportional)));
-        assert_eq!(u.symbols.iter().map(|s| s.element).collect::<Vec<_>>(), f.symbols.iter().map(|s| s.element).collect::<Vec<_>>());
+        assert_eq!(
+            u.symbols.iter().map(|s| s.element).collect::<Vec<_>>(),
+            f.symbols.iter().map(|s| s.element).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn generate_schematic_is_one_undoable_command() {
         let mut d = Document::new();
         // an empty model still builds a (trivial) schematic; the command is applied, undone, redone
-        let cmds = d.generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform).unwrap();
+        let cmds = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
         let rev = d.revision();
         d.transact(rev, &cmds).unwrap();
         assert_eq!(d.schematic_views().len(), 1);
@@ -326,8 +422,11 @@ mod tests {
             elec_cables: vec![ElecCable::new(a, b, true), feeder],
             ..Default::default()
         };
-        d.transact(d.revision(), &[Command::SetMep(Box::new(data))]).unwrap();
-        let cmds = d.generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform).unwrap();
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))])
+            .unwrap();
+        let cmds = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
         d.transact(d.revision(), &cmds).unwrap();
         assert_eq!(d.schematic_views().len(), 1);
         let view = &d.schematic_views()[0];
@@ -340,7 +439,10 @@ mod tests {
         assert!(a_slot.starts_with("A "), "{a_slot}");
         let value: f64 = a_slot.strip_prefix("A ").unwrap().parse().unwrap();
         let expected = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
-        assert!((value - expected).abs() < 1e-2, "stamped {value} vs expected {expected}");
+        assert!(
+            (value - expected).abs() < 1e-2,
+            "stamped {value} vs expected {expected}"
+        );
         // voltage drop stays a placeholder (deferred to MEP-002)
         assert_eq!(msb.annotations[1], "V —");
         assert_eq!(msb.annotations[2], "% —");
@@ -357,5 +459,164 @@ mod tests {
         assert!(restored.not_approved);
         let r = restored.symbols.iter().find(|s| s.element == b).unwrap();
         assert!(r.annotations[0].starts_with("A "), "{}", r.annotations[0]);
+        // redo regenerates the stamp from the live model rather than replaying a snapshot
+        let value: f64 = r.annotations[0]
+            .strip_prefix("A ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            (value - expected).abs() < 1e-2,
+            "redo regenerated {value} vs expected {expected}"
+        );
+    }
+
+    #[test]
+    fn redo_regenerates_the_electrical_stamp_from_the_model() {
+        use crate::elec::NODE_BASE;
+        use crate::{Command, ElecCable, ElecKind, ElecNode, ElementId, MepData};
+        let mut d = Document::spatial_sample();
+        let (a, b, _c) = (NODE_BASE, NODE_BASE + 1, NODE_BASE + 2);
+        let mut chiller = ElecNode::new(
+            NODE_BASE + 2,
+            "Chiller",
+            ElecKind::Load,
+            [20.0, 10.0],
+            ElementId(10),
+        );
+        chiller.watts = 45000.0;
+        chiller.power_factor = 0.85;
+        let data = MepData {
+            elec_nodes: vec![
+                ElecNode::new(a, "TX1", ElecKind::Source, [0.0, 0.0], ElementId(10)),
+                ElecNode::new(b, "MSB", ElecKind::Board, [10.0, 0.0], ElementId(10)),
+                chiller,
+            ],
+            elec_cables: vec![
+                ElecCable::new(a, b, true),
+                ElecCable::new(b, NODE_BASE + 2, true),
+            ],
+            ..Default::default()
+        };
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))])
+            .unwrap();
+        let mut cmds = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
+        // Corrupt the annotation carried on the command; apply must regenerate it from the model.
+        if let Command::GenerateSchematic { diagram } = &mut cmds[0] {
+            diagram.symbols[0].annotations[0] = "A snapshot-marker".into();
+        }
+        d.transact(d.revision(), &cmds).unwrap();
+        let expected = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
+        // Apply regenerates the stamp, ignoring the corrupted annotation on the command.
+        assert_ne!(
+            d.schematic_views()[0].symbols[0].annotations[0],
+            "A snapshot-marker"
+        );
+        let v: f64 = d.schematic_views()[0].symbols[0].annotations[0]
+            .strip_prefix("A ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            (v - expected).abs() < 1e-2,
+            "apply {v} vs expected {expected}"
+        );
+        // Undo then redo must also regenerate from the model, not replay the corrupted snapshot.
+        assert!(d.undo().unwrap());
+        assert!(d.schematic_views().is_empty());
+        assert!(d.redo().unwrap());
+        assert_ne!(
+            d.schematic_views()[0].symbols[0].annotations[0],
+            "A snapshot-marker"
+        );
+        let v: f64 = d.schematic_views()[0].symbols[0].annotations[0]
+            .strip_prefix("A ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            (v - expected).abs() < 1e-2,
+            "redo {v} vs expected {expected}"
+        );
+    }
+
+    #[test]
+    fn electrical_stamp_handles_board_local_load_phase_and_rejections() {
+        let three = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
+        let one = 45000.0 / ((400.0 / 3f64.sqrt()) * 0.85);
+        // downstream 45 kW load on a 3-phase feeder (golden)
+        let v = elec_doc(0.0, 45000.0, true, true, "Chiller")
+            .generate_schematic(Discipline::Electrical)
+            .unwrap();
+        assert_current(&v.symbols[0].annotations[0], three);
+        assert!(v.not_approved);
+        // board's own local 45 kW load (downstream load zero) is still stamped from the board's load
+        let v = elec_doc(45000.0, 0.0, true, true, "Chiller")
+            .generate_schematic(Discipline::Electrical)
+            .unwrap();
+        assert_current(&v.symbols[0].annotations[0], three);
+        // all single-phase: phase voltage is 400/sqrt(3) line-to-neutral, not 400 line-to-line
+        let v = elec_doc(0.0, 45000.0, false, false, "Chiller")
+            .generate_schematic(Discipline::Electrical)
+            .unwrap();
+        assert_current(&v.symbols[0].annotations[0], one);
+        // mixed-phase (3-phase feeder into 1-phase load) is rejected, not silently stamped 0 A
+        let v = elec_doc(0.0, 45000.0, true, false, "Chiller")
+            .generate_schematic(Discipline::Electrical)
+            .unwrap();
+        assert_eq!(v.symbols[0].annotations[0], "A —");
+        assert!(v.warnings.iter().any(|w| w.contains("mixed-phase")));
+        // an empty load name is rejected by the solver graph, not silently stamped 0 A
+        let v = elec_doc(0.0, 45000.0, true, true, "")
+            .generate_schematic(Discipline::Electrical)
+            .unwrap();
+        assert_eq!(v.symbols[0].annotations[0], "A —");
+        assert!(v.warnings.iter().any(|w| w.contains("rejected")));
+    }
+
+    fn elec_doc(
+        board_w: f64,
+        load_w: f64,
+        feeder_three: bool,
+        branch_three: bool,
+        name: &str,
+    ) -> Document {
+        use crate::{Command, ElecCable, ElecKind, ElecNode, MepData};
+        let a = crate::elec::NODE_BASE;
+        let b = a + 1;
+        let c = a + 2;
+        let mut board = ElecNode::new(b, "MSB", ElecKind::Board, [10.0, 0.0], ElementId(10));
+        board.watts = board_w;
+        board.power_factor = 0.85;
+        let mut load = ElecNode::new(c, name, ElecKind::Load, [20.0, 10.0], ElementId(10));
+        load.watts = load_w;
+        load.power_factor = 0.85;
+        let data = MepData {
+            elec_nodes: vec![
+                ElecNode::new(a, "TX1", ElecKind::Source, [0.0, 0.0], ElementId(10)),
+                board,
+                load,
+            ],
+            elec_cables: vec![
+                ElecCable::new(a, b, feeder_three),
+                ElecCable::new(b, c, branch_three),
+            ],
+            ..Default::default()
+        };
+        let mut d = Document::spatial_sample();
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))])
+            .unwrap();
+        d
+    }
+
+    fn assert_current(a: &str, expected: f64) {
+        assert!(a.starts_with("A "), "got {a}");
+        let value: f64 = a.strip_prefix("A ").unwrap().parse().unwrap();
+        assert!(
+            (value - expected).abs() < 1e-2,
+            "stamped {value} vs expected {expected}"
+        );
     }
 }
