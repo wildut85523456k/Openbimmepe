@@ -17,6 +17,21 @@ fn plan_bounds(bounds: Rect) -> Rect {
     if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(EMPTY_PLAN_SPAN_M)) }
 }
 
+/// The plan-view tabs, from the project's levels (lowest first): the two default plans - the lower and
+/// upper plan - are labelled by the real level 10/11 when the project has one, else generically, then
+/// every other level gets its own tab. As in Revit, the tab says the level's name, never a hard-coded
+/// "Level 1": a project loaded from IFC or started empty names its own levels.
+fn plan_tabs(levels: &[(ElementId, String, f64)]) -> Vec<(String, View)> {
+    let name_of = |default_id: u64, fallback: &str| {
+        levels.iter().find(|(id, _, _)| id.0 == default_id).map(|(_, n, _)| n.clone()).unwrap_or_else(|| fallback.to_string())
+    };
+    let mut tabs = vec![(name_of(10, "Floor Plan"), View::Plan), (name_of(11, "Upper Plan"), View::UpperPlan)];
+    for (id, name, _) in levels.iter().filter(|(id, _, _)| id.0 != 10 && id.0 != 11) {
+        tabs.push((name.clone(), View::Level(id.0)));
+    }
+    tabs
+}
+
 fn project(point: [f64; 3], three_d: bool, yaw: f32, pitch: f32) -> (Vec2, f32) {
     let [x, y, z] = point.map(|v| v as f32);
     if !three_d { return (Vec2::new(x, -y), z); }
@@ -77,13 +92,12 @@ fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: P
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
-        let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
+        let level_tabs = plan_tabs(&app.levels());
         let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0)))
             .chain(app.document.elements().filter(|e| e.category == Category::Elevation).flat_map(|e| (0..4u8).filter(move |k| e.count >> k & 1 == 1).map(move |k| (crate::section_ui::name_of_marker(&e.name, k), View::Marked(e.id.0, k)))))
             .collect();
-        let tabs = [("Level 1".to_string(), View::Plan), ("Level 2".to_string(), View::UpperPlan)].into_iter()
-            .chain(added.into_iter().map(|(v, n)| (n, v)))
-            .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)])
+        let tabs = level_tabs.into_iter()
+            .chain([("{3D}".to_string(), View::ThreeD), ("Mechanical".to_string(), View::Mechanical)])
             .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
             .chain(sections);
         for (label, view) in tabs {
@@ -1343,6 +1357,22 @@ mod tests {
         frame(&ctx, screen, &mut app, vec![button(p, true)]);
         frame(&ctx, screen, &mut app, vec![button(p, false)]);
         assert!(app.document.elements().count() > before, "the Level tool must place a level on an empty canvas; message: {}", app.message);
+    }
+
+    #[test]
+    fn plan_tabs_say_the_level_names_and_a_generic_name_for_a_default_plan_without_a_level() {
+        // levels 10/11 present and named: the two default plans take their names, the rest get their own tab
+        let named = vec![(ElementId(10), "Ground".to_string(), 0.0), (ElementId(11), "First".to_string(), 3.0), (ElementId(20), "Roof".to_string(), 9.0)];
+        assert_eq!(plan_tabs(&named), vec![
+            ("Ground".to_string(), View::Plan),
+            ("First".to_string(), View::UpperPlan),
+            ("Roof".to_string(), View::Level(20)),
+        ]);
+        // no levels at all (an empty or IFC-loaded project): the default plans fall back to generic names
+        assert_eq!(plan_tabs(&[]), vec![
+            ("Floor Plan".to_string(), View::Plan),
+            ("Upper Plan".to_string(), View::UpperPlan),
+        ]);
     }
 
     #[test]
