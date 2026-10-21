@@ -443,9 +443,25 @@ mod tests {
             (value - expected).abs() < 1e-2,
             "stamped {value} vs expected {expected}"
         );
-        // voltage drop stays a placeholder (deferred to MEP-002)
-        assert_eq!(msb.annotations[1], "V —");
-        assert_eq!(msb.annotations[2], "% —");
+        // MEP-002 stamps voltage drop (V, %); with the prototype impedance the drop is ~0, but the
+        // slots are computed, not placeholders.
+        assert_ne!(msb.annotations[1], "V —", "V slot should be stamped");
+        let v_val: f64 = msb.annotations[1]
+            .strip_prefix("V ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(v_val.abs() < 1e-3, "stiff-source drop ~0 V, got {v_val}");
+        assert_ne!(msb.annotations[2], "% —", "% slot should be stamped");
+        let pct_val: f64 = msb.annotations[2]
+            .strip_prefix("% ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            pct_val.abs() < 1e-3,
+            "stiff-source drop ~0 %, got {pct_val}"
+        );
         // every imported value is preliminary
         assert!(view.not_approved);
         assert!(view.warnings.iter().any(|w| w.contains("MEP-010")));
@@ -695,8 +711,62 @@ mod tests {
         );
         let msb = &d.schematic_views()[0].symbols[0];
         assert_eq!(msb.annotations.len(), 3);
-        assert_eq!(msb.annotations[1], "V —");
-        assert_eq!(msb.annotations[2], "% —");
+        // MEP-002 stamps V/% (not placeholders) even when re-stamping a view whose annotations
+        // were deliberately cleared before apply.
+        assert_ne!(msb.annotations[1], "V —", "V slot stamped on re-stamp");
+        assert_ne!(msb.annotations[2], "% —", "% slot stamped on re-stamp");
         assert_current(&msb.annotations[0], 45000.0 / (3f64.sqrt() * 400.0 * 0.85));
+    }
+
+    #[test]
+    fn restamp_after_graph_rejection_clears_stale_vdrop() {
+        // A retained GenerateSchematic applied to a rejected graph must reset stale voltage-drop
+        // annotations to placeholders rather than leaving the prior numeric value.
+        let mut d = elec_doc(0.0, 45000.0, true, true, "Chiller");
+        let original = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
+        d.transact(d.revision(), &original).unwrap();
+        // good graph -> V/% are stamped (not placeholders)
+        assert_ne!(d.schematic_views()[0].symbols[0].annotations[1], "V —");
+        assert_ne!(d.schematic_views()[0].symbols[0].annotations[2], "% —");
+        let rejected = elec_doc(0.0, 45000.0, true, true, "").mep().clone();
+        d.transact(d.revision(), &[crate::Command::SetMep(Box::new(rejected))])
+            .unwrap();
+        // re-applying the original commands over the rejected model stamps the rejected model,
+        // so V/% fall back to placeholders
+        d.transact(d.revision(), &original).unwrap();
+        assert_eq!(d.schematic_views()[0].symbols[0].annotations[1], "V —");
+        assert_eq!(d.schematic_views()[0].symbols[0].annotations[2], "% —");
+        assert!(d.schematic_views()[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("rejected")));
+    }
+
+    #[test]
+    fn redo_of_stored_view_regenerates_the_vdrop() {
+        // A view stored (via SetMep) with a stale V/% marker must be regenerated, not replayed, on redo.
+        let mut d = elec_doc(0.0, 45000.0, true, true, "Chiller");
+        let mut m = d.mep().clone();
+        let mut v = d.generate_schematic(Discipline::Electrical).unwrap();
+        v.symbols[0].annotations[1] = "V stale-marker".into();
+        v.symbols[0].annotations[2] = "% stale-marker".into();
+        m.schematics.push(v);
+        d.transact(d.revision(), &[crate::Command::SetMep(Box::new(m))])
+            .unwrap();
+        d.undo().unwrap();
+        d.redo().unwrap();
+        assert_ne!(
+            d.schematic_views()[0].symbols[0].annotations[1],
+            "V stale-marker"
+        );
+        assert_ne!(
+            d.schematic_views()[0].symbols[0].annotations[2],
+            "% stale-marker"
+        );
+        // regenerated from the model, so V is stamped (not a placeholder) again
+        assert_ne!(d.schematic_views()[0].symbols[0].annotations[1], "V —");
+        assert_ne!(d.schematic_views()[0].symbols[0].annotations[2], "% —");
     }
 }

@@ -6,10 +6,11 @@
 //! is a separate, pre-existing sizing tool, and the clean-room rule forbids duplicating a calculation
 //! engine. SCH-006 reads the edesign-alike solver results only.
 //!
-//! Narrow slice (SCH-006): feeder design current (A) only. Voltage drop (V, %) is deferred to
-//! MEP-002 as an explicit release gate. The import stamps each ElecCable's calculated current onto
-//! the downstream board symbol's "A" annotation (the node the cable feeds). Voltage-drop annotations
-//! ("V —", "% —") are left as placeholders until MEP-002.
+//! SCH-006 stamps feeder design current (A); MEP-002 stamps voltage drop (V, %). Both read the
+//! edesign-alike solver results only — no calculation engine is duplicated here. The import stamps
+//! each ElecCable's results onto the downstream board symbol's annotations: "A" = design current,
+//! "V" = volts dropped (nominal * branch_percent/100), "%" = percent dropped. Voltage-drop values
+//! come straight from the solver's `branch_voltage_drop_pct` (per-kilometre R/X), read-only.
 //!
 //! Every imported value is `not_approved` — the solver's `approval` is always `"not_approved"` (it
 //! computes values and findings only; engineering sign-off is a separate step) — and the cable
@@ -37,8 +38,8 @@ const SQRT_3: f64 = 1.7320508075688772;
 
 /// Prototype per-kilometre cable impedance (ohm/km) fed to the solver. The solver multiplies these by
 /// length_km; this value is negligibly small so design currents reduce to the load formula
-/// `Ib = P / (sqrt(3) * V * pf)` (voltage drops are deferred to MEP-002). Real R/X come from the
-/// breaker-catalog import (MEP-010).
+/// `Ib = P / (sqrt(3) * V * pf)` and voltage drops collapse to ~0 (both stamped by SCH-006/MEP-002
+/// from the solver). Real R/X come from the breaker-catalog import (MEP-010).
 const PROTOTYPE_RESISTANCE_OHM_PER_KM: f64 = 1e-9;
 const PROTOTYPE_REACTANCE_OHM_PER_KM: f64 = 1e-9;
 
@@ -48,7 +49,7 @@ const PROTOTYPE_SOURCE_SC_VA: f64 = 1_000_000.0;
 
 const WARNING_IMPEDANCE: &str = "electrical currents use a prototype cable impedance (stiff-source, 1e-9 ohm/km); replace with real values from the breaker-catalog import of MEP-010 before use — not_approved";
 const WARNING_VOLTAGE: &str = "system voltage assumed 400 V line-to-line (prototype; derive from the source connector per MEP-010); single-phase loads use 400/√3 V line-to-neutral (~231 V) — not_approved";
-const WARNING_DROP: &str = "voltage drop (V, %) is deferred to MEP-002: the 'V —' and '% —' annotations are not calculated — not_approved";
+const WARNING_DROP: &str = "voltage drop (V, %) is imported from the edesign-alike solver (MEP-002), read-only; with the prototype cable impedance (1e-9 ohm/km, stiff source) the drop is ~0 V — replace R/X from the breaker-catalog import of MEP-010 before use — not_approved";
 
 /// Nominal voltage for a node of the given phase configuration: line-to-line for three-phase,
 /// line-to-neutral for single-phase (the solver's single-phase convention).
@@ -232,11 +233,25 @@ pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
 
     let scenario = Scenario::new(ScenarioId(1), "schematic");
     let mut stamped: HashMap<u64, f64> = HashMap::new();
+    // MEP-002: voltage drop (volts, percent) read-only from the solver, keyed by the downstream
+    // node the cable feeds (the board symbol that carries the annotation). Volts = nominal voltage
+    // for the downstream node's phase configuration times percent/100.
+    let mut vdrop: HashMap<u64, (f64, f64)> = HashMap::new();
     match solve(&network, &scenario, &SolverSettings::default()) {
         Ok(report) => {
             for br in &report.branches {
                 if let Some(c) = branch_to_cable.get(&br.branch) {
                     stamped.insert(c.to, br.design_current_a);
+                    if let Some(to_node) = mep.elec_nodes.iter().find(|n| n.id == c.to) {
+                        let v_nom = voltage_for(node_phases(to_node, mep));
+                        vdrop.insert(
+                            c.to,
+                            (
+                                v_nom * br.branch_voltage_drop_pct / 100.0,
+                                br.branch_voltage_drop_pct,
+                            ),
+                        );
+                    }
                 }
             }
             for f in &report.findings {
@@ -253,6 +268,7 @@ pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
         )),
     }
     stamp_symbols(view, &stamped);
+    stamp_vdrop_symbols(view, &vdrop);
     for w in [WARNING_IMPEDANCE, WARNING_VOLTAGE, WARNING_DROP] {
         if !view.warnings.iter().any(|x| x.contains(w)) {
             view.warnings.push(w.to_string());
@@ -262,8 +278,8 @@ pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
 }
 
 /// Restore the mandatory A/V/% placeholder triple on every board symbol. Strips stale imported
-/// currents before a re-stamp (e.g. after a rejected graph or on redo) and guarantees the three
-/// annotation slots exist so stamping never indexes an empty annotations vector.
+/// currents and drops before a re-stamp (e.g. after a rejected graph or on redo) and guarantees the
+/// three annotation slots exist so stamping never indexes an empty annotations vector.
 fn reset_board_annotations(view: &mut SchematicView) {
     for s in &mut view.symbols {
         if s.kind == SymbolKind::Board {
@@ -283,6 +299,22 @@ fn stamp_symbols(view: &mut SchematicView, stamped: &HashMap<u64, f64>) {
         if s.kind == SymbolKind::Board {
             if let Some(&current) = stamped.get(&s.element) {
                 s.annotations[0] = format!("A {:.3}", current);
+            }
+        }
+    }
+}
+
+/// Copy a solver voltage drop (V, %, MEP-002) into the "V"/"%" slots of each board symbol fed by a
+/// cable. Read-only reuse: the percent comes from the solver's `branch_voltage_drop_pct` (the drop
+/// on the feeder supplying the board); volts is that percent of the downstream node's nominal
+/// voltage (`voltage_for(node_phases(to_node, mep))`). Boards with no downstream cable keep their
+/// "V —"/"% —" placeholders (e.g. a pure source or an un-fed board).
+fn stamp_vdrop_symbols(view: &mut SchematicView, vdrop: &HashMap<u64, (f64, f64)>) {
+    for s in &mut view.symbols {
+        if s.kind == SymbolKind::Board {
+            if let Some(&(volts, pct)) = vdrop.get(&s.element) {
+                s.annotations[1] = format!("V {:.1}", volts);
+                s.annotations[2] = format!("% {:.1}", pct);
             }
         }
     }
