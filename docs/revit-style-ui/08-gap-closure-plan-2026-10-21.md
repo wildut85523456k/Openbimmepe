@@ -21,7 +21,7 @@ later stage (unchanged, 21 Oct 2026).
 | 2 | Working file: operation log + snapshots? | **Yes, agreed.** Autosave + recovery is the first use of `crates/oplog` | GAP-15: `crates/oplog` gains its first dependent; BIM-004's acceptance grows |
 | 3 | First MEP families for the content library | **AHU, ceiling diffuser, VAV, pump, valve, WC/basin, sprinkler head, luminaire, panel board, hanger/support** | GAP-18 fixes the library list; the hanger/support family covers the structure-for-MEP need (7 in the analysis) without a structure stage |
 | 4 | Electrical calculations: keep the in-repo IEC 60364 module, or import from edesign-alike? | **Export and import from edesign-alike** | GAP-24/25: the in-repo module becomes a migration source, not the destination. This is a correctness decision as well as a de-duplication one — the project's rule is no duplicate development across the two repositories |
-| 5 | End-to-end test building | **Data hall for the MEP test; keep the office for architecture** | GAP-08/GAP-19: two fixtures, one harness. The data hall stresses routing, flow and schedules in an open plan; the office keeps the wall/door/stair path |
+| 5 | End-to-end test building | **Data hall for the MEP test; keep the office for architecture** | GAP-08 builds the harness and the office (TEST-001, P0); GAP-19/MEP-004 adds the data hall at P3. The data hall stresses routing, flow and schedules in an open plan; the office keeps the wall/door/stair path |
 | 6 | *New* creates default levels (raised by this plan) | **Yes** | GAP-09: *New* creates Level 1 and Level 2, so no tool can point at a level that does not exist |
 
 ---
@@ -100,8 +100,6 @@ is tested except through this harness.
 |---|---|---|---|
 | GAP-17 | Load Family and editable type parameters: wire `crates/family::catalogue` and the type editor into the UI | 5–10 | A catalogue imports, places and its type parameters edit with the mouse |
 | GAP-18 | The ten families of decision 3, each with connectors, host rules and an IFC class | 15–30 | Each places, hosts, exports its IFC class and appears in a schedule |
-| GAP-19 | MEP end-to-end test in the data hall (decision 5) | 3–5 | AHU → terminals → system → layout → End Points → Compute → Apply sizes → IFC asserts the system name and the ports |
-
 Everything in 5.2–5.4 of the analysis depends on GAP-17/18.
 
 ### P3 — Spaces, flow and systems
@@ -110,7 +108,9 @@ GAP-20 Space and Zone with airflow data (MEP-critical) · GAP-21 terminals with 
 classification; named systems that include terminals and respect connector flow direction ·
 GAP-22 Generate Layout from equipment to terminals with conversion settings, and the Perimeter and
 Intersection methods · GAP-23 Compute on the named system with all four sizing methods
-(friction, equal friction, velocity, static regain).
+(friction, equal friction, velocity, static regain) · GAP-19 the data-hall MEP chain end to end
+(decision 5), which is MEP-004 in the backlog: it sits here, at P3, because it needs the terminals,
+the named systems and the layout this package builds.
 
 ### P4 — Routing completeness
 
@@ -152,7 +152,8 @@ acceptance** rather than adding a second row for the same thing.
 | GAP-17, GAP-18 | MEP-003 (new) | New row: the MEP family library; FAMILY-001 keeps the editor |
 | GAP-25 | MEP-005 (new) | New row: the imported electrical calculations and the retirement of the in-repo module |
 | GAP-25 | MEP-002, SCH-004 | Acceptance extended: electrical values come from the pinned crates |
-| GAP-08, GAP-19 | TEST-001 (new) | New row: the harness and the two test buildings |
+| GAP-08 | TEST-001 (new) | New row: the harness and the office building |
+| GAP-19 | MEP-004 (new) | New row: the data-hall MEP chain, at P3 where the terminals and systems it needs are |
 | GAP-16 | DOC-002 (new) | New row: docs refresh |
 
 Phase gating in `05-backlog.md` gains a step 2a: the walking skeleton (GUI-006/007, BIM-005) gates
