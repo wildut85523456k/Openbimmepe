@@ -60,7 +60,7 @@ is measured against the reference: a wrong reference produces wrong remediation.
 | **R1** | The reference docs and the gap analysis exist **only on the branch** `docs/revit-book-references`. There is no PR for it, so nothing on `main` can cite them. | Open a docs-only PR from `docs/revit-book-references` to `main`. It adds 11 files and touches no code, so it cannot break a build. | GitHub | trivial |
 | **R2** | The Structure book is not distilled. The owner deferred structure, so this is correct for now, but the reason is recorded nowhere in the reference index. | Keep `docs/reference/README.md` line 14 as the deferral record; add the Structure book to the extraction queue in `docs/agent-team/` so the stage is not forgotten. | `docs/reference/README.md`, `docs/agent-team/` | trivial |
 | **R3** | The reference docs are not linked from `docs/revit-style-ui/README.md`, so a reader of the design never reaches them. | Add a "Reference material" bullet to the Documents list, naming the six files and the `[book]` / `[knowledge]` convention. | `docs/revit-style-ui/README.md` | trivial |
-| **R4** | `README.md` lists 7 of the 19 workspace members (`Cargo.toml` `[workspace] members`), and its crate table is missing `route`, `schematic`, `sheets`, `calc`, `ifc`, `document`, `oplog`, `sketch`, `automation`, `viewport`, `viewport-egui`, `photo`, `apps/desktop`. | Regenerate the table from `Cargo.toml` rather than by hand, and add the one-line "what it is" for each of the missing crates. | `README.md` | trivial |
+| **R4** | `README.md` lists 5 of the 19 workspace members (its crate table has `geom`, `family`, `place`, `keymap`, `arch`, plus a `spikes/*` row), and is missing `document`, `ifc`, `view`, `route`, `sheets`, `calc`, `automation`, `oplog`, `sketch`, `viewport`, `viewport-egui`, `photo`, `schematic` and `apps/desktop`. | Regenerate the table from `Cargo.toml` rather than by hand, and add the one-line "what it is" for each of the missing crates. | `README.md` | trivial |
 | **R5** | Stale claims in existing documents. The arch audit lists 15 (D1-D15) and the MEP audit 13; the recurring ones are: `docs/revit-ux-parity-audit.md` claims event-test verification that does not cover the ribbon, options bar or global keys; `docs/3d-view-parity-plan.md` claims no 3D tools and no redo; `docs/agent-team/gap-review.md` claims `main` has no desktop app; `docs/revit-style-ui/06` claims the schematic engine is not in the candidate; `docs/revit-book-review.md` A8 mentions the fixed level tabs but not that they break IFC export in a new project. | Fix each claim at its source. Keep the historical value: mark the superseded statement "superseded 2026-10-21" rather than deleting it, so a reader can see what changed. | see per-row | small |
 | **R6** | The reference docs cite "Text extraction `arch.txt`, lines 1134-10368" but the extraction itself is not in the repository, so the line references cannot be reproduced by a reviewer. | Add an extraction manifest to `docs/reference/`: the source file name, its SHA-256, the tool used, and the page/line convention. Do **not** commit the book text or the extraction - the books are copyrighted and only paraphrase may be stored. | `docs/reference/` | small |
 | **R7** | The reference acceptance checklists (~90-100 statements for Architecture, plus MEP) are prose. They become gates only when they are tests. | Convert them one feature at a time as the feature is built, carrying the reference section id into the test name (`arch-part1` section 4.1 -> test `..._matches_arch_part1_wall_...`). Do not convert them in bulk before the feature exists. | `crates/*/tests`, `apps/desktop/src/*` | ongoing |
@@ -325,7 +325,41 @@ three companion audits against the pinned SHA. Their reports are:
 Their verdicts are folded into the rows above: a row whose citation did not hold is marked in the
 register, and the citation was corrected before the row was carried into a remediation.
 
-### 8.3 What was not verified
+### 8.3 Size and measuring convention
+
+Line counts below are `wc -l` over `*.rs` files, excluding any `target/` directory, at
+`dcf8382`. `apps/desktop` is counted separately from the crates. The figures are a measuring
+convention for this document, not a project metric; a reviewer using a different convention will
+get different totals and should say so.
+
+| Where | Lines |
+|---|---|
+| `apps/desktop` | 18,531 |
+| `crates/family` | 17,018 |
+| `crates/document` | 12,868 |
+| `crates/ifc` | 8,397 |
+| `crates/view` | 5,944 |
+| `crates/route` | 5,546 |
+| `crates/sheets` | 4,607 |
+| `crates/place` | 2,865 |
+| `crates/calc` | 1,996 |
+| `crates/arch` | 1,631 |
+| `crates/automation` | 1,485 |
+| `crates/geom` | 1,481 |
+| `crates/photo` | 1,254 |
+| `crates/oplog` | 1,182 |
+| `crates/viewport-egui` | 1,139 |
+| `crates/sketch` | 1,069 |
+| `crates/viewport` | 985 |
+| `crates/keymap` | 924 |
+| `crates/schematic` | 410 |
+| **Total** | **~94,000** |
+
+The test count is 1,142 `#[test]` attributes across `crates/` and `apps/` at the same SHA, by grep
+count. The suite result at that SHA is recorded in section 8.1 of the companion gap analysis and is
+re-measured here only as a baseline, not as a gate.
+
+### 8.4 What was not verified
 
 - The desktop app was not run interactively. Every statement about runtime behaviour is from code
   reading plus the test suite.
