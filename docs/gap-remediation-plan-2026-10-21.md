@@ -117,9 +117,12 @@ counts, driven entirely through `Desktop::ui` events. This is the gate for every
 | **B24** | **The equipment pad is not associated with the equipment**, so moving the equipment does not move the pad. | Host the pad on the equipment instance. | `crates/document/src/lib.rs:844` | Moving the unit moves its pad. |
 | **B25** | **Undo restores the model but not the view or selection**, so undoing a just-made level leaves `View::Level(gone)` which resolves to `ElementId(10)`. | Restore the view and selection with the snapshot, or clamp the view to a valid level. | `crates/document/src/lib.rs:1275-1296`, `apps/desktop/src/model_edit.rs:316` | Undo of a created level returns to a valid plan. |
 
+| **B26** | **`crates/calc/src/electrical.rs` duplicates a capability that belongs to edesign-alike.** The file is a complete IEC 60364 engine (~988 lines) with `crates/document/src/compute_elec.rs` behind it and the Compute button wired to it, while `06-mep-schematic-automation.md` decision 2 says electrical calculations are imported and not re-implemented. | Mark the file and `compute_elec.rs` deprecated, remove them from the desktop path, and pin edesign-alike's electrical crates by git SHA. Owner decision of 2026-10-21 (option B). | `crates/calc/src/electrical.rs`, `crates/document/src/compute_elec.rs`, `apps/desktop/src/elec_ui.rs` | No desktop build or Compute test may reference the in-repo engine after the change. |
+
 **Class 2 acceptance:** the IFC written from a representative model contains the run systems, rooms,
 grids, named systems, penetrations and stable GlobalIds; Compute is persistent and reads the MEP
-Settings lists; and the shell blockers are closed by tests that start from an empty document.
+Settings lists; the shell blockers are closed by tests that start from an empty document; and no
+desktop path references the deprecated electrical engine.
 
 ---
 
@@ -254,12 +257,13 @@ These change priorities and cannot be settled by the implementer.
    design doc.
 3. **Which MEP families first for C3?** Proposed order: AHU, ceiling diffuser, VAV, pump, valve,
    WC/basin, sprinkler head, luminaire, panel board, hanger/support.
-4. **Electrical calculations.** `06-mep-schematic-automation.md` decision 2 says electrical
-   calculations are imported from edesign-alike and not re-implemented. The repo contains a complete
-   IEC 60364 implementation in `crates/calc/src/electrical.rs` (~988 lines) plus
-   `crates/document/src/compute_elec.rs`. Either the decision or the code must change. The
-   project rule is no duplicate development across the two repositories, so this is a real conflict,
-   not a style preference.
+4. ~~**Electrical calculations.**~~ **Decided 2026-10-21: option B.** The decision stands:
+   `06-mep-schematic-automation.md` decision 2 wins, electrical calculations are imported from
+   edesign-alike and are **not** re-implemented in this repository. Consequences, now row **B26**:
+   `crates/calc/src/electrical.rs` (~988 lines) and `crates/document/src/compute_elec.rs` are
+   marked deprecated and removed from the desktop path in a follow-up, and edesign-alike's
+   electrical crates are pinned by git SHA instead. This also matches the project rule that there
+   is no duplicate development across the two repositories.
 5. **Test building for the end-to-end tests.** The office was chosen on 14 Oct. Should the MEP test
    use a data hall instead?
 6. **Does the reference branch merge now?** R1 is a docs-only PR and is the cheapest way to make
@@ -343,6 +347,13 @@ were wrong and are corrected in the rows above:
 5. **`IfcRelAssignsToGroupByFactor` does not exist in the tree.** `IfcRelAssignsToGroup` is used, and
    only for MEP pieces. Corrected in **B9**.
 
+**Resolution of the one real conflict (C7 in the docs-decisions report).** The report confirms the
+conflict: `06-mep-schematic-automation.md:10` says revit-alike does not reimplement electrical
+calculations, while `crates/calc/src/electrical.rs` is a full IEC 60364 engine and the repository
+contains zero references to edesign-alike. The owner decided on 2026-10-21 that **the decision stands
+and the code gives way** (option B), which is also what the standing project rule requires. The
+remediation is row **B26**.
+
 **Two nuances that do not change a row:**
 
 - **B4 / A4**: no `Key::S`, `Key::N` or `Key::O` handler exists; the `save_as` arm is at
@@ -394,6 +405,45 @@ get different totals and should say so.
 The test count is 1,142 `#[test]` attributes across `crates/` and `apps/` at the same SHA, by grep
 count. The suite result at that SHA is recorded in section 8.1 of the companion gap analysis and is
 re-measured here only as a baseline, not as a gate.
+
+### 8.5 Verified line references, per row
+
+These are the real lines the four verification agents read at `dcf8382`. They supersede any
+`file:line` in the companion gap analysis where the two differ.
+
+| Row | Verified reference |
+|---|---|
+| **B1** | `apps/desktop/src/model_view.rs:143` (`if !bounds.is_finite() { return; }`); first tool branch `:482`; bounds written only at `:132` (plan meshes) and `:140` (grid datum); the only Level arm is `:220` and is gated on `three_d`. 3D is unaffected - its return is at `:88`. |
+| **B2** | `model_view.rs:68` filters levels by `ElementId(10)`/`(11)`; `:72` hard-codes `("Level 1", View::Plan)` / `("Level 2", View::UpperPlan)`; `:74` hard-codes `"M-101 - Mechanical"`; `model_edit.rs:316`; `panels.rs:931,943`; `plan_export.rs:76-78`; export failure at `export.rs:123`. Ids 10/11 are minted only by `Document::spatial_sample()` (`crates/document/src/spatial.rs:654-655`); `Document::new()` has neither. |
+| **B3** | `apps/desktop/src/main.rs:567`, the first statement of `fn ui` (`:565`, `impl eframe::App` at `:564`), before the ribbon (`:589`) and viewport (`:590`), with no `egui_wants_keyboard_input` guard. The two-stage contract the tools implement is at `model_view.rs:563`. No test reaches `Desktop::ui` - `main.rs` has no `mod tests`. |
+| **B4** | No `Key::S`, `Key::N` or `Key::O` anywhere in `apps/desktop/src/`. Handled keys are Escape `:567`, Tab `:568`, Ctrl/Cmd+Y\|Z `:578`, Ctrl+Z `:580`, Ctrl+P `:584`. The `save_as` arm at `main.rs:476` is the sole occurrence of that id in the repository, so it is unreachable; Save itself is the icon button `ribbon.rs:49`. The keymap is built at `main.rs:268` and used only for printing at `main.rs:657`; `Matcher::feed` / `command_for` (`crates/keymap/src/lib.rs:366,251`) are never called. |
+| **B5** | `main.rs:458` sets `slab_offset_mm = 2700.0`, `slab_thickness_mm = 20.0` for Ceiling; `:459` Roof 200/0; `:462` Door, `:463` Window, `:464` Component reset only `family_*` and never the pair; `model_edit.rs:568` reads `elevation_m = self.slab_offset_mm / 1000.0`. Other consumers of the same fields: `model_edit.rs:465,470,526` (Ceiling), `:533` (Roof), `:541` (Slab), `:379` (Footing), `:390` (WallFooting); exposed in `panels.rs:456,468,483,641,645`. `choose_tool` (`main.rs:303-318`) clears `slab_points` but not the pair. |
+| **B6** | `crates/document/src/lib.rs:689-702` `place_level` checks only finite elevation and a 1e-3 m tolerance, and takes an explicit name verbatim with no uniqueness check. `crates/arch/src/lib.rs:18` `MIN_LEVEL_GAP = 0.1` and `:82-92` reject gaps under 0.1 m and duplicate names; `export.rs:289` turns that into an export failure. Deletion is blocked at `model_edit.rs:870`. `Command::Rename` exists (`lib.rs:524`) but no `Command::Rename` is issued anywhere in `apps/desktop/src`. |
+| **B7** | `export.rs:205,207` build every run with `System::Other`; only `:322` copies a system from a joined fitting; zero hits for `run_system` in `export.rs`; the comment at `:203` is stale - `MepData.run_systems` exists at `crates/document/src/mep.rs:189`. |
+| **B8** | `export.rs:198` drops Level/Grid/Tag/Dimension/Room/Opening/Section/Elevation/BeamSystem/Truss/Rebar; `:291` `rooms: vec![]`; `:292` `georef: None`; `:432` warns the site is not exported. The crate can do it: `crates/ifc/src/lib.rs:964` calls `write_spaces` (`:1497-1556`, `IFCSPACE` + `Qto_SpaceBaseQuantities`), boundaries at `:1553-1555,1576`; tests `tests/ifc.rs:258-277`, `tests/boundaries.rs:191-196`. |
+| **B9** | `MepSystemDef` (`crates/document/src/mep.rs:105,178`) is never read by the exporter; `crates/ifc/src/lib.rs:1706,1739,1781` key `by_system` on `System::code()`; `:1831-1838` writes one `IFCDISTRIBUTIONSYSTEM` per code named `"<System name> N"`; `IFCRELASSIGNSTOGROUP` at `:1837` is the only hit (there is no `...BYFACTOR`); equipment (`:1798-1801`) is never assigned to a system. |
+| **B10** | `crates/place/src/penetrations.rs` exists (`find` `:279`, `register_csv` `:381`) but `export.rs:290-291` hard-codes empty lists and no file under `apps/` calls the engine. |
+| **B11** | Product ids are stable via `gid()` (`crates/ifc/src/lib.rs:638-643`, `guid.rs:14-15`); storeys, relationships, property sets, quantities and systems use the `aux` counter `gen_gid` (`lib.rs:602,645-648`; callers `:751,756,772,774,923,933,935,937,938,942,948`). `next_id` reuses a deleted maximum (`crates/document/src/lib.rs:571`). `apps/desktop/src/model_edit.rs:305` pins `"Project1"` and key 1. |
+| **B12** | `apps/desktop/src/file.rs:59-66` writes the `.obim` atomically via a `.saving` temp file and rename; `crates/document/src/native.rs:130-136` are text records; zero hits for autosave, backup, recovery or crash; `crates/oplog/Cargo.toml:2` exists with zero dependants anywhere. |
+| **B13** | The size catalogue is session-only dialog text (default empty, `compute_ui.rs:70`); `NoSize` at `crates/calc/src/tree.rs:228`; the MEP Settings lists are not read by Compute. |
+| **B14** | `compute_ui.rs:132` clears `equip_links` before adding the end point; only kind 4 (`:144`) restores the join. |
+| **B15** | The Air preset leaves `max_velocity` at 1.5 (`compute_ui.rs:69-70`); the fluid preset sets density/viscosity/roughness only. |
+| **B17** | The placeholder arm is `main.rs:495`. Wired vs placeholder: HVAC 21/8 wired/13 placeholder, Plumbing 22/7/15, Electrical 20/3/17; 63 buttons, 18 wired, 45 placeholder. |
+| **B18** | `crates/document/src/compute.rs:156-157` filters by the `System` enum; `:201` raises `MoreThanOneSource`. |
+| **B19** | `export.rs:198` skips `BeamSystem` and `Truss`, so members leave as plain `IFCBEAM` / `IFCMEMBER` with no `IfcRelAggregates` parent. |
+| **B21** | `crates/document/src/rooms.rs`; room name is generated (`"Room N"`); no Number/Name/Department instance parameters. |
+| **B26** | `crates/calc/src/electrical.rs` (~988 lines) and `crates/document/src/compute_elec.rs`; `06-mep-schematic-automation.md:10` says the opposite; zero references to edesign-alike in the tree. |
+| **C1** | `crates/family/src/catalogue.rs` exists; no caller of `Catalogue::from_text` or any family loader under `apps/`; `load_family` is only an icon id (`icons.rs`). |
+| **C2** | `export.rs:57-65` filters `Scope::Instance`; the fan coil's values are all Type scope (`library.rs:327-334,441-442`); `library.rs:309-311` compiles exactly five families; `main.rs:464` maps both `"ahu"` and `"component"` to `"Fan coil unit, ducted"`. |
+| **C3** | The five families are `"Lever handle"`, `"Door, single flush"`, `"Door, arched"`, `"Window, fixed with mullions"`, `"Fan coil unit, ducted"` (`crates/family/src/library.rs:28,97,165,240,322`). |
+| **C7** | `crates/document/src/mep.rs:105-111,332`; `crates/document/src/layout.rs:121-140` - flow direction is read only at `apps/desktop/src/systems_ui.rs:168`, to pick the base. |
+| **C8** | `crates/document/src/layout.rs` (398 lines): solution kinds at `:26-33`, the axis/height constraint at `:121-124`, only NetworkAlongX/Y + Routed at `:138-143`. |
+| **C10** | `apps/desktop/src/mep_tool.rs` - every point of a run shares one z. |
+| **C13** | `crates/calc/src/tree.rs:228`; the four sizing methods are not selectable. |
+| **C16** | `crates/calc/src/sprinkler.rs`; one `System::FireProtection` value; every end point with a demand operates. |
+| **C17** | `crates/document/src/elec.rs:20-38` (`ElecNode`), `:47-63` (`ElecCable`), `:82-91` (one-feeder rule); stored in `MepData` (`crates/document/src/mep.rs:194-196`). |
+| **C26** | Reference planes, work planes and scope boxes: absent from the tree. |
+| **D10** | The structure scope the owner deferred is recorded in `docs/reference/README.md:14`. |
 
 ### 8.4 What was not verified
 
