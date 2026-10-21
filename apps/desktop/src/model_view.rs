@@ -5,6 +5,18 @@ use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry, RangeClass};
 
+/// The span of the plan view on a model with nothing in it yet, in metres: enough room to place a
+/// level and a first wall, and close to what Revit shows for a new project.
+const EMPTY_PLAN_SPAN_M: f32 = 10.0;
+
+/// The rectangle the plan view fits to, in projected model units: the extent of every drawn mesh
+/// and every grid. On a model with nothing in it yet (a new project's empty canvas), fall back to a
+/// default view centred on the origin, so that the drawing tools still preview and accept clicks —
+/// as in Revit, where a new project starts with an empty canvas.
+fn plan_bounds(bounds: Rect) -> Rect {
+    if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(EMPTY_PLAN_SPAN_M)) }
+}
+
 fn project(point: [f64; 3], three_d: bool, yaw: f32, pitch: f32) -> (Vec2, f32) {
     let [x, y, z] = point.map(|v| v as f32);
     if !three_d { return (Vec2::new(x, -y), z); }
@@ -140,7 +152,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             for [x, y] in [start, end] { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
         }
     }
-    if !bounds.is_finite() { return; }
+    let bounds = plan_bounds(bounds);
     let fit = ((rect.width() - 100.0).max(10.0) / bounds.width().max(1.0))
         .min((rect.height() - 90.0).max(10.0) / bounds.height().max(1.0));
     let scale = fit * app.zoom;
@@ -1304,6 +1316,34 @@ mod tests {
     }
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
+
+    #[test]
+    fn plan_bounds_falls_back_to_a_default_view_on_an_empty_model() {
+        // a real extent passes through unchanged
+        let real = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(4.0, 3.0));
+        assert_eq!(plan_bounds(real), real);
+        // an empty model (Rect::NOTHING has an infinite min) gets a finite, centred default view
+        let empty = plan_bounds(Rect::NOTHING);
+        assert!(empty.is_finite(), "the fallback bounds must be finite");
+        assert_eq!(empty.center(), Pos2::ZERO, "the empty view is centred on the origin");
+        assert_eq!(empty.width(), EMPTY_PLAN_SPAN_M);
+    }
+
+    #[test]
+    fn a_new_project_starts_with_an_empty_canvas_but_the_drawing_tools_still_work() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.document = openbim_document::Document::new();
+        assert_eq!(app.document.elements().count(), 0, "the test must start from an empty project");
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Level);
+        let before = app.document.elements().count();
+        let p = Pos2::new(500.0, 350.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(p)]);
+        frame(&ctx, screen, &mut app, vec![button(p, true)]);
+        frame(&ctx, screen, &mut app, vec![button(p, false)]);
+        assert!(app.document.elements().count() > before, "the Level tool must place a level on an empty canvas; message: {}", app.message);
+    }
 
     #[test]
     fn a_wall_is_drawn_by_two_clicks_as_a_chain_and_by_press_drag_release() {
