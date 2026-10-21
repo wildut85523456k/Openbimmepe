@@ -5,6 +5,33 @@ use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry, RangeClass};
 
+/// The span of the plan view on a model with nothing in it yet, in metres: enough room to place a
+/// level and a first wall, and close to what Revit shows for a new project.
+const EMPTY_PLAN_SPAN_M: f32 = 10.0;
+
+/// The rectangle the plan view fits to, in projected model units: the extent of every drawn mesh
+/// and every grid. On a model with nothing in it yet (a new project's empty canvas), fall back to a
+/// default view centred on the origin, so that the drawing tools still preview and accept clicks —
+/// as in Revit, where a new project starts with an empty canvas.
+fn plan_bounds(bounds: Rect) -> Rect {
+    if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(EMPTY_PLAN_SPAN_M)) }
+}
+
+/// The plan-view tabs, from the project's levels (lowest first): the two default plans - the lower and
+/// upper plan - are labelled by the real level 10/11 when the project has one, else generically, then
+/// every other level gets its own tab. As in Revit, the tab says the level's name, never a hard-coded
+/// "Level 1": a project loaded from IFC or started empty names its own levels.
+fn plan_tabs(levels: &[(ElementId, String, f64)]) -> Vec<(String, View)> {
+    let name_of = |default_id: u64, fallback: &str| {
+        levels.iter().find(|(id, _, _)| id.0 == default_id).map(|(_, n, _)| n.clone()).unwrap_or_else(|| fallback.to_string())
+    };
+    let mut tabs = vec![(name_of(10, "Floor Plan"), View::Plan), (name_of(11, "Upper Plan"), View::UpperPlan)];
+    for (id, name, _) in levels.iter().filter(|(id, _, _)| id.0 != 10 && id.0 != 11) {
+        tabs.push((name.clone(), View::Level(id.0)));
+    }
+    tabs
+}
+
 fn project(point: [f64; 3], three_d: bool, yaw: f32, pitch: f32) -> (Vec2, f32) {
     let [x, y, z] = point.map(|v| v as f32);
     if !three_d { return (Vec2::new(x, -y), z); }
@@ -65,13 +92,12 @@ fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: P
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
-        let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
+        let level_tabs = plan_tabs(&app.levels());
         let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0)))
             .chain(app.document.elements().filter(|e| e.category == Category::Elevation).flat_map(|e| (0..4u8).filter(move |k| e.count >> k & 1 == 1).map(move |k| (crate::section_ui::name_of_marker(&e.name, k), View::Marked(e.id.0, k)))))
             .collect();
-        let tabs = [("Level 1".to_string(), View::Plan), ("Level 2".to_string(), View::UpperPlan)].into_iter()
-            .chain(added.into_iter().map(|(v, n)| (n, v)))
-            .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)])
+        let tabs = level_tabs.into_iter()
+            .chain([("{3D}".to_string(), View::ThreeD), ("Mechanical".to_string(), View::Mechanical)])
             .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
             .chain(sections);
         for (label, view) in tabs {
@@ -140,7 +166,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             for [x, y] in [start, end] { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
         }
     }
-    if !bounds.is_finite() { return; }
+    let bounds = plan_bounds(bounds);
     let fit = ((rect.width() - 100.0).max(10.0) / bounds.width().max(1.0))
         .min((rect.height() - 90.0).max(10.0) / bounds.height().max(1.0));
     let scale = fit * app.zoom;
@@ -1304,6 +1330,50 @@ mod tests {
     }
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
+
+    #[test]
+    fn plan_bounds_falls_back_to_a_default_view_on_an_empty_model() {
+        // a real extent passes through unchanged
+        let real = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(4.0, 3.0));
+        assert_eq!(plan_bounds(real), real);
+        // an empty model (Rect::NOTHING has an infinite min) gets a finite, centred default view
+        let empty = plan_bounds(Rect::NOTHING);
+        assert!(empty.is_finite(), "the fallback bounds must be finite");
+        assert_eq!(empty.center(), Pos2::ZERO, "the empty view is centred on the origin");
+        assert_eq!(empty.width(), EMPTY_PLAN_SPAN_M);
+    }
+
+    #[test]
+    fn a_new_project_starts_with_an_empty_canvas_but_the_drawing_tools_still_work() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.document = openbim_document::Document::new();
+        assert_eq!(app.document.elements().count(), 0, "the test must start from an empty project");
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Level);
+        let before = app.document.elements().count();
+        let p = Pos2::new(500.0, 350.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(p)]);
+        frame(&ctx, screen, &mut app, vec![button(p, true)]);
+        frame(&ctx, screen, &mut app, vec![button(p, false)]);
+        assert!(app.document.elements().count() > before, "the Level tool must place a level on an empty canvas; message: {}", app.message);
+    }
+
+    #[test]
+    fn plan_tabs_say_the_level_names_and_a_generic_name_for_a_default_plan_without_a_level() {
+        // levels 10/11 present and named: the two default plans take their names, the rest get their own tab
+        let named = vec![(ElementId(10), "Ground".to_string(), 0.0), (ElementId(11), "First".to_string(), 3.0), (ElementId(20), "Roof".to_string(), 9.0)];
+        assert_eq!(plan_tabs(&named), vec![
+            ("Ground".to_string(), View::Plan),
+            ("First".to_string(), View::UpperPlan),
+            ("Roof".to_string(), View::Level(20)),
+        ]);
+        // no levels at all (an empty or IFC-loaded project): the default plans fall back to generic names
+        assert_eq!(plan_tabs(&[]), vec![
+            ("Floor Plan".to_string(), View::Plan),
+            ("Upper Plan".to_string(), View::UpperPlan),
+        ]);
+    }
 
     #[test]
     fn a_wall_is_drawn_by_two_clicks_as_a_chain_and_by_press_drag_release() {
