@@ -305,10 +305,16 @@ pub fn window() -> Family {
     }
 }
 
-/// All sample families compiled together, in the order handle, door, window, arched door, fan coil unit, air
-/// handling unit, ceiling diffuser.
+/// All sample families, uncompiled, in the order handle, door, window, arched door, fan coil unit, air handling
+/// unit, ceiling diffuser. This is the one list: `all()` compiles it, and a loader that has to check a catalogue
+/// against the library reads it.
+pub fn families() -> Vec<Family> {
+    vec![handle(), door(), window(), arched_door(), fan_coil(), ahu(), ceiling_diffuser()]
+}
+
+/// All sample families compiled together, in the same order as `families()`.
 pub fn all() -> Result<Vec<Compiled>, FamilyError> {
-    compile_library(&[handle(), door(), window(), arched_door(), fan_coil(), ahu(), ceiling_diffuser()])
+    compile_library(&families())
 }
 
 /// Ceiling-mounted fan coil unit, ducted. Origin: centre of the casing in plan, underside of the casing.

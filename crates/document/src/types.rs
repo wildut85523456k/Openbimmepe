@@ -260,6 +260,34 @@ impl Document {
         Ok(id)
     }
 
+    /// Loads a family catalogue as types of this document: one type per row, named by the row, of the library family
+    /// its table names, with the values and the texts of that row. The catalogue is tab separated, as
+    /// `openbim_family::catalogue` writes it, and it is checked against the library before anything is created: a
+    /// table for a family the library does not have, a column the family has no input for, a calculated column, a row
+    /// naming a type the family already has, or a row whose number does not parse, refuses the whole load with the
+    /// reason. Everything else is one transaction, so a load is one undo step and never half-happens.
+    ///
+    /// The types it creates are ordinary types of a family: `types_for(Category::Family)` finds them, an instance
+    /// takes one through `assign_type`, and the values reach it through `family_values`.
+    pub fn load_family_catalogue(&mut self, text: &str) -> Result<Vec<ElementId>, String> {
+        let catalogue = openbim_family::catalogue::Catalogue::from_text(text).map_err(|e| e.to_string())?;
+        let families = openbim_family::library::families();
+        let types = catalogue.to_types(&families, None).map_err(|e| e.to_string())?;
+        let first = self.next_id().0;
+        let mut ops = Vec::new();
+        let mut ids = Vec::new();
+        for (family, t) in types.iter().flat_map(|(f, ts)| ts.iter().map(move |t| (f, t))) {
+            let id = ElementId(first + ids.len() as u64);
+            ops.push(Command::Create { id, category: Category::Type, name: t.name.clone(), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 });
+            ops.push(Command::SetTypeFor { id, category: Category::Family });
+            ops.push(Command::SetFamilyType { id, family: family.clone(), values: t.values.clone(), texts: t.texts.clone() });
+            ids.push(id);
+        }
+        if ops.is_empty() { return Err("the catalogue has no rows".into()); }
+        self.transact(self.revision, &ops).map_err(|e| format!("{e:?}"))?;
+        Ok(ids)
+    }
+
     /// The texts (choices, texts and materials) a type of a family gives its instances, in the order they were set.
     /// Empty for anything else.
     pub fn family_type_texts(&self, type_id: ElementId) -> Vec<(String, String)> {
@@ -579,4 +607,58 @@ mod tests {
         assert_eq!(d.rebar_bars(d.get(r1).unwrap()).unwrap().len(), d.rebar_bars(d.get(r2).unwrap()).unwrap().len());
         assert_eq!(d.get(r1).unwrap().count, 4);
     }
+    #[test]
+    fn a_family_catalogue_becomes_types_of_the_document_and_a_refused_one_changes_nothing() {
+        let mut d = Document::spatial_sample();
+        let text = "# a small range\nfamily\tAir handling unit\ntype\tair_flow\tpower\tsupply_duct_w\tcasing\nAHU 1.2\t1.2\t4000\t0.8\tCasing, insulated\nfamily\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 250\t0.25\t0.06\n";
+        let ids = d.load_family_catalogue(text).unwrap();
+        assert_eq!(ids.len(), 2, "one type per row");
+        let ahu_type = *ids.first().unwrap();
+        assert_eq!(d.get(ahu_type).unwrap().family, "Air handling unit");
+        assert_eq!(d.get(ahu_type).unwrap().type_for, Some(Category::Family));
+        assert_eq!(d.family_type_values(ahu_type), named(&[("air_flow", 1.2), ("power", 4000.0), ("supply_duct_w", 0.8)]));
+        assert_eq!(d.family_type_texts(ahu_type), vec![("casing".to_string(), "Casing, insulated".to_string())]);
+        assert_eq!(d.types_for(Category::Family).iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["AHU 1.2", "D 250"]);
+        // an instance of that family takes the type, and the values reach the solver through it
+        let spec = FamilySpec { family: "Air handling unit".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 0.0 };
+        let unit = d.place_family(ElementId(10), [1.0, 1.0], &spec).unwrap();
+        d.assign_type(&[unit], ahu_type).unwrap();
+        let f = openbim_family::library::families().into_iter().find(|f| f.name == "Air handling unit").unwrap().compile().unwrap();
+        let (mut ov, mut tv, mut ot, mut tt) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for (n, v) in d.family_values(unit) {
+            if f.input_scope(&n) == Some(openbim_family::Scope::Type) { tv.push((n, v)) } else { ov.push((n, v)) }
+        }
+        for (n, v) in d.family_texts(unit) {
+            if f.input_scope(&n) == Some(openbim_family::Scope::Type) { tt.push((n, v)) } else { ot.push((n, v)) }
+        }
+        let req = openbim_family::Request {
+            overrides: ov.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
+            texts: ot.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+            type_values: tv.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
+            type_texts: tt.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+            ..Default::default()
+        };
+        let solved = f.solve(&req).unwrap();
+        let supply = solved.connectors.iter().find(|c| c.name == "supply").unwrap();
+        assert!((supply.flow - 1.2).abs() < 1e-9, "the catalogue's air flow reached the unit's supply connector");
+        assert_eq!(solved.material_of(0), Some("Casing, insulated"), "and its casing material reached the solved unit");
+        // a catalogue that names a family the library does not have is refused whole, with the reason
+        let revision = d.revision();
+        let err = d.load_family_catalogue("family\tNonesuch\ntype\tsize\nbig\t1\n").unwrap_err();
+        assert!(err.contains("Nonesuch"), "{err}");
+        assert_eq!(d.revision(), revision, "a refused catalogue changes nothing");
+        // and so is a column the family has no input for
+        let err = d.load_family_catalogue("family\tAir handling unit\ntype\tnot_an_input\nx\t1\n").unwrap_err();
+        assert!(err.contains("not_an_input"), "{err}");
+        assert_eq!(d.types_for(Category::Family).len(), 2, "the refused loads added nothing");
+        assert_eq!(d.revision(), revision);
+        // the load itself was one undo step: undoing the assignment and the placement reaches it
+        assert!(d.undo().unwrap());
+        assert_eq!(d.get(unit).unwrap().type_id, None, "the assignment is one step");
+        assert!(d.undo().unwrap());
+        assert!(d.get(unit).is_none(), "the placement is one step");
+        assert!(d.undo().unwrap());
+        assert!(d.types_for(Category::Family).is_empty(), "and the whole catalogue was one step");
+    }
+
 }
