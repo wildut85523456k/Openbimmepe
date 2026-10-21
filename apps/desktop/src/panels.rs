@@ -364,6 +364,20 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.add(egui::TextEdit::singleline(&mut app.level_name).hint_text("Level N").desired_width(110.0));
             if ui.button("Place Level").clicked() { app.level_click(); }
         });
+        // the levels of the project, lowest first: renaming and deleting them is here, beside placing one (A6)
+        let levels = app.levels();
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Levels:");
+            for (id, name, elevation) in levels {
+                let mut edited = name.clone();
+                let field = ui.add(egui::TextEdit::singleline(&mut edited).desired_width(110.0));
+                if field.lost_focus() && edited != name { app.rename_level(id, &edited); }
+                ui.weak(format!("{elevation:.3} m"));
+                if ui.small_button("Delete").on_hover_text("A level that elements stand on cannot be deleted").clicked() {
+                    app.delete_level(id);
+                }
+            }
+        });
         return;
     }
     if app.tool == crate::Tool::Grid {

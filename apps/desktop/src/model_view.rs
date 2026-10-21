@@ -1362,6 +1362,25 @@ mod tests {
     }
 
     #[test]
+    fn a_level_is_renamed_and_deleted_from_the_options_bar_of_the_level_tool() {
+        let mut app = Desktop::sample();
+        let levels = app.levels();
+        assert_eq!(levels.len(), 2);
+        // a level with nothing on it can be renamed and deleted
+        let spare = app.document.place_level("Spare", 6.0).unwrap();
+        app.rename_level(spare, "Roof");
+        assert_eq!(app.document.get(spare).unwrap().name, "Roof", "{}", app.message);
+        assert!(app.message.contains("renamed"), "{}", app.message);
+        app.rename_level(spare, "Level 1");
+        assert!(app.message.contains("not renamed"), "a name another level has is refused: {}", app.message);
+        app.delete_level(spare);
+        assert!(app.document.get(spare).is_none(), "{}", app.message);
+        app.delete_level(levels[0].0);
+        assert!(app.document.get(levels[0].0).is_some());
+        assert!(app.message.contains("cannot be deleted"), "{}", app.message);
+    }
+
+    #[test]
     fn the_options_bar_does_not_leak_from_one_tool_to_the_next() {
         let mut app = Desktop::sample();
         app.run_command("ceiling", "Ceiling");

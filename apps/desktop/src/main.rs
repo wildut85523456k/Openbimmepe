@@ -269,7 +269,25 @@ struct Desktop {
     key_typed: Vec<openbim_keymap::Chord>,
 }
 
+/// The ribbon commands that are wired. Every other button the ribbon shows is rendered disabled (decision of 21 Oct
+/// 2026, A7); `run_command` gates on this list, so a command cannot run while its button is disabled.
+const IMPLEMENTED: &[&str] = &[
+    "automation_editor", "automation_player", "automation_mcp", "automation_snapshot", "duct", "pipe", "end_point",
+    "elec_node", "elec_cable", "elec_compute", "compute", "grid", "tag", "move", "dimension", "room", "wall_joins",
+    "measure", "align", "trim", "offset", "copy", "copy_clipboard", "cut", "paste", "paste_same_place", "match_type",
+    "pin", "unpin", "select_instances", "create_similar", "rotate", "mirror", "delete", "level", "wall", "beam",
+    "structural_column", "column", "structural_floor", "floor", "elevation", "railing", "section",
+    "opening_vertical", "shaft", "opening_wall", "stair", "ceiling", "roof", "footing", "truss", "door", "window",
+    "ahu", "component", "rebar", "beam_system", "foundation", "slab", "brace", "select", "ifc_export", "ifc_import",
+    "new", "open", "save", "save_as", "mep_settings", "duct_insulation", "pipe_insulation", "create_mech_system",
+    "create_pipe_system", "generate_layout", "system_browser", "schedule", "sheet", "add_view", "print",
+    "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out"
+];
+
 impl Desktop {
+    /// Whether a ribbon command is wired (A7).
+    pub(crate) fn ribbon_command_implemented(id: &str) -> bool { IMPLEMENTED.contains(&id) }
+
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::light());
@@ -444,9 +462,10 @@ impl Desktop {
             // Quick access toolbar: common commands with the 3D icons.
             for (id, label) in ribbon::QUICK_ACCESS {
                 let img = ribbon::icon_image(ui, id, self.dark, Vec2::splat(24.0));
-                if ui.add(egui::Button::image(img).frame(false)).on_hover_text(*label).clicked() {
-                    self.run_command(id, label);
-                }
+                let enabled = Self::ribbon_command_implemented(id);
+                let button = ui.add_enabled(enabled, egui::Button::image(img).frame(false));
+                let button = if enabled { button.on_hover_text(*label) } else { button.on_hover_text(format!("{label} - planned, not implemented yet")) };
+                if button.clicked() { self.run_command(id, label); }
             }
             ui.separator();
             ui.label("Project1 (SAMPLE)");
@@ -472,6 +491,10 @@ impl Desktop {
 
     /// Commands without an implementation yet report it in the status bar.
     fn run_command(&mut self, id: &str, label: &str) {
+        if !Self::ribbon_command_implemented(id) {
+            self.message = format!("{label} is not implemented yet - the button is disabled");
+            return;
+        }
         self.apply_command_defaults(id);
         match id {
             "automation_editor" | "automation_player" => {
@@ -562,7 +585,11 @@ impl Desktop {
             "redo" => self.redo_document(),
             "zoom_in" => self.zoom = (self.zoom * 1.25).min(4.0),
             "zoom_out" => self.zoom = (self.zoom / 1.25).max(0.3),
-            _ => self.message = format!("{label} is not implemented in this UI prototype"),
+            other => {
+                // the list above and this match have to agree: a listed command with no arm is a bug, not a message
+                debug_assert!(false, "ribbon command {other} is listed as implemented but has no arm");
+                self.message = format!("{label} is not implemented in this UI prototype");
+            }
         }
     }
 
@@ -597,7 +624,8 @@ impl Desktop {
                             let roofing = self.tool == Tool::Slab && matches!(self.slab_kind_pick, openbim_document::SlabKind::Roof | openbim_document::SlabKind::Ceiling);
                             let active = (cmd.id == "roof" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Roof) || (cmd.id == "ceiling" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Ceiling) || (!matches!(cmd.id, "roof" | "ceiling") && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
                                 ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("railing", Tool::Railing) | ("section", Tool::Section) | ("elevation", Tool::Elevation) | ("shaft", Tool::Shaft) | ("opening_vertical", Tool::VerticalOpening) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("paste", Tool::Paste) | ("match_type", Tool::MatchType) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
-                            if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active).clicked() {
+                            let enabled = Self::ribbon_command_implemented(cmd.id);
+                            if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active, enabled).clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }
                         }

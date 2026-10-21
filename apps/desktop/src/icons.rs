@@ -209,6 +209,7 @@ pub static ICONS: &[Icon] = &[
 /// Command IDs the Rust ribbon uses for which the approved package has a differently named icon.
 const ALIASES: &[(&str, &str)] = &[
     ("compute", "systems_analysis"),
+    ("save_as", "save"),
     ("elec_compute", "systems_analysis"),
     ("elec_node", "panel"),
     ("elec_cable", "cable_tray"),

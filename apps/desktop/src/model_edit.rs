@@ -322,6 +322,26 @@ impl Desktop {
         pick.map_or(ElementId(0), |l| l.0)
     }
 
+    /// Renames a level of the project, refusing a name another level has (A6).
+    pub(crate) fn rename_level(&mut self, id: ElementId, name: &str) {
+        match self.document.rename_level(id, name) {
+            Ok(()) => self.message = format!("Level renamed to {name}"),
+            Err(error) => self.message = format!("Level not renamed: {error:?} (a level needs a name of its own)"),
+        }
+    }
+
+    /// Deletes a level that nothing stands on, as Revit refuses to delete one that holds elements (A6).
+    pub(crate) fn delete_level(&mut self, id: ElementId) {
+        match self.document.delete_level(id) {
+            Ok(()) => {
+                if self.view == crate::View::Level(id.0) { self.view = crate::View::Plan; }
+                self.message = format!("Level {} deleted", id.0);
+            }
+            Err(openbim_document::EditError::TypeInUse(_)) => self.message = "A level that elements stand on cannot be deleted".into(),
+            Err(error) => self.message = format!("Level not deleted: {error:?}"),
+        }
+    }
+
     /// The levels of the document, lowest first: (id, name, elevation).
     pub(crate) fn levels(&self) -> Vec<(ElementId, String, f64)> {
         let mut l: Vec<_> = self.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
