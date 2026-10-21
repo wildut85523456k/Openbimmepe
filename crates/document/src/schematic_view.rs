@@ -68,6 +68,12 @@ pub struct SchematicView {
     pub symbols: Vec<Symbol>,
     pub wires: Vec<RenderedWire>,
     pub warnings: Vec<String>,
+    /// whether the view carries results imported from a calculation (SCH-006 electrical currents,
+    /// MEP-002 pressure drops) that the solver marks `not_approved` — so the sheet can warn the
+    /// designer that the displayed values are preliminary. Defaults to false for views that carry no
+    /// imported values (the SCH-003 fixture labels), and is kept false for the empty model.
+    #[serde(default)]
+    pub not_approved: bool,
 }
 
 /// Width in metres of sheet space given to every symbol on the grid (10 mm); uniform is the default
@@ -134,6 +140,7 @@ impl SchematicDraft {
             symbols: Vec::new(),
             wires: Vec::new(),
             warnings: Vec::new(),
+            not_approved: false,
         };
         // rows = levels in the order the draft sorted them (elevation, name, id) == the grid's rows
         for (row, l) in self.levels.iter().enumerate() {
@@ -189,6 +196,9 @@ impl Document {
         let draft = crate::schematic::extract_schematic(self, discipline);
         let input = draft.layout_input(mode);
         let mut view = draft.render(&openbim_schematic::layout::layout(&input));
+        if discipline.family() == crate::schematic::Family::Electrical {
+            crate::schematic_electrical::stamp(self, &mut view);
+        }
         for (a, b) in crate::schematic::overlapping_zones(self.zones()) {
             view.warnings.push(format!("overlapping zones on a level: {a:?} and {b:?}"));
         }
@@ -288,9 +298,64 @@ mod tests {
         assert_eq!(d.schematic_views().len(), 1);
         assert_eq!(d.schematic_views()[0].discipline, Discipline::Electrical);
         assert!(d.schematic_views()[0].symbols.is_empty());
+        // no electrical model on an empty document -> no imported values -> not a not_approved view
+        assert!(!d.schematic_views()[0].not_approved);
         assert!(d.undo().unwrap());
         assert!(d.schematic_views().is_empty());
         assert!(d.redo().unwrap());
         assert_eq!(d.schematic_views().len(), 1);
+    }
+
+    #[test]
+    fn generate_schematic_stamps_electrical_current_and_marks_not_approved() {
+        use crate::elec::NODE_BASE;
+        use crate::{Command, ElecCable, ElecKind, ElecNode, ElementId, MepData};
+        let mut d = Document::spatial_sample();
+        let (a, b, c) = (NODE_BASE, NODE_BASE + 1, NODE_BASE + 2);
+        let mut chiller = ElecNode::new(c, "Chiller", ElecKind::Load, [20.0, 10.0], ElementId(10));
+        chiller.watts = 45000.0;
+        chiller.power_factor = 0.85;
+        let mut feeder = ElecCable::new(b, c, true);
+        feeder.via = vec![[20.0, 0.0]];
+        let data = MepData {
+            elec_nodes: vec![
+                ElecNode::new(a, "TX1", ElecKind::Source, [0.0, 0.0], ElementId(10)),
+                ElecNode::new(b, "MSB", ElecKind::Board, [10.0, 0.0], ElementId(10)),
+                chiller,
+            ],
+            elec_cables: vec![ElecCable::new(a, b, true), feeder],
+            ..Default::default()
+        };
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))]).unwrap();
+        let cmds = d.generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform).unwrap();
+        d.transact(d.revision(), &cmds).unwrap();
+        assert_eq!(d.schematic_views().len(), 1);
+        let view = &d.schematic_views()[0];
+        // only boards are single-line symbols (TX1 is a source, the chiller is a load)
+        assert_eq!(view.symbols.len(), 1, "only the MSB board is a symbol");
+        let msb = view.symbols.iter().find(|s| s.element == b).unwrap();
+        assert_eq!(msb.label, "MSB");
+        // the feeder current is the chiller load current: Ib = P / (sqrt(3) * V * pf)
+        let a_slot = &msb.annotations[0];
+        assert!(a_slot.starts_with("A "), "{a_slot}");
+        let value: f64 = a_slot.strip_prefix("A ").unwrap().parse().unwrap();
+        let expected = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
+        assert!((value - expected).abs() < 1e-2, "stamped {value} vs expected {expected}");
+        // voltage drop stays a placeholder (deferred to MEP-002)
+        assert_eq!(msb.annotations[1], "V —");
+        assert_eq!(msb.annotations[2], "% —");
+        // every imported value is preliminary
+        assert!(view.not_approved);
+        assert!(view.warnings.iter().any(|w| w.contains("MEP-010")));
+        assert!(view.warnings.iter().any(|w| w.contains("MEP-002")));
+        assert!(view.warnings.iter().any(|w| w.contains("not_approved")));
+        // undo drops the view; redo regenerates it from the model with the stamped values
+        assert!(d.undo().unwrap());
+        assert!(d.schematic_views().is_empty());
+        assert!(d.redo().unwrap());
+        let restored = &d.schematic_views()[0];
+        assert!(restored.not_approved);
+        let r = restored.symbols.iter().find(|s| s.element == b).unwrap();
+        assert!(r.annotations[0].starts_with("A "), "{}", r.annotations[0]);
     }
 }

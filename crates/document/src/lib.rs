@@ -36,6 +36,7 @@ pub mod mep;
 mod mepsys;
 pub mod schematic;
 mod schematic_view;
+mod schematic_electrical;
 pub mod schedule;
 pub mod viewsettings;
 pub mod sheet;
