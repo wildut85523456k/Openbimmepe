@@ -322,6 +322,31 @@ impl Desktop {
         pick.map_or(ElementId(0), |l| l.0)
     }
 
+    /// Starts editing a level's name in the options bar. The draft is held by the app, so the frames between
+    /// keystrokes do not rebuild it from the document (R4).
+    pub(crate) fn start_level_rename(&mut self, id: ElementId) {
+        self.level_rename_name = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
+        self.level_rename_id = Some(id);
+        self.message = format!("Rename the level and press Enter, or Cancel");
+    }
+
+    /// Commits the draft. The field stays open when the name is refused, so the user can correct it (R4).
+    pub(crate) fn commit_level_rename(&mut self) {
+        let Some(id) = self.level_rename_id else { return };
+        let name = self.level_rename_name.trim().to_string();
+        let current = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
+        if name.is_empty() || name == current { self.level_rename_id = None; return; }
+        self.rename_level(id, &name);
+        if self.document.get(id).is_some_and(|e| e.name == name) { self.level_rename_id = None; }
+    }
+
+    /// Abandons the draft (R4).
+    pub(crate) fn cancel_level_rename(&mut self) {
+        self.level_rename_id = None;
+        self.level_rename_name.clear();
+        self.message = "Rename cancelled".into();
+    }
+
     /// Renames a level of the project, refusing a name another level has (A6).
     pub(crate) fn rename_level(&mut self, id: ElementId, name: &str) {
         match self.document.rename_level(id, name) {

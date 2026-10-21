@@ -65,6 +65,7 @@ struct ToolDefaults {
     elevation_mm: Option<f64>,
     slab_thickness_mm: Option<f64>,
     slab_offset_mm: Option<f64>,
+    footing_thickness_mm: Option<f64>,
     spacing_mm: Option<f64>,
     bar_count: Option<f64>,
     material_pick: Option<openbim_document::Material>,
@@ -267,9 +268,17 @@ struct Desktop {
     keymap: openbim_keymap::Keymap,
     /// the keys of a shortcut being typed, replayed through a fresh matcher each key (A4)
     key_typed: Vec<openbim_keymap::Chord>,
+    /// the level whose name is being edited in the options bar, and the draft: it is kept here so that typing
+    /// survives the frames between keystrokes (A6)
+    level_rename_id: Option<ElementId>,
+    level_rename_name: String,
     /// where the last frame drew each ribbon and quick-access button: the whole-window test clicks them (A8)
     #[cfg(test)]
     ribbon_hits: Vec<(&'static str, egui::Rect)>,
+    /// the plan's own model-to-screen transform of the last frame: (centre + pan, pixels per metre, the centre of the
+    /// fitted box), so a test can aim a click at a model point (A8)
+    #[cfg(test)]
+    plan_transform: Option<(egui::Pos2, f32, egui::Vec2)>,
 }
 
 /// The ribbon commands that are wired. Every other button the ribbon shows is rendered disabled (decision of 21 Oct
@@ -332,9 +341,11 @@ impl Desktop {
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
             show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
-            zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(),
+            zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(),
             #[cfg(test)]
             ribbon_hits: Vec::new(),
+            #[cfg(test)]
+            plan_transform: None,
         }
     }
 
@@ -350,10 +361,17 @@ impl Desktop {
             "railing" => ToolDefaults { width_mm: Some(50.0), height_mm: Some(1100.0), elevation_mm: Some(0.0), spacing_mm: Some(150.0), ..d },
             "rebar" => ToolDefaults { width_mm: Some(16.0), height_mm: Some(8.0), elevation_mm: Some(40.0), spacing_mm: Some(200.0), bar_count: Some(3.0), ..d },
             "stair" => ToolDefaults { elevation_mm: Some(0.0), ..d },
+            // the framing tools read the same width/height/elevation box as the wall and the duct: a beam chosen after
+            // a rebar must not come out 16 x 8 mm (R3)
+            "beam" | "brace" | "beam_system" | "structural_column" | "column" => ToolDefaults { width_mm: Some(200.0), height_mm: Some(300.0), elevation_mm: Some(2700.0), ..d },
+            "truss" => ToolDefaults { width_mm: Some(200.0), height_mm: Some(300.0), elevation_mm: Some(2700.0), spacing_mm: Some(600.0), ..d },
             "ceiling" => ToolDefaults { slab_thickness_mm: Some(20.0), slab_offset_mm: Some(2700.0), material_pick: Some(openbim_document::Material::Unspecified), ..d },
             "roof" => ToolDefaults { slab_thickness_mm: Some(200.0), slab_offset_mm: Some(0.0), ..d },
-            "floor" | "structural_floor" | "slab" | "foundation" => ToolDefaults { slab_thickness_mm: Some(200.0), slab_offset_mm: Some(0.0), ..d },
-            "footing" => ToolDefaults { slab_offset_mm: Some(0.0), ..d },
+            "floor" | "structural_floor" | "slab" => ToolDefaults { slab_thickness_mm: Some(200.0), slab_offset_mm: Some(0.0), ..d },
+            // the two footing commands consume the whole box: a wall footing, and the isolated pad the Foundation
+            // button places
+            "footing" => ToolDefaults { width_mm: Some(200.0), height_mm: Some(300.0), slab_offset_mm: Some(0.0), material_pick: Some(openbim_document::Material::Unspecified), ..d },
+            "foundation" => ToolDefaults { width_mm: Some(200.0), height_mm: Some(300.0), footing_thickness_mm: Some(500.0), slab_offset_mm: Some(0.0), material_pick: Some(openbim_document::Material::Unspecified), ..d },
             // a family stands on its level: the elevation of the ceiling or slab drawn before it must not follow it
             "door" | "window" | "ahu" | "component" => ToolDefaults { slab_offset_mm: Some(0.0), ..d },
             _ => d,
@@ -368,6 +386,7 @@ impl Desktop {
         if let Some(v) = d.elevation_mm { self.elevation_mm = v; }
         if let Some(v) = d.slab_thickness_mm { self.slab_thickness_mm = v; }
         if let Some(v) = d.slab_offset_mm { self.slab_offset_mm = v; }
+        if let Some(v) = d.footing_thickness_mm { self.footing_thickness_mm = v; }
         if let Some(v) = d.spacing_mm { self.spacing_mm = v; }
         if let Some(v) = d.bar_count { self.bar_count = v; }
         if let Some(v) = d.material_pick { self.material_pick = v; }
@@ -378,6 +397,9 @@ impl Desktop {
         !self.wall_pts.is_empty() || !self.slab_points.is_empty() || !self.run_points.is_empty() || !self.edit_pts.is_empty()
             || !self.wall_ids.is_empty() || !self.cable_via.is_empty() || self.beam_start.is_some() || self.cable_from.is_some()
             || self.opening_from.is_some()
+            // the reference of Align, Trim and Match Type; the host of Vertical Opening; the corner and the edges of a
+            // view edit in an elevation or a section (R2)
+            || self.edit_ref.is_some() || self.opening_host.is_some() || self.view_corner.is_some() || self.view_edit.is_some()
     }
 
     /// The tools that put an element on a level: without one they cannot start (A2).
@@ -688,6 +710,8 @@ impl Desktop {
                 self.select_element(Some(ids[next]));
             }
         }
+        // the clipboard keys keep the place they had before the window was split into this method (R5)
+        self.clipboard_events(ctx);
         // Ctrl+Y (also Ctrl+Shift+Z) redoes, Ctrl+Z undoes, as in Revit
         let redo = !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.modifiers.command && (i.key_pressed(egui::Key::Y) || (i.modifiers.shift && i.key_pressed(egui::Key::Z))));
         if redo { self.redo_document(); }
@@ -774,7 +798,6 @@ impl Desktop {
         self.ribbon_hits.clear();
         let ctx = ui.ctx().clone();
         self.global_keys(&ctx);
-        self.clipboard_events(&ctx);
         egui::Panel::top("header").show(ui, |ui| {
             self.toolbar(ui);
             self.ribbon(ui);

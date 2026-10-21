@@ -364,14 +364,22 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.add(egui::TextEdit::singleline(&mut app.level_name).hint_text("Level N").desired_width(110.0));
             if ui.button("Place Level").clicked() { app.level_click(); }
         });
-        // the levels of the project, lowest first: renaming and deleting them is here, beside placing one (A6)
+        // the levels of the project, lowest first: renaming and deleting them is here, beside placing one (A6). The
+        // draft of a name being typed is held by the app, so it is not rebuilt from the document every frame (R4).
         let levels = app.levels();
         ui.horizontal_wrapped(|ui| {
             ui.label("Levels:");
             for (id, name, elevation) in levels {
-                let mut edited = name.clone();
-                let field = ui.add(egui::TextEdit::singleline(&mut edited).desired_width(110.0));
-                if field.lost_focus() && edited != name { app.rename_level(id, &edited); }
+                if app.level_rename_id == Some(id) {
+                    let field = ui.add(egui::TextEdit::singleline(&mut app.level_rename_name).desired_width(110.0));
+                    if (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ui.small_button("OK").clicked() {
+                        app.commit_level_rename();
+                    }
+                    if ui.small_button("Cancel").clicked() { app.cancel_level_rename(); }
+                } else {
+                    ui.label(&name);
+                    if ui.small_button("Rename").clicked() { app.start_level_rename(id); }
+                }
                 ui.weak(format!("{elevation:.3} m"));
                 if ui.small_button("Delete").on_hover_text("A level that elements stand on cannot be deleted").clicked() {
                     app.delete_level(id);
@@ -945,8 +953,14 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
 /// The name of a level view: the level's own name, so renaming a level renames its plan views with it (A2). The
 /// const table's name is the fallback for a project that has no such level.
 pub(crate) fn level_view_name(app: &Desktop, fallback: &str, view: View) -> String {
-    let index = match view { View::Plan => 0, View::UpperPlan => 1, _ => return fallback.to_string() };
-    app.levels().get(index).map_or_else(|| fallback.to_string(), |level| level.1.clone())
+    let name = match view {
+        View::Plan => app.levels().first().map(|level| level.1.clone()),
+        View::UpperPlan => app.levels().get(1).map(|level| level.1.clone()),
+        View::Level(id) => app.document.get(ElementId(id))
+            .filter(|el| el.geometry == Some(openbim_document::Geometry::Level)).map(|el| el.name.clone()),
+        _ => None,
+    };
+    name.unwrap_or_else(|| fallback.to_string())
 }
 
 pub fn view_name(view: View) -> &'static str {
@@ -972,12 +986,14 @@ const TREE: &[Node] = &[
     folder("Families", &[]), folder("Groups", &[]), folder("Model Links", &[]),
 ];
 
-fn node_matches(node: &Node, query: &str) -> bool {
-    matches(query, node.name) || node.children.iter().any(|child| node_matches(child, query))
+fn node_matches(app: &Desktop, node: &Node, query: &str) -> bool {
+    // a level view is searched by the name it shows, which is the level's own (A2/R1)
+    let shown = node.view.map_or_else(|| node.name.to_string(), |view| level_view_name(app, node.name, view));
+    matches(query, node.name) || matches(query, &shown) || node.children.iter().any(|child| node_matches(app, child, query))
 }
 
 fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, query: &str) {
-    if !node_matches(node, query) { return; }
+    if !node_matches(app, node, query) { return; }
     let path = format!("{parent}/{}", node.name);
     if let Some(view) = node.view {
         let active = app.view == view;
@@ -1022,7 +1038,9 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().id_salt("project_tree").auto_shrink([false, false])
         .show(ui, |ui| {
             for node in TREE { tree_node(app, ui, node, "project", &query); }
-            let added: Vec<(ElementId, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (l.0, l.1)).collect();
+            // the Floor Plans folder holds the document's first two levels, whatever their ids are, so only the
+            // levels after them are added here (A2/R1)
+            let added: Vec<(ElementId, String)> = app.levels().into_iter().skip(2).map(|l| (l.0, l.1)).collect();
             for (id, name) in added {
                 if !matches(&query, &name) { continue; }
                 let active = app.view == View::Level(id.0);
@@ -1045,7 +1063,7 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
                     if ui.selectable_label(active, RichText::new(format!("{label} (elevation)"))).on_hover_text("Open this view of the elevation marker").clicked() { app.view = View::Marked(id.0, k as u8); app.selected = None; }
                 }
             }
-            if !TREE.iter().any(|node| node_matches(node, &query)) { ui.weak("No matching items"); }
+            if !TREE.iter().any(|node| node_matches(app, node, &query)) { ui.weak("No matching items"); }
         });
 }
 
@@ -1068,10 +1086,13 @@ mod tests {
 
     #[test]
     fn browser_search_keeps_ancestors_of_matching_views() {
-        assert!(node_matches(&TREE[0], "m-101"));
-        assert!(node_matches(&TREE[0], "{3d}"));
-        assert!(!node_matches(&TREE[1], "m-101"));
-        assert!(!TREE.iter().any(|node| node_matches(node, "no such view")));
+        let app = Desktop::sample();
+        assert!(node_matches(&app, &TREE[0], "m-101"));
+        assert!(node_matches(&app, &TREE[0], "{3d}"));
+        assert!(!node_matches(&app, &TREE[1], "m-101"));
+        assert!(!TREE.iter().any(|node| node_matches(&app, node, "no such view")));
+        // a renamed level is found by the name its view shows (R1)
+        assert!(node_matches(&app, &TREE[0].children[0].children[0], "level 1"), "the tree's first plan is Level 1");
     }
 
     #[test]
