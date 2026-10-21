@@ -139,14 +139,14 @@ impl Document {
         if !Element::can_have_type(el.category) { return Err(EditError::UnsupportedProperty(from)); }
         let (category, values) = (el.category, TypeValues::of(el));
         // a family instance's values are named, not a size: the type takes the family and those values with it
-        let family = (category == Category::Family).then(|| (el.family.clone(), self.family_values(from)));
+        let family = (category == Category::Family).then(|| (el.family.clone(), self.family_values(from), self.family_texts(from)));
         let id = self.next_id();
         let mut ops = vec![
             Command::Create { id, category: Category::Type, name: name.trim().into(), width_m: values.width_m, height_m: values.height_m, elevation_m: 0.0 },
             Command::SetTypeFor { id, category },
         ];
         ops.extend(self.values_ops(id, category, &values));
-        if let Some((family, named)) = family { ops.push(Command::SetFamilyType { id, family, values: named }); }
+        if let Some((family, named, texts)) = family { ops.push(Command::SetFamilyType { id, family, values: named, texts }); }
         ops.push(Command::SetType { id: from, type_id: Some(id) });
         self.transact(self.revision, &ops)?;
         Ok(id)
@@ -227,14 +227,14 @@ impl Document {
         let (kind, values) = (ty.kind(), TypeValues::of(ty));
         let layers = ty.is_layered().then(|| (ty.layers.clone(), ty.core));
         // a type of a family is its family and its named values as much as it is a size
-        let family = (kind == Category::Family).then(|| (ty.family.clone(), ty.overrides.clone()));
+        let family = (kind == Category::Family).then(|| (ty.family.clone(), ty.overrides.clone(), ty.texts.clone()));
         let id = self.next_id();
         let mut ops = vec![
             Command::Create { id, category: Category::Type, name: name.trim().into(), width_m: values.width_m, height_m: values.height_m, elevation_m: 0.0 },
             Command::SetTypeFor { id, category: kind },
         ];
         ops.extend(self.values_ops(id, kind, &values));
-        if let Some((family, named)) = family { ops.push(Command::SetFamilyType { id, family, values: named }); }
+        if let Some((family, named, texts)) = family { ops.push(Command::SetFamilyType { id, family, values: named, texts }); }
         if let Some((layers, core)) = layers { ops.push(Command::SetLayers { id, layers, core }); }
         self.transact(self.revision, &ops)?;
         Ok(id)
@@ -247,17 +247,26 @@ impl Document {
     /// The names are not checked against the family's own inputs here: a family the library does not know can still
     /// have a type, and the check that a name is a real input belongs where the library is known (the catalogue
     /// loader, `crates/family::catalogue`).
-    pub fn add_family_type(&mut self, family: &str, name: &str, values: &[(String, f64)]) -> Result<ElementId, EditError> {
+    pub fn add_family_type(&mut self, family: &str, name: &str, values: &[(String, f64)], texts: &[(String, String)]) -> Result<ElementId, EditError> {
         let (family, name) = (family.trim(), name.trim());
-        if family.is_empty() || name.is_empty() || !Self::family_values_ok(values) { return Err(EditError::InvalidElement); }
+        if family.is_empty() || name.is_empty() || !Self::family_values_ok(values) || !Self::family_texts_ok(texts) { return Err(EditError::InvalidElement); }
         let id = self.next_id();
         let ops = vec![
             Command::Create { id, category: Category::Type, name: name.into(), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
             Command::SetTypeFor { id, category: Category::Family },
-            Command::SetFamilyType { id, family: family.into(), values: values.to_vec() },
+            Command::SetFamilyType { id, family: family.into(), values: values.to_vec(), texts: texts.to_vec() },
         ];
         self.transact(self.revision, &ops)?;
         Ok(id)
+    }
+
+    /// The texts (choices, texts and materials) a type of a family gives its instances, in the order they were set.
+    /// Empty for anything else.
+    pub fn family_type_texts(&self, type_id: ElementId) -> Vec<(String, String)> {
+        self.get(type_id)
+            .filter(|t| t.category == Category::Type && t.type_for == Some(Category::Family))
+            .map(|t| t.texts.clone())
+            .unwrap_or_default()
     }
 
     /// The named values a type of a family gives its instances, in the order they were set. Empty for anything else.
@@ -286,12 +295,25 @@ impl Document {
     /// Changes the values of a type of a family, and with them the values of every instance that takes it, in one
     /// transaction. The instances are not rewritten: they resolve their type's values when they are read, so one
     /// transaction on the type is enough for all of them (and an instance's own values still win over it).
-    pub fn edit_family_type(&mut self, type_id: ElementId, values: &[(String, f64)]) -> Result<(), EditError> {
+    pub fn edit_family_type(&mut self, type_id: ElementId, values: &[(String, f64)], texts: &[(String, String)]) -> Result<(), EditError> {
         let ty = self.get(type_id).filter(|t| t.category == Category::Type && t.type_for == Some(Category::Family)).ok_or(EditError::NotFound(type_id))?;
-        if !Self::family_values_ok(values) { return Err(EditError::InvalidElement); }
+        if !Self::family_values_ok(values) || !Self::family_texts_ok(texts) { return Err(EditError::InvalidElement); }
         let family = ty.family.clone();
-        self.transact(self.revision, &[Command::SetFamilyType { id: type_id, family, values: values.to_vec() }])?;
+        self.transact(self.revision, &[Command::SetFamilyType { id: type_id, family, values: values.to_vec(), texts: texts.to_vec() }])?;
         Ok(())
+    }
+
+    /// The texts a family instance works with: those of its type first, then its own, which win.
+    pub fn family_texts(&self, id: ElementId) -> Vec<(String, String)> {
+        let Some(el) = self.get(id) else { return Vec::new() };
+        let mut texts = el.type_id.map(|t| self.family_type_texts(t)).unwrap_or_default();
+        for (n, v) in &el.texts {
+            match texts.iter_mut().find(|(m, _)| m == n) {
+                Some(slot) => slot.1 = v.clone(),
+                None => texts.push((n.clone(), v.clone())),
+            }
+        }
+        texts
     }
 
     /// Gives a family instance these named values, keeping the family, its library type and its turn. Values it does
@@ -307,6 +329,11 @@ impl Document {
     /// Whether a set of named values is one a family type may hold: named, bounded and finite, as `overrides` are.
     fn family_values_ok(values: &[(String, f64)]) -> bool {
         values.len() <= 64 && values.iter().all(|(n, v)| !n.trim().is_empty() && n.len() <= 64 && v.is_finite())
+    }
+
+    /// Whether a set of named texts is one a family type may hold: named and bounded, as `texts` are.
+    fn family_texts_ok(texts: &[(String, String)]) -> bool {
+        texts.len() <= 64 && texts.iter().all(|(n, v)| !n.trim().is_empty() && n.len() <= 64 && v.len() <= 256)
     }
 
     /// Deletes a type that no element uses.
@@ -336,10 +363,11 @@ mod tests {
     fn a_family_type_gives_its_named_values_to_every_instance_and_an_instance_value_wins() {
         let mut d = Document::spatial_sample();
         let (a, b) = (fan_coil(&mut d, [1.0, 1.0]), fan_coil(&mut d, [3.0, 1.0]));
-        let t = d.add_family_type("Fan coil unit, ducted", "FCU 400", &named(&[("air_flow", 0.2), ("power", 120.0)])).unwrap();
+        let t = d.add_family_type("Fan coil unit, ducted", "FCU 400", &named(&[("air_flow", 0.2), ("power", 120.0)]), &[]).unwrap();
         assert_eq!(d.get(t).unwrap().family, "Fan coil unit, ducted", "the type says which family it is a type of");
         assert_eq!(d.types_for(Category::Family).iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), vec!["FCU 400"]);
         assert_eq!(d.get(t).unwrap().type_for, Some(Category::Family));
+        assert_eq!(d.family_type_texts(t), Vec::new());
         d.assign_type(&[a, b], t).unwrap();
         assert_eq!(d.family_values(a), named(&[("air_flow", 0.2), ("power", 120.0)]));
         // an instance's own value wins over its type's, and the type keeps its own
@@ -348,13 +376,22 @@ mod tests {
         assert_eq!(d.family_values(b), named(&[("air_flow", 0.2), ("power", 120.0)]), "the other instance is untouched");
         // one edit to the type reaches every instance in one transaction
         let revision = d.revision();
-        d.edit_family_type(t, &named(&[("air_flow", 0.25), ("power", 150.0), ("duct_w", 0.5)])).unwrap();
+        d.edit_family_type(t, &named(&[("air_flow", 0.25), ("power", 150.0), ("duct_w", 0.5)]), &[]).unwrap();
         assert_eq!(d.revision(), revision + 1, "one transaction");
         assert_eq!(d.family_values(b), named(&[("air_flow", 0.25), ("power", 150.0), ("duct_w", 0.5)]));
         assert_eq!(d.family_values(a), named(&[("air_flow", 0.3), ("power", 150.0), ("duct_w", 0.5)]), "its own air flow still wins");
         assert!(d.undo().unwrap());
         assert_eq!(d.family_values(b), named(&[("air_flow", 0.2), ("power", 120.0)]));
         assert_eq!(d.family_values(a), named(&[("air_flow", 0.3), ("power", 120.0)]));
+        // a choice, a text or a material is part of the type as much as a number is
+        d.edit_family_type(t, &named(&[("air_flow", 0.2)]), &[("casing".to_string(), "Casing, insulated".to_string())]).unwrap();
+        assert_eq!(d.family_type_texts(t), vec![("casing".to_string(), "Casing, insulated".to_string())]);
+        for id in [a, b] { assert_eq!(d.family_texts(id), vec![("casing".to_string(), "Casing, insulated".to_string())]); }
+        // and the instance's own choice wins over the type's
+        d.transact(d.revision(), &[Command::SetFamilyTexts { id: a, texts: vec![("casing".to_string(), "Casing, lined".to_string())] }]).unwrap();
+        assert_eq!(d.family_texts(a), vec![("casing".to_string(), "Casing, lined".to_string())]);
+        assert_eq!(d.family_texts(b), vec![("casing".to_string(), "Casing, insulated".to_string())], "the other instance keeps the type's");
+        assert!(d.undo().unwrap());
     }
 
     #[test]
@@ -362,12 +399,13 @@ mod tests {
         let mut d = Document::spatial_sample();
         let coil = fan_coil(&mut d, [1.0, 1.0]);
         let door = d.place_family_in_wall(ElementId(20), 1.0, &FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 0.0 }).unwrap();
-        let t = d.add_family_type("Fan coil unit, ducted", "FCU 400", &named(&[("air_flow", 0.2)])).unwrap();
-        assert!(d.add_family_type("Fan coil unit, ducted", "FCU 400", &[]).is_err(), "the name is taken");
-        assert!(d.add_family_type("Fan coil unit, ducted", "fcu 400", &[]).is_err(), "however it is spelled");
-        assert!(d.add_family_type("", "x", &[]).is_err() && d.add_family_type("Fan coil unit, ducted", "  ", &[]).is_err());
-        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("", 1.0)])).is_err(), "an unnamed value");
-        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("air_flow", f64::NAN)])).is_err(), "a value that is not a number");
+        let t = d.add_family_type("Fan coil unit, ducted", "FCU 400", &named(&[("air_flow", 0.2)]), &[]).unwrap();
+        assert!(d.add_family_type("Fan coil unit, ducted", "FCU 400", &[], &[]).is_err(), "the name is taken");
+        assert!(d.add_family_type("Fan coil unit, ducted", "fcu 400", &[], &[]).is_err(), "however it is spelled");
+        assert!(d.add_family_type("", "x", &[], &[]).is_err() && d.add_family_type("Fan coil unit, ducted", "  ", &[], &[]).is_err());
+        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("", 1.0)]), &[]).is_err(), "an unnamed value");
+        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("air_flow", f64::NAN)]), &[]).is_err(), "a value that is not a number");
+        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &[], &[("".to_string(), "x".to_string())]).is_err(), "an unnamed text");
         // the type of one family is not a type of another, and a wall type is not a type of a family instance
         assert_eq!(d.assign_type(&[door], t), Err(EditError::UnsupportedProperty(door)));
         let wt = d.add_wall_type("Exterior 200", 0.2, 3.0).unwrap();
@@ -393,7 +431,7 @@ mod tests {
         // detaching writes the type's values into the instance, so it keeps them
         let b = fan_coil(&mut d, [3.0, 1.0]);
         d.assign_type(&[b], t).unwrap();
-        d.edit_family_type(t, &named(&[("air_flow", 0.45), ("duct_w", 0.6)])).unwrap();
+        d.edit_family_type(t, &named(&[("air_flow", 0.45), ("duct_w", 0.6)]), &[]).unwrap();
         assert_eq!(d.family_values(b), named(&[("air_flow", 0.45), ("duct_w", 0.6)]));
         d.detach_type(&[b]).unwrap();
         let e = d.get(b).unwrap();

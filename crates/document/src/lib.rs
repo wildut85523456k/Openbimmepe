@@ -365,7 +365,7 @@ pub struct Element {
     pub count: u32,
     /// Family instance: the library family it is, the library type it was placed as, and the values set on this
     /// instance. A type of a family: the library family it is a type of (the element's `name` is the type's name)
-    /// and, in `overrides`, the values it gives every instance that takes it as its type.
+    /// and, in `overrides` and `texts`, the values it gives every instance that takes it as its type.
     pub family: String,
     pub type_name: String,
     pub overrides: Vec<(String, f64)>,
@@ -416,7 +416,7 @@ impl Element {
             && (matches!(self.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening) || self.parent.is_none())
             && (matches!(k, Category::Rebar | Category::Stair | Category::Elevation) || self.count == 0)
             && (self.category == Category::Family
-                || (self.category == Category::Type && self.type_for == Some(Category::Family) && self.type_name.is_empty() && self.texts.is_empty())
+                || (self.category == Category::Type && self.type_for == Some(Category::Family) && self.type_name.is_empty())
                 || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
@@ -518,8 +518,9 @@ pub enum Command {
     /// The family, type and instance values of a family instance, and its turn in degrees.
     SetFamilyTexts { id: ElementId, texts: Vec<(String, String)> },
     SetFamily { id: ElementId, family: String, type_name: String, overrides: Vec<(String, f64)>, angle_deg: f64 },
-    /// A type of a family: the library family it is a type of, and the values it gives its instances.
-    SetFamilyType { id: ElementId, family: String, values: Vec<(String, f64)> },
+    /// A type of a family: the library family it is a type of, and the values (numbers, choices, texts and
+    /// materials) it gives its instances.
+    SetFamilyType { id: ElementId, family: String, values: Vec<(String, f64)>, texts: Vec<(String, String)> },
     /// The structural material of a beam.
     SetMaterial { id: ElementId, material: Material },
     SetGeometry { id: ElementId, geometry: Geometry },
@@ -1189,11 +1190,12 @@ impl Document {
                     (el.family, el.type_name, el.overrides, el.angle_deg) = (family.clone(), type_name.clone(), overrides.clone(), *angle_deg);
                     el.revision = revision;
                 }
-                Command::SetFamilyType { id, family, values } => {
+                Command::SetFamilyType { id, family, values, texts } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if el.category != Category::Type || el.type_for != Some(Category::Family) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.family = family.clone();
                     el.overrides = values.clone();
+                    el.texts = texts.clone();
                     el.revision = revision;
                 }
                 Command::SetCount { id, count } => {
