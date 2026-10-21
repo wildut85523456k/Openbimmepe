@@ -92,6 +92,9 @@ pub(crate) fn instance_connectors(doc: &Document, id: ElementId) -> Vec<Connecto
         type_name: (!el.type_name.is_empty()).then_some(el.type_name.as_str()),
         overrides: el.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
         texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+        // P2: the values of the instance's own type of a family are not passed yet (the type editor and this
+        // resolution path are wired together in the same slice, so nothing is half-done)
+        ..Default::default()
     };
     let Ok(inst) = f.solve(&req) else { return Vec::new() };
     let z = doc.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;

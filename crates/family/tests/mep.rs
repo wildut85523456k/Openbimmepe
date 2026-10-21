@@ -1363,3 +1363,153 @@ fn type_names_come_in_the_authors_order() {
         .unwrap();
     assert!(fc.type_names().is_empty());
 }
+
+
+fn ahu_solve(over: &[(&str, f64)], types: &[(&str, f64)]) -> Result<Instance, FamilyError> {
+    library::ahu().compile().unwrap().solve(&Request {
+        overrides: over.to_vec(),
+        type_values: types.to_vec(),
+        ..Default::default()
+    })
+}
+fn ahu_solved(over: &[(&str, f64)]) -> Instance {
+    ahu_solve(over, &[]).unwrap()
+}
+fn diffuser_solve(over: &[(&str, f64)], types: &[(&str, f64)]) -> Result<Instance, FamilyError> {
+    library::ceiling_diffuser().compile().unwrap().solve(&Request {
+        overrides: over.to_vec(),
+        type_values: types.to_vec(),
+        ..Default::default()
+    })
+}
+fn diffuser_solved(over: &[(&str, f64)]) -> Instance {
+    diffuser_solve(over, &[]).unwrap()
+}
+
+#[test]
+fn ahu_connectors_match_hand_figures() {
+    let i = ahu_solved(&[]);
+    assert_eq!(i.connectors.len(), 9, "supply, return, chw in and out, hw in and out, condensate, power, bms");
+    let s = conn(&i, "supply");
+    assert!(close3(s.pos, [0.0, 0.6, 0.7]) && s.dir == [0.0, 1.0, 0.0]);
+    assert_eq!(
+        s.size,
+        Size::Rect {
+            width: 0.8,
+            height: 0.5
+        }
+    );
+    assert!(close(s.flow, 1.2) && s.flow_dir == FlowDir::Out && s.system == System::SupplyAir && s.domain == Domain::Duct);
+    let r = conn(&i, "return");
+    assert!(close3(r.pos, [0.0, -0.6, 0.7]) && r.dir == [0.0, -1.0, 0.0] && r.flow_dir == FlowDir::In && r.system == System::ReturnAir);
+    let c = conn(&i, "chw_in");
+    assert!(close3(c.pos, [1.25, 0.3, 0.35]) && c.size == Size::Round { diameter: 0.05 } && c.system == System::ChilledWaterSupply && c.flow_dir == FlowDir::In);
+    let co = conn(&i, "chw_out");
+    assert!(close(co.flow, 0.0006) && co.flow_dir == FlowDir::Out && co.system == System::ChilledWaterReturn);
+    let h = conn(&i, "hw_in");
+    assert!(close3(h.pos, [1.25, -0.3, 0.35]) && h.system == System::HeatingWaterSupply && close(h.flow, 0.0004) && h.flow_dir == FlowDir::In);
+    assert_eq!(conn(&i, "hw_out").system, System::HeatingWaterReturn);
+    assert!(close3(conn(&i, "condensate").pos, [1.25, 0.3, 0.175]) && conn(&i, "condensate").system == System::Condensate);
+    let p = conn(&i, "power");
+    assert_eq!(p.size, Size::Electrical { voltage: 400.0, poles: 3 });
+    assert!(close(p.flow, 4000.0) && p.domain == Domain::Electrical && p.system == System::Power && p.flow_dir == FlowDir::In);
+    let b = conn(&i, "bms");
+    assert_eq!((b.size, b.flow_dir, b.system), (Size::Signal, FlowDir::Both, System::Controls));
+    // the return duct can be turned off, as on the fan coil
+    let without = ahu_solved(&[("with_return_duct", 0.0)]);
+    assert!(without.connectors.iter().all(|c| c.name != "return"), "a unit with no return duct has no return connector");
+}
+
+#[test]
+fn ahu_follows_its_own_sizes_and_flow() {
+    let big = ahu_solve(&[("length", 4.0), ("depth", 2.0), ("height", 2.0)], &[("air_flow", 3.0), ("supply_duct_w", 1.2)]).unwrap();
+    let s = conn(&big, "supply");
+    assert!(close3(s.pos, [0.0, 1.0, 1.0]) && close(s.flow, 3.0));
+    assert_eq!(
+        s.size,
+        Size::Rect {
+            width: 1.2,
+            height: 0.5
+        }
+    );
+    assert!(close3(conn(&big, "chw_in").pos, [2.0, 0.5, 0.5]));
+    // a duct that cannot fit the casing face is refused by the family's own check
+    assert!(matches!(ahu_solve(&[("length", 1.0)], &[("supply_duct_w", 1.2)]), Err(FamilyError::CheckFailed(_))), "1.2 m duct on a 1 m face");
+    assert!(matches!(ahu_solve(&[("length", 1.9)], &[("supply_duct_w", 2.0)]), Err(FamilyError::CheckFailed(_))), "2 m duct on a 1.9 m face");
+    // a value of the wrong scope is refused whichever way it is passed
+    assert!(matches!(ahu_solve(&[("air_flow", 2.0)], &[]), Err(FamilyError::WrongScope(_))), "a type value is not an instance override");
+    assert!(matches!(ahu_solve(&[], &[("length", 3.0)]), Err(FamilyError::WrongScope(_))), "an instance value is not a type value");
+}
+
+#[test]
+fn the_ceiling_diffuser_hangs_on_a_ceiling_and_takes_its_duct_from_above() {
+    let i = diffuser_solved(&[]);
+    assert_eq!(i.connectors.len(), 1, "a diffuser has one duct connection");
+    let s = conn(&i, "supply");
+    assert!(close3(s.pos, [0.0, 0.0, 0.15]) && s.dir == [0.0, 0.0, 1.0], "the drop joins it from above");
+    assert_eq!(s.size, Size::Round { diameter: 0.2 });
+    assert!(close(s.flow, 0.05) && close(s.pressure_drop, 30.0) && s.flow_dir == FlowDir::In && s.system == System::SupplyAir);
+    let big = diffuser_solve(&[], &[("neck_d", 0.4), ("neck_h", 0.3), ("air_flow", 0.2)]).unwrap();
+    let b = conn(&big, "supply");
+    assert_eq!(b.size, Size::Round { diameter: 0.4 });
+    assert!(close3(b.pos, [0.0, 0.0, 0.3]) && close(b.flow, 0.2));
+    // a neck wider than the face is refused by the family's own check
+    assert!(matches!(diffuser_solve(&[("face", 0.3)], &[("neck_d", 0.4)]), Err(FamilyError::CheckFailed(_))));
+    // the type's values win over the library's own defaults (neck_d 0.2 and neck_h 0.15), and the face, which is the
+    // instance's own value, is untouched by them
+    let tall = diffuser_solve(&[("face", 0.8)], &[("neck_h", 0.25)]).unwrap();
+    assert!(close3(conn(&tall, "supply").pos, [0.0, 0.0, 0.25]) && close3(conn(&tall, "supply").pos, [0.0, 0.0, 0.25]));
+    assert_eq!(conn(&tall, "supply").size, Size::Round { diameter: 0.2 }, "the library default still stands for what the type does not set");
+    // a value of the wrong scope is refused whichever way it is passed
+    assert!(matches!(diffuser_solve(&[("neck_d", 0.2)], &[]), Err(FamilyError::WrongScope(_))), "a type value is not an instance override");
+    assert!(matches!(diffuser_solve(&[], &[("face", 0.6)]), Err(FamilyError::WrongScope(_))), "an instance value is not a type value");
+}
+
+#[test]
+fn the_library_carries_the_air_handling_unit_and_the_ceiling_diffuser() {
+    let all = library::all().unwrap();
+    let ahu = all.iter().find(|c| c.name() == "Air handling unit").unwrap();
+    assert_eq!(ahu.category(), Category::UnitaryEquipment);
+    assert_eq!(ahu.category().ifc_class(), "IfcUnitaryEquipment");
+    assert_eq!(ahu.host(), Host::Floor, "an air handling unit stands on a floor");
+    let d = all.iter().find(|c| c.name() == "Ceiling diffuser, square").unwrap();
+    assert_eq!(d.category(), Category::AirTerminal);
+    assert_eq!(d.category().ifc_class(), "IfcAirTerminal");
+    assert_eq!(d.host(), Host::Ceiling, "a diffuser belongs on a ceiling");
+    assert!(d.type_names().is_empty(), "the library ships no named types for either: they come from a catalogue");
+    assert!(ahu.type_names().is_empty());
+}
+
+
+#[test]
+fn the_type_layer_sits_between_the_librarys_named_type_and_the_instances_own_values() {
+    // a family with one value of each scope and a named type of its own that sets both
+    let f = Family {
+        name: "Layered".into(),
+        values: vec![
+            ValueDef::input("size", 1.0, 0.1, 10.0, Scope::Instance),
+            ValueDef::number("flow", 2.0, 0.1, 10.0, Scope::Type),
+        ],
+        types: vec![TypeDef {
+            name: "T".into(),
+            values: vec![("size".into(), 3.0), ("flow".into(), 4.0)],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let c = f.compile().unwrap();
+    let v = |req: &Request| -> Vec<(String, f64)> {
+        let i = c.solve(req).unwrap();
+        c.input_values(&i).into_iter().map(|(n, x)| (n.to_string(), x)).collect()
+    };
+    // the library's own defaults, with nothing else asked for
+    assert_eq!(v(&Request::default()), vec![("size".to_string(), 1.0), ("flow".to_string(), 2.0)]);
+    // the named type of the library
+    assert_eq!(v(&Request { type_name: Some("T"), ..Default::default() }), vec![("size".to_string(), 3.0), ("flow".to_string(), 4.0)]);
+    // the caller's own type of the family wins over the library's named type, and the instance wins over both
+    let r = Request { type_name: Some("T"), type_values: vec![("flow", 5.0)], overrides: vec![("size", 6.0)], ..Default::default() };
+    assert_eq!(v(&r), vec![("size".to_string(), 6.0), ("flow".to_string(), 5.0)]);
+    // and an unknown name is refused whatever layer it comes from
+    assert!(matches!(c.solve(&Request { type_values: vec![("nope", 1.0)], ..Default::default() }), Err(FamilyError::UnknownValue(_))));
+    assert!(matches!(c.solve(&Request { overrides: vec![("nope", 1.0)], ..Default::default() }), Err(FamilyError::UnknownValue(_))));
+}

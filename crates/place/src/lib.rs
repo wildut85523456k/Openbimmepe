@@ -160,7 +160,7 @@ impl Model {
         let p = &self.placements[k];
         let mut ov: Vec<(&str, f64)> = p.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
         if inject && !ov.iter().any(|(n, _)| *n == "wall_t") { ov.push(("wall_t", self.chains[p.chain].thickness)); }
-        self.families[p.family].solve(&Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
+        self.families[p.family].solve(&Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(), ..Default::default()})
     }
 
     /// Solve every placement and cut the wall openings. Does not change the model.
@@ -294,7 +294,7 @@ impl Model {
                 let p = &self.placements[k];
                 let mut ov: Vec<(&str, f64)> = p.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
                 if inject && !ov.iter().any(|(n, _)| *n == "wall_t") { ov.push(("wall_t", self.chains[p.chain].thickness)); }
-                Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }
+                Request { type_name: p.type_name.as_deref(), overrides: ov, texts: p.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(), ..Default::default()}
             }).collect();
             for (&k, r) in idx.iter().zip(fam.solve_many(&reqs)) {
                 match r {

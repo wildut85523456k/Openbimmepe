@@ -358,6 +358,9 @@ fn family_facts(e: &Element) -> FamFacts {
             type_name: (!e.type_name.is_empty()).then_some(e.type_name.as_str()),
             overrides: e.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
             texts: e.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+            // P2: the values of a family's own type reach a schedule through the same resolution the geometry uses,
+            // which is wired in the slice that adds the type editor
+            ..Default::default()
         }).ok().and_then(|i| i.opening)
     } else { None };
     FamFacts { kind, opening }

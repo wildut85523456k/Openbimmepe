@@ -20,6 +20,7 @@ fn solve(f: &Compiled, w: f64, h: f64, r: f64, s: f64) -> Result<Instance, Famil
         type_name: None,
         overrides: vec![("width", w), ("height", h), ("rise", r), ("sill", s)],
         texts: vec![],
+..Default::default()
     })
 }
 /// Shoelace area, counter-clockwise positive.

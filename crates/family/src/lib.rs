@@ -1570,10 +1570,16 @@ impl Instance {
 #[derive(Debug, Clone, Default)]
 pub struct Request<'a> {
     pub type_name: Option<&'a str>,
-    /// numbers, whole numbers and yes/no (0 or 1) by name
+    /// numbers, whole numbers and yes/no (0 or 1) by name, for the values the instance itself sets
     pub overrides: Vec<(&'a str, f64)>,
-    /// choices, texts and materials by name
+    /// choices, texts and materials by name, for the values the instance itself sets
     pub texts: Vec<(&'a str, &'a str)>,
+    /// numbers, whole numbers and yes/no by name, for the values the caller's own type of this family sets. They are
+    /// applied after the named type's values and before the instance's, so a type of a family can carry its own
+    /// parameters (the document's `Category::Type` of a family does) without the library having to name every one.
+    pub type_values: Vec<(&'a str, f64)>,
+    /// choices, texts and materials by name, for the values the caller's own type of this family sets
+    pub type_texts: Vec<(&'a str, &'a str)>,
 }
 
 /// Inputs already resolved to slots.
@@ -1581,6 +1587,8 @@ struct Resolved<'a> {
     type_name: Option<&'a str>,
     nums: Vec<(usize, f64)>,
     texts: Vec<(usize, String)>,
+    type_nums: Vec<(usize, f64)>,
+    type_texts: Vec<(usize, String)>,
 }
 
 impl Inner {
@@ -1695,6 +1703,8 @@ impl Inner {
             type_name: req.type_name,
             nums: Vec::with_capacity(req.overrides.len()),
             texts: Vec::with_capacity(req.texts.len()),
+            type_nums: Vec::with_capacity(req.type_values.len()),
+            type_texts: Vec::with_capacity(req.type_texts.len()),
         };
         for &(nm, v) in &req.overrides {
             let i = self
@@ -1735,6 +1745,46 @@ impl Inner {
                 });
             }
             r.texts.push((i, v.to_string()));
+        }
+        for &(nm, v) in &req.type_values {
+            let i = self
+                .slot(nm)
+                .ok_or_else(|| FamilyError::UnknownValue(nm.into()))?;
+            let inp = self
+                .inputs
+                .get(i)
+                .and_then(|t| t.as_ref())
+                .ok_or_else(|| FamilyError::NotAnInput(nm.into()))?;
+            if inp.scope != Scope::Type {
+                return Err(FamilyError::WrongScope(nm.into()));
+            }
+            if !matches!(inp.spec, Spec::Num { .. } | Spec::Flag { .. }) {
+                return Err(FamilyError::WrongKind {
+                    name: nm.into(),
+                    expected: "number or yes/no",
+                });
+            }
+            r.type_nums.push((i, v));
+        }
+        for &(nm, v) in &req.type_texts {
+            let i = self
+                .slot(nm)
+                .ok_or_else(|| FamilyError::UnknownValue(nm.into()))?;
+            let inp = self
+                .inputs
+                .get(i)
+                .and_then(|t| t.as_ref())
+                .ok_or_else(|| FamilyError::NotAnInput(nm.into()))?;
+            if inp.scope != Scope::Type {
+                return Err(FamilyError::WrongScope(nm.into()));
+            }
+            if matches!(inp.spec, Spec::Num { .. } | Spec::Flag { .. }) {
+                return Err(FamilyError::WrongKind {
+                    name: nm.into(),
+                    expected: "choice, text or material",
+                });
+            }
+            r.type_texts.push((i, v.to_string()));
         }
         let mut budget = MAX_NESTED_INSTANCES;
         self.run(&r, &mut budget)
@@ -1793,7 +1843,8 @@ impl Inner {
             }
             Ok(())
         };
-        // layer 1: type values, layer 2: the request's values (later entries win)
+        // layer 1: the named type's values, layer 2: the caller's own type of the family, layer 3: the instance's own
+        // values (later layers win)
         if let Some(t) = r.type_name {
             let (_, nums, txts) = self
                 .types
@@ -1806,6 +1857,12 @@ impl Inner {
             for (i, v) in txts {
                 set_text(&mut texts, &mut vals, *i, v)?;
             }
+        }
+        for &(i, v) in &r.type_nums {
+            vals[i] = v;
+        }
+        for (i, v) in &r.type_texts {
+            set_text(&mut texts, &mut vals, *i, v)?;
         }
         for &(i, v) in &r.nums {
             vals[i] = v;
@@ -2079,6 +2136,8 @@ impl Inner {
                     type_name: nd.type_name.as_deref(),
                     nums: Vec::with_capacity(nd.values.len()),
                     texts: Vec::with_capacity(nd.texts.len()),
+                    type_nums: Vec::new(),
+                    type_texts: Vec::new(),
                 };
                 for (slot, e) in &nd.values {
                     cr.nums.push((*slot, fe(&nd.child.names[*slot], e, &vals)?));

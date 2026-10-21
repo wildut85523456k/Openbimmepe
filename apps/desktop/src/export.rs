@@ -58,7 +58,10 @@ pub fn instance_values_with(family: &str, type_name: &str, overrides: &[(String,
     let f = library().iter().find(|f| f.name() == family)?;
     let inst = f.solve(&openbim_family::Request {
         type_name: (!type_name.is_empty()).then_some(type_name),
-        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }).ok()?;
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+        // P2: a family's own type of a family (the document's `Category::Type`) is wired into this resolution in the
+        // slice that adds the type editor, so that the two land together rather than half-wired
+        ..Default::default() }).ok()?;
     Some(f.input_values(&inst).into_iter()
         .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Instance))
         .map(|(n, v)| (n.to_string(), v)).collect())
@@ -73,7 +76,10 @@ pub fn instance_texts(family: &str, type_name: &str, overrides: &[(String, f64)]
     let f = library().iter().find(|f| f.name() == family)?;
     let inst = f.solve(&openbim_family::Request {
         type_name: (!type_name.is_empty()).then_some(type_name),
-        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }).ok()?;
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+        // P2: a family's own type of a family (the document's `Category::Type`) is wired into this resolution in the
+        // slice that adds the type editor, so that the two land together rather than half-wired
+        ..Default::default() }).ok()?;
     Some(f.input_texts(&inst).into_iter().filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Instance))
         .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect())
 }
@@ -244,10 +250,10 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         let instance = match wall_t {
             Some(t) if !overrides.iter().any(|(n, _)| *n == "wall_t") => {
                 overrides.push(("wall_t", t));
-                lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
-                    .or_else(|_| { overrides.pop(); lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }) })
+                lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(), ..Default::default() })
+                    .or_else(|_| { overrides.pop(); lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(), ..Default::default() }) })
             }
-            _ => lib[fi].solve(&openbim_family::Request { type_name, overrides, texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }),
+            _ => lib[fi].solve(&openbim_family::Request { type_name, overrides, texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(), ..Default::default() }),
         }.map_err(|e| format!("{}: {e:?}", el.name))?;
         // a door or window opens its wall
         if let (Some((wi, _, along)), Some([w, h, sill])) = (host, instance.opening) {

@@ -31,6 +31,7 @@ fn r<'a>(overrides: Vec<(&'a str, f64)>, texts: Vec<(&'a str, &'a str)>) -> Requ
         type_name: None,
         overrides,
         texts,
+        ..Default::default()
     }
 }
 
@@ -72,6 +73,7 @@ fn the_nested_handle_sits_where_the_hinge_side_says() {
             type_name: None,
             overrides: vec![],
             texts: vec![],
+            ..Default::default()
         })
         .unwrap();
     let j = c
@@ -712,6 +714,7 @@ fn batches_with_typed_values_are_identical_on_any_thread_count() {
     let reqs: Vec<Request> = (0..3000)
         .map(|k| Request {
             type_name: if k % 3 == 0 { Some("Type B") } else { None },
+            // the type layer is not exercised here: these requests are the instance's own
             overrides: vec![
                 ("has_handle", (k % 2) as f64),
                 ("wall_t", 0.1 + (k % 5) as f64 * 0.1),
@@ -720,6 +723,7 @@ fn batches_with_typed_values_are_identical_on_any_thread_count() {
                 ("swing", if k % 4 < 2 { "left" } else { "right" }),
                 ("mark", marks[k % 300].as_str()),
             ],
+            ..Default::default()
         })
         .collect();
     let serial: Vec<_> = reqs.iter().map(|q| c.solve(q)).collect();
@@ -744,7 +748,7 @@ proptest! {
         let mut f = door();
         f.types.push(TypeDef { name: "t".into(), values: vec![("width".into(), w), ("height".into(), h), ("frame".into(), fr), ("handle_height".into(), hh)], ..Default::default() });
         let c = compile_library(&[handle(), f]).unwrap().remove(1);
-        let res = c.solve(&Request { type_name: Some("t"), overrides: vec![("has_handle", if on { 1.0 } else { 0.0 })], texts: vec![("swing", if left { "left" } else { "right" })] });
+        let res = c.solve(&Request { type_name: Some("t"), overrides: vec![("has_handle", if on { 1.0 } else { 0.0 })], texts: vec![("swing", if left { "left" } else { "right" })], ..Default::default() });
         let valid = w > 4.0 * fr && h > 4.0 * fr && (!on || (w - 2.0 * fr > 0.35 && hh < h - fr - 0.15));
         prop_assert_eq!(res.is_ok(), valid, "{:?}", res);
         if let Ok(i) = res {
