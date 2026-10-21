@@ -1314,6 +1314,23 @@ mod tests {
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
 
+    /// The whole window, as the app runs it: the toolbar, the ribbon, the options bar, the panels and the viewport,
+    /// without an `eframe::Frame`, so a test can click what the ribbon draws (A8).
+    fn window_frame(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>) {
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| app.window(ui));
+        out.textures_delta.clear();
+    }
+
+    /// Clicks the middle of a ribbon button, where the last frame put it. False when the ribbon shows no such button.
+    fn ribbon_click(ctx: &egui::Context, screen: Rect, app: &mut Desktop, id: &str) -> bool {
+        let Some((_, rect)) = app.ribbon_hits.iter().find(|(hit, _)| *hit == id).copied() else { return false };
+        let at = rect.center();
+        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+        window_frame(ctx, screen, app, vec![button(at, true)]);
+        window_frame(ctx, screen, app, vec![button(at, false)]);
+        true
+    }
+
     /// A frame in which the window handles the global keys first and then draws the viewport, as `ui()` does (A3, A4).
     fn key_frame(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>) {
         let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() },
@@ -1359,6 +1376,81 @@ mod tests {
         key_frame(&ctx, screen, &mut app, vec![key_with(egui::Key::N, egui::Modifiers::CTRL)]);
         assert_eq!(app.levels().len(), 2, "{}", app.message);
         assert!(app.tool == crate::Tool::Select, "{}", app.message);
+    }
+
+    #[test]
+    fn the_ribbon_starts_a_tool_and_a_button_that_is_not_wired_changes_nothing() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.ribbon = "Architecture";
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "wall"), "the Architecture tab shows a Wall button");
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        // a button the decision of 21 Oct 2026 leaves disabled does nothing at all
+        app.ribbon = "Systems";
+        app.systems_sub = "HVAC";
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(app.ribbon_hits.iter().any(|(id, _)| *id == "damper"), "the HVAC tab shows a Damper button");
+        assert!(!crate::Desktop::ribbon_command_implemented("damper"), "the Damper command is not wired yet");
+        ribbon_click(&ctx, screen, &mut app, "damper");
+        assert!(app.tool == crate::Tool::Wall, "a disabled button changes nothing: {}", app.message);
+    }
+
+    #[test]
+    fn the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.reset_model();
+        app.view = View::Plan;
+        let level = app.plan_level();
+        // three levels: New brings two, the Level tool adds the third
+        app.run_command("level", "Level");
+        app.level_elev_mm = 6000.0;
+        app.level_name = "Roof".into();
+        app.level_click();
+        assert_eq!(app.levels().len(), 3, "{}", app.message);
+        // a grid, by two clicks on the empty canvas
+        app.run_command("grid", "Grid");
+        for at in [Pos2::new(250.0, 300.0), Pos2::new(750.0, 300.0)] {
+            frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Grid).count(), 1, "{}", app.message);
+        // four walls round a room, by the chain: the last click closes the loop
+        app.run_command("wall", "Wall");
+        app.wall_loc = 2;
+        for p in [[2.0, 2.0], [8.0, 2.0], [8.0, 6.0], [2.0, 6.0], [2.0, 2.0]] { app.wall_click(level, p); }
+        assert_eq!(walls(&app), 4, "{}", app.message);
+        // a floor over them, and the room they enclose
+        app.run_command("floor", "Floor");
+        for p in [[2.0, 2.0], [8.0, 2.0], [8.0, 6.0], [2.0, 6.0]] { app.slab_click(level, p, false); }
+        app.slab_click(level, [2.0, 2.0], true);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Slab).count(), 1, "{}", app.message);
+        app.run_command("room", "Room");
+        app.room_click(level, [5.0, 4.0]);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Room).count(), 1, "{}", app.message);
+        // a section through it, and the view it makes
+        app.run_command("section", "Section");
+        app.section_click(level, [4.0, 1.0]);
+        app.section_click(level, [4.0, 7.0]);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Section).count(), 1, "{}", app.message);
+        // save, reopen and export: the same building comes back, and the IFC carries its walls
+        let path = std::env::temp_dir().join("openbim-small-office-e2e.obim");
+        let path = path.to_str().unwrap().to_string();
+        app.write_model(&path);
+        let saved = app.document.clone();
+        let mut reopened = Desktop::sample();
+        reopened.open_path(&path);
+        assert_eq!(reopened.document.elements().count(), saved.elements().count(), "{}", reopened.message);
+        assert_eq!(reopened.document.elements().filter(|e| e.category == Category::Wall).count(), 4);
+        assert_eq!(reopened.document.elements().filter(|e| e.category == Category::Room).count(), 1, "the room comes back");
+        let out = crate::export::export_ifc_with(&reopened.document, "Office", 1, "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false)
+            .expect("the model exports");
+        assert_eq!(out.walls, 4, "{}", out.warnings.join("; "));
+        assert!(out.text.contains("IFCWALL("), "the file carries walls");
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

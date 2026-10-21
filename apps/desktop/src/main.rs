@@ -267,6 +267,9 @@ struct Desktop {
     keymap: openbim_keymap::Keymap,
     /// the keys of a shortcut being typed, replayed through a fresh matcher each key (A4)
     key_typed: Vec<openbim_keymap::Chord>,
+    /// where the last frame drew each ribbon and quick-access button: the whole-window test clicks them (A8)
+    #[cfg(test)]
+    ribbon_hits: Vec<(&'static str, egui::Rect)>,
 }
 
 /// The ribbon commands that are wired. Every other button the ribbon shows is rendered disabled (decision of 21 Oct
@@ -330,6 +333,8 @@ impl Desktop {
             message: "Sample scene - use Save to keep your edits".into(),
             show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(),
+            #[cfg(test)]
+            ribbon_hits: Vec::new(),
         }
     }
 
@@ -465,6 +470,8 @@ impl Desktop {
                 let enabled = Self::ribbon_command_implemented(id);
                 let button = ui.add_enabled(enabled, egui::Button::image(img).frame(false));
                 let button = if enabled { button.on_hover_text(*label) } else { button.on_hover_text(format!("{label} - planned, not implemented yet")) };
+                #[cfg(test)]
+                self.ribbon_hits.push((id, button.rect));
                 if button.clicked() { self.run_command(id, label); }
             }
             ui.separator();
@@ -616,6 +623,8 @@ impl Desktop {
         ui.separator();
         let groups = ribbon::groups(self.ribbon, self.systems_sub);
         let mut clicked = None;
+        #[cfg(test)]
+        let mut hits: Vec<(&'static str, egui::Rect)> = Vec::new();
         egui::ScrollArea::horizontal().id_salt("ribbon").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for group in groups {
@@ -625,7 +634,10 @@ impl Desktop {
                             let active = (cmd.id == "roof" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Roof) || (cmd.id == "ceiling" && roofing && self.slab_kind_pick == openbim_document::SlabKind::Ceiling) || (!matches!(cmd.id, "roof" | "ceiling") && !(roofing && matches!(cmd.id, "structural_floor" | "floor" | "slab")) && matches!((cmd.id, self.tool),
                                 ("duct", Tool::Duct) | ("pipe", Tool::Pipe) | ("end_point", Tool::EndPoint) | ("elec_node", Tool::ElecNode) | ("elec_cable", Tool::Cable) | ("wall", Tool::Wall) | ("grid", Tool::Grid) | ("tag", Tool::Tag) | ("move", Tool::Move) | ("dimension", Tool::Dimension) | ("wall_joins", Tool::WallJoins) | ("room", Tool::Room) | ("stair", Tool::Stair) | ("railing", Tool::Railing) | ("section", Tool::Section) | ("elevation", Tool::Elevation) | ("shaft", Tool::Shaft) | ("opening_vertical", Tool::VerticalOpening) | ("opening_wall", Tool::WallOpening) | ("measure", Tool::Measure) | ("align", Tool::Align) | ("trim", Tool::Trim) | ("offset", Tool::Offset) | ("copy", Tool::Copy) | ("paste", Tool::Paste) | ("match_type", Tool::MatchType) | ("rotate", Tool::Rotate) | ("mirror", Tool::Mirror) | ("level", Tool::Level) | ("beam" | "brace", Tool::Beam) | ("structural_column", Tool::Column) | ("structural_floor" | "floor" | "slab", Tool::Slab) | ("foundation", Tool::Footing) | ("footing", Tool::WallFooting) | ("beam_system", Tool::BeamSystem) | ("truss", Tool::Truss) | ("rebar", Tool::Rebar) | ("door" | "window" | "ahu" | "component", Tool::Family)));
                             let enabled = Self::ribbon_command_implemented(cmd.id);
-                            if ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active, enabled).clicked() {
+                            let response = ribbon::big_button(ui, cmd.id, cmd.label, self.dark, active, enabled);
+                            #[cfg(test)]
+                            hits.push((cmd.id, response.rect));
+                            if response.clicked() {
                                 clicked = Some((cmd.id, cmd.label));
                             }
                         }
@@ -633,6 +645,8 @@ impl Desktop {
                 }
             });
         });
+        #[cfg(test)]
+        self.ribbon_hits.extend(hits);
         if let Some((id, label)) = clicked { self.run_command(id, label); }
         ui.separator();
         panels::options(self, ui);
@@ -752,8 +766,12 @@ fn key_char(key: egui::Key) -> Option<char> {
     (chars.next().is_none() && c.is_ascii_alphanumeric()).then(|| c.to_ascii_uppercase())
 }
 
-impl eframe::App for Desktop {
-    fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
+impl Desktop {
+    /// The whole window: the keys, the toolbar, the ribbon, the options bar, the panels and the viewport. It is separate
+    /// from the `eframe::App` entry point so that a test can drive the whole window without an `eframe::Frame` (A8).
+    fn window(&mut self, ui: &mut egui::Ui) {
+        #[cfg(test)]
+        self.ribbon_hits.clear();
         let ctx = ui.ctx().clone();
         self.global_keys(&ctx);
         self.clipboard_events(&ctx);
@@ -831,6 +849,10 @@ impl eframe::App for Desktop {
             });
         }
     }
+}
+
+impl eframe::App for Desktop {
+    fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) { self.window(ui); }
 }
 
 fn main() -> eframe::Result {
