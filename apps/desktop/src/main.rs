@@ -300,7 +300,19 @@ impl Desktop {
         }
     }
 
+    /// The tools that put an element on a level: without one they cannot start (A2).
+    fn tool_needs_level(tool: Tool) -> bool {
+        matches!(tool, Tool::Wall | Tool::Grid | Tool::Beam | Tool::Column | Tool::Slab | Tool::Footing | Tool::WallFooting
+            | Tool::BeamSystem | Tool::Truss | Tool::Rebar | Tool::Stair | Tool::Railing | Tool::Room | Tool::Family
+            | Tool::Shaft | Tool::VerticalOpening | Tool::WallOpening | Tool::Duct | Tool::Pipe | Tool::EndPoint
+            | Tool::ElecNode | Tool::Cable | Tool::Section | Tool::Elevation | Tool::Tag | Tool::Dimension)
+    }
+
     fn choose_tool(&mut self, tool: Tool) {
+        if Self::tool_needs_level(tool) && self.plan_level().0 == 0 {
+            self.message = "Add a level first: Architecture > Datum > Level".into();
+            return;
+        }
         if tool != Tool::Family { self.family_kind = None; }
         self.tool = tool;
         self.beam_start = None;

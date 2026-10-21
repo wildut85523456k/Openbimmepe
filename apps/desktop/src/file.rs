@@ -96,11 +96,17 @@ impl Desktop {
         self.reset_model();
     }
 
-    fn reset_model(&mut self) {
+    pub(crate) fn reset_model(&mut self) {
         self.document = Document::new();
+        // Revit's default template: Level 1 at 0 and Level 2 at 3 m. Without a level, every drawing tool would point at
+        // a level that is not there and the IFC export of the first wall would fail (A2).
+        let _ = self.document.place_level("Level 1", 0.0);
+        let _ = self.document.place_level("Level 2", 3.0);
         self.file = FileState::default();
         self.selected = None;
-        self.message = "New empty model".into();
+        self.view = crate::View::Plan;
+        self.tool = crate::Tool::Select;
+        self.message = "New model: Level 1 and Level 2 are in place - draw a wall, or add your own levels".into();
     }
 
     /// The question asked when a file or a new model would replace unsaved changes.
@@ -194,7 +200,9 @@ mod tests {
         app.file.confirm_new = false;
         app.write_model(path);
         app.new_model();
-        assert_eq!(app.document.elements().count(), 0, "{}", app.message);
+        // New gives the project its two levels and nothing else (decision of 21 Oct 2026, A2/A6)
+        assert_eq!(app.document.elements().count(), 2, "{}", app.message);
+        assert!(app.document.elements().all(|e| e.geometry == Some(openbim_document::Geometry::Level)), "a new model holds its levels and no other element");
         assert!(app.file.path.is_none());
         std::fs::remove_dir_all(&d).unwrap();
     }

@@ -60,6 +60,9 @@ pub use spatial::{line_meet, system_lines, BeamExtent, Geometry, Mesh, ViewRef};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ElementId(pub u64);
 
+/// Two levels closer than this cannot be told apart as storeys in IFC export, so placing one is refused (A6).
+pub const MIN_LEVEL_GAP_M: f64 = 0.1;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
     Wall,
@@ -686,19 +689,42 @@ impl Document {
         Ok(id)
     }
     /// Adds a level at `elevation_m`; two levels cannot share an elevation.
+    /// Places a level. Two levels less than 100 mm apart, or two with the same name, would leave the storeys of the
+    /// exported model ambiguous, so both are refused (A6).
     pub fn place_level(&mut self, name: &str, elevation_m: f64) -> Result<ElementId, EditError> {
         let id = self.next_id();
-        if !elevation_m.is_finite() || self.elements.values().any(|e| e.geometry == Some(Geometry::Level) && (e.elevation_m - elevation_m).abs() < 1e-3) { return Err(EditError::InvalidGeometry(id)); }
+        if !elevation_m.is_finite() { return Err(EditError::InvalidGeometry(id)); }
+        let levels: Vec<(String, f64)> = self.elements.values().filter(|e| e.geometry == Some(Geometry::Level))
+            .map(|e| (e.name.clone(), e.elevation_m)).collect();
+        if levels.iter().any(|(_, z)| (z - elevation_m).abs() < MIN_LEVEL_GAP_M) { return Err(EditError::InvalidGeometry(id)); }
         let name = if name.trim().is_empty() {
-            let mut n = self.elements.values().filter(|e| e.geometry == Some(Geometry::Level)).count() + 1;
-            while self.elements.values().any(|e| e.geometry == Some(Geometry::Level) && e.name == format!("Level {n}")) { n += 1; }
+            let mut n = levels.len() + 1;
+            while levels.iter().any(|(used, _)| used.eq_ignore_ascii_case(&format!("Level {n}"))) { n += 1; }
             format!("Level {n}")
         } else { name.trim().to_string() };
+        if levels.iter().any(|(used, _)| used.eq_ignore_ascii_case(&name)) { return Err(EditError::InvalidGeometry(id)); }
         self.transact(self.revision, &[
             Command::Create { id, category: Category::Level, name, width_m: 1.0, height_m: 1.0, elevation_m },
             Command::SetGeometry { id, geometry: Geometry::Level },
         ])?;
         Ok(id)
+    }
+    /// Renames a level. An empty name, or one another level already has, is refused (A6).
+    pub fn rename_level(&mut self, id: ElementId, name: &str) -> Result<(), EditError> {
+        if self.get(id).map(|e| e.geometry) != Some(Some(Geometry::Level)) { return Err(EditError::InvalidElement); }
+        let name = name.trim();
+        if name.is_empty() { return Err(EditError::InvalidElement); }
+        if self.elements.values().any(|e| e.id != id && e.geometry == Some(Geometry::Level) && e.name.eq_ignore_ascii_case(name)) {
+            return Err(EditError::InvalidElement);
+        }
+        self.transact(self.revision, &[Command::Rename { id, name: name.to_string() }]).map(|_| ())
+    }
+    /// Deletes a level that nothing stands on. A level with elements on it is refused, as in Revit, rather than
+    /// taking the elements with it (A6).
+    pub fn delete_level(&mut self, id: ElementId) -> Result<(), EditError> {
+        if self.get(id).map(|e| e.geometry) != Some(Some(Geometry::Level)) { return Err(EditError::InvalidElement); }
+        if self.elements.values().any(|e| e.id != id && self.level_of(e.id) == Some(id)) { return Err(EditError::TypeInUse(id)); }
+        self.transact(self.revision, &[Command::Delete { id }]).map(|_| ())
     }
     /// The level an element stands on: its own, or its host's.
     pub fn level_of(&self, id: ElementId) -> Option<ElementId> {
@@ -1239,7 +1265,8 @@ impl Document {
                 Command::GenerateSchematic { diagram } => { trial_mep.schematics.push((**diagram).clone()); }
                 Command::Rename { id, name } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Type { return Err(EditError::UnsupportedProperty(*id)); }
+                    // a type and a level carry the name the user edits; every other element is named by its category
+                    if el.category != Category::Type && el.category != Category::Level { return Err(EditError::UnsupportedProperty(*id)); }
                     el.name = name.trim().into();
                     el.revision = revision;
                 }

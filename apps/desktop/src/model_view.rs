@@ -51,6 +51,12 @@ fn plan_edges(doc: &openbim_document::Document, level: ElementId) -> Vec<crate::
     out
 }
 
+/// The box a plan is fitted to: what is drawn on it, or a default 20 m square when the plan is empty. Without the
+/// default the viewport would return before the tool branches and no click on an empty canvas could reach a tool (A1).
+fn fit_box(bounds: Rect) -> Rect {
+    if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(20.0)) }
+}
+
 /// Where the pointer at `p` snaps in a plan: as in Revit, to the endpoints, intersections, midpoints and nearest points
 /// of the lines (and the foot of the perpendicular from `base`, the last point picked), else to 50 mm. Shift keeps the
 /// point level or plumb with `base` when nothing was caught. `xf` maps the plan to the screen.
@@ -65,12 +71,15 @@ fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: P
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
-        let added: Vec<(View, String)> = app.levels().into_iter().filter(|l| l.0 != ElementId(10) && l.0 != ElementId(11)).map(|l| (View::Level(l.0.0), l.1)).collect();
         let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0)))
             .chain(app.document.elements().filter(|e| e.category == Category::Elevation).flat_map(|e| (0..4u8).filter(move |k| e.count >> k & 1 == 1).map(move |k| (crate::section_ui::name_of_marker(&e.name, k), View::Marked(e.id.0, k)))))
             .collect();
-        let tabs = [("Level 1".to_string(), View::Plan), ("Level 2".to_string(), View::UpperPlan)].into_iter()
-            .chain(added.into_iter().map(|(v, n)| (n, v)))
+        // the level tabs are the document's own levels, lowest first (A2): the first two keep the Plan and Upper Plan
+        // views, every other level gets a view of its own. No level id and no level name is hard-coded here.
+        let level_tabs: Vec<(String, View)> = app.levels().into_iter().enumerate()
+            .map(|(k, (id, name, _))| (name, match k { 0 => View::Plan, 1 => View::UpperPlan, _ => View::Level(id.0) }))
+            .collect();
+        let tabs = level_tabs.into_iter()
             .chain([("{3D}".to_string(), View::ThreeD), ("M-101 - Mechanical".to_string(), View::Mechanical)])
             .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
             .chain(sections);
@@ -140,7 +149,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             for [x, y] in [start, end] { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
         }
     }
-    if !bounds.is_finite() { return; }
+    let bounds = fit_box(bounds);
     let fit = ((rect.width() - 100.0).max(10.0) / bounds.width().max(1.0))
         .min((rect.height() - 90.0).max(10.0) / bounds.height().max(1.0));
     let scale = fit * app.zoom;
@@ -1304,6 +1313,57 @@ mod tests {
     }
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
+
+    #[test]
+    fn an_empty_plan_is_fitted_to_a_default_box() {
+        assert!(fit_box(Rect::NOTHING).is_finite(), "an empty plan still needs a box to fit");
+        let drawn = Rect::from_min_size(Pos2::new(-1.0, -1.0), Vec2::new(9.0, 7.0));
+        assert_eq!(fit_box(drawn), drawn, "a plan with something on it is fitted to what is drawn");
+    }
+
+    #[test]
+    fn a_new_model_has_its_own_levels_and_takes_a_drawn_wall_and_grid() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.reset_model();
+        let levels = app.levels();
+        assert_eq!(levels.len(), 2, "New gives Level 1 and Level 2: {:?}", levels.iter().map(|l| l.1.clone()).collect::<Vec<_>>());
+        assert_eq!((levels[0].2, levels[1].2), (0.0, 3.0));
+        assert_eq!(app.plan_level(), levels[0].0, "the plan sits on the lowest level of the document");
+        assert_ne!(app.plan_level(), ElementId(10), "a new model must not point at the sample's level");
+        app.view = View::UpperPlan;
+        assert_eq!(app.plan_level(), levels[1].0, "the upper plan sits on the second level");
+        app.view = View::Plan;
+        // two clicks with the Wall tool, on a canvas with nothing drawn on it yet (A1)
+        app.run_command("wall", "Wall");
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        let (a, b) = (Pos2::new(400.0, 300.0), Pos2::new(600.0, 300.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
+        for at in [a, b] {
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(walls(&app), 1, "{}", app.message);
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("the wall that was drawn");
+        assert_eq!(app.document.level_of(wall.id), Some(levels[0].0), "the wall stands on the level of the plan");
+        // and a grid, on the same empty canvas
+        app.choose_tool(crate::Tool::Grid);
+        for at in [Pos2::new(300.0, 200.0), Pos2::new(300.0, 500.0)] {
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Grid).count(), 1, "{}", app.message);
+    }
+
+    #[test]
+    fn a_project_with_no_level_refuses_a_drawing_tool() {
+        let mut app = Desktop::sample();
+        app.document = openbim_document::Document::new();
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Wall);
+        assert!(app.tool == crate::Tool::Select, "the tool must not start without a level");
+        assert!(app.message.contains("Add a level first"), "{}", app.message);
+    }
 
     #[test]
     fn a_wall_is_drawn_by_two_clicks_as_a_chain_and_by_press_drag_release() {

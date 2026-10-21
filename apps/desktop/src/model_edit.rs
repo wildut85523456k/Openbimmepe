@@ -312,8 +312,14 @@ impl Desktop {
     }
 
     /// The level of the plan view on show.
+    /// The level the plan view on show sits on: the view's own level, else the lowest level of the document (the
+    /// second lowest for the upper plan). `ElementId(0)` means the project has no level at all and the drawing tools
+    /// refuse to start (A2).
     pub(crate) fn plan_level(&self) -> ElementId {
-        match self.view { crate::View::Level(id) if self.document.get(ElementId(id)).is_some() => ElementId(id), crate::View::UpperPlan => ElementId(11), _ => ElementId(10) }
+        if let crate::View::Level(id) = self.view { if self.document.get(ElementId(id)).is_some() { return ElementId(id); } }
+        let levels = self.levels();
+        let pick = if matches!(self.view, crate::View::UpperPlan) { levels.get(1).or_else(|| levels.first()) } else { levels.first() };
+        pick.map_or(ElementId(0), |l| l.0)
     }
 
     /// The levels of the document, lowest first: (id, name, elevation).
