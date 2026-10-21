@@ -61,7 +61,7 @@ is measured against the reference: a wrong reference produces wrong remediation.
 | **R2** | The Structure book is not distilled. The owner deferred structure, so this is correct for now, but the reason is recorded nowhere in the reference index. | Keep `docs/reference/README.md` line 14 as the deferral record; add the Structure book to the extraction queue in `docs/agent-team/` so the stage is not forgotten. | `docs/reference/README.md`, `docs/agent-team/` | trivial |
 | **R3** | The reference docs are not linked from `docs/revit-style-ui/README.md`, so a reader of the design never reaches them. | Add a "Reference material" bullet to the Documents list, naming the six files and the `[book]` / `[knowledge]` convention. | `docs/revit-style-ui/README.md` | trivial |
 | **R4** | `README.md` lists 5 of the 19 workspace members (its crate table has `geom`, `family`, `place`, `keymap`, `arch`, plus a `spikes/*` row), and is missing `document`, `ifc`, `view`, `route`, `sheets`, `calc`, `automation`, `oplog`, `sketch`, `viewport`, `viewport-egui`, `photo`, `schematic` and `apps/desktop`. | Regenerate the table from `Cargo.toml` rather than by hand, and add the one-line "what it is" for each of the missing crates. | `README.md` | trivial |
-| **R5** | Stale claims in existing documents. The arch audit lists 15 (D1-D15) and the MEP audit 13; the recurring ones are: `docs/revit-ux-parity-audit.md` claims event-test verification that does not cover the ribbon, options bar or global keys; `docs/3d-view-parity-plan.md` claims no 3D tools and no redo; `docs/agent-team/gap-review.md` claims `main` has no desktop app; `docs/revit-style-ui/06` claims the schematic engine is not in the candidate; `docs/revit-book-review.md` A8 mentions the fixed level tabs but not that they break IFC export in a new project. | Fix each claim at its source. Keep the historical value: mark the superseded statement "superseded 2026-10-21" rather than deleting it, so a reader can see what changed. | see per-row | small |
+| **R5** | Stale claims in existing documents. The arch audit lists 15 (D1-D15) and the MEP audit 13; the recurring ones are: `docs/revit-ux-parity-audit.md` claims event-test verification that does not cover the ribbon, options bar or global keys; `docs/3d-view-parity-plan.md` claims no 3D tools and no redo; `docs/agent-team/gap-review.md` claims `main` has no desktop app; `docs/revit-style-ui/06` claims the schematic engine is not in the candidate; `docs/agent-team/gap-review.md` marks `05-backlog.md` MEP-002 "PLANNED/UNVERIFIED" although the backlog row carries no status column at all; `docs/revit-book-review.md` A8 mentions the fixed level tabs but not that they break IFC export in a new project. | Fix each claim at its source. Keep the historical value: mark the superseded statement "superseded 2026-10-21" rather than deleting it, so a reader can see what changed. | see per-row | small |
 | **R6** | The reference docs cite "Text extraction `arch.txt`, lines 1134-10368" but the extraction itself is not in the repository, so the line references cannot be reproduced by a reviewer. | Add an extraction manifest to `docs/reference/`: the source file name, its SHA-256, the tool used, and the page/line convention. Do **not** commit the book text or the extraction - the books are copyrighted and only paraphrase may be stored. | `docs/reference/` | small |
 | **R7** | The reference acceptance checklists (~90-100 statements for Architecture, plus MEP) are prose. They become gates only when they are tests. | Convert them one feature at a time as the feature is built, carrying the reference section id into the test name (`arch-part1` section 4.1 -> test `..._matches_arch_part1_wall_...`). Do not convert them in bulk before the feature exists. | `crates/*/tests`, `apps/desktop/src/*` | ongoing |
 | **R8** | The reference docs mark 155 statements `[knowledge]` (general Revit/IFC knowledge, not in the books). A reader cannot tell which acceptance criteria depend on an unverified premise. | Add a column to the acceptance checklists: `book` / `knowledge` / `unverified`. Where a `[knowledge]` row gates a safety-relevant behaviour, mark it for confirmation against Autodesk's own documentation. | `docs/reference/revit-books/*.md` | small |
@@ -87,7 +87,7 @@ few days each; the order in section 4 is the recommended one, not a hard depende
 | **B3** | **Esc leaves the tool immediately** in the running app, so the documented two-stage Esc ("Esc ends the chain, Esc again leaves the tool") is unreachable. Tests pass because they call `show()` directly and never run `Desktop::ui`. | Delete the unconditional `choose_tool(Select)` and let each tool step back through its own pending state. Guard it with `egui_wants_keyboard_input` so it does not fire in a text field. | `apps/desktop/src/main.rs:567` | A test that drives `Desktop::ui` and asserts two-stage Esc for the wall and stair tools. |
 | **B4** | **No Ctrl+S / Ctrl+N / Ctrl+O, no Save As button**, and the Revit two-letter shortcuts are defined in `crates/keymap` but never consulted. | Wire `crates/keymap` into key handling and add the Save As button to the quick-access bar. The `save_as` command id already exists and is already handled. | `apps/desktop/src/main.rs:476`, `ribbon.rs:46-54`, `crates/keymap` | Every key in the keymap is exercised by a test that sends the key through the UI path. |
 | **B5** | **Tool parameters leak between tools.** `slab_offset_mm` / `slab_thickness_mm` are shared by Floor, Roof, Ceiling, Door/Window/Component and the footings. After Ceiling, the Door button places a door 2.7 m up and the "AHU" gets its elevation from the same box. | Give each tool its own state, or reset the shared fields in the command that sets the tool. | `apps/desktop/src/main.rs:450,458-464`, `model_edit.rs:568`, `panels.rs:482-483` | A test that presses Ceiling then Door and asserts the door elevation is the default. |
-| **B6** | **`place_level` accepts duplicate names and levels closer than 100 mm**, which `Levels::new` then rejects at export, so a model that was usable becomes unexportable. Levels cannot be renamed or deleted. | Validate name uniqueness and the 100 mm gap at placement, with the same rule `crates/arch` applies. Add rename and delete in Properties. | `crates/document/src/lib.rs:689-702`, `crates/arch/src/lib.rs:82-91` | A test that places two levels 50 mm apart with the same name and asserts a refusal, plus rename and delete round-trips. |
+| **B6** | **`place_level` accepts duplicate names and levels closer than 100 mm**, which `Levels::new` then rejects at export, so a model that was usable becomes unexportable. Levels cannot be deleted, and rename is never surfaced for them even though the model-level rename exists. | Validate name uniqueness and the 100 mm gap at placement, with the same rule `crates/arch` applies. Surface the existing model-level rename for levels, and add delete. | `crates/document/src/lib.rs:689-702`, `crates/arch/src/lib.rs:82-91` | A test that places two levels 50 mm apart with the same name and asserts a refusal, plus rename and delete round-trips. |
 
 **Class 2.1 acceptance (the walking skeleton):** from a pristine *New*, a user can create three
 levels, draw grids, draw typed walls, place a floor, place a door and window, and export IFC with
@@ -145,8 +145,8 @@ mechanical equipment, plumbing fixtures, sprinklers, luminaires, devices, panels
 | **C4** | **Air terminals do not exist**, so there is nothing for a duct system to serve and no Flow to drive sizing. | Add the terminal families with a Flow instance parameter and the four airflow-direction arrow flags. | `crates/family/src/library.rs` | mep-part2 5 |
 | **C5** | **Nothing can be hosted on a ceiling or a face.** | Implement host resolution for families: a ceiling or wall face becomes the host, and level/offset come from it. | `crates/family/src/mep.rs:121-128` (`Host` already exists), `apps/desktop/src/model_edit.rs` | mep-part2 5, mep-part3 A1 |
 | **C6** | **Spaces and zones do not exist.** Rooms only, with no airflow or load data, and no colour scheme. The reference treats Spaces as the driver of everything downstream: airflow per space, sprinkler count per space, lighting per space. | Add Space (upper limit, offset, separators, airflow and load data), Zone, and a colour scheme with a legend. | `crates/document` (new module), `apps/desktop/src/panels.rs` | mep-part2 2-4 |
-| **C7** | **Systems are groups of equipment, not of ducts and pipes.** Ducts and pipes cannot be members, and connector flow direction is ignored, so the layout ties three supply outlets to one trunk and is not an AHU-to-terminals system. | Let runs be system members, and make connector flow direction part of the join rule. | `crates/document/src/mep.rs:97-105`, `crates/route/src/layout.rs:115-140` | mep-part2 7 |
-| **C8** | **Generate Layout is Network-only** (two orientations) plus an obstacle-aware Routed solution for exactly two connectors. No Perimeter, no Intersections, no Custom, no editable base, no conversion settings, connectors must face along a plan axis at the base height. | Add Perimeter, Intersections and Custom; accept connectors in any orientation; add the base tools and the conversion settings dialog. The book's counts are Network up to 6 solutions, Perimeter 5, Intersection up to 8; the pipe chapter's own example shows 5 for Network, so the count is complexity-dependent and should not be hard-coded. | `crates/route/src/layout.rs`, `apps/desktop/src/systems_ui.rs` | mep-part2 8, mep-part3 A10 |
+| **C7** | **Systems are groups of equipment, not of ducts and pipes.** Ducts and pipes cannot be members, and connector flow direction is ignored, so the layout ties three supply outlets to one trunk and is not an AHU-to-terminals system. | Let runs be system members, and make connector flow direction part of the join rule. | `crates/document/src/mep.rs:105-111,332`, `crates/document/src/layout.rs:121-140` | mep-part2 7 |
+| **C8** | **Generate Layout is Network-only** (two orientations) plus an obstacle-aware Routed solution for exactly two connectors. No Perimeter, no Intersections, no Custom, no editable base, no conversion settings, connectors must face along a plan axis at the base height. | Add Perimeter, Intersections and Custom; accept connectors in any orientation; add the base tools and the conversion settings dialog. The book's counts are Network up to 6 solutions, Perimeter 5, Intersection up to 8; the pipe chapter's own example shows 5 for Network, so the count is complexity-dependent and should not be hard-coded. | `crates/document/src/layout.rs:26-33,121-140`, `apps/desktop/src/systems_ui.rs` | mep-part2 8, mep-part3 A10 |
 | **C9** | **Duct and pipe types do not exist.** No type selector, no routing preferences, no round or oval duct, no flex duct, no segment or material, so roughness and fitting selection cannot vary by service. | Add type objects with routing preferences, and let the tool pick fittings from them. | `crates/family`, `apps/desktop/src/mep_tool.rs` | mep-part2 9, mep-part3 A2-A3 |
 | **C10** | **Vertical runs cannot be drawn.** All points of a run share one z, so there is no riser and no drop, and shafts are useless for services. | Allow a per-point elevation, and insert transitions and vertical elbows when the elevation changes. | `apps/desktop/src/mep_tool.rs:~164`, `crates/document/src/lib.rs` `Geometry::Linear` | mep-part2 9 |
 | **C11** | **Duct and pipe clicks snap to a 50 mm grid only**, not to connectors, walls or grid intersections, and there are no angle snaps. | Reuse the shared plan snap for the MEP tools. | `apps/desktop/src/model_view.rs:942-956`, `mep_tool.rs:167,198,221` | mep-part2 9 |
@@ -155,7 +155,7 @@ mechanical equipment, plumbing fixtures, sprinklers, luminaires, devices, panels
 | **C14** | **Moving equipment does not drag connected runs**, and moving a joined duct is refused outright. | Move connected runs with their equipment; allow a joined run to be moved by translating the whole network. | `apps/desktop/src/edit.rs:141`, `compute_ui.rs:197,217` | mep-part2 (behaviour) |
 | **C15** | **Plumbing fixtures do not exist**, so there is no fixture-unit data, no trap and no vent logic, and sanitary and vent are computed as pressurised flow. `Route::check_fall` exists and is unused. | Add fixture families with WFU / HWFU / CWFU type parameters and connectors, and use them to drive the loading-unit conversion. Add the minimum-slope check and the gravity rules. | `crates/family/src/library.rs`, `crates/calc/src/plumbing.rs`, `crates/route/src/lib.rs` | mep-part3 A1, A9 |
 | **C16** | **No sprinkler heads can be placed.** Sprinklers are abstract end points with a K-factor; there is no design area, so every head with a demand operates, and there is no wet or dry system. | Add pendent and upright head families, a design-area concept, and the wet/dry system attribute. Keep the book's rule: pipe above pendent heads and below upright heads. | `crates/family/src/library.rs`, `crates/calc/src/sprinkler.rs`, `crates/document/src/mep.rs` | mep-part3 B1-B4 |
-| **C17** | **Electrical is an abstract single-line tree.** "Electrical Node" and "Cable" are records in `MepData`, not elements: no Select, no Properties, no 3D, no schedule, no IFC entity. There is no circuit, no panel schedule, no cable tray or conduit, and each node accepts exactly one feeder. | Make panels, devices and luminaires elements with families; add circuits (Create Circuit, Select Panel, Edit Circuit); add panel schedules; add cable tray and conduit tools. The cable tree then reads from the circuits. | `crates/document/src/elec.rs`, `crates/family`, `crates/ifc` | mep-part2 12 |
+| **C17** | **Electrical is an abstract single-line tree.** "Electrical Node" and "Cable" are records in `MepData`, not elements: no Select, no Properties, no 3D, no schedule, no IFC entity. There is no circuit object (only `grouped_circuits` on the cable, which is a grouping flag, not a circuit), no panel schedule, no cable tray or conduit, and each node accepts exactly one feeder. | Make panels, devices and luminaires elements with families; add circuits (Create Circuit, Select Panel, Edit Circuit); add panel schedules; add cable tray and conduit tools. The cable tree then reads from the circuits. | `crates/document/src/elec.rs`, `crates/family`, `crates/ifc` | mep-part2 12 |
 | **C18** | **Hangers and pipe/duct supports do not exist.** They are the single biggest hole in the MEP-support story the owner reduced structure to. | Treat them as MEP families (C3), hosted on beams, slabs or trusses, with auto-placement along a run. | `crates/family`, `apps/desktop/src/mep_tool.rs` | structure-for-MEP scope |
 
 **Class 3 acceptance:** the reference's own acceptance checklists, converted to tests one feature at
@@ -313,17 +313,53 @@ The register above is the seed for `bim-gap`. Its rules, which the role must enf
 ### 8.2 Independent re-check of the gap analysis citations
 
 Four review agents re-checked the `file:line` citations in `docs/gap-analysis-2026-10-21.md` and its
-three companion audits against the pinned SHA. Their reports are:
+three companion audits against the pinned SHA `dcf8382`, reading code only. Their reports are
+committed beside this document:
 
-| Report | Scope |
-|---|---|
-| `docs/audits/verify-ui-shell.md` | A1-A6 shell blockers, ribbon wiring, keymap, save, undo |
-| `docs/audits/verify-mep-engine.md` | M1-M10 MEP content, systems, layout, compute, electrical |
-| `docs/audits/verify-ifc.md` | I1-I9 IFC export/import, GlobalIds, persistence, undo |
-| `docs/audits/verify-docs-decisions.md` | C1-C10 stale documents and agreed decisions |
+| Report | Scope | Result |
+|---|---|---|
+| `docs/audits/verify-ui-shell.md` | A1-A6 shell blockers, ribbon wiring, keymap, save, undo | 6 of 6 CONFIRMED; two precision notes below |
+| `docs/audits/verify-mep-engine.md` | M1-M10 MEP content, systems, layout, compute, electrical | 8 of 10 CONFIRMED, 2 APPROXIMATE (one wrong path, one wrong sub-claim) |
+| `docs/audits/verify-ifc.md` | I1-I9 IFC export/import, GlobalIds, persistence, undo | 9 of 9 CONFIRMED; two nuances below |
+| `docs/audits/verify-docs-decisions.md` | C1-C10 stale documents and agreed decisions | 9 of 10 CONFIRMED, 1 APPROXIMATE |
 
-Their verdicts are folded into the rows above: a row whose citation did not hold is marked in the
-register, and the citation was corrected before the row was carried into a remediation.
+**Corrections carried into the register.** The substance of the gap analysis holds; five citations
+were wrong and are corrected in the rows above:
+
+1. **Generate Layout lives in `crates/document/src/layout.rs` (398 lines), not `apps/desktop/src/layout.rs`.**
+   `apps/desktop/src/layout.rs` does not exist at this SHA. Corrected in **C7** and **C8**; the
+   constraint lines are `crates/document/src/layout.rs:26-33` (solution kinds), `:121-124`
+   (connectors must face along a plan axis and sit at the base connector's height) and `:138-140`.
+2. **The electrical "grep `circuit`" sub-claim is wrong.** `crates/document/src/elec.rs` does contain
+   circuit-named code; what is missing is a *circuit object* - the only thing that exists is
+   `grouped_circuits`, a grouping flag on `ElecCable`. Corrected in **C17**. The substance (no
+   circuit, no panel schedule, one feeder per node) is confirmed.
+3. **The `05-backlog.md` MEP-002 status is not what the agent-team note says.** The backlog row
+   (`05-backlog.md:24`) carries no status column; the "PLANNED/UNVERIFIED" wording is in
+   `docs/agent-team/gap-review.md`. Corrected in **R5**.
+4. **Level rename is not a missing capability.** The model-level rename exists
+   (`crates/document/src/lib.rs`); it is simply never surfaced for levels, and levels cannot be
+   deleted. Corrected in **B6**.
+5. **`IfcRelAssignsToGroupByFactor` does not exist in the tree.** `IfcRelAssignsToGroup` is used, and
+   only for MEP pieces. Corrected in **B9**.
+
+**Two nuances that do not change a row:**
+
+- **B4 / A4**: no `Key::S`, `Key::N` or `Key::O` handler exists; the `save_as` arm is at
+  `main.rs:476`; the keymap is consulted only when it is built (`main.rs:268`) and printed
+  (`main.rs:657`). The claim holds as written.
+- **B11 / I4**: the running counter for non-product GlobalIds is *stable across unchanged exports*;
+  it shifts only when the set of non-element entities changes. The instability is real but narrower
+  than "adding a level changes them" - a level changes the set, so the claim survives.
+
+### 8.2.1 Test result at the pinned SHA
+
+`cargo test --workspace --release` was run at `dcf8382` with a clean `CARGO_TARGET_DIR` and
+`--jobs=2`; exit code 0. Result: **1,140 passed, 0 failed, 2 ignored** across 19 workspace members.
+The `#[test]` attribute count at the same SHA is 1,142 by grep (the difference is tests that are
+`#[ignore]`d or in files with no test binary of their own). The raw log is committed beside this
+document as `docs/audits/2026-10-21-test-run-dcf8382.log`. This confirms the figure the companion
+gap analysis reported from its own run.
 
 ### 8.3 Size and measuring convention
 
