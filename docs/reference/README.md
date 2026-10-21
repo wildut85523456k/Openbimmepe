@@ -21,3 +21,17 @@ Structure book (Exploring Autodesk Revit 2024 for Structure): **not yet distille
 - The books describe Revit as shipped in their edition and contain a few errors; each file lists those it found under "Open questions".
 
 The comparison between these references and the app is in `docs/gap-analysis-2026-10-21.md`; line-level evidence is in `docs/audits/`.
+
+## Verification
+
+- Factual spot-check (2026-10-21) against the source books: five claims checked, all five held -
+  Generate Layout solution counts (Network up to six, Perimeter five, Intersection up to eight),
+  sprinkler coverage (one head per 130 sq ft, i.e. per 12 m2, schedule formula `Area/130` / `Area/12`),
+  the colour-scheme "By value / By range" distinction, and the zone perimeter rule (shared edges of
+  adjacent spaces count once). The pipe chapter's Network example showing five solutions while the duct
+  chapter says up to six is the book's own inconsistency, recorded here rather than corrected.
+- The `file:line` citations in `docs/gap-analysis-2026-10-21.md` and its three companion audits were
+  re-checked against the SHA they name; see `docs/gap-remediation-plan-2026-10-21.md` section 8.
+- The books are the owner's licensed copies. Only paraphrase and the book's own field names are stored
+  here; the extraction itself is not committed. To reproduce a citation, record the source file name,
+  its SHA-256 and the extraction tool in an extraction manifest.
