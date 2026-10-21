@@ -1243,7 +1243,9 @@ impl Document {
                     // electrical views carry imported results, so only them are re-stamped.
                     let mut view = (**diagram).clone();
                     if view.discipline.family() == crate::schematic::Family::Electrical {
-                        crate::schematic_electrical::stamp(&*self, &mut view);
+                        // Stamp from the staged (not-yet-committed) MepData so a batched SetMep +
+                        // Generate reflects the live model, not the pre-transaction document.
+                        crate::schematic_electrical::stamp(&trial_mep, &*self, &mut view);
                     }
                     trial_mep.schematics.push(view);
                 }
@@ -1302,7 +1304,24 @@ impl Document {
         self.history.push((std::mem::replace(&mut self.elements, after.0), std::mem::replace(&mut self.site, after.1), std::mem::replace(&mut self.mep, after.2)));
         self.revision = revision;
         for el in self.elements.values_mut() { el.revision = revision; }
+        // Redo restores a MepData snapshot directly, bypassing the `GenerateSchematic` apply arm,
+        // so Electrical stamps are regenerated from the restored (live) model instead of replayed
+        // from a stored snapshot that may carry a stale current.
+        self.regenerate_electrical_schematics();
         Ok(true)
+    }
+
+    /// Re-stamp every Electrical schematic view from the restored model. Redo bypasses the
+    /// `GenerateSchematic` apply arm, so imported currents are regenerated here rather than carried
+    /// across from the snapshot.
+    fn regenerate_electrical_schematics(&mut self) {
+        for i in 0..self.mep.schematics.len() {
+            if self.mep.schematics[i].discipline.family() == crate::schematic::Family::Electrical {
+                let mut view = self.mep.schematics[i].clone();
+                crate::schematic_electrical::stamp(&self.mep, self, &mut view);
+                self.mep.schematics[i] = view;
+            }
+        }
     }
 }
 

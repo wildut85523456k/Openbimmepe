@@ -123,13 +123,19 @@ fn elec_node_kind(n: &ElecNode) -> NodeKind {
 }
 
 /// Stamp calculated feeder currents onto the electrical symbols of `view`. Read-only: the solver
-/// runs over a `Network` built from `doc`'s electrical nodes and cables; each cable's
+/// runs over a `Network` built from `mep`'s electrical nodes and cables; each cable's
 /// `design_current_a` is written to the "A" annotation of the downstream board symbol (the node the
 /// cable feeds). On any solver failure the view is left un-stamped (placeholders remain) and a
 /// warning carries the reason. Graph-construction failures (rejected nodes/branches) are surfaced
 /// as warnings and leave the placeholders in place: partial networks are never stamped as valid currents.
-pub(crate) fn stamp(doc: &Document, view: &mut SchematicView) {
-    let mep = doc.mep();
+///
+/// `mep` is passed in (rather than read from `doc`) so the `GenerateSchematic` apply arm and the
+/// redo path can stamp the staged/live model instead of the pre-transaction document.
+pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
+    // Reset every Electrical board's A/V/% slots to placeholders before stamping. A re-stamp after
+    // a rejected graph (or on redo) must never leave a stale current behind or index an empty
+    // annotations vector: placeholders carry the "not calculated" state until a current is written.
+    reset_board_annotations(view);
     if mep.elec_nodes.is_empty() || view.symbols.is_empty() {
         return;
     }
@@ -253,6 +259,22 @@ pub(crate) fn stamp(doc: &Document, view: &mut SchematicView) {
         }
     }
     view.not_approved = true;
+}
+
+/// Restore the mandatory A/V/% placeholder triple on every board symbol. Strips stale imported
+/// currents before a re-stamp (e.g. after a rejected graph or on redo) and guarantees the three
+/// annotation slots exist so stamping never indexes an empty annotations vector.
+fn reset_board_annotations(view: &mut SchematicView) {
+    for s in &mut view.symbols {
+        if s.kind == SymbolKind::Board {
+            if s.annotations.len() < 3 {
+                s.annotations.resize(3, String::from("A —"));
+            }
+            s.annotations[0] = String::from("A —");
+            s.annotations[1] = String::from("V —");
+            s.annotations[2] = String::from("% —");
+        }
+    }
 }
 
 /// Copy a solver current (A) into the "A" slot of each board symbol fed by a cable.

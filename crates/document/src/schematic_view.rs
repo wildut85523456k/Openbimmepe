@@ -249,7 +249,7 @@ impl Document {
         let input = draft.layout_input(mode);
         let mut view = draft.render(&openbim_schematic::layout::layout(&input));
         if discipline.family() == crate::schematic::Family::Electrical {
-            crate::schematic_electrical::stamp(self, &mut view);
+            crate::schematic_electrical::stamp(self.mep(), self, &mut view);
         }
         for (a, b) in crate::schematic::overlapping_zones(self.zones()) {
             view.warnings
@@ -618,5 +618,85 @@ mod tests {
             (value - expected).abs() < 1e-2,
             "stamped {value} vs expected {expected}"
         );
+    }
+
+    #[test]
+    fn batch_setmep_then_generate_stamps_the_staged_model() {
+        // A batched SetMep + GenerateSchematic must stamp the staged model, not the
+        // pre-transaction document (lib.rs apply arm).
+        let mut d = elec_doc(0.0, 45000.0, true, true, "Chiller");
+        let cmds = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
+        let staged = elec_doc(0.0, 90000.0, true, true, "Chiller").mep().clone();
+        d.transact(
+            d.revision(),
+            &[crate::Command::SetMep(Box::new(staged)), cmds[0].clone()],
+        )
+        .unwrap();
+        assert_current(
+            &d.schematic_views()[0].symbols[0].annotations[0],
+            90000.0 / (3f64.sqrt() * 400.0 * 0.85),
+        );
+    }
+
+    #[test]
+    fn restamp_after_graph_rejection_clears_stale_current() {
+        // A retained GenerateSchematic applied to a rejected graph must reset stale currents to
+        // placeholders rather than leaving the prior numeric value.
+        let mut d = elec_doc(0.0, 45000.0, true, true, "Chiller");
+        let original = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
+        let rejected = elec_doc(0.0, 45000.0, true, true, "").mep().clone();
+        d.transact(d.revision(), &[crate::Command::SetMep(Box::new(rejected))])
+            .unwrap();
+        d.transact(d.revision(), &original).unwrap();
+        assert_eq!(d.schematic_views()[0].symbols[0].annotations[0], "A —");
+        assert!(d.schematic_views()[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("rejected")));
+    }
+
+    #[test]
+    fn redo_of_stored_view_regenerates_the_stamp() {
+        // A view stored (via SetMep) with a stale "A" annotation must be regenerated, not replayed,
+        // on redo.
+        let mut d = elec_doc(0.0, 45000.0, true, true, "Chiller");
+        let mut m = d.mep().clone();
+        let mut v = d.generate_schematic(Discipline::Electrical).unwrap();
+        v.symbols[0].annotations[0] = "A stale-marker".into();
+        m.schematics.push(v);
+        d.transact(d.revision(), &[crate::Command::SetMep(Box::new(m))])
+            .unwrap();
+        d.undo().unwrap();
+        d.redo().unwrap();
+        let annotations = &d.schematic_views()[0].symbols[0].annotations[0];
+        assert_ne!(annotations, "A stale-marker");
+        assert_current(annotations, 45000.0 / (3f64.sqrt() * 400.0 * 0.85));
+    }
+
+    #[test]
+    fn generate_schematic_with_empty_annotations_does_not_panic() {
+        let mut d = elec_doc(0.0, 45000.0, true, true, "Chiller");
+        let mut ops = d
+            .generate_schematic_commands(Discipline::Electrical, SpacingMode::Uniform)
+            .unwrap();
+        if let crate::Command::GenerateSchematic { diagram } = &mut ops[0] {
+            diagram.symbols[0].annotations.clear();
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            d.transact(d.revision(), &ops)
+        }));
+        assert!(
+            result.is_ok() && result.as_ref().unwrap().is_ok(),
+            "re-stamping a view with empty annotations must not panic nor fail"
+        );
+        let msb = &d.schematic_views()[0].symbols[0];
+        assert_eq!(msb.annotations.len(), 3);
+        assert_eq!(msb.annotations[1], "V —");
+        assert_eq!(msb.annotations[2], "% —");
+        assert_current(&msb.annotations[0], 45000.0 / (3f64.sqrt() * 400.0 * 0.85));
     }
 }
