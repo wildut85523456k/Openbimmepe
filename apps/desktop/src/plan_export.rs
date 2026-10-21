@@ -72,10 +72,16 @@ pub struct PlanContent {
 }
 
 pub fn plan_content(document: &Document, view: View) -> Result<PlanContent, String> {
+    // the plan views belong to the document's levels, lowest first (A2): no level id is hard-coded
+    let levels: Vec<ElementId> = {
+        let mut l: Vec<(ElementId, f64)> = document.elements().filter(|e| e.geometry == Some(Geometry::Level)).map(|e| (e.id, e.elevation_m)).collect();
+        l.sort_by(|a, b| a.1.total_cmp(&b.1));
+        l.into_iter().map(|(id, _)| id).collect()
+    };
     let (level, number) = match view {
-        View::Plan => (ElementId(10), "PLAN-L1"),
-        View::UpperPlan => (ElementId(11), "PLAN-L2"),
-        View::Mechanical => (ElementId(10), "M-101"),
+        View::Plan => (*levels.first().ok_or("The project has no level: add one before exporting a plan.")?, "PLAN-L1"),
+        View::UpperPlan => (*levels.get(1).or_else(|| levels.first()).ok_or("The project has no level: add one before exporting a plan.")?, "PLAN-L2"),
+        View::Mechanical => (*levels.first().ok_or("The project has no level: add one before exporting a plan.")?, "M-101"),
         View::ThreeD => return Err("Select a plan view before exporting; 3D export is not connected.".into()),
         // Elevations, sections, schedules, sheets and level plans are not wired to a plan export yet.
         _ => return Err("Select a plan or mechanical view before exporting.".into()),

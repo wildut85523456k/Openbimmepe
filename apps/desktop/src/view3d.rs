@@ -240,8 +240,12 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if let Some(hit) = app.view3d.last_hit.take() {
             let id = ElementId(hit.element.id);
             let wall = app.document.get(id).is_some_and(|e| e.category == Category::Wall).then_some(id);
-            let level = app.document.get(id).and_then(|e| match e.geometry { Some(Geometry::Linear { level, .. }) | Some(Geometry::Placed { level, .. }) => Some(level), _ => None }).unwrap_or(ElementId(10));
-            app.family_click(level, [hit.point[0], hit.point[1]], wall);
+            let level = app.document.get(id).and_then(|e| match e.geometry { Some(Geometry::Linear { level, .. }) | Some(Geometry::Placed { level, .. }) => Some(level), _ => None })
+                .or_else(|| app.levels().first().map(|l| l.0));
+            match level {
+                Some(level) => app.family_click(level, [hit.point[0], hit.point[1]], wall),
+                None => app.message = "Add a level first: Architecture > Datum > Level".into(),
+            }
         }
     } else if *app.view3d.selection() != wanted {
         let id = app.view3d.selection().iter().next().map(|e| ElementId(e.id));

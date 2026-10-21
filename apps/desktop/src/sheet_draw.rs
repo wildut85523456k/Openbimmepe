@@ -98,9 +98,19 @@ impl Drawing {
 // ---------------------------------------------------------------------------------------------------------------------
 // the views
 
-/// The level a plan key stands for.
-fn plan_level_id(key: &str) -> Option<ElementId> {
-    if key == "mech" { return Some(ElementId(10)); }
+/// The level a plan key stands for. `mech`, `p10` and `p11` are view keys, not level ids: they are the first two
+/// plan views and the mechanical plan, so their level is the document's own (A2/R1). A `pN` key names a level.
+pub(crate) fn plan_level_id(doc: &Document, key: &str) -> Option<ElementId> {
+    let levels = |n: usize| -> Option<ElementId> {
+        let mut l: Vec<(ElementId, f64)> = doc.elements().filter(|e| e.geometry == Some(Geometry::Level)).map(|e| (e.id, e.elevation_m)).collect();
+        l.sort_by(|a, b| a.1.total_cmp(&b.1));
+        l.get(n).map(|(id, _)| *id)
+    };
+    match key {
+        "mech" | "p10" => return levels(0),
+        "p11" => return levels(1).or_else(|| levels(0)),
+        _ => {}
+    }
     key.strip_prefix('p')?.parse().ok().map(ElementId)
 }
 
@@ -108,7 +118,7 @@ fn plan_level_id(key: &str) -> Option<ElementId> {
 pub fn view_title(doc: &Document, key: &str) -> String {
     if let Some(id) = openbim_document::schedule_ref(key) { return doc.schedule(id).map_or("Schedule".into(), |s| s.name.clone()); }
     match crate::view_ui::view_from_key(key) {
-        Some(View::Plan | View::UpperPlan | View::Level(_)) => plan_level_id(key).and_then(|l| doc.get(l)).map_or("Plan".into(), |l| l.name.clone()),
+        Some(View::Plan | View::UpperPlan | View::Level(_)) => plan_level_id(doc, key).and_then(|l| doc.get(l)).map_or("Plan".into(), |l| l.name.clone()),
         Some(View::Mechanical) => "M-101 - Mechanical".into(),
         Some(View::ThreeD) => "{3D}".into(),
         Some(View::Elevation(k)) => crate::section_ui::FACINGS.get(usize::from(k)).map_or("Elevation".into(), |f| format!("{} elevation", f.1)),
@@ -238,7 +248,7 @@ fn bubble(out: &mut Vec<Prim>, c: [f64; 2], r: f64, label: &str, rgb: Rgb) {
 }
 
 fn plan_prims(doc: &Document, key: &str, vs: &openbim_document::ViewSettings) -> Result<Vec<Prim>, String> {
-    let level_id = plan_level_id(key).ok_or("not a plan")?;
+    let level_id = plan_level_id(doc, key).ok_or("not a plan")?;
     let level = doc.get(level_id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).ok_or("the level of the plan is gone")?;
     let level_z = level.elevation_m;
     let s = per_metre(vs);

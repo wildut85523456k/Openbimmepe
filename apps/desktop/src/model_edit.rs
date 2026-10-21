@@ -312,8 +312,59 @@ impl Desktop {
     }
 
     /// The level of the plan view on show.
+    /// The level the plan view on show sits on: the view's own level, else the lowest level of the document (the
+    /// second lowest for the upper plan). `ElementId(0)` means the project has no level at all and the drawing tools
+    /// refuse to start (A2).
     pub(crate) fn plan_level(&self) -> ElementId {
-        match self.view { crate::View::Level(id) if self.document.get(ElementId(id)).is_some() => ElementId(id), crate::View::UpperPlan => ElementId(11), _ => ElementId(10) }
+        if let crate::View::Level(id) = self.view { if self.document.get(ElementId(id)).is_some() { return ElementId(id); } }
+        let levels = self.levels();
+        let pick = if matches!(self.view, crate::View::UpperPlan) { levels.get(1).or_else(|| levels.first()) } else { levels.first() };
+        pick.map_or(ElementId(0), |l| l.0)
+    }
+
+    /// Starts editing a level's name in the options bar. The draft is held by the app, so the frames between
+    /// keystrokes do not rebuild it from the document (R4).
+    pub(crate) fn start_level_rename(&mut self, id: ElementId) {
+        self.level_rename_name = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
+        self.level_rename_id = Some(id);
+        self.message = "Rename the level and press Enter, or Cancel".into();
+    }
+
+    /// Commits the draft. The field stays open when the name is refused, so the user can correct it (R4).
+    pub(crate) fn commit_level_rename(&mut self) {
+        let Some(id) = self.level_rename_id else { return };
+        let name = self.level_rename_name.trim().to_string();
+        let current = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
+        if name.is_empty() || name == current { self.level_rename_id = None; return; }
+        self.rename_level(id, &name);
+        if self.document.get(id).is_some_and(|e| e.name == name) { self.level_rename_id = None; }
+    }
+
+    /// Abandons the draft (R4).
+    pub(crate) fn cancel_level_rename(&mut self) {
+        self.level_rename_id = None;
+        self.level_rename_name.clear();
+        self.message = "Rename cancelled".into();
+    }
+
+    /// Renames a level of the project, refusing a name another level has (A6).
+    pub(crate) fn rename_level(&mut self, id: ElementId, name: &str) {
+        match self.document.rename_level(id, name) {
+            Ok(()) => self.message = format!("Level renamed to {name}"),
+            Err(error) => self.message = format!("Level not renamed: {error:?} (a level needs a name of its own)"),
+        }
+    }
+
+    /// Deletes a level that nothing stands on, as Revit refuses to delete one that holds elements (A6).
+    pub(crate) fn delete_level(&mut self, id: ElementId) {
+        match self.document.delete_level(id) {
+            Ok(()) => {
+                if self.view == crate::View::Level(id.0) { self.view = crate::View::Plan; }
+                self.message = format!("Level {} deleted", id.0);
+            }
+            Err(openbim_document::EditError::TypeInUse(_)) => self.message = "A level that elements stand on cannot be deleted".into(),
+            Err(error) => self.message = format!("Level not deleted: {error:?}"),
+        }
     }
 
     /// The levels of the document, lowest first: (id, name, elevation).

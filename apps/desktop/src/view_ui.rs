@@ -8,6 +8,10 @@ use openbim_document::{Detail, Document, Element, ElementId, Mesh, RangeClass, V
 use std::sync::Arc;
 
 /// The key the document knows a view by; None for a view that has no settings (a schedule).
+///
+/// `p10` and `p11` are the keys of the first two plan views — names, not level ids: the level a plan shows is resolved
+/// from the document (`sheet_draw::plan_level_id`, `panels::level_view_name`), so a project whose levels have other ids
+/// still resolves correctly (A2/R1). A `pN` key names the level `N` itself.
 pub(crate) fn view_key(v: View) -> Option<String> {
     Some(match v {
         View::Plan => "p10".into(),

@@ -17,19 +17,14 @@ fn plan_bounds(bounds: Rect) -> Rect {
     if bounds.is_finite() { bounds } else { Rect::from_center_size(Pos2::ZERO, Vec2::splat(EMPTY_PLAN_SPAN_M)) }
 }
 
-/// The plan-view tabs, from the project's levels (lowest first): the two default plans - the lower and
-/// upper plan - are labelled by the real level 10/11 when the project has one, else generically, then
-/// every other level gets its own tab. As in Revit, the tab says the level's name, never a hard-coded
-/// "Level 1": a project loaded from IFC or started empty names its own levels.
+/// The plan-view tabs, from the project's levels (lowest first): the first two are the floor and the upper plan,
+/// every other level gets a tab of its own. The tab is named by the level, and `View::Plan` / `View::UpperPlan`
+/// resolve to the document's own levels (`plan_level`), so a new project's first two tabs point at levels that
+/// exist: taking the first two by *position* rather than by the sample's ids 10/11 is what makes that true (A2).
 fn plan_tabs(levels: &[(ElementId, String, f64)]) -> Vec<(String, View)> {
-    let name_of = |default_id: u64, fallback: &str| {
-        levels.iter().find(|(id, _, _)| id.0 == default_id).map(|(_, n, _)| n.clone()).unwrap_or_else(|| fallback.to_string())
-    };
-    let mut tabs = vec![(name_of(10, "Floor Plan"), View::Plan), (name_of(11, "Upper Plan"), View::UpperPlan)];
-    for (id, name, _) in levels.iter().filter(|(id, _, _)| id.0 != 10 && id.0 != 11) {
-        tabs.push((name.clone(), View::Level(id.0)));
-    }
-    tabs
+    levels.iter().enumerate()
+        .map(|(k, (id, name, _))| (name.clone(), match k { 0 => View::Plan, 1 => View::UpperPlan, _ => View::Level(id.0) }))
+        .collect()
 }
 
 fn project(point: [f64; 3], three_d: bool, yaw: f32, pitch: f32) -> (Vec2, f32) {
@@ -174,6 +169,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let ann = |paper_mm: f32, min: f32, max: f32| crate::view_ui::annotation_px(paper_mm, denom, scale, min, max);
     let (bubble_r, note_px) = (ann(1.8, 6.0, 26.0), ann(2.0, 7.0, 20.0));
     let screen = |p| rect.center() + pan0 + (proj(p).0 - bounds.center().to_vec2()) * scale;
+    #[cfg(test)]
+    {
+        app.plan_transform = Some((rect.center() + pan0, scale, bounds.center().to_vec2()));
+    }
     let selected = app.selected_id();
     let selected_all = app.selected_ids();
     let blue = ui.visuals().hyperlink_color;
@@ -978,8 +977,11 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
-        else if pick.is_some() { if let Some(p) = pick { app.truss_click(level_id, to_model(p)); } }
+        // the truss keeps its start in beam_start, so Esc steps back before it leaves the tool (R2)
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if app.beam_start.is_some() { app.beam_start = None; app.message = "Truss: click the start".into(); }
+            else { app.choose_tool(crate::Tool::Select); }
+        } else if pick.is_some() { if let Some(p) = pick { app.truss_click(level_id, to_model(p)); } }
     } else if matches!(app.tool, crate::Tool::Duct | crate::Tool::Pipe) && !three_d {
         // the points of a duct or pipe run, snapped to 50 mm; Enter or Esc (once it has a length) places it
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
@@ -1000,18 +1002,25 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
         for p in &pts { painter.circle_filled(*p, 3.5, colour); }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if app.run_points.len() >= 2 { app.finish_run(level_id); } else { app.run_points.clear(); app.run_sizes.clear(); app.choose_tool(crate::Tool::Select); }
+            // Esc places the run once it has a length; a single point is taken back first, and only then does Esc
+            // leave the tool (R2)
+            if app.run_points.len() >= 2 { app.finish_run(level_id); }
+            else if !app.run_points.is_empty() { app.run_back(); app.message = "Esc takes the point back; Esc again ends the run".into(); }
+            else { app.run_sizes.clear(); app.choose_tool(crate::Tool::Select); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.run_back();
         } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.run_points.len() >= 2 { app.finish_run(level_id);
         } else if pick.is_some() {
             if let Some(p) = pick { app.run_click(to_model(p)); }
         }
     } else if app.tool == crate::Tool::Beam && !three_d {
-        // two clicks place a beam, snapped to 50 mm; Esc ends the tool
+        // two clicks place a beam, snapped to 50 mm; Esc takes the start back and then ends the tool (R2)
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let snap = |v: f32| (v as f64 / 0.05).round() * 0.05;
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [snap(v.x), snap(-v.y)] };
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); } else {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if app.beam_start.is_some() { app.beam_start = None; app.message = "Beam: click the start".into(); }
+            else { app.choose_tool(crate::Tool::Select); }
+        } else {
             if let (Some(a), Some(h)) = (app.beam_start, response.hover_pos()) {
                 let (a, b) = (screen([a[0], a[1], level_z]), screen([to_model(h)[0], to_model(h)[1], level_z]));
                 painter.line_segment([a, b], Stroke::new((app.width_mm as f32 / 1000.0 * scale).max(2.0), Color32::from_rgba_unmultiplied(176, 140, 104, 140)));
@@ -1331,6 +1340,387 @@ mod tests {
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
 
+    /// The whole window, as the app runs it: the toolbar, the ribbon, the options bar, the panels and the viewport,
+    /// without an `eframe::Frame`, so a test can click what the ribbon draws (A8).
+    fn window_frame(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>) {
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| app.window(ui));
+        out.textures_delta.clear();
+    }
+
+    /// Where a model point falls on the screen of the plan: the transform the viewport itself used in its last frame
+    /// (A8), so a click can be aimed at a point of the model.
+    fn plan_screen(app: &Desktop, at: [f64; 2]) -> Pos2 {
+        let (centre, scale, box_centre) = app.plan_transform.expect("the plan has drawn a frame");
+        centre + (Vec2::new(at[0] as f32, -(at[1] as f32)) - box_centre) * scale
+    }
+
+    /// Clicks the middle of a ribbon button, where the last frame put it. False when the ribbon shows no such button.
+    fn ribbon_click(ctx: &egui::Context, screen: Rect, app: &mut Desktop, id: &str) -> bool {
+        let Some((_, rect)) = app.ribbon_hits.iter().find(|(hit, _)| *hit == id).copied() else { return false };
+        let at = rect.center();
+        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+        window_frame(ctx, screen, app, vec![button(at, true)]);
+        window_frame(ctx, screen, app, vec![button(at, false)]);
+        true
+    }
+
+    /// A frame in which the window handles the global keys first and then draws the viewport, as `ui()` does (A3, A4).
+    fn key_frame(ctx: &egui::Context, screen: Rect, app: &mut Desktop, events: Vec<egui::Event>) {
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() },
+            |ui| { app.global_keys(ui.ctx()); egui::CentralPanel::default().show(ui, |ui| show(app, ui)); });
+        out.textures_delta.clear();
+    }
+    fn key_with(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    #[test]
+    fn escape_steps_back_inside_the_wall_tool_before_leaving_it() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("wall", "Wall");
+        let at = Pos2::new(400.0, 300.0);
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, screen, &mut app, vec![button(at, true)]);
+        frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        assert_eq!(app.wall_pts.len(), 1, "{}", app.message);
+        // the first Esc takes the pending point back and keeps the tool
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Wall, "Esc inside a chain keeps the tool: {}", app.message);
+        assert!(app.wall_pts.is_empty(), "the point is taken back");
+        // with nothing pending the second Esc leaves it
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+    }
+
+    #[test]
+    fn the_keymap_shortcuts_choose_a_tool_and_ctrl_n_starts_a_new_model() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        // "W A" is the keymap's Wall shortcut, typed one key at a time: half of it starts nothing
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::W)]);
+        assert!(app.tool == crate::Tool::Select, "a half-typed shortcut starts nothing: {}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::A)]);
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        assert_eq!((app.width_mm, app.height_mm), (200.0, 3000.0), "the Wall command's own numbers");
+        // Ctrl+N starts a new model, which brings its two levels with it
+        key_frame(&ctx, screen, &mut app, vec![key_with(egui::Key::N, egui::Modifiers::CTRL)]);
+        assert_eq!(app.levels().len(), 2, "{}", app.message);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+    }
+
+    #[test]
+    fn a_level_view_is_named_after_its_level_and_follows_a_rename() {
+        let mut app = Desktop::sample();
+        let level = app.levels()[0].0;
+        app.rename_level(level, "Ground floor");
+        assert_eq!(crate::panels::level_view_name(&app, "Level 1", View::Plan), "Ground floor", "{}", app.message);
+        assert_eq!(crate::panels::level_view_name(&app, "Level 2", View::UpperPlan), "Level 2", "the second level keeps its name");
+        // a view that is not a level keeps the name the browser table gives it
+        let other = Desktop::sample();
+        assert_eq!(crate::panels::level_view_name(&other, "{3D}", View::ThreeD), "{3D}");
+    }
+
+    #[test]
+    fn the_ribbon_starts_a_tool_and_a_button_that_is_not_wired_changes_nothing() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.ribbon = "Architecture";
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "wall"), "the Architecture tab shows a Wall button");
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        // a button the decision of 21 Oct 2026 leaves disabled does nothing at all
+        app.ribbon = "Systems";
+        app.systems_sub = "HVAC";
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(app.ribbon_hits.iter().any(|(id, _)| *id == "damper"), "the HVAC tab shows a Damper button");
+        assert!(!crate::Desktop::ribbon_command_implemented("damper"), "the Damper command is not wired yet");
+        ribbon_click(&ctx, screen, &mut app, "damper");
+        assert!(app.tool == crate::Tool::Wall, "a disabled button changes nothing: {}", app.message);
+    }
+
+    #[test]
+    fn the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported() {
+        // wide enough for the whole Architecture and View tabs: the ribbon scrolls sideways, and a button off screen
+        // cannot be clicked
+        let (ctx, screen) = (egui::Context::default(), Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 800.0)));
+        let mut app = Desktop::sample();
+        app.reset_model();
+        app.view = View::Plan;
+        app.ribbon = "Architecture";
+        let level = app.plan_level();
+        // the tools are chosen from the ribbon, and every frame runs the whole window (R5)
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "level"), "the ribbon shows the Level button");
+        assert!(app.tool == crate::Tool::Level, "the Level button starts the tool: {}", app.message);
+        app.level_elev_mm = 6000.0;
+        app.level_name = "Roof".into();
+        app.level_click();
+        assert_eq!(app.levels().len(), 3, "{}", app.message);
+        // a grid, by two clicks on the empty canvas, where the transform is still the default box
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "grid"), "the ribbon shows the Grid button");
+        assert!(app.tool == crate::Tool::Grid, "the Grid button starts the tool: {}", app.message);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        for at in [plan_screen(&app, [1.0, 1.0]), plan_screen(&app, [7.0, 1.0])] {
+            window_frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
+            window_frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            window_frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Grid).count(), 1, "{}", app.message);
+        // four walls round a room, by the chain the viewport calls with the picked point; the plan re-fits itself
+        // after each element, so these steps are in model coordinates
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "wall"), "the ribbon shows the Wall button");
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        app.wall_loc = 2;
+        for p in [[2.0, 2.0], [8.0, 2.0], [8.0, 6.0], [2.0, 6.0], [2.0, 2.0]] { app.wall_click(level, p); }
+        assert_eq!(walls(&app), 4, "{}", app.message);
+        // a floor over them, and the room they enclose
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "floor"), "the ribbon shows the Floor button");
+        for p in [[2.0, 2.0], [8.0, 2.0], [8.0, 6.0], [2.0, 6.0]] { app.slab_click(level, p, false); }
+        app.slab_click(level, [2.0, 2.0], true);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Slab).count(), 1, "{}", app.message);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "room"), "the ribbon shows the Room button");
+        app.room_click(level, [5.0, 4.0]);
+        let room = app.document.elements().find(|e| e.category == Category::Room).expect("the room the walls enclose").id;
+        let area = app.document.room_shape(room).expect("the walls enclose the room").area();
+        // the walls were drawn on their exterior face round a 6 x 4 m rectangle, so the room between their inner
+        // faces is that rectangle
+        assert!((area - 24.0).abs() < 0.05, "the room is the 6 x 4 m the walls enclose: {area}");
+        // a section through it, from the View tab
+        app.ribbon = "View";
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "section"), "the View tab shows the Section button");
+        assert!(app.tool == crate::Tool::Section, "the Section button starts the tool: {}", app.message);
+        app.section_click(level, [4.0, 1.0]);
+        app.section_click(level, [4.0, 7.0]);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Section).count(), 1, "{}", app.message);
+        // save, reopen and export: every element comes back with its identity and its geometry, and the IFC carries
+        // the four walls
+        let path = std::env::temp_dir().join("openbim-small-office-e2e.obim");
+        let path = path.to_str().unwrap().to_string();
+        app.write_model(&path);
+        let saved = app.document.clone();
+        let mut reopened = Desktop::sample();
+        reopened.open_path(&path);
+        assert_eq!(reopened.document.elements().count(), saved.elements().count(), "{}", reopened.message);
+        for el in saved.elements() {
+            let back = reopened.document.get(el.id).unwrap_or_else(|| panic!("element {} came back", el.id.0));
+            assert_eq!(back.geometry, el.geometry, "element {} keeps its geometry", el.id.0);
+            assert_eq!(back.name, el.name, "element {} keeps its name", el.id.0);
+        }
+        let back_room = reopened.document.room_shape(room).expect("the reopened room is enclosed");
+        assert!((back_room.area() - area).abs() < 1e-9, "the room keeps its area: {} against {area}", back_room.area());
+        let out = crate::export::export_ifc_with(&reopened.document, "Office", 1, "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false)
+            .expect("the model exports");
+        assert_eq!(out.walls, 4, "{}", out.warnings.join("; "));
+        assert!(out.text.contains("IFCWALL("), "the file carries walls");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn escape_steps_back_inside_the_framing_and_run_tools_too() {
+        let (ctx, screen) = frames();
+        // the truss keeps its start
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = app.plan_level();
+        app.run_command("truss", "Truss");
+        app.truss_click(level, [1.0, 1.0]);
+        assert!(app.beam_start.is_some(), "{}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Truss && app.beam_start.is_none(), "{}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+        // the beam keeps its start
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("beam", "Beam");
+        app.beam_click(app.plan_level(), [1.0, 1.0]);
+        assert!(app.beam_start.is_some());
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Beam && app.beam_start.is_none(), "{}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+        // a duct run with one point takes the point back, and the second Esc ends the run
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("duct", "Duct");
+        app.run_click([1.0, 1.0]);
+        assert_eq!(app.run_points.len(), 1);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Duct && app.run_points.is_empty(), "{}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+        // the reference of Align is dropped first: the global handler must not steal that Esc
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        app.run_command("align", "Align");
+        app.edit_ref = Some((ElementId(20), [1.0, 0.0]));
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Align && app.edit_ref.is_none(), "{}", app.message);
+        key_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+    }
+
+    #[test]
+    fn the_framing_and_footing_tools_start_from_their_own_numbers() {
+        let mut app = Desktop::sample();
+        app.run_command("rebar", "Rebar");
+        assert_eq!((app.width_mm, app.height_mm), (16.0, 8.0));
+        app.run_command("beam", "Beam");
+        assert_eq!((app.width_mm, app.height_mm), (200.0, 300.0), "a beam is not 16 x 8 mm because a rebar came before it");
+        app.run_command("truss", "Truss");
+        assert_eq!((app.width_mm, app.height_mm, app.elevation_mm, app.spacing_mm), (200.0, 300.0, 2700.0, 600.0));
+        app.run_command("rebar", "Rebar");
+        app.run_command("structural_column", "Column");
+        assert_eq!((app.width_mm, app.height_mm), (200.0, 300.0));
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0);
+        app.run_command("foundation", "Foundation");
+        assert!(app.tool == crate::Tool::Footing, "{}", app.message);
+        assert_eq!((app.width_mm, app.height_mm, app.footing_thickness_mm, app.slab_offset_mm), (200.0, 300.0, 500.0, 0.0),
+            "the pad starts from its own box, not from the ceiling's height");
+        app.run_command("ceiling", "Ceiling");
+        app.run_command("footing", "Wall Footing");
+        assert!(app.tool == crate::Tool::WallFooting, "{}", app.message);
+        assert_eq!((app.width_mm, app.height_mm, app.slab_offset_mm), (200.0, 300.0, 0.0));
+    }
+
+    #[test]
+    fn a_level_rename_keeps_its_draft_across_frames_and_commits_on_enter() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        let level = app.levels()[0].0;
+        app.run_command("level", "Level");
+        app.start_level_rename(level);
+        app.level_rename_name = "Grou".into();
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert_eq!(app.level_rename_name, "Grou", "the draft survives a frame instead of being rebuilt from the document");
+        app.level_rename_name.push('n');
+        app.level_rename_name.push('d');
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert_eq!(app.level_rename_name, "Ground");
+        app.commit_level_rename();
+        assert_eq!(app.document.get(level).unwrap().name, "Ground", "{}", app.message);
+        assert!(app.level_rename_id.is_none(), "the field closes when the name is accepted");
+        // a name another level has is refused, and the field stays open so it can be corrected
+        app.start_level_rename(level);
+        app.level_rename_name = "Level 2".into();
+        app.commit_level_rename();
+        assert!(app.message.contains("not renamed"), "{}", app.message);
+        assert_eq!(app.level_rename_id, Some(level), "the field stays open on a refused name");
+        app.cancel_level_rename();
+        assert!(app.level_rename_id.is_none());
+        assert_eq!(app.document.get(level).unwrap().name, "Ground", "cancelling changes nothing");
+    }
+
+    #[test]
+    fn the_browser_and_the_sheet_plans_take_their_levels_from_the_document() {
+        let mut app = Desktop::sample();
+        app.reset_model();
+        assert_eq!(app.levels().len(), 2);
+        let third = app.document.place_level("Level 3", 6.0).unwrap();
+        let extra: Vec<_> = app.levels().into_iter().skip(2).collect();
+        assert_eq!(extra.len(), 1, "the browser adds the levels the tree does not show");
+        assert_eq!(extra[0].0, third);
+        app.rename_level(third, "Roof");
+        assert_eq!(crate::panels::level_view_name(&app, "Level plan", View::Level(third.0)), "Roof");
+        assert_eq!(crate::panels::level_view_name(&app, "Level 1", View::Plan), app.levels()[0].1);
+        // a sheet's plan views resolve their level from the document, never from a sample id
+        assert_eq!(crate::sheet_draw::plan_level_id(&app.document, "mech"), Some(app.levels()[0].0));
+        assert_eq!(crate::sheet_draw::plan_level_id(&app.document, "p10"), Some(app.levels()[0].0));
+        assert_eq!(crate::sheet_draw::plan_level_id(&app.document, "p11"), Some(app.levels()[1].0));
+        assert_eq!(crate::sheet_draw::plan_level_id(&app.document, &format!("p{}", third.0)), Some(third));
+    }
+
+    #[test]
+    fn a_level_is_renamed_and_deleted_from_the_options_bar_of_the_level_tool() {
+        let mut app = Desktop::sample();
+        let levels = app.levels();
+        assert_eq!(levels.len(), 2);
+        // a level with nothing on it can be renamed and deleted
+        let spare = app.document.place_level("Spare", 6.0).unwrap();
+        app.rename_level(spare, "Roof");
+        assert_eq!(app.document.get(spare).unwrap().name, "Roof", "{}", app.message);
+        assert!(app.message.contains("renamed"), "{}", app.message);
+        app.rename_level(spare, "Level 1");
+        assert!(app.message.contains("not renamed"), "a name another level has is refused: {}", app.message);
+        app.delete_level(spare);
+        assert!(app.document.get(spare).is_none(), "{}", app.message);
+        app.delete_level(levels[0].0);
+        assert!(app.document.get(levels[0].0).is_some());
+        assert!(app.message.contains("cannot be deleted"), "{}", app.message);
+    }
+
+    #[test]
+    fn the_options_bar_does_not_leak_from_one_tool_to_the_next() {
+        let mut app = Desktop::sample();
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0, "the ceiling hangs 2.7 m above its level");
+        app.run_command("door", "Door");
+        assert_eq!(app.slab_offset_mm, 0.0, "a door is not placed 2.7 m up because a ceiling was drawn before it");
+        assert!(app.tool == crate::Tool::Family, "{}", app.message);
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0, "the ceiling gets its own numbers back");
+        app.run_command("wall", "Wall");
+        assert_eq!((app.width_mm, app.height_mm, app.elevation_mm), (200.0, 3000.0, 0.0));
+        app.run_command("duct", "Duct");
+        assert_eq!((app.width_mm, app.height_mm, app.elevation_mm), (400.0, 300.0, 2700.0));
+        app.run_command("door", "Door");
+        assert_eq!(app.slab_offset_mm, 0.0, "and the duct's elevation does not follow the door either");
+    }
+
+    #[test]
+    fn a_new_model_has_its_own_levels_and_takes_a_drawn_wall_and_grid() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.reset_model();
+        let levels = app.levels();
+        assert_eq!(levels.len(), 2, "New gives Level 1 and Level 2: {:?}", levels.iter().map(|l| l.1.clone()).collect::<Vec<_>>());
+        assert_eq!((levels[0].2, levels[1].2), (0.0, 3.0));
+        assert_eq!(app.plan_level(), levels[0].0, "the plan sits on the lowest level of the document");
+        assert_ne!(app.plan_level(), ElementId(10), "a new model must not point at the sample's level");
+        app.view = View::UpperPlan;
+        assert_eq!(app.plan_level(), levels[1].0, "the upper plan sits on the second level");
+        app.view = View::Plan;
+        // two clicks with the Wall tool, on a canvas with nothing drawn on it yet (A1)
+        app.run_command("wall", "Wall");
+        assert!(app.tool == crate::Tool::Wall, "{}", app.message);
+        let (a, b) = (Pos2::new(400.0, 300.0), Pos2::new(600.0, 300.0));
+        frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
+        for at in [a, b] {
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(walls(&app), 1, "{}", app.message);
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("the wall that was drawn");
+        assert_eq!(app.document.level_of(wall.id), Some(levels[0].0), "the wall stands on the level of the plan");
+        // and a grid, on the same empty canvas
+        app.choose_tool(crate::Tool::Grid);
+        for at in [Pos2::new(300.0, 200.0), Pos2::new(300.0, 500.0)] {
+            frame(&ctx, screen, &mut app, vec![button(at, true)]);
+            frame(&ctx, screen, &mut app, vec![button(at, false)]);
+        }
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Grid).count(), 1, "{}", app.message);
+    }
+
+    #[test]
+    fn a_project_with_no_level_refuses_a_drawing_tool() {
+        let mut app = Desktop::sample();
+        app.document = openbim_document::Document::new();
+        app.view = View::Plan;
+        app.choose_tool(crate::Tool::Wall);
+        assert!(app.tool == crate::Tool::Select, "the tool must not start without a level");
+        assert!(app.message.contains("Add a level first"), "{}", app.message);
+    }
+
     #[test]
     fn plan_bounds_falls_back_to_a_default_view_on_an_empty_model() {
         // a real extent passes through unchanged
@@ -1360,19 +1750,23 @@ mod tests {
     }
 
     #[test]
-    fn plan_tabs_say_the_level_names_and_a_generic_name_for_a_default_plan_without_a_level() {
-        // levels 10/11 present and named: the two default plans take their names, the rest get their own tab
+    fn plan_tabs_name_the_first_two_levels_and_give_every_other_level_its_own_tab() {
+        // the first two levels are the floor and the upper plan, whatever their ids are, and the rest get their own tab
         let named = vec![(ElementId(10), "Ground".to_string(), 0.0), (ElementId(11), "First".to_string(), 3.0), (ElementId(20), "Roof".to_string(), 9.0)];
         assert_eq!(plan_tabs(&named), vec![
             ("Ground".to_string(), View::Plan),
             ("First".to_string(), View::UpperPlan),
             ("Roof".to_string(), View::Level(20)),
         ]);
-        // no levels at all (an empty or IFC-loaded project): the default plans fall back to generic names
-        assert_eq!(plan_tabs(&[]), vec![
-            ("Floor Plan".to_string(), View::Plan),
-            ("Upper Plan".to_string(), View::UpperPlan),
+        // a project whose levels have other ids (a new project numbers them from 1): the tabs still name the
+        // document's own levels, and `plan_level` resolves the first two to levels that exist
+        let renumbered = vec![(ElementId(1), "Level 1".to_string(), 0.0), (ElementId(2), "Level 2".to_string(), 3.0)];
+        assert_eq!(plan_tabs(&renumbered), vec![
+            ("Level 1".to_string(), View::Plan),
+            ("Level 2".to_string(), View::UpperPlan),
         ]);
+        // no levels at all (an IFC-loaded project with none): there is no plan tab to offer
+        assert!(plan_tabs(&[]).is_empty());
     }
 
     #[test]

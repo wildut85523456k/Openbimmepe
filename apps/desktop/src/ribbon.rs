@@ -47,6 +47,7 @@ pub const QUICK_ACCESS: &[(&str, &str)] = &[
     ("new", "New"),
     ("open", "Open"),
     ("save", "Save"),
+    ("save_as", "Save As"),
     ("undo", "Undo"),
     ("redo", "Redo"),
     ("measure", "Measure"),
@@ -288,13 +289,14 @@ pub fn panel(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.separator();
 }
 
-/// Large ribbon button: 32 px icon above a label wrapped on up to two lines.
-pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: bool) -> egui::Response {
+/// Large ribbon button: 32 px icon above a label wrapped on up to two lines. A command that is not wired yet is
+/// drawn weak, cannot be clicked and says that it is planned (decision of 21 Oct 2026, A7).
+pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: bool, enabled: bool) -> egui::Response {
     let size = Vec2::new(64.0, 66.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let (rect, response) = ui.allocate_exact_size(size, if enabled { Sense::click() } else { Sense::hover() });
     if ui.is_rect_visible(rect) {
         let visuals = ui.visuals();
-        if active || response.hovered() {
+        if enabled && (active || response.hovered()) {
             let (fill, stroke) = if active {
                 (visuals.selection.bg_fill.gamma_multiply(0.45), visuals.selection.stroke)
             } else {
@@ -303,15 +305,16 @@ pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: 
             ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0_f32, stroke.color), StrokeKind::Inside);
         }
         let icon_rect = Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 20.0), Vec2::splat(32.0));
-        icon_image(ui, id, dark, icon_rect.size()).paint_at(ui, icon_rect);
-        let color: Color32 = visuals.text_color();
+        let icon = icon_image(ui, id, dark, icon_rect.size());
+        if enabled { icon.paint_at(ui, icon_rect); } else { icon.tint(visuals.weak_text_color()).paint_at(ui, icon_rect); }
+        let color: Color32 = if enabled { visuals.text_color() } else { visuals.weak_text_color() };
         let mut job = egui::text::LayoutJob::simple(label.to_owned(), FontId::proportional(11.0), color, size.x - 4.0);
         job.halign = Align::Center;
         job.wrap.max_rows = 2;
         let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
         ui.painter().galley(egui::pos2(rect.center().x, rect.top() + 39.0), galley, color);
     }
-    response.on_hover_text(label)
+    if enabled { response.on_hover_text(label) } else { response.on_hover_text(format!("{label} - planned, not implemented yet")) }
 }
 
 #[cfg(test)]
@@ -360,6 +363,44 @@ mod tests {
         }
         let missing: Vec<_> = ids.iter().filter(|id| icons::find(id).is_none() && !["automation_editor", "automation_player", "automation_mcp", "automation_snapshot"].contains(id)).collect();
         assert!(missing.is_empty(), "ribbon IDs without an icon: {missing:?}");
+    }
+
+    /// Every command id the ribbon, the sub-tabs and the quick access bar show, tabs and sub-tabs excluded: those
+    /// are navigation, not commands.
+    fn command_ids() -> Vec<&'static str> {
+        let mut ids: Vec<&'static str> = QUICK_ACCESS.iter().map(|t| t.0).collect();
+        for (tab, _) in TABS {
+            for sub in ["HVAC", "Plumbing & Piping", "Electrical", "All"] {
+                for g in groups(tab, sub) { ids.extend(g.commands.iter().map(|c| c.id)); }
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    /// The decision of 21 Oct 2026 (A7): every ribbon button is either wired or rendered disabled, and the list the
+    /// ribbon renders from agrees with the dispatch in `run_command`.
+    #[test]
+    fn every_ribbon_command_is_either_handled_or_disabled() {
+        // these open a file dialog, which would block the test: they are wired and are checked by hand
+        const DIALOG: &[&str] = &["open", "save", "save_as", "ifc_export", "ifc_import"];
+        let mut handled = 0;
+        for id in command_ids() {
+            let implemented = crate::Desktop::ribbon_command_implemented(id);
+            if !implemented {
+                let mut app = crate::Desktop::sample();
+                app.run_command(id, id);
+                assert!(app.message.contains("is not implemented yet"), "{id} is disabled but did not say so: {}", app.message);
+                continue;
+            }
+            if DIALOG.contains(&id) { continue; }
+            let mut app = crate::Desktop::sample();
+            app.run_command(id, id);
+            assert!(!app.message.contains("is not implemented"), "{id} is listed as implemented but its arm did not run: {}", app.message);
+            handled += 1;
+        }
+        assert!(handled > 40, "only {handled} ribbon commands were exercised");
     }
 
     #[test]
