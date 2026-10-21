@@ -9,6 +9,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / 'catalog-source' / 'catalog.png'
+# Icons that are replacements, not catalog crops. Skip extraction to preserve them.
+SKIP = {'socket', 'switch'}
 # Bounds exclude the catalog's labels, tile borders and headings.
 ROWS = [
  ('architecture', (46,130), [12,96,181,267,359,456,547,638,724,811,902,992,1081,1171,1262,1351,1440,1525],
@@ -42,6 +44,16 @@ def main():
         for i,name in enumerate(names):
             if name.startswith('_'):
                 continue  # Keep only the labeled Brace Frame as requested.
+            if name in SKIP:
+                # Preserve British replacements: retain ID and provenance, skip image overwrite.
+                categories[category].append(name)
+                output = destination / (name+'.png')
+                inventory['assets'][name] = {
+                    'replacement': True,
+                    'note': 'British BS 1363 style replacement (not a catalog crop).',
+                    'sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
+                }
+                continue
             bounds = [edges[i]+4, top, edges[i+1]-4, bottom]
             tile = source.crop(bounds)
             side = max(tile.size)
