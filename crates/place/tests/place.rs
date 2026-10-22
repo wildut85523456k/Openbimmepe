@@ -108,7 +108,9 @@ fn bad_placements_are_refused_with_the_culprit_named() {
     assert!(matches!(model(vec![straight(6.0, 1.5, 3.0)], vec![pl(0, 0, 0, 3.0)]).build(), Err(PlaceError::Family { placement: 0, .. })));
     assert!(matches!(model(vec![straight(6.0, 0.02, 3.0)], vec![pl(0, 0, 0, 3.0)]).build(), Err(PlaceError::Family { placement: 0, .. })));
     // references that do not exist, and numbers that are not numbers
-    assert!(matches!(model(walls(), vec![pl(5, 0, 0, 3.0)]).build(), Err(PlaceError::BadReference { .. })));
+    // the family index is the first one past the library, so the case still holds when the library grows
+    let families = library_families().len();
+    assert!(matches!(model(walls(), vec![pl(families, 0, 0, 3.0)]).build(), Err(PlaceError::BadReference { .. })));
     assert!(matches!(model(walls(), vec![pl(0, 9, 0, 3.0)]).build(), Err(PlaceError::BadReference { .. })));
     assert!(matches!(model(walls(), vec![pl(0, 0, 9, 3.0)]).build(), Err(PlaceError::BadReference { .. })));
     assert!(matches!(model(walls(), vec![pl(0, 0, 0, f64::NAN)]).build(), Err(PlaceError::NotFinite { .. })));
