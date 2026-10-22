@@ -129,9 +129,10 @@ fn elec_node_kind(n: &ElecNode) -> NodeKind {
 /// Stamp calculated feeder currents onto the electrical symbols of `view`. Read-only: the solver
 /// runs over a `Network` built from `mep`'s electrical nodes and cables; each cable's
 /// `design_current_a` is written to the "A" annotation of the downstream board symbol (the node the
-/// cable feeds). On any solver failure the view is left un-stamped (placeholders remain) and a
-/// warning carries the reason. Graph-construction failures (rejected nodes/branches) are surfaced
-/// as warnings and leave the placeholders in place: partial networks are never stamped as valid currents.
+/// cable feeds) and its cumulative voltage drop to the "V"/"%". On any solver failure the view is
+/// left un-stamped (placeholders remain) and a warning carries the reason. Graph-construction
+/// failures (rejected nodes/branches) are surfaced as warnings and leave the placeholders in place:
+/// partial networks are never stamped as valid currents.
 ///
 /// `mep` is passed in (rather than read from `doc`) so the `GenerateSchematic` apply arm and the
 /// redo path can stamp the staged/live model instead of the pre-transaction document.
@@ -207,9 +208,15 @@ pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
             from: na,
             to: nb,
             kind: BranchKind::Cable {
+                // The prototype impedance unless the cable carries its own (a fixture overriding it
+                // with a realistic value, which is what makes the stamp's branch-vs-path field
+                // selection testable end to end).
                 phase: ConductorImpedance {
-                    resistance_ohm: PROTOTYPE_RESISTANCE_OHM_PER_KM,
-                    reactance_ohm: PROTOTYPE_REACTANCE_OHM_PER_KM,
+                    // The cable's own R/X when it carries them (a fixture setting a realistic value,
+                    // which is what makes the stamp's branch-vs-path field selection observable);
+                    // otherwise the stiff-source prototype until MEP-010 imports the catalog.
+                    resistance_ohm: c.r_ohm_per_km.unwrap_or(PROTOTYPE_RESISTANCE_OHM_PER_KM),
+                    reactance_ohm: c.x_ohm_per_km.unwrap_or(PROTOTYPE_REACTANCE_OHM_PER_KM),
                 },
                 neutral: None,
                 protective: None,
@@ -329,8 +336,6 @@ fn stamp_vdrop_symbols(view: &mut SchematicView, vdrop: &HashMap<u64, (f64, f64)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openbim_electrical_model::BranchId;
-
     /// Parse a stamped "V <n>"/"% <n>" annotation and assert it is a finite number. This is the
     /// assertion the V/% re-stamp and redo regressions use: it fails on the placeholder and on any
     /// non-numeric or non-finite text, which `assert_ne` against the placeholder alone would accept.
@@ -343,6 +348,25 @@ mod tests {
             .unwrap_or_else(|_| panic!("{annotation:?} does not parse as a number"));
         assert!(value.is_finite(), "{annotation:?} is not finite");
         value
+    }
+
+    /// Realistic LV cable R/X (ohm/km) for the test fixtures. The shipped build uses the
+    /// stiff-source prototype, which collapses every drop to ~0 — enough to prove the stamp writes
+    /// the slot, but not to separate a branch's own drop from the cumulative path. These values make
+    /// one branch's drop a few percent, far above the annotation's one-decimal rendering.
+    const TEST_R_OHM_PER_KM: f64 = 0.5;
+    const TEST_X_OHM_PER_KM: f64 = 0.1;
+    /// Drawn length (m) of each cable in [`chain_doc`]; identical on both so the chain's cumulative
+    /// drop is exactly twice one branch's.
+    const TEST_CABLE_LENGTH_M: f64 = 100.0;
+
+    /// A three-phase cable carrying the realistic test impedance and the fixture length.
+    fn realistic_cable(from: u64, to: u64) -> crate::ElecCable {
+        let mut c = crate::ElecCable::new(from, to, true);
+        c.extra_m = TEST_CABLE_LENGTH_M;
+        c.r_ohm_per_km = Some(TEST_R_OHM_PER_KM);
+        c.x_ohm_per_km = Some(TEST_X_OHM_PER_KM);
+        c
     }
 
     /// A board symbol carrying the mandatory A/V/% annotation triple (the Electrical label set).
@@ -379,47 +403,154 @@ mod tests {
         assert_eq!(finite_number(&view.symbols[0].annotations[2], "% "), 1.0);
     }
 
+    /// A source -> MSB -> DB2 chain: two boards, two cables of the same length, the 45 kW load
+    /// hanging off DB2. `stamp()` is fed this model, so the solver sees a real two-branch path.
+    /// Branch id `stamp()` assigns to the fixture's DB2 cable (nodes count 3, so the second cable
+    /// is `3 + 1 + 1`).
+    const BRANCH_DB2_ID: u64 = 5;
+
+    /// Solve the fixture network exactly as `stamp()` does, and hand back the report so a test can
+    /// compare the stamp against the solver's own branch and path values.
+    fn solve_chain(
+        doc: &crate::Document,
+        mep: &crate::MepData,
+    ) -> openbim_electrical_solver::SolverReport {
+        use openbim_electrical_model::{
+            Branch, BranchId, BranchKind, EarthingSystem, Node, NodeId, Scenario, ScenarioId,
+        };
+        let mut network = openbim_electrical_model::Network::new();
+        let mut node_id: HashMap<u64, NodeId> = HashMap::new();
+        for (i, n) in mep.elec_nodes.iter().enumerate() {
+            node_id.insert(n.id, NodeId(i as u64 + 1));
+        }
+        for n in &mep.elec_nodes {
+            network
+                .add_node(Node {
+                    id: node_id[&n.id],
+                    label: n.name.clone(),
+                    kind: elec_node_kind(n),
+                    nominal_voltage_v: voltage_for(node_phases(n, mep)),
+                    phases: node_phases(n, mep),
+                    earthing: EarthingSystem::TnS,
+                })
+                .unwrap();
+        }
+        let n_nodes = mep.elec_nodes.len();
+        for (i, c) in mep.elec_cables.iter().enumerate() {
+            let from_node = mep.elec_nodes.iter().find(|n| n.id == c.from).unwrap();
+            let to_node = mep.elec_nodes.iter().find(|n| n.id == c.to).unwrap();
+            network
+                .add_branch(Branch {
+                    id: BranchId(n_nodes as u64 + i as u64 + 1),
+                    label: format!("cable {i}"),
+                    from: node_id[&c.from],
+                    to: node_id[&c.to],
+                    kind: BranchKind::Cable {
+                        phase: ConductorImpedance {
+                            resistance_ohm: c
+                                .r_ohm_per_km
+                                .unwrap_or(PROTOTYPE_RESISTANCE_OHM_PER_KM),
+                            reactance_ohm: c.x_ohm_per_km.unwrap_or(PROTOTYPE_REACTANCE_OHM_PER_KM),
+                        },
+                        neutral: None,
+                        protective: None,
+                        ampacity_a: 1e6,
+                        length_m: cable_length_m(doc, from_node, c, to_node),
+                    },
+                    normally_closed: true,
+                })
+                .unwrap();
+        }
+        solve(
+            &network,
+            &Scenario::new(ScenarioId(1), "schematic"),
+            &SolverSettings::default(),
+        )
+        .unwrap()
+    }
+
+    fn chain_doc() -> crate::Document {
+        use crate::{Command, ElecKind, ElecNode, MepData};
+        let a = crate::elec::NODE_BASE;
+        let b = a + 1;
+        let c = a + 2;
+        let mut db2 = ElecNode::new(c, "DB2", ElecKind::Board, [20.0, 0.0], crate::ElementId(10));
+        db2.watts = 45_000.0;
+        db2.power_factor = 0.85;
+        let data = MepData {
+            elec_nodes: vec![
+                ElecNode::new(a, "TX1", ElecKind::Source, [0.0, 0.0], crate::ElementId(10)),
+                ElecNode::new(b, "MSB", ElecKind::Board, [10.0, 0.0], crate::ElementId(10)),
+                db2,
+            ],
+            elec_cables: vec![realistic_cable(a, b), realistic_cable(b, c)],
+            ..Default::default()
+        };
+        let mut d = crate::Document::spatial_sample();
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))])
+            .unwrap();
+        d
+    }
     #[test]
     fn cumulative_path_drop_differs_from_the_feeder_drop() {
-        // The cumulative source-to-board drop is not the feeder's own drop: for a source -> MSB ->
-        // DB2 chain the DB2 branch carries both feeders' drops. Constructing the pinned solver's
-        // BranchResult with distinct values proves the stamp consumes `path_voltage_drop_pct`, not
-        // `branch_voltage_drop_pct`: if the stamp read the branch field, this test's construction
-        // would have to change to keep the annotation equal.
-        let result = openbim_electrical_solver::BranchResult {
-            branch: BranchId(2),
-            design_current_a: 100.0,
-            carried_power: (80_000.0, 30_000.0),
-            branch_voltage_drop_pct: 1.0,
-            path_voltage_drop_pct: 2.5,
-            fault_max_a: 10_000.0,
-            fault_min_a: 6_000.0,
-            fault_peak_a: 21_200.0,
-        };
-        assert_ne!(
-            result.branch_voltage_drop_pct, result.path_voltage_drop_pct,
-            "the fixture must carry distinct branch and path drops"
+        // End to end through production `stamp()`: a source -> MSB -> DB2 chain of two identical
+        // cables carrying the 45 kW / 0.85 pf load. The board's own cable has one drop; the
+        // cumulative source-to-DB2 drop is two. The DB2 annotation must carry the cumulative value,
+        // so reverting `stamp()` to `branch_voltage_drop_pct` fails this test. The realistic test
+        // impedance makes the two differ by far more than the annotation's one-decimal rendering.
+        let doc = chain_doc();
+        let mep = doc.mep().clone();
+
+        // Read the two solver quantities straight out of the pinned solver (the same `solve` call
+        // `stamp()` makes), so the expectation is the solver's own arithmetic rather than a
+        // hand-derived number.
+        let report = solve_chain(&doc, &mep);
+        let db2_branch = report
+            .branches
+            .iter()
+            .find(|b| b.branch.0 == BRANCH_DB2_ID)
+            .expect("DB2 cable result");
+        let db2_path = report
+            .branches
+            .iter()
+            .find(|b| b.branch.0 == BRANCH_DB2_ID)
+            .expect("DB2 cable result");
+        let one_pct = db2_branch.branch_voltage_drop_pct;
+        let expected_pct = db2_path.path_voltage_drop_pct;
+        assert!(
+            expected_pct > 1.5 * one_pct,
+            "the fixture must separate branch {one_pct} from path {expected_pct}"
         );
-        // The stamp is keyed on the downstream node, so the pair is (volts, path percent).
-        let mut view = board_view(7);
-        // the cumulative drop is percent of the downstream node's nominal voltage
-        let v_nom = voltage_for(openbim_electrical_model::PhaseConfiguration::ThreePhase);
-        let mut vdrop = HashMap::new();
-        vdrop.insert(
-            7u64,
-            (
-                v_nom * result.path_voltage_drop_pct / 100.0,
-                result.path_voltage_drop_pct,
-            ),
+
+        let boards: Vec<u64> = mep
+            .elec_nodes
+            .iter()
+            .filter(|n| n.kind == crate::ElecKind::Board)
+            .map(|n| n.id)
+            .collect();
+        assert_eq!(boards.len(), 2, "MSB and DB2 are both boards");
+        let db2 = boards[1];
+        let mut view = board_view(db2);
+        stamp(&mep, &doc, &mut view);
+        assert_eq!(view.symbols.len(), 1);
+
+        let got_pct = finite_number(&view.symbols[0].annotations[2], "% ");
+        let expected_volts = NOMINAL_VOLTAGE_V * expected_pct / 100.0;
+        let got_volts = finite_number(&view.symbols[0].annotations[1], "V ");
+        // The annotation renders one decimal, so the comparison is at that precision.
+        assert!(
+            (got_pct - expected_pct).abs() <= 0.05,
+            "DB2 % must be the cumulative drop {expected_pct}, got {got_pct}"
         );
-        stamp_vdrop_symbols(&mut view, &vdrop);
-        assert_eq!(
-            finite_number(&view.symbols[0].annotations[1], "V "),
-            v_nom * result.path_voltage_drop_pct / 100.0
+        assert!(
+            (got_volts - expected_volts).abs() <= 0.05,
+            "DB2 V must be {expected_volts}, got {got_volts}"
         );
-        assert_eq!(
-            finite_number(&view.symbols[0].annotations[2], "% "),
-            result.path_voltage_drop_pct
+        // And the two quantities are separated by far more than the rendering, so the assertion
+        // above cannot be satisfied by the branch value.
+        assert!(
+            (expected_pct - one_pct).abs() > 1.0,
+            "fixture: branch {one_pct} must not render as the path {expected_pct}"
         );
     }
 }
