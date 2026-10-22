@@ -47,65 +47,7 @@ pub fn library() -> &'static [openbim_family::Compiled] {
     LIB.get_or_init(|| openbim_family::library::all().unwrap_or_default())
 }
 
-/// Everything a family instance of the document is solved with, split the way `solve` wants it: the instance's own
-/// values and texts, and those its type of a family gives it. A name of instance scope has to travel in `overrides`
-/// and one of type scope in `type_values` (the family refuses it otherwise), so the two layers cannot simply be
-/// merged: this is the one place that knows which is which.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct RequestParts {
-    pub overrides: Vec<(String, f64)>,
-    pub texts: Vec<(String, String)>,
-    pub type_values: Vec<(String, f64)>,
-    pub type_texts: Vec<(String, String)>,
-}
-
-impl RequestParts {
-    /// The request itself. `type_name` selects the library's own named type; a document type of a family is carried
-    /// in the type layers instead, so an instance whose type comes from a catalogue passes None here.
-    pub fn request<'a>(&'a self, type_name: Option<&'a str>) -> openbim_family::Request<'a> {
-        openbim_family::Request {
-            type_name,
-            overrides: self.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
-            texts: self.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-            type_values: self.type_values.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
-            type_texts: self.type_texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-        }
-    }
-}
-
-/// The values a family instance of the document is solved with: its own, and those of its type of a family (the
-/// document's `Category::Type`), each in its own layer. A value the instance itself sets wins over its type's, which
-/// wins over the library's own named type.
-pub fn request_parts(doc: &openbim_document::Document, el: &openbim_document::Element, f: &openbim_family::Compiled) -> RequestParts {
-    let (type_values, type_texts) = match el.type_id {
-        Some(t) => (doc.family_type_values(t), doc.family_type_texts(t)),
-        None => (Vec::new(), Vec::new()),
-    };
-    let mut parts = RequestParts::default();
-    let put = |into: &mut Vec<(String, f64)>, type_into: &mut Vec<(String, f64)>, name: &str, v: f64| {
-        if f.input_scope(name) == Some(openbim_family::Scope::Type) { type_into.push((name.to_string(), v)) } else { into.push((name.to_string(), v)) }
-    };
-    for (n, v) in &el.overrides {
-        put(&mut parts.overrides, &mut parts.type_values, n, *v);
-    }
-    for (n, v) in &type_values {
-        if !parts.type_values.iter().any(|(m, _)| m == n) && !parts.overrides.iter().any(|(m, _)| m == n) {
-            put(&mut parts.overrides, &mut parts.type_values, n, *v);
-        }
-    }
-    let put_text = |into: &mut Vec<(String, String)>, type_into: &mut Vec<(String, String)>, name: &str, v: &str| {
-        if f.input_scope(name) == Some(openbim_family::Scope::Type) { type_into.push((name.to_string(), v.to_string())) } else { into.push((name.to_string(), v.to_string())) }
-    };
-    for (n, v) in &el.texts {
-        put_text(&mut parts.texts, &mut parts.type_texts, n, v);
-    }
-    for (n, v) in &type_texts {
-        if !parts.type_texts.iter().any(|(m, _)| m == n) && !parts.texts.iter().any(|(m, _)| m == n) {
-            put_text(&mut parts.texts, &mut parts.type_texts, n, v);
-        }
-    }
-    parts
-}
+pub use openbim_document::{request_parts, RequestParts};
 
 /// `instance_values` of an element of the document: its own values and its type's, whichever scope they are in.
 pub fn instance_values_of(doc: &openbim_document::Document, el: &openbim_document::Element) -> Option<Vec<(String, f64)>> {
@@ -130,7 +72,15 @@ pub fn instance_texts_of(doc: &openbim_document::Document, el: &openbim_document
 /// that edits a type rather than one instance of it. Empty if the type's values do not solve (a value out of the
 /// family's range, say), which is also what every instance of that type would report.
 pub fn family_type_inputs(doc: &openbim_document::Document, type_id: openbim_document::ElementId, f: &openbim_family::Compiled) -> (Vec<(String, f64)>, Vec<TextInput>) {
-    let parts = RequestParts { type_values: doc.family_type_values(type_id), type_texts: doc.family_type_texts(type_id), ..Default::default() };
+    // route each stored value by its scope: a catalogue may carry an instance-scoped column, and putting it in the
+    // type layer makes the family refuse the request (and the editor show nothing)
+    let mut parts = RequestParts::default();
+    for (n, v) in doc.family_type_values(type_id) {
+        if f.input_scope(&n) == Some(openbim_family::Scope::Type) { parts.type_values.push((n, v)); } else { parts.overrides.push((n, v)); }
+    }
+    for (n, v) in doc.family_type_texts(type_id) {
+        if f.input_scope(&n) == Some(openbim_family::Scope::Type) { parts.type_texts.push((n, v)); } else { parts.texts.push((n, v)); }
+    }
     let Ok(inst) = f.solve(&parts.request(None)) else { return (Vec::new(), Vec::new()) };
     let nums = f.input_values(&inst).into_iter()
         .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Type))

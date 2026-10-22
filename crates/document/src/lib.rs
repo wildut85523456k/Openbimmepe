@@ -44,7 +44,7 @@ pub mod layout;
 pub mod elec;
 mod warnings;
 pub use rebar::BarPath;
-pub use types::TypeValues;
+pub use types::{TypeValues, request_parts, RequestParts};
 pub use elec::{ElecCable, ElecKind, ElecNode};
 pub use sheet::{schedule_ref, schedule_view, view_element, PaperSize, SheetDef, TitleBlock, Viewport, MAX_SHEETS, MAX_VIEWPORTS};
 pub use viewsettings::{Detail, RangeClass, ViewCategory, ViewRange, ViewSettings, MAX_SCALE, MIN_SCALE, STANDARD_SCALES};
