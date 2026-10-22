@@ -4,6 +4,7 @@
 use openbim_document::{Command, Document, EditError, ElementId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+pub mod engine;
 pub mod protocol;
 pub mod worker;
 pub mod mcp;
