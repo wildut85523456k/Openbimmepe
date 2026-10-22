@@ -107,7 +107,7 @@ const ELECTRICAL: &[Group] = &[
 
 const ARCHITECTURE: &[Group] = &[
     Group { title: "Build", commands: &[
-        c("wall", "Wall"), c("door", "Door"), c("window", "Window"), c("component", "Component"),
+        c("wall", "Wall"), c("door", "Door"), c("window", "Window"), c("component", "Component"), c("load_family", "Load Family"),
         c("column", "Column"), c("roof", "Roof"), c("ceiling", "Ceiling"), c("floor", "Floor"),
         c("curtain_wall", "Curtain Wall"),
     ]},

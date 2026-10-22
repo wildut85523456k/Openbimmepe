@@ -12,6 +12,7 @@ fn main() {
             type_name: if k % 3 == 0 { Some("Type A") } else { None },
             overrides: vec![("mullions", (k % 6) as f64), ("sill", (k % 7) as f64 * 0.2)],
             texts: vec![],
+            ..Default::default()
         })
         .collect();
     let mut base = 0.0;

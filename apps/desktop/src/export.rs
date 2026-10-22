@@ -47,6 +47,100 @@ pub fn library() -> &'static [openbim_family::Compiled] {
     LIB.get_or_init(|| openbim_family::library::all().unwrap_or_default())
 }
 
+/// Everything a family instance of the document is solved with, split the way `solve` wants it: the instance's own
+/// values and texts, and those its type of a family gives it. A name of instance scope has to travel in `overrides`
+/// and one of type scope in `type_values` (the family refuses it otherwise), so the two layers cannot simply be
+/// merged: this is the one place that knows which is which.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RequestParts {
+    pub overrides: Vec<(String, f64)>,
+    pub texts: Vec<(String, String)>,
+    pub type_values: Vec<(String, f64)>,
+    pub type_texts: Vec<(String, String)>,
+}
+
+impl RequestParts {
+    /// The request itself. `type_name` selects the library's own named type; a document type of a family is carried
+    /// in the type layers instead, so an instance whose type comes from a catalogue passes None here.
+    pub fn request<'a>(&'a self, type_name: Option<&'a str>) -> openbim_family::Request<'a> {
+        openbim_family::Request {
+            type_name,
+            overrides: self.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
+            texts: self.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+            type_values: self.type_values.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
+            type_texts: self.type_texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+        }
+    }
+}
+
+/// The values a family instance of the document is solved with: its own, and those of its type of a family (the
+/// document's `Category::Type`), each in its own layer. A value the instance itself sets wins over its type's, which
+/// wins over the library's own named type.
+pub fn request_parts(doc: &openbim_document::Document, el: &openbim_document::Element, f: &openbim_family::Compiled) -> RequestParts {
+    let (type_values, type_texts) = match el.type_id {
+        Some(t) => (doc.family_type_values(t), doc.family_type_texts(t)),
+        None => (Vec::new(), Vec::new()),
+    };
+    let mut parts = RequestParts::default();
+    let put = |into: &mut Vec<(String, f64)>, type_into: &mut Vec<(String, f64)>, name: &str, v: f64| {
+        if f.input_scope(name) == Some(openbim_family::Scope::Type) { type_into.push((name.to_string(), v)) } else { into.push((name.to_string(), v)) }
+    };
+    for (n, v) in &el.overrides {
+        put(&mut parts.overrides, &mut parts.type_values, n, *v);
+    }
+    for (n, v) in &type_values {
+        if !parts.type_values.iter().any(|(m, _)| m == n) && !parts.overrides.iter().any(|(m, _)| m == n) {
+            put(&mut parts.overrides, &mut parts.type_values, n, *v);
+        }
+    }
+    let put_text = |into: &mut Vec<(String, String)>, type_into: &mut Vec<(String, String)>, name: &str, v: &str| {
+        if f.input_scope(name) == Some(openbim_family::Scope::Type) { type_into.push((name.to_string(), v.to_string())) } else { into.push((name.to_string(), v.to_string())) }
+    };
+    for (n, v) in &el.texts {
+        put_text(&mut parts.texts, &mut parts.type_texts, n, v);
+    }
+    for (n, v) in &type_texts {
+        if !parts.type_texts.iter().any(|(m, _)| m == n) && !parts.texts.iter().any(|(m, _)| m == n) {
+            put_text(&mut parts.texts, &mut parts.type_texts, n, v);
+        }
+    }
+    parts
+}
+
+/// `instance_values` of an element of the document: its own values and its type's, whichever scope they are in.
+pub fn instance_values_of(doc: &openbim_document::Document, el: &openbim_document::Element) -> Option<Vec<(String, f64)>> {
+    let f = library().iter().find(|f| f.name() == el.family)?;
+    let parts = request_parts(doc, el, f);
+    let inst = f.solve(&parts.request((!el.type_name.is_empty()).then_some(el.type_name.as_str()))).ok()?;
+    Some(f.input_values(&inst).into_iter()
+        .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Instance))
+        .map(|(n, v)| (n.to_string(), v)).collect())
+}
+
+/// `instance_texts` of an element of the document, its type's included.
+pub fn instance_texts_of(doc: &openbim_document::Document, el: &openbim_document::Element) -> Option<Vec<TextInput>> {
+    let f = library().iter().find(|f| f.name() == el.family)?;
+    let parts = request_parts(doc, el, f);
+    let inst = f.solve(&parts.request((!el.type_name.is_empty()).then_some(el.type_name.as_str()))).ok()?;
+    Some(f.input_texts(&inst).into_iter().filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Instance))
+        .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect())
+}
+
+/// The type-scoped inputs of a type of a family as that type gives them: the numbers and the texts, for the panel
+/// that edits a type rather than one instance of it. Empty if the type's values do not solve (a value out of the
+/// family's range, say), which is also what every instance of that type would report.
+pub fn family_type_inputs(doc: &openbim_document::Document, type_id: openbim_document::ElementId, f: &openbim_family::Compiled) -> (Vec<(String, f64)>, Vec<TextInput>) {
+    let parts = RequestParts { type_values: doc.family_type_values(type_id), type_texts: doc.family_type_texts(type_id), ..Default::default() };
+    let Ok(inst) = f.solve(&parts.request(None)) else { return (Vec::new(), Vec::new()) };
+    let nums = f.input_values(&inst).into_iter()
+        .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Type))
+        .map(|(n, v)| (n.to_string(), v)).collect();
+    let txts = f.input_texts(&inst).into_iter()
+        .filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Type))
+        .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect();
+    (nums, txts)
+}
+
 /// The instance values of a family (its numbers and yes/no inputs of instance scope, `wall_t` left out because the
 /// wall sets it) as solved for `type_name` with `overrides`; None for an unknown family or values that do not solve.
 pub fn instance_values(family: &str, type_name: &str, overrides: &[(String, f64)]) -> Option<Vec<(String, f64)>> {
@@ -58,7 +152,10 @@ pub fn instance_values_with(family: &str, type_name: &str, overrides: &[(String,
     let f = library().iter().find(|f| f.name() == family)?;
     let inst = f.solve(&openbim_family::Request {
         type_name: (!type_name.is_empty()).then_some(type_name),
-        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }).ok()?;
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+        // P2: a family's own type of a family (the document's `Category::Type`) is wired into this resolution in the
+        // slice that adds the type editor, so that the two land together rather than half-wired
+        ..Default::default() }).ok()?;
     Some(f.input_values(&inst).into_iter()
         .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Instance))
         .map(|(n, v)| (n.to_string(), v)).collect())
@@ -73,7 +170,10 @@ pub fn instance_texts(family: &str, type_name: &str, overrides: &[(String, f64)]
     let f = library().iter().find(|f| f.name() == family)?;
     let inst = f.solve(&openbim_family::Request {
         type_name: (!type_name.is_empty()).then_some(type_name),
-        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }).ok()?;
+        overrides: overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(), texts: texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
+        // P2: a family's own type of a family (the document's `Category::Type`) is wired into this resolution in the
+        // slice that adds the type editor, so that the two land together rather than half-wired
+        ..Default::default() }).ok()?;
     Some(f.input_texts(&inst).into_iter().filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Instance))
         .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect())
 }
@@ -238,16 +338,19 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             }
             _ => continue,
         };
-        let mut overrides: Vec<(&str, f64)> = el.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        // the instance's own values and those its type of a family gives it, each in the layer solve wants
+        let mut parts = request_parts(doc, el, &lib[fi]);
         let type_name = (!el.type_name.is_empty()).then_some(el.type_name.as_str());
         // a door or window fills the wall it stands in, whatever the wall's thickness is now
-        let instance = match wall_t {
-            Some(t) if !overrides.iter().any(|(n, _)| *n == "wall_t") => {
-                overrides.push(("wall_t", t));
-                lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() })
-                    .or_else(|_| { overrides.pop(); lib[fi].solve(&openbim_family::Request { type_name, overrides: overrides.clone(), texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }) })
-            }
-            _ => lib[fi].solve(&openbim_family::Request { type_name, overrides, texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect() }),
+        let injected = wall_t.filter(|_| !parts.overrides.iter().any(|(n, _)| n == "wall_t"));
+        if let Some(t) = injected { parts.overrides.push(("wall_t".to_string(), t)); }
+        let instance = match lib[fi].solve(&parts.request(type_name)) {
+            Ok(i) => Ok(i),
+            Err(e) => match injected {
+                // the wall's thickness is a hint: if the family refuses it, solve without it
+                Some(_) => { parts.overrides.retain(|(n, _)| n != "wall_t"); lib[fi].solve(&parts.request(type_name)).map_err(|_| e) }
+                None => Err(e),
+            },
         }.map_err(|e| format!("{}: {e:?}", el.name))?;
         // a door or window opens its wall
         if let (Some((wi, _, along)), Some([w, h, sill])) = (host, instance.opening) {

@@ -88,12 +88,10 @@ pub(crate) fn instance_connectors(doc: &Document, id: ElementId) -> Vec<Connecto
     let Some(el) = doc.get(id).filter(|e| e.category == Category::Family) else { return Vec::new() };
     let Some(Geometry::Placed { at, level }) = el.geometry else { return Vec::new() };
     let Some(f) = crate::export::library().iter().find(|f| f.name() == el.family) else { return Vec::new() };
-    let req = openbim_family::Request {
-        type_name: (!el.type_name.is_empty()).then_some(el.type_name.as_str()),
-        overrides: el.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
-        texts: el.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-    };
-    let Ok(inst) = f.solve(&req) else { return Vec::new() };
+    // P2: the instance's own values and those of its type of a family, so a type loaded from a catalogue sets the
+    // size of the ports a run meets here (and the exported ports with them)
+    let parts = crate::export::request_parts(doc, el, f);
+    let Ok(inst) = f.solve(&parts.request((!el.type_name.is_empty()).then_some(el.type_name.as_str()))) else { return Vec::new() };
     let z = doc.get(level).map_or(0.0, |l| l.elevation_m) + el.elevation_m;
     let pose = Pose { x: at[0], y: at[1], z, angle: el.angle_deg };
     inst.connectors.iter().map(|c| c.world(&pose)).collect()

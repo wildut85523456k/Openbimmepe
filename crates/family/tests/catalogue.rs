@@ -330,3 +330,29 @@ fn export_and_reload_give_the_same_types() {
     let crlf = format!("# x\r\n{}", text.replace('\n', "\r\n"));
     assert_eq!(Catalogue::from_text(&crlf).unwrap(), cat);
 }
+
+
+#[test]
+fn to_types_reads_a_catalogue_into_types_of_its_families_without_touching_them() {
+    // the loader's view: what the catalogue says, per family, before anything is written anywhere
+    let fams = library::families();
+    assert!(fams.iter().any(|f| f.name == "Air handling unit") && fams.iter().any(|f| f.name == "Ceiling diffuser, square"));
+    let text = "# a range of two families\nfamily\tAir handling unit\ntype\tair_flow\tpower\tcasing\nAHU-S\t0.8\t2500\tPainted steel\nAHU-L\t2.5\t\tGalvanised\nfamily\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD-200\t0.2\t0.05\n";
+    let types = Catalogue::from_text(text).unwrap().to_types(&fams, None).unwrap();
+    assert_eq!(types.len(), 2, "one list per family the catalogue names");
+    let (ahu, diffusers) = (&types[0], &types[1]);
+    assert_eq!((ahu.0.as_str(), ahu.1.len()), ("Air handling unit", 2));
+    assert_eq!((diffusers.0.as_str(), diffusers.1.len()), ("Ceiling diffuser, square", 1));
+    assert_eq!(ahu.1[0].name, "AHU-S");
+    assert_eq!(ahu.1[0].values, vec![("air_flow".to_string(), 0.8), ("power".to_string(), 2500.0)]);
+    assert_eq!(ahu.1[0].texts, vec![("casing".to_string(), "Painted steel".to_string())]);
+    assert_eq!(ahu.1[1].values, vec![("air_flow".to_string(), 2.5)], "an empty cell is simply not set");
+    let named: Vec<&Family> = fams.iter().filter(|f| f.name == "Air handling unit" || f.name == "Ceiling diffuser, square").collect();
+    assert!(named.iter().all(|f| f.types.is_empty()), "reading the catalogue leaves the library alone");
+    // and `apply` is the same reading, written into the families
+    let mut own = library::families();
+    Catalogue::from_text(text).unwrap().apply(&mut own, None).unwrap();
+    let ahu = own.iter().find(|f| f.name == "Air handling unit").unwrap();
+    assert_eq!(ahu.types.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["AHU-S", "AHU-L"]);
+    assert!(own.iter().find(|f| f.name == "Ceiling diffuser, square").unwrap().types.len() == 1);
+}

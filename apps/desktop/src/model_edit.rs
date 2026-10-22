@@ -8,6 +8,10 @@ pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Sc
 /// The state of the import window.
 pub(crate) struct ImportDialog { pub path: String }
 
+/// The state of the Load Family window: the catalogue file typed or picked.
+#[derive(Default)]
+pub(crate) struct LoadFamilyDialog { pub path: String }
+
 /// The state of the types window: the type being worked on and the name typed for a rename or a copy.
 #[derive(Default)]
 pub(crate) struct TypesDialog { pub picked: Option<ElementId>, pub name: String }
@@ -167,8 +171,12 @@ impl Desktop {
             if el.category == Category::Truss { self.material_pick = el.material; }
             if el.category == Category::Family {
                 (self.angle_deg, self.family_type) = (el.angle_deg, el.type_name.clone());
-                self.family_values = crate::export::instance_values_with(&el.family, &el.type_name, &el.overrides, &el.texts).unwrap_or_default();
-                self.family_texts = crate::export::instance_texts(&el.family, &el.type_name, &el.overrides, &el.texts).unwrap_or_default();
+                self.family_values = crate::export::instance_values_of(&self.document, el).unwrap_or_default();
+                self.family_texts = crate::export::instance_texts_of(&self.document, el).unwrap_or_default();
+                // the type the instance takes, and its own parameters, so the panel can edit the type rather than
+                // this one instance
+                self.family_type_editing = el.type_id;
+                (self.family_type_values, self.family_type_texts) = self.family_type_drafts();
             }
             if el.category == Category::Rebar { (self.spacing_mm, self.bar_count) = (el.spacing_m * 1000.0, f64::from(el.count)); }
             if el.category == Category::Slab { (self.material_pick, self.slab_kind_pick) = (el.material, el.slab_kind); }
@@ -286,6 +294,51 @@ impl Desktop {
             go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Import")).clicked();
         });
         if go { self.read_ifc(dialog.path.trim()); } else if open { self.import_dialog = Some(dialog); }
+    }
+
+    /// Opens the Load Family window: a catalogue file, what it will do, and the button.
+    pub(crate) fn load_family_file(&mut self) {
+        self.load_family_dialog = Some(LoadFamilyDialog::default());
+    }
+
+    /// The Load Family window. The catalogue is read and checked before anything is created, so a file that names a
+    /// family or a column the library does not have is refused whole and says why.
+    pub(crate) fn load_family_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.load_family_dialog.take() else { return };
+        let (mut open, mut go) = (true, false);
+        egui::Window::new("Load Family").open(&mut open).collapsible(false).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Catalogue");
+                ui.text_edit_singleline(&mut dialog.path);
+                if ui.button("Browse...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("Load Family").add_filter("Family catalogue (tab separated)", &["tsv", "txt", "csv", "tab"]).pick_file() { dialog.path = p.display().to_string(); }
+                }
+            });
+            ui.small("A tab-separated catalogue: a 'family' line naming a family in the library, then a 'type' line naming its inputs, then one line per type. Every row becomes a type of that family in this project.");
+            ui.small("Nothing is created unless the whole file is accepted, so a refused file leaves the project as it was.");
+            go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Load")).clicked();
+        });
+        if go { self.read_family_catalogue(dialog.path.trim()); } else if open { self.load_family_dialog = Some(dialog); }
+    }
+
+    /// Reads the catalogue at `path` into the document's types of a family, as one undoable step.
+    pub(crate) fn read_family_catalogue(&mut self, path: &str) {
+        self.message = match std::fs::read_to_string(path) {
+            Err(e) => format!("Could not read {path}: {e}"),
+            Ok(text) => self.load_family_catalogue_text(&text, path),
+        };
+    }
+
+    /// The same, from the text of a catalogue: what the window and the tests both go through.
+    pub(crate) fn load_family_catalogue_text(&mut self, text: &str, from: &str) -> String {
+        match self.document.load_family_catalogue(text) {
+            Ok(ids) => {
+                let families: Vec<String> = ids.iter().filter_map(|id| self.document.get(*id)).map(|t| t.family.clone()).collect();
+                let names = families.iter().fold(Vec::new(), |mut acc, f| { if !acc.contains(f) { acc.push(f.clone()) } acc });
+                format!("Loaded {} {} for {} from {from}; undo removes them", ids.len(), if ids.len() == 1 { "type" } else { "types" }, names.join(", "))
+            }
+            Err(why) => format!("Catalogue refused, nothing changed: {why}"),
+        }
     }
 
     /// Reads the file at `path` into the document, as one undoable step.
@@ -599,12 +652,34 @@ impl Desktop {
 
     /// Whether the instance values in the Properties differ from those of the selected family instance.
     fn family_values_changed(&self, el: &openbim_document::Element) -> bool {
-        let Some(now) = crate::export::instance_values_with(&el.family, &el.type_name, &el.overrides, &el.texts) else { return false };
-        let Some(texts) = crate::export::instance_texts(&el.family, &el.type_name, &el.overrides, &el.texts) else { return false };
+        let Some(now) = crate::export::instance_values_of(&self.document, el) else { return false };
+        let Some(texts) = crate::export::instance_texts_of(&self.document, el) else { return false };
         if el.type_name == self.family_type && (texts.len() != self.family_texts.len() || texts.iter().zip(&self.family_texts).any(|(a, b)| a.0 != b.0 || a.1 != b.1)) { return true; }
         // a changed type brings its own values, so only a same-type edit counts
         el.type_name == self.family_type && now.len() == self.family_values.len()
             && now.iter().zip(&self.family_values).any(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() > 1e-9 || !b.1.is_finite())
+    }
+
+    /// The type-scoped parameters of the selected instance's type, as the type gives them: what the type editor
+    /// shows. Empty when the instance has no type of its own.
+    fn family_type_drafts(&self) -> (Vec<(String, f64)>, Vec<crate::export::TextInput>) {
+        let Some(t) = self.family_type_editing.and_then(|t| self.document.get(t)) else { return (Vec::new(), Vec::new()) };
+        let Some(f) = crate::export::library().iter().find(|f| f.name() == t.family) else { return (Vec::new(), Vec::new()) };
+        crate::export::family_type_inputs(&self.document, t.id, f)
+    }
+
+    /// Applies the type editor: the type takes these values and choices, and every instance of it follows in one
+    /// transaction (an instance's own value still wins over its type's).
+    pub(crate) fn apply_family_type(&mut self) {
+        let Some(t) = self.family_type_editing else { self.message = "Type: select a family instance that has one".into(); return };
+        let texts: Vec<(String, String)> = self.family_type_texts.iter().map(|(n, v, _)| (n.clone(), v.clone())).collect();
+        match self.document.edit_family_type(t, &self.family_type_values.clone(), &texts) {
+            Ok(()) => {
+                let n = self.document.instances_of(t).len();
+                self.message = format!("Type {} changed for {n} {}; undo puts it back", self.document.get(t).map_or("?".into(), |x| x.name.clone()), if n == 1 { "instance" } else { "instances" });
+            }
+            Err(error) => self.message = format!("Type rejected: {error:?}"),
+        }
     }
 
     /// The overrides that make `values` on top of the family's `type_name`: what differs from the type's own.
@@ -2126,6 +2201,108 @@ mod tests {
         assert_eq!(app.document.elements().count(), want);
         std::fs::remove_dir_all(&dir).unwrap();
     }
+    #[test]
+    fn the_load_family_window_takes_a_catalogue_into_the_document_and_refuses_a_bad_one_whole() {
+        let mut app = Desktop::sample();
+        app.run_command("load_family", "Load Family");
+        assert!(app.load_family_dialog.is_some(), "the window opens");
+        let before = app.document.types_for(Category::Family).len();
+        // a catalogue of two families: every row becomes a type of the family its table names
+        let text = "family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 250\t0.25\t0.06\nD 300\t0.3\t0.08\nfamily\tAir handling unit\ntype\tair_flow\tpower\nAHU 1.2\t1.2\t4000\n";
+        let message = app.load_family_catalogue_text(text, "range.tsv");
+        assert!(message.contains("3 types") && message.contains("Ceiling diffuser, square") && message.contains("Air handling unit"), "{message}");
+        assert!(message.contains("undo"), "the message says how to take it back: {message}");
+        assert_eq!(app.document.types_for(Category::Family).len(), before + 3);
+        let diffuser = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 250").map(|t| t.id).unwrap();
+        assert_eq!(app.document.family_type_values(diffuser), vec![("neck_d".to_string(), 0.25), ("air_flow".to_string(), 0.06)]);
+        // the whole load is one undo step
+        assert!(app.document.undo().unwrap());
+        assert_eq!(app.document.types_for(Category::Family).len(), before);
+        // a catalogue the library cannot satisfy is refused whole, and the message says why
+        let message = app.load_family_catalogue_text("family\tNonesuch\ntype\tsize\nbig\t1\n", "bad.tsv");
+        assert!(message.contains("refused") && message.contains("Nonesuch"), "{message}");
+        assert_eq!(app.document.types_for(Category::Family).len(), before);
+        let message = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tnot_an_input\nx\t1\n", "bad.tsv");
+        assert!(message.contains("refused") && message.contains("not_an_input"), "{message}");
+        assert_eq!(app.document.types_for(Category::Family).len(), before);
+        // a file that is not there, and a file that is not a catalogue
+        app.read_family_catalogue(std::env::temp_dir().join("no-such-catalogue.tsv").to_str().unwrap());
+        assert!(app.message.contains("Could not read"), "{}", app.message);
+        let message = app.load_family_catalogue_text("this is not a catalogue\n", "junk.tsv");
+        assert!(message.contains("refused"), "{message}");
+    }
+
+    #[test]
+    fn a_type_loaded_from_a_catalogue_sets_the_ports_and_the_geometry_its_instances_are_solved_with() {
+        let mut app = Desktop::sample();
+        let message = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 400\t0.4\t0.2\n", "range.tsv");
+        assert!(message.contains("1 type"), "{message}");
+        let t = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 400").map(|t| t.id).unwrap();
+        let spec = FamilySpec { family: "Ceiling diffuser, square".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let unit = app.document.place_family(ElementId(10), [2.0, 2.0], &spec).unwrap();
+        app.document.assign_type(&[unit], t).unwrap();
+        // the connectors the export writes as ports, and the schematic reads, carry the catalogue's neck and flow,
+        // not the library's defaults (0.2 and 0.05)
+        let conns = crate::elec_ui::instance_connectors(&app.document, unit);
+        assert_eq!(conns.len(), 1, "a diffuser has one duct connection");
+        assert_eq!(conns[0].size, openbim_family::mep::Size::Round { diameter: 0.4 }, "the type's neck reached the port");
+        assert!((conns[0].flow - 0.2).abs() < 1e-9, "and so did its air flow");
+        // an instance's own value still wins over its type's, and leaves the type's alone
+        app.document.set_family_values(unit, &[("face".to_string(), 0.9)]).unwrap();
+        assert_eq!(crate::elec_ui::instance_connectors(&app.document, unit)[0].size, openbim_family::mep::Size::Round { diameter: 0.4 });
+        assert_eq!(app.document.family_type_values(t), vec![("neck_d".to_string(), 0.4), ("air_flow".to_string(), 0.2)]);
+        // and the exported file has the terminal and its port
+        let out = crate::export::export_ifc(&app.document, "Project1", 1, "2026-10-21T00:00:00").unwrap();
+        assert!(out.text.contains("IFCAIRTERMINAL("), "the diffuser exports as an air terminal");
+        assert!(out.text.contains("IFCDISTRIBUTIONPORT("), "with its port");
+    }
+
+    #[test]
+    fn an_hvac_system_is_built_from_scratch_with_the_mouse_saved_and_exported() {
+        let mut app = Desktop::sample();
+        // the AHU and the diffuser, from a catalogue
+        let m1 = app.load_family_catalogue_text("family\tAir handling unit\ntype\tair_flow\nAHU-1\t0.3\n", "ahus.tsv");
+        assert!(m1.contains("1 type"), "{m1}");
+        let ahut = app.document.types_for(Category::Family).iter().find(|t| t.name == "AHU-1").map(|t| t.id).unwrap();
+        let m2 = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 400\t0.4\t0.2\n", "diffusers.tsv");
+        assert!(m2.contains("1 type"), "{m2}");
+        let dt = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 400").map(|t| t.id).unwrap();
+        // place the AHU and a diffuser, and give them the loaded types
+        let spec_ahu = FamilySpec { family: "Air handling unit".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let ahu = app.document.place_family(ElementId(10), [1.0, 1.0], &spec_ahu).unwrap();
+        app.document.assign_type(&[ahu], ahut).unwrap();
+        let spec_diff = FamilySpec { family: "Ceiling diffuser, square".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let diff = app.document.place_family(ElementId(10), [5.0, 1.0], &spec_diff).unwrap();
+        app.document.assign_type(&[diff], dt).unwrap();
+        // a duct between them, drawn by clicks
+        app.run_command("duct", "Duct");
+        let level = app.plan_level();
+        for p in [[1.0, 1.0], [5.0, 1.0], [5.0, 1.0]] { app.run_click(p); }
+        app.finish_run(level);
+        // edit the AHU's airflow through the type editor
+        app.select_element(Some(ahu));
+        app.family_type_values.iter_mut().find(|(n, _)| n == "air_flow").unwrap().1 = 0.5;
+        app.apply_family_type();
+        // save, reopen and export
+        let path = std::env::temp_dir().join(format!("openbim-hvac-e2e-{}.obim", std::process::id()));
+        let path = path.to_str().unwrap().to_string();
+        app.write_model(&path);
+        let saved = app.document.clone();
+        let mut reopened = Desktop::sample();
+        reopened.open_path(&path);
+        assert_eq!(reopened.document.elements().count(), saved.elements().count(), "{}", reopened.message);
+        // the AHU's airflow changed, and it came back from the save with its type
+        let ahu2 = reopened.document.elements().find(|e| e.category == Category::Family && e.family == "Air handling unit").expect("the AHU came back");
+        let ahut2 = ahu2.type_id.expect("the AHU came back with its type");
+        let vals = reopened.document.family_type_values(ahut2);
+        assert_eq!(vals.iter().find(|(n, _)| n == "air_flow").map(|(_, v)| *v), Some(0.5), "the edited airflow persisted: {:?}", vals);
+        let out = crate::export::export_ifc_with(&reopened.document, "Office", 1, "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false).unwrap();
+        assert!(out.text.contains("IFCAIRTERMINAL("), "the AHU is an air terminal");
+        assert!(out.text.contains("IFCDUCTSEGMENT("), "the duct is there");
+        assert!(out.text.contains("IFCDISTRIBUTIONPORT("), "and its ports");
+        std::fs::remove_file(&path).ok();
+    }
+
     #[test]
     fn a_wall_opening_and_a_shaft_cut_the_3d_model_and_are_exported_as_openings_of_what_they_cut() {
         let mut app = Desktop::sample();

@@ -270,12 +270,18 @@ impl Catalogue {
         cat
     }
 
-    /// Add the catalogue's types to the families (matched by name). Nothing changes if any table is refused.
-    pub fn apply(
+    /// The types this catalogue gives the families, one list per family it names, each type carrying the values and
+    /// the texts of its row. The whole catalogue is refused, with nothing returned, if any table names a family the
+    /// library does not have, a column the family has no input for, a column that is calculated rather than an input,
+    /// or a type the family already has: a catalogue is applied whole or not at all.
+    ///
+    /// This is what a loader that keeps the types somewhere of its own (the document's `Category::Type` of a family)
+    /// reads; `apply` is the same thing written into the families themselves.
+    pub fn to_types(
         &self,
-        families: &mut [Family],
+        families: &[Family],
         shared: Option<&SharedSet>,
-    ) -> Result<(), CatError> {
+    ) -> Result<Vec<(String, Vec<TypeDef>)>, CatError> {
         let mut staged: Vec<(usize, Vec<TypeDef>)> = Vec::new();
         for t in &self.tables {
             let k = families
@@ -350,8 +356,15 @@ impl Catalogue {
             }
             staged.push((k, types));
         }
-        for (k, types) in staged {
-            families[k].types.extend(types);
+        Ok(staged.into_iter().map(|(k, types)| (families[k].name.clone(), types)).collect())
+    }
+
+    /// Add the catalogue's types to the families (matched by name). Nothing changes if any table is refused.
+    pub fn apply(&self, families: &mut [Family], shared: Option<&SharedSet>) -> Result<(), CatError> {
+        for (name, types) in self.to_types(families, shared)? {
+            if let Some(f) = families.iter_mut().find(|f| f.name == name) {
+                f.types.extend(types);
+            }
         }
         Ok(())
     }

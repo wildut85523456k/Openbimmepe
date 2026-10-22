@@ -3,7 +3,7 @@
 
 use crate::{
     compile_library, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dim, Dir,
-    Domain, Family, FamilyError, FlowDir, NestedDef, OpeningDef, PlanDef, Scope::*, ShapeDef,
+    Domain, Family, FamilyError, FlowDir, Host, NestedDef, OpeningDef, PlanDef, Scope::*, ShapeDef,
     SolidDef, System, TextSrc, TypeDef, ValueDef as V, NUMBER, U_VALUE,
 };
 
@@ -305,9 +305,16 @@ pub fn window() -> Family {
     }
 }
 
-/// All sample families compiled together, in the order handle, door, window, arched door, fan coil unit.
+/// All sample families, uncompiled, in the order handle, door, window, arched door, fan coil unit, air handling
+/// unit, ceiling diffuser. This is the one list: `all()` compiles it, and a loader that has to check a catalogue
+/// against the library reads it.
+pub fn families() -> Vec<Family> {
+    vec![handle(), door(), window(), arched_door(), fan_coil(), ahu(), ceiling_diffuser()]
+}
+
+/// All sample families compiled together, in the same order as `families()`.
 pub fn all() -> Result<Vec<Compiled>, FamilyError> {
-    compile_library(&[handle(), door(), window(), arched_door(), fan_coil()])
+    compile_library(&families())
 }
 
 /// Ceiling-mounted fan coil unit, ducted. Origin: centre of the casing in plan, underside of the casing.
@@ -439,6 +446,221 @@ pub fn fan_coil() -> Family {
             PlanDef::line(("x0", "y1"), ("x1", "y0")),
         ],
         category: Category::UnitaryEquipment,
+        ..Default::default()
+    }
+}
+
+/// Air handling unit, floor mounted: a casing with a supply and a return duct connection, a chilled and a heating
+/// water coil, condensate, power and a BMS link. Origin: centre of the casing in plan, underside of the casing.
+/// Face +Y carries the supply air outlet, face -Y the return air inlet, face +X the water, condensate and power
+/// connections. Sizes and flows are illustrative defaults to be replaced by the manufacturer data.
+pub fn ahu() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Air handling unit".into(),
+        values: vec![
+            V::input("length", 2.5, 1.0, 6.0, Instance),
+            V::input("depth", 1.2, 0.6, 3.0, Instance),
+            V::input("height", 1.4, 0.6, 2.5, Instance),
+            V::number("air_flow", 1.2, 0.05, 10.0, Type),
+            V::input("supply_duct_w", 0.8, 0.1, 2.0, Type),
+            V::input("supply_duct_h", 0.5, 0.1, 1.5, Type),
+            V::input("return_duct_w", 0.8, 0.1, 2.0, Type),
+            V::input("return_duct_h", 0.5, 0.1, 1.5, Type),
+            V::number("chw_flow", 0.0006, 0.00001, 0.05, Type),
+            V::input("chw_pipe", 0.05, 0.01, 0.2, Type),
+            V::number("hw_flow", 0.0004, 0.00001, 0.05, Type),
+            V::input("hw_pipe", 0.04, 0.01, 0.2, Type),
+            V::input("condensate_pipe", 0.032, 0.01, 0.05, Type),
+            V::number("voltage", 400.0, 12.0, 1000.0, Type),
+            V::number("power", 4000.0, 1.0, 100000.0, Type),
+            V::flag("with_return_duct", true, Instance),
+            V::material("casing", "Casing", Type),
+            V::plane("x0", X, "-length / 2"),
+            V::plane("x1", X, "length / 2"),
+            V::plane("y0", Y, "-depth / 2"),
+            V::plane("y1", Y, "depth / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "height"),
+        ],
+        solids: vec![
+            SolidDef::new("body", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("casing"),
+        ],
+        checks: vec![
+            chk("the supply duct fits the casing face", "supply_duct_w < length && supply_duct_h < height"),
+            chk("the return duct fits the casing face", "return_duct_w < length && return_duct_h < height"),
+            chk("the pipes fit the casing height", "chw_pipe < height && hw_pipe < height && condensate_pipe < height"),
+        ],
+        connectors: vec![
+            ConnectorDef::new(
+                "supply",
+                Duct,
+                SupplyAir,
+                Out,
+                ("0", "depth / 2", "height / 2"),
+                PlusY,
+                ShapeDef::Rect("supply_duct_w".into(), "supply_duct_h".into()),
+            )
+            .flow("air_flow")
+            .pressure_drop("0"),
+            ConnectorDef::new(
+                "return",
+                Duct,
+                ReturnAir,
+                In,
+                ("0", "-depth / 2", "height / 2"),
+                MinusY,
+                ShapeDef::Rect("return_duct_w".into(), "return_duct_h".into()),
+            )
+            .flow("air_flow")
+            .visible_if("with_return_duct"),
+            ConnectorDef::new(
+                "chw_in",
+                Pipe,
+                ChilledWaterSupply,
+                In,
+                ("length / 2", "depth / 4", "height / 4"),
+                PlusX,
+                ShapeDef::Round("chw_pipe".into()),
+            )
+            .flow("chw_flow"),
+            ConnectorDef::new(
+                "chw_out",
+                Pipe,
+                ChilledWaterReturn,
+                Out,
+                ("length / 2", "0", "height / 4"),
+                PlusX,
+                ShapeDef::Round("chw_pipe".into()),
+            )
+            .flow("chw_flow"),
+            ConnectorDef::new(
+                "hw_in",
+                Pipe,
+                HeatingWaterSupply,
+                In,
+                ("length / 2", "-depth / 4", "height / 4"),
+                PlusX,
+                ShapeDef::Round("hw_pipe".into()),
+            )
+            .flow("hw_flow"),
+            ConnectorDef::new(
+                "hw_out",
+                Pipe,
+                HeatingWaterReturn,
+                Out,
+                ("length / 2", "-depth / 2 + 150 mm", "height / 4"),
+                PlusX,
+                ShapeDef::Round("hw_pipe".into()),
+            )
+            .flow("hw_flow"),
+            ConnectorDef::new(
+                "condensate",
+                Pipe,
+                Condensate,
+                Out,
+                ("length / 2", "depth / 4", "height / 8"),
+                PlusX,
+                ShapeDef::Round("condensate_pipe".into()),
+            ),
+            ConnectorDef::new(
+                "power",
+                Electrical,
+                Power,
+                In,
+                ("length / 2", "depth / 2 - 150 mm", "3 * height / 4"),
+                PlusX,
+                ShapeDef::Electrical {
+                    voltage: "voltage".into(),
+                    poles: "3".into(),
+                },
+            )
+            .flow("power"),
+            // BMS link to the unit controller (signal both ways)
+            ConnectorDef::new(
+                "bms",
+                Electrical,
+                Controls,
+                Both,
+                ("length / 2", "depth / 2 - 250 mm", "3 * height / 4"),
+                PlusX,
+                ShapeDef::Signal,
+            ),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+            PlanDef::line(("x0", "y0"), ("x1", "y1")),
+            PlanDef::line(("x0", "y1"), ("x1", "y0")),
+        ],
+        category: Category::UnitaryEquipment,
+        host: Some(Host::Floor),
+        ..Default::default()
+    }
+}
+
+/// Ceiling diffuser, square faced with a round neck. Origin: centre of the face on the ceiling plane (the face hangs
+/// a little below the ceiling and the neck rises from it into the duct above). The one connector is the duct drop
+/// above the unit, so a run joins it from +Z. Sizes and flows are illustrative defaults to be replaced by the
+/// manufacturer data.
+pub fn ceiling_diffuser() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Ceiling diffuser, square".into(),
+        values: vec![
+            V::input("face", 0.6, 0.15, 1.2, Instance),
+            V::input("neck_d", 0.2, 0.05, 0.6, Type),
+            V::input("neck_h", 0.15, 0.02, 0.5, Type),
+            V::number("air_flow", 0.05, 0.005, 1.0, Type),
+            V::number("pressure_drop", 30.0, 0.0, 500.0, Type),
+            V::material("face_material", "Diffuser", Type),
+            V::plane("nx0", X, "-neck_d / 2"),
+            V::plane("nx1", X, "neck_d / 2"),
+            V::plane("ny0", Y, "-neck_d / 2"),
+            V::plane("ny1", Y, "neck_d / 2"),
+            V::plane("x0", X, "-face / 2"),
+            V::plane("x1", X, "face / 2"),
+            V::plane("y0", Y, "-face / 2"),
+            V::plane("y1", Y, "face / 2"),
+            V::plane("z0", Z, "-0.025"),
+            V::plane("z1", Z, "0"),
+            V::plane("z2", Z, "neck_h"),
+        ],
+        solids: vec![
+            SolidDef::new("face", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("face_material"),
+            SolidDef::new("neck", ("nx0", "nx1"), ("ny0", "ny1"), ("z1", "z2")).material("face_material"),
+        ],
+        checks: vec![
+            chk("the neck fits inside the face", "neck_d < face"),
+            chk("the neck rises above the face", "neck_h > 0"),
+        ],
+        connectors: vec![
+            ConnectorDef::new(
+                "supply",
+                Duct,
+                SupplyAir,
+                In,
+                ("0", "0", "z2"),
+                PlusZ,
+                ShapeDef::Round("neck_d".into()),
+            )
+            .flow("air_flow")
+            .pressure_drop("pressure_drop"),
+        ],
+        plan: vec![
+            PlanDef::circle(("0", "0"), "face / 2"),
+            PlanDef::line(("x0", "0"), ("x1", "0")),
+            PlanDef::line(("0", "y0"), ("0", "y1")),
+        ],
+        category: Category::AirTerminal,
         ..Default::default()
     }
 }

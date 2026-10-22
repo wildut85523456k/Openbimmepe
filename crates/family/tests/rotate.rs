@@ -205,7 +205,7 @@ proptest! {
         let mut f = openbim_family::library::door();
         f.types.push(TypeDef { name: "t".into(), values: vec![("width".into(), w)], ..Default::default() });
         let c = compile_library(&[handle(), f]).unwrap().remove(1);
-        let i = c.solve(&Request { type_name: Some("t"), overrides: vec![("open_angle", angle)], texts: vec![("swing", if left { "left" } else { "right" })] }).unwrap();
+        let i = c.solve(&Request { type_name: Some("t"), overrides: vec![("open_angle", angle)], texts: vec![("swing", if left { "left" } else { "right" })], ..Default::default() }).unwrap();
         let k = solid_index(&c, &i, "leaf");
         let b = i.solids[k].1;
         let cs = corners(&i, k);
