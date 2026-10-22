@@ -2509,6 +2509,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-commands"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "openbim-desktop"
 version = "0.0.1"
 dependencies = [
