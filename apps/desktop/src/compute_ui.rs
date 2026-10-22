@@ -485,4 +485,54 @@ mod tests {
         // a bad catalogue line is explained
         assert!(parse_catalogue("a,b,c\n300x200,300\n", true).is_err());
     }
+
+    #[test]
+    fn a_loaded_families_airflow_drives_the_sized_duct() {
+        let mut app = Desktop::sample();
+        let lv = ElementId(10);
+        // a diffuser whose air flow comes from a loaded catalogue type -- not the library default (0.05)
+        let msg = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD-400\t0.3\t0.4\n", "d.tsv");
+        assert!(msg.contains("1 type"), "{msg}");
+        let t = app.document.types_for(Category::Family).iter().find(|t| t.name == "D-400").map(|t| t.id).unwrap();
+        let spec = openbim_document::FamilySpec { family: "Ceiling diffuser, square".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let diff = app.document.place_family(lv, [5.0, 5.0], &spec).unwrap();
+        app.document.assign_type(&[diff], t).unwrap();
+        // the type layer reaches the connector: 0.4 m3/s, not the library default 0.05
+        let air = crate::elec_ui::instance_connectors(&app.document, diff).into_iter()
+            .find(|c| c.domain == Domain::Duct && c.flow > 0.0).expect("an air connector").clone();
+        assert!((air.flow - 0.4).abs() < 1e-12, "the loaded type's air_flow reached the connector: {}", air.flow);
+        // a duct to carry it, its terminal end taking the type's airflow as the demand
+        let id = app.document.next_id();
+        let port = |p: usize| MepPort { node: MepNode::Run(id), port: p };
+        let end = |p: usize, role: EndRole, demand: EndDemand, rp: f64| MepEndpoint { port: port(p), role, demand, required_pressure_pa: rp };
+        app.document.transact(app.document.revision(), &[
+            Command::Create { id, category: Category::Duct, name: "Duct".into(), width_m: 0.6, height_m: 0.3, elevation_m: 2.7 },
+            Command::SetSlope { id, slope_ratio: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Linear { start: [0.0, 0.0], end: [20.0, 0.0], level: lv } },
+            Command::SetMep(Box::new(openbim_document::MepData {
+                run_systems: vec![(id, System::SupplyAir)],
+                endpoints: vec![end(0, EndRole::Source, EndDemand::None, 0.0), end(1, EndRole::Terminal, EndDemand::Flow(air.flow), 0.0)],
+                ..Default::default()
+            })),
+        ]).unwrap();
+        // size it for air
+        app.compute.system = System::SupplyAir;
+        (app.compute.density, app.compute.viscosity_mpas, app.compute.specific_heat, app.compute.roughness_mm) = (1.2, 0.0181, 1006.0, 0.09);
+        app.compute.max_velocity = 6.0;
+        app.compute.max_friction = 1.0;
+        app.compute.catalogue = "300x200,300,200\n500x300,500,300\n800x400,800,400\n1200x600,1200,600\n".into();
+        app.run_compute();
+        assert!(app.compute.error.is_empty(), "{}", app.compute.error);
+        let r = app.compute.report.as_ref().expect("a report").1.clone();
+        // the loaded type's air flow is the system's total flow: the type drives the sizing
+        assert!((r.total_flow - air.flow).abs() < 1e-9, "total_flow {} == the type's air flow {}", r.total_flow, air.flow);
+        let sized = &r.runs[0];
+        assert!(sized.velocity <= 6.0 && sized.friction_per_metre <= 1.0, "velocity {} friction {}", sized.velocity, sized.friction_per_metre);
+        assert!(!sized.exceeds_limits, "the sized duct carries the type's airflow within the criteria: v={}, f={}", sized.velocity, sized.friction_per_metre);
+        // the placeholder duct is resized to the catalogue size that carries the flow
+        let before = app.document.get(id).unwrap().width_m;
+        compute::apply_sizes(&mut app.document, &r).unwrap();
+        let after = app.document.get(id).unwrap().width_m;
+        assert!(after != before, "the run was resized from its placeholder {} to the catalogue size that carries the airflow", before);
+    }
 }
