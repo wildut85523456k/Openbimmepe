@@ -742,6 +742,15 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
                 num(t).map(Some)
             }
         };
+        // Optional key for forward compatibility with legacy records that predate
+        // a field: an absent key is treated as None, a present "N" as None, and a
+        // present non-finite value as a parse error.
+        let opt_key = |k: &str| -> Result<Option<f64>, String> {
+            match f.get(k) {
+                None => Ok(None),
+                Some(t) => opt(t),
+            }
+        };
         if line.starts_with("X|") {
             let rect = crate::schematic::Rect::new(
                 [num(get("x0")?)?, num(get("y0")?)?],
@@ -1035,8 +1044,8 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
                 ambient_c: opt(get("amb")?)?,
                 demand_factor: num(get("df")?)?,
                 rcd_ma: opt(get("rcd")?)?,
-                r_ohm_per_km: opt(get("r")?)?,
-                x_ohm_per_km: opt(get("x")?)?,
+                r_ohm_per_km: opt_key("r")?,
+                x_ohm_per_km: opt_key("x")?,
             });
             continue;
         }
@@ -1386,5 +1395,86 @@ mod tests {
         assert_eq!(back.elec_cables[0].x_ohm_per_km, Some(0.1));
         assert_eq!(back.elec_cables[1].r_ohm_per_km, None);
         assert_eq!(back.elec_cables[1].x_ohm_per_km, None);
+    }
+
+    #[test]
+    fn a_legacy_cable_record_without_solver_impedance_is_readable() {
+        // Records written before r=/x= were added omit those keys entirely. Such a
+        // cable must parse back with both fields as None, not error as "a record
+        // without 'r'".
+        let line =
+            "C|a=1125899906842624|b=1125899906842625|via=|ph=3|ex=0.0|gc=1|amb=N|df=1.0|rcd=N";
+        let back = parse_mep(&[line.to_string()]).unwrap();
+        assert_eq!(back.elec_cables.len(), 1);
+        let c = &back.elec_cables[0];
+        assert_eq!(c.from, 1125899906842624);
+        assert_eq!(c.to, 1125899906842625);
+        assert!(c.three_phase);
+        assert_eq!(c.r_ohm_per_km, None);
+        assert_eq!(c.x_ohm_per_km, None);
+        // And a legacy record that carries ONLY r (pre-X reactance was tracked) is
+        // half-migrated gracefully, not rejected.
+        let half = "C|a=1125899906842624|b=1125899906842625|via=|ph=1|ex=0.0|gc=1|amb=N|df=1.0|rcd=N|r=0.42";
+        let back = parse_mep(&[half.to_string()]).unwrap();
+        assert_eq!(back.elec_cables[0].r_ohm_per_km, Some(0.42));
+        assert_eq!(back.elec_cables[0].x_ohm_per_km, None);
+    }
+
+    #[test]
+    fn impedance_validation_rejects_nonfinite_and_negative_resistance() {
+        // The new impedance fields are subject to the same MepData validation as
+        // every other physical quantity: NaN/inf are rejected at transact time so
+        // they can never enter committed saved state, and negative resistance is
+        // physically meaningless.
+        use crate::elec::{ElecKind, ElecNode, NODE_BASE};
+        use crate::EditError;
+        let src = ElecNode::new(
+            NODE_BASE,
+            "TX",
+            ElecKind::Source,
+            [0.0, 0.0],
+            crate::ElementId(10),
+        );
+        let board = ElecNode::new(
+            NODE_BASE + 1,
+            "B",
+            ElecKind::Board,
+            [3.0, 0.0],
+            crate::ElementId(10),
+        );
+        let base = crate::MepData {
+            elec_nodes: vec![src.clone(), board.clone()],
+            elec_cables: vec![crate::ElecCable::new(NODE_BASE, NODE_BASE + 1, true)],
+            ..Default::default()
+        };
+        let mut d = Document::spatial_sample();
+        d.transact(d.revision(), &[Command::SetMep(Box::new(base.clone()))])
+            .unwrap();
+        let bad = |r: Option<f64>, x: Option<f64>| {
+            let mut m = base.clone();
+            m.elec_cables[0].r_ohm_per_km = r;
+            m.elec_cables[0].x_ohm_per_km = x;
+            d.clone()
+                .transact(d.revision(), &[Command::SetMep(Box::new(m))])
+        };
+        // NaN in either field is rejected.
+        assert_eq!(bad(Some(f64::NAN), None), Err(EditError::InvalidMep));
+        assert_eq!(bad(None, Some(f64::NAN)), Err(EditError::InvalidMep));
+        // Infinity is rejected.
+        assert_eq!(bad(Some(f64::INFINITY), None), Err(EditError::InvalidMep));
+        assert_eq!(
+            bad(None, Some(f64::NEG_INFINITY)),
+            Err(EditError::InvalidMep)
+        );
+        // Negative resistance is rejected (reactance may be any finite sign).
+        assert_eq!(bad(Some(-0.5), None), Err(EditError::InvalidMep));
+        // A finite, non-negative pair is accepted and round-trips.
+        let mut ok = base.clone();
+        ok.elec_cables[0].r_ohm_per_km = Some(0.5);
+        ok.elec_cables[0].x_ohm_per_km = Some(-0.1);
+        d.transact(d.revision(), &[Command::SetMep(Box::new(ok))])
+            .unwrap();
+        assert_eq!(d.mep().elec_cables[0].r_ohm_per_km, Some(0.5));
+        assert_eq!(d.mep().elec_cables[0].x_ohm_per_km, Some(-0.1));
     }
 }

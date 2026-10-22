@@ -142,7 +142,9 @@ pub(crate) fn valid_nodes(
             && c.demand_factor.is_finite()
             && c.demand_factor > 0.0
             && c.demand_factor <= 1.0
-            && c.rcd_ma.is_none_or(|m| m.is_finite() && m > 0.0);
+            && c.rcd_ma.is_none_or(|m| m.is_finite() && m > 0.0)
+            && c.r_ohm_per_km.is_none_or(|r| r.is_finite() && r >= 0.0)
+            && c.x_ohm_per_km.is_none_or(f64::is_finite);
         if !ok {
             return false;
         }
