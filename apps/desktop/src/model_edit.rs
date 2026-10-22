@@ -2347,10 +2347,21 @@ mod tests {
     fn the_type_editor_shows_a_catalogue_that_carries_an_instance_scoped_column() {
         let mut doc = openbim_document::Document::spatial_sample();
         // neck_d is type-scoped and face is instance-scoped; a catalogue may carry both
-        let ids = doc.load_family_catalogue("family\tCeiling diffuser, square\ntype\tneck_d\tface\nD-Mixed\t0.3\t0.9\n").unwrap();
+        let ids = doc
+            .load_family_catalogue(
+                "family\tCeiling diffuser, square\ntype\tneck_d\tface\nD-Mixed\t0.3\t0.9\n",
+            )
+            .unwrap();
         let t = *ids.first().unwrap();
-        let f = openbim_family::library::all().unwrap().into_iter().find(|f| f.name() == "Ceiling diffuser, square").unwrap();
+        let f = openbim_family::library::all()
+            .unwrap()
+            .into_iter()
+            .find(|f| f.name() == "Ceiling diffuser, square")
+            .unwrap();
         let (nums, _) = crate::export::family_type_inputs(&doc, t, &f);
-        assert!(nums.iter().any(|(n, _)| n == "neck_d"), "the type-scoped column is still shown: {nums:?}");
+        assert!(
+            nums.iter().any(|(n, _)| n == "neck_d"),
+            "the type-scoped column is still shown: {nums:?}"
+        );
     }
 }
