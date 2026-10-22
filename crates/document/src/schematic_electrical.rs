@@ -9,8 +9,11 @@
 //! SCH-006 stamps feeder design current (A); MEP-002 stamps voltage drop (V, %). Both read the
 //! edesign-alike solver results only — no calculation engine is duplicated here. The import stamps
 //! each ElecCable's results onto the downstream board symbol's annotations: "A" = design current,
-//! "V" = volts dropped (nominal * branch_percent/100), "%" = percent dropped. Voltage-drop values
-//! come straight from the solver's `branch_voltage_drop_pct` (per-kilometre R/X), read-only.
+//! "V" = volts dropped at the board (`nominal * path_percent/100`, the cumulative source-to-board
+//! drop), "%" = the cumulative drop in percent. Voltage-drop values come straight from the solver's
+//! `path_voltage_drop_pct` (cumulative source-to-node, per-kilometre R/X summed along the path),
+//! read-only — `branch_voltage_drop_pct` (the feeder's own drop) is not used, because a board's
+//! annotation must report the drop seen at that board.
 //!
 //! Every imported value is `not_approved` — the solver's `approval` is always `"not_approved"` (it
 //! computes values and findings only; engineering sign-off is a separate step) — and the cable
@@ -49,7 +52,7 @@ const PROTOTYPE_SOURCE_SC_VA: f64 = 1_000_000.0;
 
 const WARNING_IMPEDANCE: &str = "electrical currents use a prototype cable impedance (stiff-source, 1e-9 ohm/km); replace with real values from the breaker-catalog import of MEP-010 before use — not_approved";
 const WARNING_VOLTAGE: &str = "system voltage assumed 400 V line-to-line (prototype; derive from the source connector per MEP-010); single-phase loads use 400/√3 V line-to-neutral (~231 V) — not_approved";
-const WARNING_DROP: &str = "voltage drop (V, %) is imported from the edesign-alike solver (MEP-002), read-only; with the prototype cable impedance (1e-9 ohm/km, stiff source) the drop is ~0 V — replace R/X from the breaker-catalog import of MEP-010 before use — not_approved";
+const WARNING_DROP: &str = "voltage drop (V, %) is imported from the edesign-alike solver (MEP-002), read-only: the % is the cumulative source-to-board drop (solver `path_voltage_drop_pct`), not the feeder's own drop; with the prototype cable impedance (1e-9 ohm/km, stiff source) the drop is ~0 V — replace R/X from the breaker-catalog import of MEP-010 before use — not_approved";
 
 /// Nominal voltage for a node of the given phase configuration: line-to-line for three-phase,
 /// line-to-neutral for single-phase (the solver's single-phase convention).
@@ -234,8 +237,9 @@ pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
     let scenario = Scenario::new(ScenarioId(1), "schematic");
     let mut stamped: HashMap<u64, f64> = HashMap::new();
     // MEP-002: voltage drop (volts, percent) read-only from the solver, keyed by the downstream
-    // node the cable feeds (the board symbol that carries the annotation). Volts = nominal voltage
-    // for the downstream node's phase configuration times percent/100.
+    // node the cable feeds (the board symbol that carries the annotation). Both slots report the
+    // cumulative source-to-board drop: the % is the solver's `path_voltage_drop_pct`, and volts is
+    // that percent of the downstream node's nominal voltage.
     let mut vdrop: HashMap<u64, (f64, f64)> = HashMap::new();
     match solve(&network, &scenario, &SolverSettings::default()) {
         Ok(report) => {
@@ -244,13 +248,12 @@ pub(crate) fn stamp(mep: &MepData, doc: &Document, view: &mut SchematicView) {
                     stamped.insert(c.to, br.design_current_a);
                     if let Some(to_node) = mep.elec_nodes.iter().find(|n| n.id == c.to) {
                         let v_nom = voltage_for(node_phases(to_node, mep));
-                        vdrop.insert(
-                            c.to,
-                            (
-                                v_nom * br.branch_voltage_drop_pct / 100.0,
-                                br.branch_voltage_drop_pct,
-                            ),
+                        let path_pct = br.path_voltage_drop_pct;
+                        debug_assert!(
+                            path_pct.is_finite(),
+                            "solver returned a non-finite cumulative voltage drop for a cable"
                         );
+                        vdrop.insert(c.to, (v_nom * path_pct / 100.0, path_pct));
                     }
                 }
             }
@@ -305,17 +308,118 @@ fn stamp_symbols(view: &mut SchematicView, stamped: &HashMap<u64, f64>) {
 }
 
 /// Copy a solver voltage drop (V, %, MEP-002) into the "V"/"%" slots of each board symbol fed by a
-/// cable. Read-only reuse: the percent comes from the solver's `branch_voltage_drop_pct` (the drop
-/// on the feeder supplying the board); volts is that percent of the downstream node's nominal
-/// voltage (`voltage_for(node_phases(to_node, mep))`). Boards with no downstream cable keep their
-/// "V —"/"% —" placeholders (e.g. a pure source or an un-fed board).
+/// cable. Read-only reuse: the percent is the solver's `path_voltage_drop_pct`, the cumulative
+/// source-to-board drop; volts is that percent of the downstream node's nominal voltage
+/// (`voltage_for(node_phases(to_node, mep))`). Boards with no downstream cable keep their
+/// "V —"/"% —" placeholders (e.g. a pure source or an un-fed board). A non-finite pair is never
+/// written: it leaves the placeholder, so no NaN/inf string can reach the sheet.
 fn stamp_vdrop_symbols(view: &mut SchematicView, vdrop: &HashMap<u64, (f64, f64)>) {
     for s in &mut view.symbols {
         if s.kind == SymbolKind::Board {
             if let Some(&(volts, pct)) = vdrop.get(&s.element) {
-                s.annotations[1] = format!("V {:.1}", volts);
-                s.annotations[2] = format!("% {:.1}", pct);
+                if volts.is_finite() && pct.is_finite() {
+                    s.annotations[1] = format!("V {:.1}", volts);
+                    s.annotations[2] = format!("% {:.1}", pct);
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openbim_electrical_model::BranchId;
+
+    /// Parse a stamped "V <n>"/"% <n>" annotation and assert it is a finite number. This is the
+    /// assertion the V/% re-stamp and redo regressions use: it fails on the placeholder and on any
+    /// non-numeric or non-finite text, which `assert_ne` against the placeholder alone would accept.
+    pub(crate) fn finite_number(annotation: &str, prefix: &str) -> f64 {
+        let text = annotation
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("{annotation:?} is not stamped with {prefix:?}"));
+        let value: f64 = text
+            .parse()
+            .unwrap_or_else(|_| panic!("{annotation:?} does not parse as a number"));
+        assert!(value.is_finite(), "{annotation:?} is not finite");
+        value
+    }
+
+    /// A board symbol carrying the mandatory A/V/% annotation triple (the Electrical label set).
+    fn board_view(element: u64) -> crate::SchematicView {
+        crate::SchematicView {
+            discipline: crate::schematic::Discipline::Electrical,
+            rows: Vec::new(),
+            symbols: vec![crate::Symbol {
+                element,
+                kind: SymbolKind::Board,
+                label: "MSB".into(),
+                annotations: vec!["A —".into(), "V —".into(), "% —".into()],
+            }],
+            wires: Vec::new(),
+            warnings: Vec::new(),
+            not_approved: false,
+        }
+    }
+
+    #[test]
+    fn a_non_finite_solver_drop_never_reaches_the_annotation() {
+        // The stamp must not serialise a NaN/inf solver result into the view. A branch whose
+        // cumulative drop is not finite keeps the placeholder rather than writing "V NaN"/"% inf".
+        let mut view = board_view(1 << 50);
+        let mut vdrop = HashMap::new();
+        vdrop.insert(1u64 << 50, (f64::NAN, f64::NAN));
+        stamp_vdrop_symbols(&mut view, &vdrop);
+        assert_eq!(view.symbols[0].annotations[1], "V —");
+        assert_eq!(view.symbols[0].annotations[2], "% —");
+        // A finite pair is written, and parses back as a finite number.
+        vdrop.insert(1u64 << 50, (4.0, 1.0));
+        stamp_vdrop_symbols(&mut view, &vdrop);
+        assert_eq!(finite_number(&view.symbols[0].annotations[1], "V "), 4.0);
+        assert_eq!(finite_number(&view.symbols[0].annotations[2], "% "), 1.0);
+    }
+
+    #[test]
+    fn cumulative_path_drop_differs_from_the_feeder_drop() {
+        // The cumulative source-to-board drop is not the feeder's own drop: for a source -> MSB ->
+        // DB2 chain the DB2 branch carries both feeders' drops. Constructing the pinned solver's
+        // BranchResult with distinct values proves the stamp consumes `path_voltage_drop_pct`, not
+        // `branch_voltage_drop_pct`: if the stamp read the branch field, this test's construction
+        // would have to change to keep the annotation equal.
+        let result = openbim_electrical_solver::BranchResult {
+            branch: BranchId(2),
+            design_current_a: 100.0,
+            carried_power: (80_000.0, 30_000.0),
+            branch_voltage_drop_pct: 1.0,
+            path_voltage_drop_pct: 2.5,
+            fault_max_a: 10_000.0,
+            fault_min_a: 6_000.0,
+            fault_peak_a: 21_200.0,
+        };
+        assert_ne!(
+            result.branch_voltage_drop_pct, result.path_voltage_drop_pct,
+            "the fixture must carry distinct branch and path drops"
+        );
+        // The stamp is keyed on the downstream node, so the pair is (volts, path percent).
+        let mut view = board_view(7);
+        // the cumulative drop is percent of the downstream node's nominal voltage
+        let v_nom = voltage_for(openbim_electrical_model::PhaseConfiguration::ThreePhase);
+        let mut vdrop = HashMap::new();
+        vdrop.insert(
+            7u64,
+            (
+                v_nom * result.path_voltage_drop_pct / 100.0,
+                result.path_voltage_drop_pct,
+            ),
+        );
+        stamp_vdrop_symbols(&mut view, &vdrop);
+        assert_eq!(
+            finite_number(&view.symbols[0].annotations[1], "V "),
+            v_nom * result.path_voltage_drop_pct / 100.0
+        );
+        assert_eq!(
+            finite_number(&view.symbols[0].annotations[2], "% "),
+            result.path_voltage_drop_pct
+        );
     }
 }
