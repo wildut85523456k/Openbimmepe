@@ -93,6 +93,11 @@ pub struct Member {
     pub storey: Option<usize>,
     pub psets: Psets,
     pub material: Option<String>,
+    /// where the product is placed (its origin) and where its x axis points, in model coordinates (metres)
+    pub origin: Option<[f64; 3]>,
+    pub x_axis: Option<[f64; 3]>,
+    /// a door's or a window's overall (height, width), metres
+    pub overall: Option<(f64, f64)>,
     /// index into `Imported::types`
     pub type_obj: Option<usize>,
 }
@@ -136,7 +141,7 @@ pub struct Imported {
 }
 
 /// The classes that become members.
-const MEMBERS: [&str; 14] = [
+const MEMBERS: [&str; 16] = [
     "IFCBEAM",
     "IFCMEMBER",
     "IFCCOLUMN",
@@ -151,6 +156,8 @@ const MEMBERS: [&str; 14] = [
     "IFCDUCTSEGMENT",
     "IFCCABLECARRIERSEGMENT",
     "IFCSPACE",
+    "IFCDOOR",
+    "IFCWINDOW",
 ];
 
 /// Entities that are not products of the building, or are read in another way.
@@ -691,6 +698,7 @@ fn canonical_lengths(f: &mut StepFile) -> Result<(), ReadError> {
             "IFCEXTRUDEDAREASOLID" => &[3],
             "IFCBUILDINGSTOREY" => &[9],
             "IFCMATERIALLAYER" => &[1],
+            "IFCDOOR" | "IFCWINDOW" => &[8, 9],
             _ => &[],
         };
         for &i in indices {
@@ -904,6 +912,11 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                 storey: contained.get(&id).copied(),
                 psets,
                 material: material_of.get(&id).cloned(),
+                origin: e.args.get(5).and_then(|a| r.placement(a, 0)).map(|m| m.o),
+                x_axis: e.args.get(5).and_then(|a| r.placement(a, 0)).map(|m| m.x),
+                overall: matches!(e.class.as_str(), "IFCDOOR" | "IFCWINDOW")
+                    .then(|| Some((e.args.get(8)?.as_f64()?, e.args.get(9)?.as_f64()?)))
+                    .flatten(),
                 type_obj: type_of.get(&id).and_then(|t| type_index.get(t)).copied(),
             });
         } else if e.class == "IFCREINFORCINGBAR" {
