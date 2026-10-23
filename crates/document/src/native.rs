@@ -393,6 +393,12 @@ pub fn records(doc: &Document) -> Vec<String> {
     out
 }
 
+/// The kind of an application line (`U|kind=<kind>|...`): what it is for, and who reads it.
+pub fn app_record_kind(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("U|kind=")?;
+    Some(rest.split('|').next().unwrap_or(rest)).filter(|k| !k.is_empty())
+}
+
 /// The application's own lines in a file (`U|`), for the application to read.
 pub fn parse_app_records(lines: &[String]) -> Vec<String> {
     lines.iter().filter(|l| l.starts_with("U|")).cloned().collect()
