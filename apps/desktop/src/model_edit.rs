@@ -341,14 +341,24 @@ impl Desktop {
         }
     }
 
-    /// Reads the file at `path` into the document, as one undoable step.
+    /// Reads the file at `path` into the document, as one undoable step, and writes the import log next to it
+    /// (`<file>.log`, as Revit writes `<file>.ifc.log`).
     pub(crate) fn read_ifc(&mut self, path: &str) {
-        self.message = match std::fs::read(path) {
-            Err(e) => format!("Could not read {path}: {e}"),
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let when = crate::export::iso_time(secs);
+        let (message, log) = match std::fs::read(path) {
+            Err(e) => (format!("Could not read {path}: {e}"), None),
             Ok(bytes) => match crate::import::import_ifc(&mut self.document, &String::from_utf8_lossy(&bytes)) {
-                Ok(report) => { self.sync_duct_controls(); self.selected = None; report.text() }
-                Err(e) => format!("Import failed, nothing changed: {e}"),
+                Ok(report) => { self.sync_duct_controls(); self.selected = None; (report.text(), Some(report.log_text(path, &when))) }
+                Err(e) => (format!("Import failed, nothing changed: {e}"), Some(format!("Import log for {path}\nRead on {when}\n\nImport failed, nothing changed: {e}\n"))),
             },
+        };
+        self.message = match log {
+            Some(text) => match std::fs::write(format!("{path}.log"), text) {
+                Ok(()) => format!("{message}. Log: {path}.log"),
+                Err(e) => format!("{message}. The log could not be written ({e})"),
+            },
+            None => message,
         };
     }
 
@@ -2258,12 +2268,25 @@ mod tests {
         assert!(crate::import::describe_file(path.to_str().unwrap()).contains("IFC4X3_ADD2"));
         app.read_ifc(path.to_str().unwrap());
         assert_eq!(app.document.elements().count(), want, "{}", app.message);
-        assert!(app.message.contains("Restored"), "{}", app.message);
+        assert!(app.message.contains("Restored") && app.message.contains("m.ifc.log"), "{}", app.message);
+        // the log is next to the file: what came in, what was left out, and the reader's word on single entities
+        let log = std::fs::read_to_string(dir.join("m.ifc.log")).unwrap();
+        assert!(log.starts_with("Import log for ") && log.contains("\nAdded\n") && log.contains("\nLeft out\n"), "{log}");
+        // a file without the app's own data leaves things out, and the log names each class with its count
+        let foreign = dir.join("f.ifc");
+        app.write_ifc(foreign.to_str().unwrap(), crate::export::Schema::Ifc4x3, false);
+        app.document = openbim_document::Document::new();
+        app.read_ifc(foreign.to_str().unwrap());
+        let log = std::fs::read_to_string(dir.join("f.ifc.log")).unwrap();
+        assert!(log.contains("not an extruded profile this app reads") && log.contains("\nReader\n") && log.contains("unsupported product"), "{log}");
+        app.document = openbim_document::Document::new();
+        app.read_ifc(path.to_str().unwrap());
         app.read_ifc(dir.join("missing.ifc").to_str().unwrap());
         assert!(app.message.contains("Could not read"), "{}", app.message);
         std::fs::write(dir.join("bad.ifc"), "not an ifc").unwrap();
         app.read_ifc(dir.join("bad.ifc").to_str().unwrap());
         assert!(app.message.contains("Import failed"), "{}", app.message);
+        assert!(std::fs::read_to_string(dir.join("bad.ifc.log")).unwrap().contains("Import failed, nothing changed"));
         assert_eq!(app.document.elements().count(), want);
         std::fs::remove_dir_all(&dir).unwrap();
     }
