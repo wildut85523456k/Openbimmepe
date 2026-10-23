@@ -138,6 +138,16 @@ pub struct Imported {
     pub skipped: BTreeMap<String, usize>,
     /// Entity-specific explanations for unsupported products.
     pub diagnostics: Vec<String>,
+    /// the lines of every `IfcGrid`, in model coordinates (metres)
+    pub grids: Vec<GridLine>,
+}
+
+/// One axis of an `IfcGrid`: its tag and the ends of its polyline in plan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridLine {
+    pub name: String,
+    pub start: [f64; 2],
+    pub end: [f64; 2],
 }
 
 /// The classes that become members.
@@ -919,6 +929,23 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                     .flatten(),
                 type_obj: type_of.get(&id).and_then(|t| type_index.get(t)).copied(),
             });
+        } else if e.class == "IFCGRID" {
+            // the axes are polylines in the grid's own frame; lengths are scaled to metres already
+            let place = e.args.get(5).and_then(|a| r.placement(a, 0)).unwrap_or(Mat::ID);
+            for list in [7usize, 8, 9] {
+                let Some(axes) = e.args.get(list) else { continue };
+                for ax in axes.as_list() {
+                    let Some(axis) = f.deref(ax).filter(|a| a.class == "IFCGRIDAXIS") else { continue };
+                    let Some(curve) = axis.args.get(1).and_then(|c| f.deref(c)).filter(|c| c.class == "IFCPOLYLINE") else { continue };
+                    let pts: Vec<V3> = curve.args.first().map(|l| l.as_list()).unwrap_or(&[]).iter()
+                        .filter_map(|p| r.point(p)).map(|c| place.apply([c[0], c[1], c.get(2).copied().unwrap_or(0.0)])).collect();
+                    if let (Some(a), Some(b)) = (pts.first(), pts.last()) {
+                        if (a[0] - b[0]).hypot(a[1] - b[1]) > 1e-9 {
+                            out.grids.push(GridLine { name: axis.args.first().and_then(Value::as_str).unwrap_or("").to_string(), start: [a[0], a[1]], end: [b[0], b[1]] });
+                        }
+                    }
+                }
+            }
         } else if e.class == "IFCREINFORCINGBAR" {
             *out.skipped.entry("IFCREINFORCINGBAR".into()).or_default() += 1;
             out.diagnostics
