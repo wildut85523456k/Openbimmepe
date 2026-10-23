@@ -250,11 +250,12 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
                 let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
                 let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);
                 let (a, b) = ([start[0], start[1], z], [end[0], end[1], z + rise]);
-                // the document does not say which system a run belongs to yet
+                // the system the tools gave the run; a run nobody has assigned stays Other
+                let system = doc.mep().run_system(el.id).unwrap_or(System::Other);
                 let run = if el.category == Category::Pipe {
-                    openbim_place::penetrations::Run::round(&el.name, Domain::Pipe, System::Other, a, b, el.width_m)
+                    openbim_place::penetrations::Run::round(&el.name, Domain::Pipe, system, a, b, el.width_m)
                 } else {
-                    openbim_place::penetrations::Run::rect(&el.name, Domain::Duct, System::Other, a, b, el.width_m, el.height_m)
+                    openbim_place::penetrations::Run::rect(&el.name, Domain::Duct, system, a, b, el.width_m, el.height_m)
                 };
                 mep.segments.push(NetSegment { id: el.id.0, run });
             }
@@ -265,6 +266,11 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         }
     }
     add_connections(doc, &mut mep, &mut skipped);
+    // grid lines leave as one IfcGrid
+    let grids: Vec<openbim_ifc::GridItem> = doc.elements().filter_map(|e| match e.geometry {
+        Some(Geometry::Grid { start, end }) => Some(openbim_ifc::GridItem { id: e.id.0, name: e.name.clone(), start, end }),
+        _ => None,
+    }).collect();
     // family instances, after the walls they may stand in
     let wall_index: std::collections::BTreeMap<u64, usize> = walls.iter().enumerate().map(|(i, w): (usize, &WallItem)| (w.id, i)).collect();
     let lib = library();
@@ -343,7 +349,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         walls, wall_penetrations: vec![], firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
         floor_penetrations: vec![], slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
-        room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
+        room_lighting: Default::default(), pset_map: Default::default(), grids, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
 }

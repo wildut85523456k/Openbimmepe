@@ -253,6 +253,15 @@ pub struct FamilyItem {
     pub host: Option<(usize, usize, f64)>,
 }
 
+/// A grid line in plan: a named straight axis between two points, in metres.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridItem {
+    pub id: u64,
+    pub name: String,
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+}
+
 /// A room, written as an `IfcSpace` with its base quantities.
 pub struct RoomItem {
     pub id: u64,
@@ -387,6 +396,8 @@ pub struct Scene {
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
     pub rooms: Vec<RoomItem>,
+    /// grid lines, written as one `IfcGrid` with its axes
+    pub grids: Vec<GridItem>,
     /// lighting inputs of rooms, by the room's element number
     pub room_lighting: std::collections::BTreeMap<u64, lighting::RoomLighting>,
     pub wall_types: Vec<walls::WallType>,
@@ -446,6 +457,8 @@ pub struct Report {
     /// occurrences whose shape is a mapped item of their type's shared shape
     pub mapped: usize,
     pub spaces: usize,
+    /// grid axes written (all in the one `IfcGrid`)
+    pub grid_axes: usize,
     pub space_boundaries: usize,
     pub wall_types: usize,
     pub wall_joins: usize,
@@ -962,6 +975,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     write_beams(&mut o)?;
     write_member_materials(&mut o);
     write_spaces(&mut o)?;
+    write_grids(&mut o);
     if v2 {
         if !scene.networks.is_empty() {
             o.report.warnings.push("IFC2X3: service networks are not written".into());
@@ -1492,6 +1506,34 @@ fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
         o.report.stairs += 1;
     }
     Ok(())
+}
+
+/// Grid lines as one `IfcGrid`. Lines nearer the Y axis than the X axis are U axes, the others V axes; a grid with
+/// only one direction writes them all as U axes (an `IfcGrid` needs at least one). The grid is contained in the
+/// lowest storey, as a grid has no level of its own.
+fn write_grids(o: &mut Out) {
+    let scene = o.scene;
+    if scene.grids.is_empty() || o.storeys.is_empty() {
+        return;
+    }
+    let (mut u, mut v): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
+    for gr in &scene.grids {
+        let (a, b) = (o.p2(gr.start[0], gr.start[1]), o.p2(gr.end[0], gr.end[1]));
+        let curve = o.s.add(format!("IFCPOLYLINE((#{a},#{b}))"));
+        let axis = o.s.add(format!("IFCGRIDAXIS({},#{curve},.T.)", string(&gr.name)));
+        o.report.grid_axes += 1;
+        let (dx, dy) = ((gr.end[0] - gr.start[0]).abs(), (gr.end[1] - gr.start[1]).abs());
+        if dy >= dx { u.push(axis) } else { v.push(axis) }
+    }
+    if u.is_empty() {
+        std::mem::swap(&mut u, &mut v);
+    }
+    let list = |ids: &[u32]| if ids.is_empty() { "$".to_string() } else { format!("({})", ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")) };
+    let pl = o.place(Some(o.storeys[0].1), [0.0; 3], None, None);
+    let first = scene.grids[0].id;
+    let g = o.gid(first, 0x2000);
+    let grid = o.s.add(format!("IFCGRID({g},$,'Grid',$,$,#{pl},$,{},{},$)", list(&u), list(&v)));
+    o.contained.entry(0).or_default().push(grid);
 }
 
 fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
