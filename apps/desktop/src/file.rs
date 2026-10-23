@@ -22,6 +22,7 @@ pub(crate) fn document_from(text: &str) -> Result<Document, String> {
     if !mep.is_empty() { ops.push(openbim_document::Command::SetMep(Box::new(mep))); }
     doc.transact(0, &ops).map_err(|e| format!("the file does not make a model: {e:?}"))?;
     doc.clear_undo_history();
+    doc.set_project_key(native::parse_project_key(&lines));
     Ok(doc)
 }
 
@@ -57,6 +58,7 @@ impl Desktop {
     }
 
     pub(crate) fn write_model(&mut self, path: &str) {
+        self.document.ensure_project_key();
         let tmp = format!("{path}.saving");
         let result = std::fs::write(&tmp, file_text(&self.document)).and_then(|()| std::fs::rename(&tmp, path));
         self.message = match result {

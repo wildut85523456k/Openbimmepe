@@ -693,6 +693,14 @@ mod tests {
         assert_eq!(e.demand, openbim_document::EndDemand::Flow(air.flow));
         assert_eq!(e.required_pressure_pa, air.pressure_drop);
         assert_eq!(app.document.mep().equip_links.len(), 1);
+        // marking the same end as the Source does not undo the join to the unit (B14); the Terminal mark puts it back
+        app.end_draft.mark = crate::compute_ui::Mark::Source;
+        app.end_point_click(lv, [air.pos[0], air.pos[1]]);
+        assert_eq!(app.document.mep().equip_links.len(), 1, "the join survives a Source mark: {}", app.message);
+        assert_eq!(app.document.mep().endpoints.first().map(|e| e.role), Some(openbim_document::EndRole::Source));
+        app.end_draft.mark = crate::compute_ui::Mark::Terminal;
+        app.end_point_click(lv, [air.pos[0], air.pos[1]]);
+        assert_eq!(app.document.mep().endpoints.first().map(|e| e.demand), Some(openbim_document::EndDemand::Flow(air.flow)));
         // the tie is saved, comes back from the file, and a change of the unit's airflow reaches the end point on compute
         let lines = openbim_document::native::records(&app.document);
         assert_eq!(openbim_document::native::parse_mep(&lines).unwrap(), *app.document.mep());

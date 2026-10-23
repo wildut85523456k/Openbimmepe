@@ -49,7 +49,7 @@ fn scene(walls: Vec<WallChain>) -> Scene {
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(), grids: vec![], types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
+        pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![], types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     }
 }
 

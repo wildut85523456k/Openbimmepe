@@ -564,6 +564,9 @@ pub struct Document {
     elements: BTreeMap<ElementId, Element>,
     site: Option<Site>,
     mep: MepData,
+    /// 48-bit identity of this project, kept in its file; it keeps the IFC GlobalIds of one project apart from every
+    /// other's. 0 until the project is given one.
+    project_key: u64,
     revision: u64,
     /// Undo checkpoints are local, bounded by the hosting application's policy.
     history: Vec<(BTreeMap<ElementId, Element>, Option<Site>, MepData)>,
@@ -574,6 +577,22 @@ pub struct Document {
 impl Document {
     pub fn new() -> Self { Self::default() }
     pub fn revision(&self) -> u64 { self.revision }
+    /// The project's identity (0 when it has none yet).
+    pub fn project_key(&self) -> u64 { self.project_key }
+    /// Sets the identity, from a file that carries one. Not an edit: no revision, nothing to undo.
+    pub fn set_project_key(&mut self, key: u64) { self.project_key = key & 0xFFFF_FFFF_FFFF; }
+    /// The identity, made on first use from the clock and the process, so two new projects differ. Not an edit.
+    pub fn ensure_project_key(&mut self) -> u64 {
+        if self.project_key == 0 {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()).hash(&mut h);
+            std::process::id().hash(&mut h);
+            self.elements.len().hash(&mut h);
+            self.project_key = (h.finish() & 0xFFFF_FFFF_FFFF).max(1);
+        }
+        self.project_key
+    }
     /// Where the project is, if it has been set.
     pub fn site(&self) -> Option<Site> { self.site }
     /// The fittings and the links between the ducts and pipes.

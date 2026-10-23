@@ -824,7 +824,7 @@ mod tests {
             assert!(out.text.matches("IFCFACETEDBREP(").count() >= 36, "{schema:?}: the parts of the railing");
             // the shaft voids the floor above it; the wall opening voids its wall; the door and the window void theirs
             assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Shaft Opening 1")).count(), 1, "{schema:?}: the shaft is an opening of the floor");
-            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 5, "{schema:?}: door, window, wall opening, shaft and the vertical opening in the floor");
+            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count() - crate::export::service_openings(&out.text), 5, "{schema:?}: door, window, wall opening, shaft and the vertical opening in the floor");
             // the one in the roof is cut in the roof's shape, not a void of its own
             assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Vertical Opening")).count(), 1, "{schema:?}");
             assert!(out.text.contains("Pset_StairCommon") && out.text.contains(".STRAIGHT_RUN_STAIR."), "{schema:?}");
@@ -843,7 +843,10 @@ mod tests {
             // the native records above still restore every element exactly.
             let mut skipped = BTreeMap::from([
                 ("IFCDOOR", 1),
-                ("IFCOPENINGELEMENT", 5),
+                // the grid and the sample's truss and beam system leave as assemblies; the native records restore them
+                ("IFCELEMENTASSEMBLY", 2),
+                ("IFCGRID", 1),
+                ("IFCOPENINGELEMENT", 5 + crate::export::service_openings(&out.text)),
                 ("IFCRAILING", 3),
                 ("IFCWINDOW", 1),
             ]);

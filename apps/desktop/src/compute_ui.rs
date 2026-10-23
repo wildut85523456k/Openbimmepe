@@ -62,6 +62,20 @@ pub(crate) struct ComputeDialog {
     pub error: String,
 }
 
+impl ComputeDialog {
+    /// The fluid of the preset and the limits that go with it: water at 1.5 m/s with no friction limit, or air at 8 m/s
+    /// and 1 Pa/m (common low-velocity duct criteria; the dialog shows them and they can be edited).
+    pub(crate) fn use_fluid(&mut self, air: bool) {
+        if air {
+            (self.density, self.viscosity_mpas, self.specific_heat, self.roughness_mm) = (1.2, 0.0181, 1006.0, 0.09);
+            (self.max_velocity, self.max_friction) = (8.0, 1.0);
+        } else {
+            (self.density, self.viscosity_mpas, self.specific_heat, self.roughness_mm) = (998.0, 1.0, 4186.0, 0.045);
+            (self.max_velocity, self.max_friction) = (1.5, 0.0);
+        }
+    }
+}
+
 impl Default for ComputeDialog {
     fn default() -> Self {
         Self {
@@ -129,7 +143,8 @@ impl Desktop {
         let mut data = self.document.mep().clone();
         let had = data.endpoints.len();
         data.endpoints.retain(|e| e.port != port);
-        data.equip_links.retain(|q| q.port != port);
+        // marking a Source leaves the join to the equipment alone; any other mark replaces what the end was
+        if self.end_draft.mark != Mark::Source { data.equip_links.retain(|q| q.port != port); }
         let removed = data.endpoints.len() != had;
         let d = self.end_draft.clone();
         match d.mark {
@@ -233,11 +248,14 @@ impl Desktop {
             let d = &mut self.compute;
             ui.horizontal_wrapped(|ui| {
                 ui.label("System");
+                let was_duct = is_duct(d.system);
                 egui::ComboBox::from_id_salt("compute_system").selected_text(d.system.name()).show_ui(ui, |ui| {
                     for s in System::ALL.iter().copied().filter(|s| *s != System::Other && !matches!(s, System::Power | System::Data)) { ui.selectable_value(&mut d.system, s, s.name()); }
                 });
-                if ui.button("Water").on_hover_text("density 998, viscosity 1.0 mPa.s, specific heat 4186").clicked() { (d.density, d.viscosity_mpas, d.specific_heat, d.roughness_mm) = (998.0, 1.0, 4186.0, 0.045); }
-                if ui.button("Air").on_hover_text("density 1.2, viscosity 0.0181 mPa.s, specific heat 1006").clicked() { (d.density, d.viscosity_mpas, d.specific_heat, d.roughness_mm) = (1.2, 0.0181, 1006.0, 0.09); }
+                // choosing a duct system after a pipe one (or the other way round) brings the fluid and limits that fit it
+                if is_duct(d.system) != was_duct { d.use_fluid(is_duct(d.system)); }
+                if ui.button("Water").on_hover_text("density 998, viscosity 1.0 mPa.s, specific heat 4186; velocity limit 1.5 m/s, no friction limit").clicked() { d.use_fluid(false); }
+                if ui.button("Air").on_hover_text("density 1.2, viscosity 0.0181 mPa.s, specific heat 1006; velocity limit 8 m/s and friction limit 1 Pa/m (common low-velocity duct criteria, edit them for the project)").clicked() { d.use_fluid(true); }
             });
             egui::CollapsingHeader::new("Settings").default_open(true).show(ui, |ui| {
                 egui::Grid::new("compute_grid").num_columns(4).show(ui, |ui| {
@@ -427,6 +445,17 @@ pub(crate) fn snap_commands(doc: &Document, q: &openbim_document::EquipLink, c: 
 mod tests {
     use super::*;
     use crate::Tool;
+
+    #[test]
+    fn the_air_preset_brings_air_limits_and_the_water_preset_takes_them_back() {
+        let mut d = ComputeDialog::default();
+        d.use_fluid(true);
+        assert_eq!((d.density, d.max_velocity, d.max_friction), (1.2, 8.0, 1.0));
+        let s = Desktop::sample();
+        let _ = s;
+        d.use_fluid(false);
+        assert_eq!((d.density, d.max_velocity, d.max_friction), (998.0, 1.5, 0.0));
+    }
 
     #[test]
     fn end_points_are_placed_on_open_ends_and_compute_sizes_the_drawn_duct() {

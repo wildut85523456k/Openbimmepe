@@ -383,9 +383,17 @@ pub fn records(doc: &Document) -> Vec<String> {
             s.latitude, s.longitude, s.angle_to_true_north_deg, s.utc_offset_hours
         ));
     }
+    if doc.project_key() != 0 {
+        out.push(format!("Y|key={:x}", doc.project_key()));
+    }
     out.extend(doc.elements().map(element_record));
     out.extend(mep_records(doc.mep()));
     out
+}
+
+/// The project key a file carries (its `Y|` record), 0 when it has none (a file from before the key existed).
+pub fn parse_project_key(lines: &[String]) -> u64 {
+    lines.iter().find_map(|l| l.strip_prefix("Y|key=")).and_then(|h| u64::from_str_radix(h.trim(), 16).ok()).unwrap_or(0)
 }
 
 fn size_text(s: openbim_place::penetrations::RunSize) -> String {
@@ -1166,7 +1174,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
                 .ok_or_else(|| format!("a record without '{k}'"))
         };
         if [
-            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|",
+            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|", "Y|",
         ]
         .iter()
         .any(|p| line.starts_with(p))

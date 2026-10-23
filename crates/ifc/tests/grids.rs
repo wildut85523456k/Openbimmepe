@@ -18,7 +18,7 @@ fn empty() -> Scene {
         levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
         walls: vec![], wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], roofs: vec![], railings: vec![],
         stairs: vec![], columns: vec![], beams: vec![], materials: Default::default(), shafts: vec![], floor_penetrations: vec![],
-        slab_voids: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], grids: vec![],
+        slab_voids: vec![], networks: vec![], families: vec![], items: vec![], rooms: vec![], grids: vec![], system_defs: vec![], assemblies: vec![],
         room_lighting: Default::default(), wall_types: vec![], types: vec![], member_info: Default::default(), native: vec![],
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], pset_map: Default::default(),
     }
@@ -71,4 +71,130 @@ fn the_grid_belongs_to_the_lowest_storey_and_exports_repeatably() {
     assert_eq!(a.text, b.text);
     let grid_id = a.text.lines().find(|l| l.contains("=IFCGRID(")).unwrap().split('=').next().unwrap().to_string();
     assert!(a.text.lines().any(|l| l.contains("IFCRELCONTAINEDINSPATIALSTRUCTURE") && l.contains(&grid_id)), "{grid_id} is contained in a storey");
+}
+
+// ---- named systems (gap B9)
+mod systems {
+    use super::*;
+    use openbim_family::mep::{Domain, FlowDir, System};
+    use openbim_ifc::SystemDef;
+    use openbim_place::penetrations::{Run, RunSize};
+    use openbim_route::graph::{NetEquipment, NetSegment, Network, NodeRef, PortRef};
+
+    fn network() -> Network {
+        let mut n = Network::new(100);
+        let seg = |id, x: f64| NetSegment { id, run: Run::rect("duct", Domain::Duct, System::SupplyAir, [x, 0.0, 2.5], [x + 3.0, 0.0, 2.5], 0.4, 0.3) };
+        n.segments = vec![seg(1, 0.0), seg(2, 3.0), seg(3, 20.0)];
+        n.equipment = vec![NetEquipment {
+            element: 50, connector: "supply".into(), domain: Domain::Duct, system: System::SupplyAir, flow_dir: FlowDir::Out,
+            pos: [0.0, 0.0, 2.5], dir: [1.0, 0.0, 0.0], size: RunSize::Rect { width: 0.4, height: 0.3, roll: 0.0 },
+        }];
+        let p = |node, port| PortRef { node, port };
+        n.link(p(NodeRef::Segment(0), 1), p(NodeRef::Segment(1), 0)).unwrap();
+        n.link(p(NodeRef::Equipment(0), 0), p(NodeRef::Segment(0), 0)).unwrap();
+        n
+    }
+
+    fn with(defs: Vec<SystemDef>) -> Scene {
+        let mut s = empty();
+        s.networks = vec![network()];
+        s.system_defs = defs;
+        s
+    }
+
+    /// the entity numbers a group of that name holds
+    fn members(text: &str, name: &str) -> Vec<String> {
+        let id = text.lines().find(|l| l.contains("=IFCDISTRIBUTIONSYSTEM(") && l.contains(&format!(",'{name}',"))).map(|l| l.split('=').next().unwrap().to_string());
+        let id = id.unwrap_or_else(|| panic!("no group {name}"));
+        let rel = text.lines().find(|l| l.contains("=IFCRELASSIGNSTOGROUP(") && l.ends_with(&format!(",$,{id});"))).unwrap();
+        let inner = rel.split("$,$,$,(").nth(1).unwrap().split(')').next().unwrap();
+        inner.split(',').map(str::to_string).collect()
+    }
+
+    #[test]
+    fn without_a_named_system_runs_go_into_the_group_of_their_kind() {
+        let e = export(&with(vec![])).unwrap();
+        assert_eq!(e.report.named_systems, 0);
+        assert_eq!(members(&e.text, "Supply air 1").len(), 3);
+    }
+
+    #[test]
+    fn a_named_system_takes_its_equipment_and_the_runs_connected_to_it() {
+        let def = SystemDef { name: "AHU-1 Supply".into(), system: System::SupplyAir, members: vec![50] };
+        let e = export(&with(vec![def])).unwrap();
+        assert_eq!(e.report.named_systems, 1);
+        assert_eq!(members(&e.text, "AHU-1 Supply").len(), 3, "two runs and the equipment");
+        assert_eq!(members(&e.text, "Supply air 1").len(), 1, "the run nobody connected stays in the group of its kind");
+    }
+
+    #[test]
+    fn a_system_whose_equipment_is_not_in_the_model_writes_nothing() {
+        let def = SystemDef { name: "Ghost".into(), system: System::SupplyAir, members: vec![999] };
+        let e = export(&with(vec![def])).unwrap();
+        assert_eq!(e.report.named_systems, 0);
+        assert!(!e.text.contains("'Ghost'"));
+    }
+
+    #[test]
+    fn the_guid_of_a_named_system_does_not_change_when_other_things_are_added() {
+        let def = || SystemDef { name: "AHU-1 Supply".into(), system: System::SupplyAir, members: vec![50] };
+        let guid = |s: &Scene| {
+            let e = export(s).unwrap();
+            e.text.lines().find(|l| l.contains("IFCDISTRIBUTIONSYSTEM(") && l.contains("AHU-1")).unwrap().split('(').nth(1).unwrap().split(',').next().unwrap().to_string()
+        };
+        let a = with(vec![def()]);
+        let mut b = with(vec![def()]);
+        b.grids = vec![grid(1, "A", [0.0, 0.0], [0.0, 5.0])];
+        b.levels = Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }, Level { name: "L1".into(), elevation: 3.0 }]).unwrap();
+        assert_eq!(guid(&a), guid(&b));
+    }
+}
+
+// ---- trusses and beam systems (gap B19)
+mod assemblies {
+    use super::*;
+    use openbim_geom::profile::Profile;
+    use openbim_ifc::{AssemblyDef, AssemblyKind, BeamItem, FramingUsage};
+
+    fn beam(id: u64, y: f64) -> BeamItem {
+        BeamItem { id, name: format!("M{id}"), a: [0.0, y, 2.6], b: [4.0, y, 2.6], profile: Profile::Circle { diameter: 0.1 }, usage: FramingUsage::Brace, bars: vec![] }
+    }
+    fn truss_scene(members: Vec<u64>) -> Scene {
+        let mut s = empty();
+        s.beams = vec![beam(5, 0.0), beam(6, 1.0), beam(7, 2.0)];
+        s.assemblies = vec![AssemblyDef { id: 4, name: "Truss 1".into(), kind: AssemblyKind::Truss, members }];
+        s
+    }
+
+    #[test]
+    fn a_truss_is_one_assembly_over_its_members_and_the_storey_holds_the_assembly() {
+        let e = export(&truss_scene(vec![5, 6])).unwrap();
+        assert_eq!(e.report.assemblies, 1);
+        let asm = e.text.lines().find(|l| l.contains("=IFCELEMENTASSEMBLY(")).expect("an assembly");
+        assert!(asm.contains("'Truss 1'") && asm.ends_with(".TRUSS.);"), "{asm}");
+        let asm_id = asm.split('=').next().unwrap();
+        let agg = e.text.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.contains(&format!("$,$,$,{asm_id},("))).expect("it aggregates its members");
+        assert_eq!(agg.split_once('=').unwrap().1.matches('#').count(), 3, "the assembly and two members: {agg}");
+        // the members are parts, so only the assembly and the loose beam are contained in the storey
+        let contained: String = e.text.lines().filter(|l| l.contains("IFCRELCONTAINEDINSPATIALSTRUCTURE(")).map(|l| l.split_once('=').unwrap().1).collect();
+        assert!(contained.contains(asm_id));
+        assert_eq!(contained.matches('#').count(), 1 + 1 + 1, "storey + the assembly + the one beam that is not part of it: {contained}");
+    }
+
+    #[test]
+    fn a_beam_system_is_a_beam_grid_and_a_truss_with_no_written_members_is_reported() {
+        let mut s = truss_scene(vec![5, 6]);
+        s.assemblies[0].kind = AssemblyKind::BeamGrid;
+        assert!(export(&s).unwrap().text.contains(".BEAM_GRID.);"));
+        let e = export(&truss_scene(vec![99])).unwrap();
+        assert_eq!(e.report.assemblies, 0);
+        assert!(e.report.warnings.iter().any(|w| w.contains("Truss 1")), "{:?}", e.report.warnings);
+    }
+
+    #[test]
+    fn the_guid_of_an_assembly_comes_from_its_element_and_repeats() {
+        let a = export(&truss_scene(vec![5, 6])).unwrap();
+        let b = export(&truss_scene(vec![5, 6])).unwrap();
+        assert_eq!(a.text, b.text);
+    }
 }

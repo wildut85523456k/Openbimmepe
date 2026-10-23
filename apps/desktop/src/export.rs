@@ -266,6 +266,34 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         }
     }
     add_connections(doc, &mut mep, &mut skipped);
+    // where the runs cross walls and slabs: an opening each (and its register), as the place crate finds them
+    let (wall_penetrations, floor_penetrations) = if mep.segments.is_empty() { (Vec::new(), Vec::new()) } else {
+        let chains: Vec<WallChain> = walls.iter().map(|w: &WallItem| w.chain.clone()).collect();
+        let runs: Vec<openbim_place::penetrations::Run> = mep.segments.iter().map(|s| s.run.clone()).collect();
+        let gap = openbim_place::penetrations::DEFAULT_GROUP_RADIUS;
+        let (mut wall_pens, _) = openbim_place::penetrations::find(&chains, &runs, gap);
+        // the opening is cut into the wall itself; one that would break the wall is left out and its record says so
+        for pen in wall_pens.iter_mut().filter(|p| p.cut) {
+            let chain = &mut walls[pen.id.chain].chain;
+            let n = chain.segment_count();
+            if chain.openings.len() < n { chain.openings.resize(n, Vec::new()); }
+            chain.openings[pen.id.segment].push(openbim_geom::Opening { offset: pen.offset, width: pen.width, sill: pen.sill, height: pen.height });
+            let fits = chain.plans().ok().is_some_and(|plans| chain.segment_volume_exact(pen.id.segment, &plans[pen.id.segment]).is_ok());
+            if !fits { chain.openings[pen.id.segment].pop(); pen.cut = false; }
+        }
+        let flat: Vec<openbim_place::floors::Slab> = slabs.iter().map(|s: &SlabItem| s.slab.clone()).collect();
+        let (floor_pens, _) = openbim_place::floors::find_floor(&flat, &[], &runs, gap);
+        (wall_pens, floor_pens)
+    };
+    // trusses and beam systems: one assembly each over the beams they made
+    let assemblies: Vec<openbim_ifc::AssemblyDef> = doc.elements().filter(|e| matches!(e.category, Category::Truss | Category::BeamSystem)).map(|e| openbim_ifc::AssemblyDef {
+        id: e.id.0, name: e.name.clone(),
+        kind: if e.category == Category::Truss { openbim_ifc::AssemblyKind::Truss } else { openbim_ifc::AssemblyKind::BeamGrid },
+        members: doc.system_beams(e.id).into_iter().map(|m| m.0).collect(),
+    }).collect();
+    // the systems the user named, with the equipment in them
+    let system_defs: Vec<openbim_ifc::SystemDef> = doc.mep().systems.iter()
+        .map(|d| openbim_ifc::SystemDef { name: d.name.clone(), system: d.system, members: d.members.iter().map(|m| m.0).collect() }).collect();
     // grid lines leave as one IfcGrid
     let grids: Vec<openbim_ifc::GridItem> = doc.elements().filter_map(|e| match e.geometry {
         Some(Geometry::Grid { start, end }) => Some(openbim_ifc::GridItem { id: e.id.0, name: e.name.clone(), start, end }),
@@ -346,10 +374,10 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
-        walls, wall_penetrations: vec![], firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations: vec![], slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
+        walls, wall_penetrations, firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
+        floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
-        room_lighting: Default::default(), pset_map: Default::default(), grids, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
+        room_lighting: Default::default(), pset_map: Default::default(), grids, system_defs, assemblies, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
 }
@@ -610,4 +638,11 @@ pub mod tests_support {
             min_transition_len: 0.1, connector_stub: 0.5, margin: 0.0, catalogue: None,
         }
     }
+}
+
+/// The openings the runs of the sample cut (named W<chain>-S<segment>-P<n> in walls and F<slab>-P<n> in floors), which the
+/// tests that count the openings of doors, windows and shafts leave out.
+#[cfg(test)]
+pub(crate) fn service_openings(text: &str) -> usize {
+    text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && (l.contains(",'W") || l.contains(",'F")) && l.chars().filter(|c| *c == '-').count() >= 1 && l.contains("-P")).count()
 }
