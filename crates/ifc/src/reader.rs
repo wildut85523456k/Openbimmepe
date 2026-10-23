@@ -136,7 +136,7 @@ pub struct Imported {
 }
 
 /// The classes that become members.
-const MEMBERS: [&str; 13] = [
+const MEMBERS: [&str; 14] = [
     "IFCBEAM",
     "IFCMEMBER",
     "IFCCOLUMN",
@@ -150,6 +150,7 @@ const MEMBERS: [&str; 13] = [
     "IFCPIPESEGMENT",
     "IFCDUCTSEGMENT",
     "IFCCABLECARRIERSEGMENT",
+    "IFCSPACE",
 ];
 
 /// Entities that are not products of the building, or are read in another way.

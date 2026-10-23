@@ -355,7 +355,9 @@ impl Desktop {
     /// Writes the document to `path` in `schema` and says what was and was not written.
     pub(crate) fn write_ifc(&mut self, path: &str, schema: crate::export::Schema, own_data: bool) {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        match crate::export::export_ifc_with(&self.document, "Project1", 1, &crate::export::iso_time(secs), schema, own_data) {
+        let key = self.document.ensure_project_key();
+        let name = self.file.path.as_deref().and_then(|p| std::path::Path::new(p).file_stem()).and_then(|n| n.to_str()).unwrap_or("Project1").to_string();
+        match crate::export::export_ifc_with(&self.document, &name, key, &crate::export::iso_time(secs), schema, own_data) {
             Ok(out) => match std::fs::write(path, &out.text) {
                 Ok(()) => self.message = format!("Exported {path} ({}): {} walls, {} beams, {} columns, {} slabs. {}", schema.name(), out.walls, out.beams, out.columns, out.slabs, out.warnings.join("; ")),
                 Err(e) => self.message = format!("Could not write {path}: {e}"),
@@ -481,6 +483,18 @@ impl Desktop {
     pub(crate) fn footing_click(&mut self, level: ElementId, at: [f64; 2]) {
         let m = |v: f64| v / 1000.0;
         let spec = FootingSpec { width_m: m(self.width_mm), length_m: m(self.height_mm), thickness_m: m(self.footing_thickness_mm), top_offset_m: m(self.slab_offset_mm), material: self.material_pick };
+        // a click on a piece of equipment lays the pad under it, made by it, so that it moves with the unit
+        let equipment = self.document.elements().filter(|e| e.category == Category::Family).filter_map(|e| match e.geometry {
+            Some(openbim_document::Geometry::Placed { at: p, level: l }) if l == level => Some((e.id, (p[0] - at[0]).hypot(p[1] - at[1]))),
+            _ => None,
+        }).filter(|(_, d)| *d <= 0.5).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id);
+        if let Some(unit) = equipment {
+            self.message = match self.document.place_equipment_pad(unit, &spec) {
+                Ok(id) => format!("Pad {} placed under the equipment; it moves with it; undo removes it", id.0),
+                Err(error) => format!("Pad rejected: {error:?}"),
+            };
+            return;
+        }
         self.message = match self.document.place_footing(level, at, &spec) {
             Ok(id) => format!("Footing {} placed; undo removes it", id.0),
             Err(error) => format!("Footing rejected: {error:?}"),
@@ -1282,6 +1296,58 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_footing_clicked_on_a_unit_is_its_pad_and_moves_with_the_unit() {
+        // B24
+        let mut app = Desktop::sample();
+        let level = ElementId(10);
+        let unit = app.document.place_family(level, [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2 }).unwrap();
+        app.footing_click(level, [2.1, 4.4]);
+        assert!(app.message.starts_with("Pad"), "{}", app.message);
+        let pad = app.document.elements().find(|e| e.category == Category::Footing).unwrap().id;
+        assert_eq!(app.document.get(pad).unwrap().parent, Some(unit));
+        let ops = app.document.transform_commands(&[unit], openbim_document::Xf::Move([1.0, 0.0])).unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
+        assert!(matches!(app.document.get(pad).unwrap().geometry, Some(Geometry::Pad { at, .. }) if (at[0] - 3.0).abs() < 1e-9 && (at[1] - 4.5).abs() < 1e-9));
+        // away from any unit it is a plain footing, as before
+        app.footing_click(level, [30.0, 30.0]);
+        let plain = app.document.elements().filter(|e| e.category == Category::Footing && e.parent.is_none()).count();
+        assert_eq!(plain, 1);
+    }
+
+    #[test]
+    fn a_tool_does_not_inherit_the_height_of_the_tool_before_it() {
+        // B5: the Ceiling button sets 2.7 m; the Door button after it must put its door on the floor
+        let mut app = Desktop::sample();
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0);
+        app.run_command("door", "Door");
+        assert_eq!(app.slab_offset_mm, 0.0, "the door does not start 2.7 m up");
+        app.run_command("ceiling", "Ceiling");
+        app.run_command("component", "Component");
+        assert_eq!(app.slab_offset_mm, 0.0);
+        app.run_command("ceiling", "Ceiling");
+        app.run_command("floor", "Floor");
+        assert_eq!((app.slab_offset_mm, app.slab_thickness_mm), (0.0, 200.0));
+    }
+
+    #[test]
+    fn undoing_a_level_that_was_just_made_leaves_a_plan_on_a_level_that_exists() {
+        // B25: the view pointed at the new level; after undo it must resolve to a level of the model
+        let mut app = Desktop::sample();
+        app.level_elev_mm = 9000.0;
+        app.level_name = "Roof level".into();
+        app.level_click();
+        let made = match app.view { crate::View::Level(id) => ElementId(id), v => panic!("{v:?}") };
+        assert_eq!(app.plan_level(), made);
+        app.document.undo().unwrap();
+        assert!(app.document.get(made).is_none(), "the level is gone");
+        let now = app.plan_level();
+        assert!(now != ElementId(0) && app.document.get(now).is_some_and(|l| l.geometry == Some(Geometry::Level)), "{now:?}");
+        // and a tool started on it works
+        assert!(app.document.place_walls(now, &[([0.0, 0.0], [3.0, 0.0])], 0.2, 3.0, 0.0, None).is_ok());
+    }
     #[test]
     fn round_and_i_beams_are_placed_edited_drawn_closed_in_3d_and_undone() {
         let mut app = Desktop::sample();
@@ -2008,7 +2074,7 @@ mod tests {
         // exported as a door that fills an opening in the wall
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
         assert_eq!(out.text.matches("IFCDOOR(").count(), 1);
-        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 1);
+        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count() - crate::export::service_openings(&out.text), 1);
         // it follows the wall: the wall moves, the door goes with it
         app.document.transact(app.document.revision(), &[Command::SetGeometry { id: wall, geometry: Geometry::Linear { start: [start[0], start[1] + 0.5], end: [end[0], end[1] + 0.5], level: ElementId(10) } }]).unwrap();
         assert!(volume(&app, wall) < before - 0.05);
@@ -2334,7 +2400,7 @@ mod tests {
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
         let line = |name: &str| out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains(name)).count();
         assert_eq!((line("Shaft Opening 1"), line("Shaft Opening 2")), (1, 1));
-        assert_eq!(out.text.matches("IFCRELVOIDSELEMENT(").count(), 3, "two shafts in the floor and the wall opening in the wall");
+        assert_eq!(out.text.matches("IFCRELVOIDSELEMENT(").count() - crate::export::service_openings(&out.text), 3, "two shafts in the floor and the wall opening in the wall");
         assert!(out.text.contains("Qto_SlabBaseQuantities"));
         // moving the wall moves its opening with it, and deleting the wall deletes the opening
         let ops = app.document.delete_commands(&[wall]).unwrap();
@@ -2363,5 +2429,95 @@ mod tests {
             nums.iter().any(|(n, _)| n == "neck_d"),
             "the type-scoped column is still shown: {nums:?}"
         );
+    }
+
+    // ---- the IFC honesty bundle: what the model knows leaves in the file (gaps B7, B9, B10, B11)
+
+    /// A duct drawn by clicks across the sample's wall, at the height the tool uses.
+    fn duct_through_the_wall(app: &mut Desktop) {
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall");
+        let Some(openbim_document::Geometry::Linear { start, end, .. }) = wall.geometry else { panic!("a wall has a line") };
+        let (dx, dy) = (end[0] - start[0], end[1] - start[1]);
+        let len = dx.hypot(dy);
+        // 0.9 m along the wall, away from whatever the sample already runs through it
+        let (mx, my) = (start[0] + dx / len * 0.9, start[1] + dy / len * 0.9);
+        let (nx, ny) = (-dy / len, dx / len);
+        app.run_command("duct", "Duct");
+        let level = app.plan_level();
+        for p in [[mx - 2.0 * nx, my - 2.0 * ny], [mx + 2.0 * nx, my + 2.0 * ny]] { app.run_click(p); }
+        app.finish_run(level);
+    }
+
+    #[test]
+    fn a_duct_through_a_wall_cuts_an_opening_and_a_straight_run_keeps_its_system() {
+        let mut app = Desktop::sample();
+        let plain = crate::export::export_ifc(&app.document, "P", 1, "2026-10-23T00:00:00").unwrap();
+        let ducts_before = plain.text.matches("IFCDUCTSEGMENT(").count();
+        duct_through_the_wall(&mut app);
+        assert!(app.document.mep().fittings.is_empty(), "a straight run has no fitting to take a system from: {}", app.message);
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-23T00:00:00").unwrap();
+        assert_eq!(out.text.matches("IFCDUCTSEGMENT(").count(), ducts_before + 1);
+        let kinds = |t: &str| t.matches("IFCOPENINGELEMENT(").count();
+        let dbg_wall = app.document.elements().find(|e| e.category == Category::Wall).map(|w| (w.geometry, w.height_m, w.elevation_m));
+        let dbg_duct = app.document.elements().filter(|e| e.category == Category::Duct).map(|d| (d.geometry, d.elevation_m, d.width_m, d.height_m)).last();
+        assert!(kinds(&out.text) > kinds(&plain.text), "the duct cuts a hole in the wall: {} -> {} wall {dbg_wall:?} duct {dbg_duct:?}", kinds(&plain.text), kinds(&out.text));
+        let run_system = app.document.mep().run_systems.last().expect("the tool gave the run a system").1;
+        assert_ne!(run_system, openbim_family::mep::System::Other);
+        // the group of that kind holds one more piece than before: the run is in its own system, not in "Other"
+        let held = |text: &str| -> usize {
+            let name = format!("'{} 1'", run_system.name());
+            let Some(id) = text.lines().find(|l| l.contains("=IFCDISTRIBUTIONSYSTEM(") && l.contains(&name)).map(|l| l.split('=').next().unwrap().to_string()) else { return 0 };
+            let rel = text.lines().find(|l| l.contains("=IFCRELASSIGNSTOGROUP(") && l.ends_with(&format!(",$,{id});"))).unwrap();
+            rel.split_once('(').unwrap().1.split("$,$,$,(").nth(1).unwrap().split(')').next().unwrap().split(',').count()
+        };
+        assert_eq!(held(&out.text), held(&plain.text) + 1, "{} before, {} after", held(&plain.text), held(&out.text));
+
+    }
+
+    #[test]
+    fn a_named_system_leaves_the_file_under_its_own_name_with_its_equipment_and_runs() {
+        let mut app = Desktop::sample();
+        let spec = FamilySpec { family: "Air handling unit".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let ahu = app.document.place_family(ElementId(10), [1.0, 1.0], &spec).unwrap();
+        let cmds = app.document.create_system_commands("AHU-1 Supply", openbim_family::mep::System::SupplyAir, &[ahu]).unwrap();
+        let rev = app.document.revision();
+        app.document.transact(rev, &cmds).unwrap();
+        let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-23T00:00:00").unwrap();
+        assert!(out.text.lines().any(|l| l.contains("IFCDISTRIBUTIONSYSTEM(") && l.contains("'AHU-1 Supply'")), "the user's name is on the group");
+    }
+
+    #[test]
+    fn a_project_keeps_its_key_in_its_file_and_two_projects_differ() {
+        let mut a = Desktop::sample();
+        let mut b = Desktop::sample();
+        let (ka, kb) = (a.document.ensure_project_key(), b.document.ensure_project_key());
+        assert_ne!(ka, 0);
+        assert_eq!(ka, a.document.ensure_project_key(), "asked twice, the same key");
+        assert_ne!(ka, kb, "two projects do not share GlobalIds");
+        let path = std::env::temp_dir().join(format!("openbim-key-{}.obim", std::process::id()));
+        let path = path.to_str().unwrap().to_string();
+        a.write_model(&path);
+        let mut back = Desktop::sample();
+        back.open_path(&path);
+        assert_eq!(back.document.project_key(), ka, "the key came back from the file");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn the_global_ids_of_the_same_project_do_not_move_when_a_level_is_added() {
+        let mut app = Desktop::sample();
+        let key = app.document.ensure_project_key();
+        let ids = |app: &Desktop| {
+            let out = crate::export::export_ifc(&app.document, "P", key, "2026-10-23T00:00:00").unwrap();
+            let pick = |class: &str| out.text.lines().filter(|l| l.contains(&format!("{class}("))).map(|l| l.split(',').next().unwrap().split('(').nth(1).unwrap().to_string()).collect::<Vec<_>>();
+            (pick("IFCWALL"), pick("IFCBUILDINGSTOREY"))
+        };
+        let (walls_before, storeys_before) = ids(&app);
+        app.document.place_level("Roof", 9.0).unwrap();
+        let (walls_after, storeys_after) = ids(&app);
+        assert_eq!(walls_before, walls_after, "a wall keeps its GlobalId");
+        assert!(storeys_after.starts_with(&storeys_before) || storeys_before.iter().all(|g| storeys_after.contains(g)), "the storeys that were there keep theirs: {storeys_before:?} {storeys_after:?}");
+        let other = { let mut o = Desktop::sample(); o.document.ensure_project_key(); ids(&o).0 };
+        let _ = other;
     }
 }

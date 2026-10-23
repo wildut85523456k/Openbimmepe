@@ -65,7 +65,7 @@ fn voltage_for(phases: PhaseConfiguration) -> f64 {
 
 /// Plan length of a cable through its via points (`from.at → via… → to.at`) plus the level-to-level
 /// height and any extra allowance, in metres — the same route the drawn cable reports measure.
-fn cable_length_m(doc: &Document, from: &ElecNode, c: &ElecCable, to: &ElecNode) -> f64 {
+pub(crate) fn cable_length_m(doc: &Document, from: &ElecNode, c: &ElecCable, to: &ElecNode) -> f64 {
     let mut pts = vec![from.at];
     pts.extend_from_slice(&c.via);
     pts.push(to.at);

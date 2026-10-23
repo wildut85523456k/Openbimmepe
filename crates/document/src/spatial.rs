@@ -212,7 +212,9 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
             let stair = matches!(el.category, Category::Stair | Category::Railing) && p != el.id && elements.get(&p).is_some_and(|s| s.category == Category::Stair && s.parent.is_none());
             // a vertical opening points at the floor, roof or ceiling it is cut in
             let opening = el.category == Category::Opening && elements.get(&p).is_some_and(|s| s.category == Category::Slab && matches!(s.geometry, Some(Geometry::Area { .. })));
-            if !(beam || stair || opening) { return Err(EditError::InvalidElement); }
+            // an equipment pad points at the unit it stands under, and the unit has no parent of its own
+            let pad = el.category == Category::Footing && elements.get(&p).is_some_and(|u| u.category == Category::Family && u.parent.is_none());
+            if !(beam || stair || opening || pad) { return Err(EditError::InvalidElement); }
         }
         let valid = match &el.geometry {
             None => !matches!(el.category, Category::Level | Category::Grid | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss | Category::Rebar | Category::Family),

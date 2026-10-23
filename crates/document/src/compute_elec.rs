@@ -1,8 +1,17 @@
+//! DEPRECATED (gap B26, owner decision of 2026-10-21, option B). Electrical calculation belongs to edesign-alike and is
+//! not to be developed further here: no new features, only fixes. This engine stays because edesign-alike (pinned at
+//! 57ef018, checked 23 Oct 2026) does not yet size cables: its solver checks a cable's ampacity that is given to it
+//! (Ib <= Iz), and reads currents, voltage drop and short-circuit from it, but does not choose a cable from tables
+//! with correction factors, check the protective device, trip and breaking, or size the protective conductor. When it
+//! does, move the Compute electrical window to it and delete this file (`docs/decisions/0002-electrical-engine.md`).
 //! Cable and protection sizing of the drawn electrical network: the source, boards and loads become a tree for
 //! `openbim-calc` (IEC 60364 method, the owner's tables), and the answer is given back per cable and per load.
 //! Cable length is the drawn route (source to node through the plan points clicked) plus the height between the two
 //! levels plus the allowance on the cable. Cables are not written back to the model: the report is the result.
 use crate::{Document, ElecKind};
+
+/// Shown in the Compute electrical window: what this tool is and where the calculation is going.
+pub const DEPRECATION_NOTICE: &str = "This sizing tool is deprecated: electrical calculation is moving to edesign-alike, which does not size cables yet. It stays until it does.";
 use openbim_calc as calc;
 use std::collections::BTreeMap;
 
@@ -124,6 +133,11 @@ pub fn compute_electrical(doc: &Document, s: &ElecComputeSettings) -> Result<Ele
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tool_says_it_is_deprecated_and_where_the_calculation_is_going() {
+        assert!(DEPRECATION_NOTICE.contains("deprecated") && DEPRECATION_NOTICE.contains("edesign-alike"));
+    }
     use crate::{Command, ElecCable, ElecNode, ElementId, MepData};
     use crate::elec::NODE_BASE;
 

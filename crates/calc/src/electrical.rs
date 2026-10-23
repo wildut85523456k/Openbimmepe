@@ -1,3 +1,9 @@
+//! DEPRECATED (gap B26, owner decision of 2026-10-21, option B). Electrical calculation belongs to edesign-alike and is
+//! not to be developed further here: no new features, only fixes. This engine stays because edesign-alike (pinned at
+//! 57ef018, checked 23 Oct 2026) does not yet size cables: its solver checks a cable's ampacity that is given to it
+//! (Ib <= Iz), and reads currents, voltage drop and short-circuit from it, but does not choose a cable from tables
+//! with correction factors, check the protective device, trip and breaking, or size the protective conductor. When it
+//! does, move the Compute electrical window to it and delete this file (`docs/decisions/0002-electrical-engine.md`).
 //! Electrical power distribution after the IEC 60364 series: the design current of every branch from the loads
 //! downstream, a protective device and a cable (or several in parallel) for it, voltage drop along the path and at motor
 //! starting, short-circuit withstand, protection at the far end against the smallest fault, automatic disconnection

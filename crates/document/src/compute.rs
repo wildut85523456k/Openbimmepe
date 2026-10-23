@@ -28,6 +28,9 @@ pub struct ComputeSettings {
     pub losses: FittingLosses,
     /// keep the drawn sizes (the result only reports whether they meet the limits) instead of choosing sizes
     pub keep_sizes: bool,
+    /// the named system object to compute (B18): only the ducts or pipes reachable from its equipment are read, so two
+    /// loops of one type in one model compute apart. `None` reads every run of `system`, as before.
+    pub scope: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +43,8 @@ pub enum ComputeError {
     NoTerminal,
     /// the run closes a loop
     Loop(ElementId),
+    /// the named system is not in the model
+    UnknownSystem,
     Calc(calc::TreeError),
 }
 
@@ -150,11 +155,32 @@ fn demand_of(d: EndDemand) -> calc::Demand {
     }
 }
 
+/// The ducts and pipes reachable from the equipment of the named system, through fittings, joints and taps.
+fn system_reach(doc: &Document, name: &str) -> Result<BTreeSet<ElementId>, ComputeError> {
+    let m = doc.mep();
+    let def = m.systems.iter().find(|d| d.name == name).ok_or(ComputeError::UnknownSystem)?;
+    let mut adj: BTreeMap<MepNode, Vec<MepNode>> = BTreeMap::new();
+    let mut join = |a: MepNode, b: MepNode| { adj.entry(a).or_default().push(b); adj.entry(b).or_default().push(a); };
+    for (a, b) in &m.links { join(a.node, b.node); }
+    for t in &m.taps { join(MepNode::Run(t.run), MepNode::Fitting(t.fitting)); }
+    let mut seen: BTreeSet<MepNode> = BTreeSet::new();
+    let mut queue: VecDeque<MepNode> = m.equip_links.iter().filter(|q| def.members.contains(&q.element)).map(|q| q.port.node).collect();
+    while let Some(n) = queue.pop_front() {
+        if !seen.insert(n) { continue; }
+        for &v in adj.get(&n).map(Vec::as_slice).unwrap_or(&[]) { if !seen.contains(&v) { queue.push_back(v); } }
+    }
+    Ok(seen.into_iter().filter_map(|n| if let MepNode::Run(r) = n { Some(r) } else { None }).collect())
+}
+
 /// Reads one system of the drawing as a tree, sizes it and reports. See the module description.
 pub fn compute_system(doc: &Document, s: &ComputeSettings) -> Result<SystemReport, ComputeError> {
     let data = doc.mep();
     let runs: Vec<ElementId> = doc.elements().filter(|e| matches!(e.category, Category::Duct | Category::Pipe) && run_z(doc, e.id).is_some())
         .map(|e| e.id).filter(|id| system_of_run(doc, *id) == s.system).collect();
+    let runs: Vec<ElementId> = match &s.scope {
+        None => runs,
+        Some(name) => { let reach = system_reach(doc, name)?; runs.into_iter().filter(|r| reach.contains(r)).collect() }
+    };
     let mut ids = Ids { map: BTreeMap::new(), uf: Uf(Vec::new()) };
     // pieces: a run is cut where a tap sits on it
     let mut edges: Vec<Edge> = Vec::new();
@@ -377,7 +403,7 @@ mod tests {
             system,
             calc: calc::Settings { fluid: calc::Fluid::WATER, roughness: 0.045e-3, criteria: calc::Criteria { max_velocity: Some(1.5), max_friction: None }, catalogue: catalogue(), count_static: false, loading: None, hazen_williams: None },
             losses: FittingLosses { elbow: 0.3, transition: 0.1, tee: 0.5, tap: 0.5 },
-            keep_sizes: false,
+            keep_sizes: false, scope: None,
         }
     }
 
@@ -422,6 +448,42 @@ mod tests {
         };
         d.transact(d.revision(), &[Command::SetMep(Box::new(data))]).unwrap();
         (d, p1, p2)
+    }
+
+    #[test]
+    fn two_loops_of_one_type_compute_apart_when_each_is_a_named_system() {
+        let mut d = Document::spatial_sample();
+        let spec = crate::FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 0.0 };
+        let (u1, u2) = (d.place_family(LEVEL, [1.0, 1.0], &spec).unwrap(), d.place_family(LEVEL, [21.0, 1.0], &spec).unwrap());
+        let (a1, a2) = (pipe(&mut d, [1.0, 1.0], [5.0, 1.0], 0.05), pipe(&mut d, [5.0, 1.0], [5.0, 4.0], 0.05));
+        let (b1, b2) = (pipe(&mut d, [21.0, 1.0], [25.0, 1.0], 0.05), pipe(&mut d, [25.0, 1.0], [25.0, 4.0], 0.05));
+        let data = MepData {
+            links: vec![(run_port(a1, 1), run_port(a2, 0)), (run_port(b1, 1), run_port(b2, 0))],
+            endpoints: vec![
+                end(run_port(a1, 0), EndRole::Source, EndDemand::None, 0.0), end(run_port(a2, 1), EndRole::Terminal, EndDemand::Power { watts: 50_000.0, delta_t: 5.0 }, 20_000.0),
+                end(run_port(b1, 0), EndRole::Source, EndDemand::None, 0.0), end(run_port(b2, 1), EndRole::Terminal, EndDemand::Power { watts: 20_000.0, delta_t: 5.0 }, 20_000.0),
+            ],
+            equip_links: vec![
+                crate::EquipLink { port: run_port(a1, 0), element: u1, connector: "Supply".into() },
+                crate::EquipLink { port: run_port(b1, 0), element: u2, connector: "Supply".into() },
+            ],
+            systems: vec![
+                crate::MepSystemDef { name: "CHW North".into(), system: System::ChilledWaterSupply, members: vec![u1], base: None },
+                crate::MepSystemDef { name: "CHW South".into(), system: System::ChilledWaterSupply, members: vec![u2], base: None },
+            ],
+            run_systems: [a1, a2, b1, b2].iter().map(|r| (*r, System::ChilledWaterSupply)).collect(),
+            ..Default::default()
+        };
+        d.transact(d.revision(), &[Command::SetMep(Box::new(data))]).unwrap();
+        // together they are two sources, as before
+        assert_eq!(compute_system(&d, &settings(System::ChilledWaterSupply)).unwrap_err(), ComputeError::MoreThanOneSource);
+        // each named system is its own computation, with its own load
+        let north = compute_system(&d, &ComputeSettings { scope: Some("CHW North".into()), ..settings(System::ChilledWaterSupply) }).unwrap();
+        let south = compute_system(&d, &ComputeSettings { scope: Some("CHW South".into()), ..settings(System::ChilledWaterSupply) }).unwrap();
+        assert!((north.total_flow - 50_000.0 / (998.0 * 4186.0 * 5.0)).abs() < 1e-12);
+        assert!((south.total_flow - 20_000.0 / (998.0 * 4186.0 * 5.0)).abs() < 1e-12);
+        assert!(north.runs.iter().all(|r| [a1, a2].contains(&r.run)) && south.runs.iter().all(|r| [b1, b2].contains(&r.run)));
+        assert_eq!(compute_system(&d, &ComputeSettings { scope: Some("Missing".into()), ..settings(System::ChilledWaterSupply) }).unwrap_err(), ComputeError::UnknownSystem);
     }
 
     #[test]
@@ -625,7 +687,7 @@ mod tests {
         let s = ComputeSettings {
             system: System::SupplyAir,
             calc: calc::Settings { fluid: calc::Fluid::AIR, roughness: 0.09e-3, criteria: calc::Criteria { max_velocity: Some(6.0), max_friction: Some(1.0) }, catalogue: cat, count_static: false, loading: None, hazen_williams: None },
-            losses: FittingLosses::default(), keep_sizes: false,
+            losses: FittingLosses::default(), keep_sizes: false, scope: None,
         };
         let r = compute_system(&d, &s).unwrap();
         // 12 kW over 10 K of air: 0.99 m3/s

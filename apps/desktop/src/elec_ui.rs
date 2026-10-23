@@ -349,6 +349,44 @@ impl Desktop {
         Ok(ElecComputeSettings { calc: s })
     }
 
+    /// The design basis typed in the window, as the exchange carries it. Only what the user gave is present:
+    /// no fault level unless the fault check is on, no rating unless one was typed.
+    pub(crate) fn exchange_basis(&self) -> serde_json::Value {
+        let d = &self.elec;
+        let mut b = serde_json::json!({
+            "line_voltage_v": d.line_voltage, "max_total_drop_pct": d.max_total_drop, "max_branch_drop_pct": d.max_branch_drop,
+            "max_start_drop_pct": d.max_start_drop, "max_parallel_cables": d.max_parallel,
+            "earthing": match d.earthing { 1 => "TT", 2 => "IT", _ => "TN" },
+        });
+        let o = b.as_object_mut().unwrap();
+        if d.earthing == 1 { o.insert("electrode_ohm".into(), d.electrode_ohm.into()); }
+        if d.earthing == 2 { o.insert("neutral_distributed".into(), d.neutral_distributed.into()); }
+        if d.use_fault {
+            o.insert("short_circuit_ka".into(), d.isc_ka.into());
+            for (k, v) in [("x_over_r", d.x_over_r), ("clearing_time_s", d.clearing_s), ("c_min", d.c_min), ("hot_resistance_factor", d.hot_factor), ("trip_multiple", d.trip_multiple), ("touch_voltage_v", d.touch_v)] { o.insert(k.into(), v.into()); }
+        }
+        if d.source_kva > 0.0 { o.insert("source_kva".into(), d.source_kva.into()); }
+        for (k, t) in [("cable_table", &d.table), ("grouping_factors", &d.grouping), ("temperature_factors", &d.temperature), ("harmonic_factors", &d.harmonics), ("device_ratings", &d.devices), ("protective_conductor_rule", &d.pe_rule)] {
+            if !t.trim().is_empty() { o.insert(k.into(), t.trim().into()); }
+        }
+        b
+    }
+
+    /// The exchange file for edesign-alike as text. GlobalIds are those of the IFC export with the same project key.
+    pub(crate) fn exchange_text(&mut self) -> String {
+        let key = self.document.ensure_project_key();
+        let name = self.file.path.as_deref().and_then(|p| std::path::Path::new(p).file_stem()).and_then(|n| n.to_str()).unwrap_or("Project1").to_string();
+        let basis = self.exchange_basis();
+        let v = openbim_document::electrical_exchange::build(&self.document, &name, key, basis, &|e| openbim_ifc::guid::global_id(key, 0, e.0));
+        serde_json::to_string_pretty(&v).unwrap_or_default()
+    }
+
+    fn export_exchange(&mut self) {
+        let Some(p) = rfd::FileDialog::new().set_title("Export for edesign").add_filter("Electrical exchange", &["json"]).set_file_name("electrical-exchange.json").save_file() else { return };
+        let text = self.exchange_text();
+        self.message = match std::fs::write(&p, &text) { Ok(()) => format!("Exported {} for edesign", p.display()), Err(e) => format!("Could not write {}: {e}", p.display()) };
+    }
+
     pub(crate) fn run_elec_compute(&mut self) {
         self.elec.error.clear();
         self.refresh_equipment_loads();
@@ -366,7 +404,9 @@ impl Desktop {
         if !self.elec.open { return; }
         let mut open = true;
         let mut run = false;
+        let mut export = false;
         egui::Window::new("Compute electrical").open(&mut open).default_width(640.0).show(ctx, |ui| {
+            ui.colored_label(egui::Color32::from_rgb(190, 90, 30), compute_elec::DEPRECATION_NOTICE);
             let d = &mut self.elec;
             egui::CollapsingHeader::new("Settings").default_open(true).show(ui, |ui| {
                 egui::Grid::new("elec_grid").num_columns(4).show(ui, |ui| {
@@ -415,7 +455,10 @@ impl Desktop {
                     }
                 }
             });
-            if ui.button("Compute").clicked() { run = true; }
+            ui.horizontal(|ui| {
+                if ui.button("Compute").clicked() { run = true; }
+                if ui.button("Export for edesign...").on_hover_text("Everything this model holds for a full electrical computation, as one JSON file for edesign-alike").clicked() { export = true; }
+            });
             if !self.elec.error.is_empty() { ui.colored_label(Color32::from_rgb(200, 60, 40), &self.elec.error); }
             let now = self.document.revision();
             if let Some((rev, r)) = &self.elec.report {
@@ -455,6 +498,7 @@ impl Desktop {
             }
         });
         if run { self.run_elec_compute(); }
+        if export { self.export_exchange(); }
         self.elec.open = open;
     }
 }
@@ -693,6 +737,14 @@ mod tests {
         assert_eq!(e.demand, openbim_document::EndDemand::Flow(air.flow));
         assert_eq!(e.required_pressure_pa, air.pressure_drop);
         assert_eq!(app.document.mep().equip_links.len(), 1);
+        // marking the same end as the Source does not undo the join to the unit (B14); the Terminal mark puts it back
+        app.end_draft.mark = crate::compute_ui::Mark::Source;
+        app.end_point_click(lv, [air.pos[0], air.pos[1]]);
+        assert_eq!(app.document.mep().equip_links.len(), 1, "the join survives a Source mark: {}", app.message);
+        assert_eq!(app.document.mep().endpoints.first().map(|e| e.role), Some(openbim_document::EndRole::Source));
+        app.end_draft.mark = crate::compute_ui::Mark::Terminal;
+        app.end_point_click(lv, [air.pos[0], air.pos[1]]);
+        assert_eq!(app.document.mep().endpoints.first().map(|e| e.demand), Some(openbim_document::EndDemand::Flow(air.flow)));
         // the tie is saved, comes back from the file, and a change of the unit's airflow reaches the end point on compute
         let lines = openbim_document::native::records(&app.document);
         assert_eq!(openbim_document::native::parse_mep(&lines).unwrap(), *app.document.mep());
@@ -776,5 +828,23 @@ mod tests {
         let r = app.document.mep_run(last).unwrap();
         let end = if q.port.port == 0 { r.a } else { r.b };
         assert!(end.iter().zip(&air.pos).all(|(a, b)| (a - b).abs() < 1e-9), "{end:?}");
+    }
+
+    #[test]
+    fn the_exchange_carries_only_the_basis_the_user_gave() {
+        let mut app = Desktop::sample();
+        app.elec.earthing = 1;
+        app.elec.electrode_ohm = 7.0;
+        let v: serde_json::Value = serde_json::from_str(&app.exchange_text()).unwrap();
+        assert_eq!(v["design_basis"]["earthing"], "TT");
+        assert_eq!(v["design_basis"]["electrode_ohm"], 7.0);
+        assert!(v["design_basis"].get("short_circuit_ka").is_none(), "the fault check is off: no fault level is invented");
+        assert!(v["readiness"]["missing"].to_string().contains("short-circuit"));
+        app.elec.use_fault = true;
+        app.elec.isc_ka = 31.5;
+        let v: serde_json::Value = serde_json::from_str(&app.exchange_text()).unwrap();
+        assert_eq!(v["design_basis"]["short_circuit_ka"], 31.5);
+        assert!(!v["readiness"]["missing"].to_string().contains("short-circuit"));
+        assert_eq!(v["project"]["project_key"], format!("{:x}", app.document.project_key()));
     }
 }
