@@ -594,6 +594,21 @@ impl Document {
     pub fn app_records(&self) -> &[String] { &self.app_records }
     /// Replaces them. Only lines starting with `U|` and holding no line break are kept.
     pub fn set_app_records(&mut self, lines: Vec<String>) { self.app_records = lines.into_iter().filter(|l| l.starts_with("U|") && !l.contains(['\n', '\r'])).collect(); }
+    /// The application's line of `kind` (`U|kind=<kind>|...`), if the file has one.
+    pub fn app_record(&self, kind: &str) -> Option<&str> { self.app_records.iter().map(String::as_str).find(|l| native::app_record_kind(l) == Some(kind)) }
+    /// Puts the line of `kind`, replacing the one of that kind there is (`None` takes it away). The line must be
+    /// `U|kind=<kind>` followed by `|key=value` fields, on one line; a kind is lower-case letters, digits, `_` or `-`.
+    /// Not an edit: no revision, nothing to undo. This is how something the app keeps that IFC has no place for is
+    /// added without touching the format: a new kind, its own fields (see docs/reference/obim-data-format.md).
+    pub fn put_app_record(&mut self, kind: &str, line: Option<String>) -> Result<(), String> {
+        if kind.is_empty() || !kind.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-') { return Err(format!("'{kind}' is not a record kind")); }
+        if let Some(l) = &line {
+            if native::app_record_kind(l) != Some(kind) || l.contains(['\n', '\r']) { return Err(format!("the line must be one line starting with U|kind={kind}")); }
+        }
+        self.app_records.retain(|l| native::app_record_kind(l) != Some(kind));
+        self.app_records.extend(line);
+        Ok(())
+    }
     /// The project's identity (0 when it has none yet).
     pub fn project_key(&self) -> u64 { self.project_key }
     /// Sets the identity, from a file that carries one. Not an edit: no revision, nothing to undo.

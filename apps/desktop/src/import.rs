@@ -22,6 +22,8 @@ pub struct ImportReport {
     pub skipped: BTreeMap<String, usize>,
     /// what the reader said about single entities it could not use (`#12 IFCSTAIR: unsupported product ...`)
     pub diagnostics: Vec<String>,
+    /// the kinds of the file's own `U|` lines that the model took (it had none of that kind), for the app to read again
+    pub adopted: Vec<String>,
 }
 
 impl ImportReport {
@@ -767,6 +769,17 @@ fn merge_mep(have: &openbim_document::MepData, incoming: openbim_document::MepDa
     out
 }
 
+/// The `U|` lines of the file's own records whose kind the model has no line of yet are added to the model's (the
+/// model's own settings win). Returns the kinds taken.
+fn adopt_app_records(doc: &mut Document, native: &[String]) -> Vec<String> {
+    let mut taken = Vec::new();
+    for line in openbim_document::native::parse_app_records(native) {
+        let Some(kind) = openbim_document::native::app_record_kind(&line).map(str::to_string) else { continue };
+        if doc.app_record(&kind).is_none() && doc.put_app_record(&kind, Some(line)).is_ok() { taken.push(kind); }
+    }
+    taken
+}
+
 /// Puts back the model from the file's own records. Every element that the file still shows with the values the app
 /// wrote comes back exactly as it was; one that was changed in another program is read from the file's geometry
 /// (with the same number), one deleted there stays deleted, one added there is imported as a new element.
@@ -834,6 +847,9 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
     report.skipped = if others <= explained { BTreeMap::new() } else {
         imp.skipped.iter().filter(|(k, _)| !matches!(k.as_str(), "IFCDISTRIBUTIONPORT" | "IFCREINFORCINGBAR")).map(|(k, n)| (format!("{k} (not an extruded profile this app reads)"), *n)).collect()
     };
+    let adopted = adopt_app_records(doc, &imp.native);
+    report.adopted = adopted.clone();
+    if !adopted.is_empty() { report.notes.push(format!("settings of the file were taken: {}", adopted.join(", "))); }
     let mut all: Vec<Command> = restore_ops.into_iter().chain(ops2).collect();
     // the fittings and what is joined to what come back with the runs they were joined to
     let merged = merge_mep(doc.mep(), mep_in);
@@ -1294,6 +1310,27 @@ mod tests {
         assert!(!ops.iter().any(|c| matches!(c, Command::Create { category: Category::Generic, .. })), "{}", report.text());
         assert_eq!(report.skipped.get("IFCPUMP (not an extruded profile this app reads)"), Some(&1), "{}", report.text());
         assert!(report.diagnostics.iter().any(|l| l.contains("IFCPUMP") && l.contains("not a prism")), "{:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn the_settings_of_a_file_come_with_it_for_the_kinds_the_model_has_none_of() {
+        let mut d = Document::spatial_sample();
+        d.put_app_record("cost-codes", Some("U|kind=cost-codes|scheme=CSI".into())).unwrap();
+        d.put_app_record("phasing", Some("U|kind=phasing|n=3".into())).unwrap();
+        let text = crate::export::export_ifc_as(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3).unwrap().text;
+        // into an empty model: both come
+        let mut back = Document::new();
+        let report = import_ifc(&mut back, &text).unwrap();
+        assert_eq!(back.app_record("cost-codes"), Some("U|kind=cost-codes|scheme=CSI"));
+        assert_eq!(back.app_record("phasing"), Some("U|kind=phasing|n=3"));
+        assert_eq!(report.adopted, vec!["cost-codes".to_string(), "phasing".to_string()], "{}", report.text());
+        // into a model with its own cost codes: its own win, the other kind comes
+        let mut mine = Document::new();
+        mine.put_app_record("cost-codes", Some("U|kind=cost-codes|scheme=Uniclass".into())).unwrap();
+        let report = import_ifc(&mut mine, &text).unwrap();
+        assert_eq!(mine.app_record("cost-codes"), Some("U|kind=cost-codes|scheme=Uniclass"));
+        assert_eq!(mine.app_record("phasing"), Some("U|kind=phasing|n=3"));
+        assert_eq!(report.adopted, vec!["phasing".to_string()], "{}", report.text());
     }
 
     #[test]

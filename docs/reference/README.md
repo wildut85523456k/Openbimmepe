@@ -35,3 +35,5 @@ The comparison between these references and the app is in `docs/gap-analysis-202
 - The books are the owner's licensed copies. Only paraphrase and the book's own field names are stored
   here; the extraction itself is not committed. To reproduce a citation, record the source file name,
   its SHA-256 and the extraction tool in an extraction manifest.
+
+The app's own data format (what is kept beside IFC, and how to add to it) is in `docs/obim-data-format.md`.

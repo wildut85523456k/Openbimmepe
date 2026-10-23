@@ -348,10 +348,15 @@ impl Desktop {
         let when = crate::export::iso_time(secs);
         let (message, log) = match std::fs::read(path) {
             Err(e) => (format!("Could not read {path}: {e}"), None),
-            Ok(bytes) => match crate::import::import_ifc(&mut self.document, &String::from_utf8_lossy(&bytes)) {
-                Ok(report) => { self.sync_duct_controls(); self.selected = None; (report.text(), Some(report.log_text(path, &when))) }
+            Ok(bytes) => { self.sync_app_records(); match crate::import::import_ifc(&mut self.document, &String::from_utf8_lossy(&bytes)) {
+                Ok(report) => {
+                    self.sync_duct_controls(); self.selected = None;
+                    // the file's own settings (Compute inputs, georeferencing, any other kind) that the model had none of
+                    if !report.adopted.is_empty() { self.compute.restore(self.document.app_records()); self.georef = crate::georef_ui::GeorefInput::from_records(self.document.app_records()); }
+                    (report.text(), Some(report.log_text(path, &when)))
+                }
                 Err(e) => (format!("Import failed, nothing changed: {e}"), Some(format!("Import log for {path}\nRead on {when}\n\nImport failed, nothing changed: {e}\n"))),
-            },
+            } }
         };
         self.message = match log {
             Some(text) => match std::fs::write(format!("{path}.log"), text) {
