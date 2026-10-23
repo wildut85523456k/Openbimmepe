@@ -8,8 +8,6 @@ use openbim_document::{
 
 pub(crate) struct Office {
     pub doc: Document,
-    pub ground: ElementId,
-    pub upper: ElementId,
     pub rooms: Vec<ElementId>,
     pub fcu: ElementId,
 }
@@ -26,10 +24,10 @@ pub(crate) fn office() -> Office {
     let ground = d.place_level("Level 1", 0.0).unwrap();
     let upper = d.place_level("Level 2", 3.6).unwrap();
     for (i, x) in [0.0, 10.0, 20.0].into_iter().enumerate() {
-        d.place_grid([x, -1.0], [x, D + 1.0], &["A", "B", "C"][i]).unwrap();
+        d.place_grid([x, -1.0], [x, D + 1.0], ["A", "B", "C"][i]).unwrap();
     }
     for (i, y) in [0.0, 6.0, 12.0].into_iter().enumerate() {
-        d.place_grid([-1.0, y], [W + 1.0, y], &["1", "2", "3"][i]).unwrap();
+        d.place_grid([-1.0, y], [W + 1.0, y], ["1", "2", "3"][i]).unwrap();
     }
     // the envelope of both storeys, and the partitions of the ground floor
     let outer = d.place_walls(ground, &box_lines(0.0, 0.0, W, D), 0.3, 3.6, 0.0, None).unwrap();
@@ -84,7 +82,7 @@ pub(crate) fn office() -> Office {
         elec_cables: vec![ElecCable::new(base, base + 1, true), ElecCable::new(base + 1, base + 2, true), ElecCable::new(base + 2, base + 3, false)],
         ..Default::default()
     }))]).unwrap();
-    Office { doc: d, ground, upper, rooms, fcu }
+    Office { doc: d, rooms, fcu }
 }
 
 #[cfg(test)]
@@ -131,7 +129,7 @@ mod tests {
         let c = class_counts(&out.text);
         eprintln!("{c:?}");
         assert_eq!(c.get("IFCSPACE"), Some(&2), "{c:?}");
-        assert_eq!(c.get("IFCSTAIR").copied().unwrap_or(0) + c.get("IFCSTAIRFLIGHT").copied().unwrap_or(0) > 0, true, "{c:?}");
+        assert!(c.get("IFCSTAIR").copied().unwrap_or(0) + c.get("IFCSTAIRFLIGHT").copied().unwrap_or(0) > 0, "{c:?}");
         assert_eq!(c.get("IFCDOOR"), Some(&1), "{c:?}");
         assert_eq!(c.get("IFCWINDOW"), Some(&2), "{c:?}");
         assert!(c.get("IFCBUILDINGSTOREY") == Some(&2), "{c:?}");
