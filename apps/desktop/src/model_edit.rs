@@ -2232,31 +2232,31 @@ mod tests {
         assert!(message.contains("refused"), "{message}");
     }
 
-    #[test]
-    fn a_type_loaded_from_a_catalogue_sets_the_ports_and_the_geometry_its_instances_are_solved_with() {
-        let mut app = Desktop::sample();
-        let message = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 400\t0.4\t0.2\n", "range.tsv");
-        assert!(message.contains("1 type"), "{message}");
-        let t = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 400").map(|t| t.id).unwrap();
-        let spec = FamilySpec { family: "Ceiling diffuser, square".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
-        let unit = app.document.place_family(ElementId(10), [2.0, 2.0], &spec).unwrap();
-        app.document.assign_type(&[unit], t).unwrap();
-        // the connectors the export writes as ports, and the schematic reads, carry the catalogue's neck and flow,
-        // not the library's defaults (0.2 and 0.05)
-        let conns = crate::elec_ui::instance_connectors(&app.document, unit);
-        assert_eq!(conns.len(), 1, "a diffuser has one duct connection");
-        assert_eq!(conns[0].size, openbim_family::mep::Size::Round { diameter: 0.4 }, "the type's neck reached the port");
-        assert!((conns[0].flow - 0.2).abs() < 1e-9, "and so did its air flow");
-        // an instance's own value still wins over its type's, and leaves the type's alone
-        app.document.set_family_values(unit, &[("face".to_string(), 0.9)]).unwrap();
-        assert_eq!(crate::elec_ui::instance_connectors(&app.document, unit)[0].size, openbim_family::mep::Size::Round { diameter: 0.4 });
-        assert_eq!(app.document.family_type_values(t), vec![("neck_d".to_string(), 0.4), ("air_flow".to_string(), 0.2)]);
-        // and the exported file has the terminal and its port
-        let out = crate::export::export_ifc(&app.document, "Project1", 1, "2026-10-21T00:00:00").unwrap();
-        assert!(out.text.contains("IFCAIRTERMINAL("), "the diffuser exports as an air terminal");
-        assert!(out.text.contains("IFCDISTRIBUTIONPORT("), "with its port");
-    }
-
+    #[test]
+    fn a_type_loaded_from_a_catalogue_sets_the_ports_and_the_geometry_its_instances_are_solved_with() {
+        let mut app = Desktop::sample();
+        let message = app.load_family_catalogue_text("family\tCeiling diffuser, square\ntype\tneck_d\tair_flow\nD 400\t0.4\t0.2\n", "range.tsv");
+        assert!(message.contains("1 type"), "{message}");
+        let t = app.document.types_for(Category::Family).iter().find(|t| t.name == "D 400").map(|t| t.id).unwrap();
+        let spec = FamilySpec { family: "Ceiling diffuser, square".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 2.7 };
+        let unit = app.document.place_family(ElementId(10), [2.0, 2.0], &spec).unwrap();
+        app.document.assign_type(&[unit], t).unwrap();
+        // the connectors the export writes as ports, and the schematic reads, carry the catalogue's neck and flow,
+        // not the library's defaults (0.2 and 0.05)
+        let conns = crate::elec_ui::instance_connectors(&app.document, unit);
+        assert_eq!(conns.len(), 1, "a diffuser has one duct connection");
+        assert_eq!(conns[0].size, openbim_family::mep::Size::Round { diameter: 0.4 }, "the type's neck reached the port");
+        assert!((conns[0].flow - 0.2).abs() < 1e-9, "and so did its air flow");
+        // an instance's own value still wins over its type's, and leaves the type's alone
+        app.document.set_family_values(unit, &[("face".to_string(), 0.9)]).unwrap();
+        assert_eq!(crate::elec_ui::instance_connectors(&app.document, unit)[0].size, openbim_family::mep::Size::Round { diameter: 0.4 });
+        assert_eq!(app.document.family_type_values(t), vec![("neck_d".to_string(), 0.4), ("air_flow".to_string(), 0.2)]);
+        // and the exported file has the terminal and its port
+        let out = crate::export::export_ifc(&app.document, "Project1", 1, "2026-10-21T00:00:00").unwrap();
+        assert!(out.text.contains("IFCAIRTERMINAL("), "the diffuser exports as an air terminal");
+        assert!(out.text.contains("IFCDISTRIBUTIONPORT("), "with its port");
+    }
+
     #[test]
     fn an_hvac_system_is_built_from_scratch_with_the_mouse_saved_and_exported() {
         let mut app = Desktop::sample();
