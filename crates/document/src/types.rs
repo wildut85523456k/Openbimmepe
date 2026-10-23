@@ -192,8 +192,12 @@ impl Document {
         for id in ids {
             let el = self.get(*id).ok_or(EditError::NotFound(*id))?;
             if el.category == Category::Family && el.type_id.is_some() {
+                // the type gives the instance its values and its texts; both must be written into the instance,
+                // or detaching loses the texts it was inheriting (a mark, a material)
                 let overrides = self.family_values(*id);
+                let texts = self.family_texts(*id);
                 ops.push(Command::SetFamily { id: *id, family: el.family.clone(), type_name: el.type_name.clone(), overrides, angle_deg: el.angle_deg });
+                ops.push(Command::SetFamilyTexts { id: *id, texts });
             }
             ops.push(Command::SetType { id: *id, type_id: None });
         }
@@ -326,7 +330,28 @@ impl Document {
     pub fn edit_family_type(&mut self, type_id: ElementId, values: &[(String, f64)], texts: &[(String, String)]) -> Result<(), EditError> {
         let ty = self.get(type_id).filter(|t| t.category == Category::Type && t.type_for == Some(Category::Family)).ok_or(EditError::NotFound(type_id))?;
         if !Self::family_values_ok(values) || !Self::family_texts_ok(texts) { return Err(EditError::InvalidElement); }
+        // the compiled family must accept these values: a value outside its range (a negative neck, say) is refused
+        // here rather than stored, or every instance of the type would fail to solve and export empty
         let family = ty.family.clone();
+        let Some(f) = openbim_family::library::all().ok().and_then(|l| l.into_iter().find(|f| f.name() == family)) else { return Err(EditError::InvalidElement) };
+        // route each value by its scope, as `request_parts` does: a catalogue may carry an instance-scoped column on a
+        // type, and putting it in the type layer makes the family refuse the request (and the editor show nothing)
+        let mut parts = RequestParts::default();
+        for (n, v) in values {
+            if f.input_scope(n) == Some(openbim_family::Scope::Type) {
+                parts.type_values.push((n.clone(), *v));
+            } else {
+                parts.overrides.push((n.clone(), *v));
+            }
+        }
+        for (n, v) in texts {
+            if f.input_scope(n) == Some(openbim_family::Scope::Type) {
+                parts.type_texts.push((n.clone(), v.clone()));
+            } else {
+                parts.texts.push((n.clone(), v.clone()));
+            }
+        }
+        if f.solve(&parts.request(None)).is_err() { return Err(EditError::InvalidElement); }
         self.transact(self.revision, &[Command::SetFamilyType { id: type_id, family, values: values.to_vec(), texts: texts.to_vec() }])?;
         Ok(())
     }
@@ -432,7 +457,8 @@ mod tests {
         assert!(d.add_family_type("Fan coil unit, ducted", "fcu 400", &[], &[]).is_err(), "however it is spelled");
         assert!(d.add_family_type("", "x", &[], &[]).is_err() && d.add_family_type("Fan coil unit, ducted", "  ", &[], &[]).is_err());
         assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("", 1.0)]), &[]).is_err(), "an unnamed value");
-        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("air_flow", f64::NAN)]), &[]).is_err(), "a value that is not a number");
+        assert!(d.add_family_type("Fan coil unit, ducted", "bad", &named(&[("air_flow", f64::NAN)]), &[]).is_err(), "a value that is not a number");
+
         assert!(d.add_family_type("Fan coil unit, ducted", "bad", &[], &[("".to_string(), "x".to_string())]).is_err(), "an unnamed text");
         // the type of one family is not a type of another, and a wall type is not a type of a family instance
         assert_eq!(d.assign_type(&[door], t), Err(EditError::UnsupportedProperty(door)));
@@ -624,21 +650,9 @@ mod tests {
         let unit = d.place_family(ElementId(10), [1.0, 1.0], &spec).unwrap();
         d.assign_type(&[unit], ahu_type).unwrap();
         let f = openbim_family::library::families().into_iter().find(|f| f.name == "Air handling unit").unwrap().compile().unwrap();
-        let (mut ov, mut tv, mut ot, mut tt) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        for (n, v) in d.family_values(unit) {
-            if f.input_scope(&n) == Some(openbim_family::Scope::Type) { tv.push((n, v)) } else { ov.push((n, v)) }
-        }
-        for (n, v) in d.family_texts(unit) {
-            if f.input_scope(&n) == Some(openbim_family::Scope::Type) { tt.push((n, v)) } else { ot.push((n, v)) }
-        }
-        let req = openbim_family::Request {
-            overrides: ov.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
-            texts: ot.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-            type_values: tv.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
-            type_texts: tt.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-            ..Default::default()
-        };
-        let solved = f.solve(&req).unwrap();
+        // the one builder, the way every consumer asks: the instance's own values and its type's, each in its layer
+        let el = d.get(unit).unwrap();
+        let solved = f.solve(&request_parts(&d, el, &f).request(None)).unwrap();
         let supply = solved.connectors.iter().find(|c| c.name == "supply").unwrap();
         assert!((supply.flow - 1.2).abs() < 1e-9, "the catalogue's air flow reached the unit's supply connector");
         assert_eq!(solved.material_of(0), Some("Casing, insulated"), "and its casing material reached the solved unit");
@@ -661,4 +675,194 @@ mod tests {
         assert!(d.types_for(Category::Family).is_empty(), "and the whole catalogue was one step");
     }
 
+
+    #[test]
+    fn a_schedule_reads_the_one_request_so_a_type_scoped_override_is_not_blanked() {
+        let mut d = Document::spatial_sample();
+        let ids = d
+            .load_family_catalogue(
+                "family\tDoor, single flush\ntype\twidth\tmark\nReviewDoor\t1.3\tInherited mark\n",
+            )
+            .unwrap();
+        let t = *ids.first().unwrap();
+        let spec = FamilySpec {
+            family: "Door, single flush".into(),
+            type_name: String::new(),
+            overrides: vec![],
+            angle_deg: 0.0,
+            elevation_m: 0.0,
+        };
+        let i = d.place_family_in_wall(ElementId(20), 2.0, &spec).unwrap();
+        d.assign_type(&[i], t).unwrap();
+        let before = d
+            .schedule_table(&crate::schedule::ScheduleDef::starter(
+                1,
+                "Doors",
+                crate::schedule::ScheduleKind::Doors,
+            ))
+            .to_csv();
+        assert!(
+            before.contains("1300"),
+            "the type's width schedules: {before}"
+        );
+        // the instance's own value wins over its type's; the schedule must follow it, not go blank
+        d.set_family_values(i, &[("width".to_string(), 1.4)])
+            .unwrap();
+        let after = d
+            .schedule_table(&crate::schedule::ScheduleDef::starter(
+                1,
+                "Doors",
+                crate::schedule::ScheduleKind::Doors,
+            ))
+            .to_csv();
+        assert!(
+            after.contains("1400"),
+            "the overridden width schedules, not blank: {after}"
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_family_type_value_is_refused_by_the_document() {
+        let mut d = Document::spatial_sample();
+        let ids = d
+            .load_family_catalogue(
+                "family\tCeiling diffuser, square\ntype\tneck_d\nReviewDiffuser\t0.3\n",
+            )
+            .unwrap();
+        let t = *ids.first().unwrap();
+        // a negative neck is outside the family's range: the solve refuses it, so the edit must too
+        assert_eq!(
+            d.edit_family_type(t, &[("neck_d".to_string(), -1.0)], &[]),
+            Err(EditError::InvalidElement)
+        );
+        assert_eq!(
+            d.family_type_values(t),
+            vec![("neck_d".to_string(), 0.3)],
+            "the stored value is unchanged"
+        );
+    }
+
+    #[test]
+    fn detaching_a_type_keeps_the_texts_it_was_inheriting() {
+        let mut d = Document::spatial_sample();
+        let ids = d
+            .load_family_catalogue(
+                "family\tDoor, single flush\ntype\twidth\tmark\nReviewDoor\t1.3\tInherited mark\n",
+            )
+            .unwrap();
+        let t = *ids.first().unwrap();
+        let spec = FamilySpec {
+            family: "Door, single flush".into(),
+            type_name: String::new(),
+            overrides: vec![],
+            angle_deg: 0.0,
+            elevation_m: 0.0,
+        };
+        let i = d.place_family_in_wall(ElementId(20), 2.0, &spec).unwrap();
+        d.assign_type(&[i], t).unwrap();
+        assert!(
+            d.family_texts(i).iter().any(|(n, _)| n == "mark"),
+            "the instance inherits the type's mark"
+        );
+        d.detach_type(&[i]).unwrap();
+        assert!(
+            d.family_texts(i)
+                .iter()
+                .any(|(n, v)| n == "mark" && v == "Inherited mark"),
+            "detaching keeps the mark: {:?}",
+            d.family_texts(i)
+        );
+    }
+}
+
+/// Everything a family instance of the document is solved with, split the way `solve` wants it: the instance's own
+/// values and texts, and those its type of a family gives it. A name of instance scope travels in `overrides` and one
+/// of type scope in `type_values` (the family refuses it otherwise), so the two layers cannot simply be merged: this
+/// is the one place that knows which is which. Every consumer of a family instance — the geometry, the ports, the
+/// schedules, the properties panel, the exports — builds its request here.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RequestParts {
+    pub overrides: Vec<(String, f64)>,
+    pub texts: Vec<(String, String)>,
+    pub type_values: Vec<(String, f64)>,
+    pub type_texts: Vec<(String, String)>,
+}
+
+impl RequestParts {
+    /// The request itself. `type_name` selects the library's own named type; a document type of a family is carried
+    /// in the type layers instead, so an instance whose type comes from a catalogue passes None here.
+    pub fn request<'a>(&'a self, type_name: Option<&'a str>) -> openbim_family::Request<'a> {
+        openbim_family::Request {
+            type_name,
+            overrides: self
+                .overrides
+                .iter()
+                .map(|(n, v)| (n.as_str(), *v))
+                .collect(),
+            texts: self
+                .texts
+                .iter()
+                .map(|(n, v)| (n.as_str(), v.as_str()))
+                .collect(),
+            type_values: self
+                .type_values
+                .iter()
+                .map(|(n, v)| (n.as_str(), *v))
+                .collect(),
+            type_texts: self
+                .type_texts
+                .iter()
+                .map(|(n, v)| (n.as_str(), v.as_str()))
+                .collect(),
+        }
+    }
+}
+
+/// The values a family instance of the document is solved with: its own, and those of its type of a family (the
+/// document's `Category::Type`), each in its own layer. An instance's own value wins over its type's, which wins over
+/// the library's own named type.
+pub fn request_parts(doc: &Document, el: &Element, f: &openbim_family::Compiled) -> RequestParts {
+    let (type_values, type_texts) = match el.type_id {
+        Some(t) => (doc.family_type_values(t), doc.family_type_texts(t)),
+        None => (Vec::new(), Vec::new()),
+    };
+    let mut parts = RequestParts::default();
+    let put =
+        |into: &mut Vec<(String, f64)>, type_into: &mut Vec<(String, f64)>, name: &str, v: f64| {
+            if f.input_scope(name) == Some(openbim_family::Scope::Type) {
+                type_into.push((name.to_string(), v))
+            } else {
+                into.push((name.to_string(), v))
+            }
+        };
+    for (n, v) in &el.overrides {
+        put(&mut parts.overrides, &mut parts.type_values, n, *v);
+    }
+    for (n, v) in &type_values {
+        if !parts.type_values.iter().any(|(m, _)| m == n)
+            && !parts.overrides.iter().any(|(m, _)| m == n)
+        {
+            put(&mut parts.overrides, &mut parts.type_values, n, *v);
+        }
+    }
+    let put_text = |into: &mut Vec<(String, String)>,
+                    type_into: &mut Vec<(String, String)>,
+                    name: &str,
+                    v: &str| {
+        if f.input_scope(name) == Some(openbim_family::Scope::Type) {
+            type_into.push((name.to_string(), v.to_string()))
+        } else {
+            into.push((name.to_string(), v.to_string()))
+        }
+    };
+    for (n, v) in &el.texts {
+        put_text(&mut parts.texts, &mut parts.type_texts, n, v);
+    }
+    for (n, v) in &type_texts {
+        if !parts.type_texts.iter().any(|(m, _)| m == n) && !parts.texts.iter().any(|(m, _)| m == n)
+        {
+            put_text(&mut parts.texts, &mut parts.type_texts, n, v);
+        }
+    }
+    parts
 }

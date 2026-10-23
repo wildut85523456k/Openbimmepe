@@ -354,18 +354,10 @@ fn family_facts(doc: &Document, e: &Element) -> FamFacts {
     let Some(f) = library().iter().find(|f| f.name() == e.family) else { return FamFacts { kind: ScheduleKind::GenericModels, opening: None } };
     let kind = family_kind(e);
     let opening = if matches!(kind, ScheduleKind::Doors | ScheduleKind::Windows) {
-        // the same values the geometry is solved with, the element's own type of a family included, each in its layer
-        let (type_values, type_texts) = match e.type_id {
-            Some(t) => (doc.family_type_values(t), doc.family_type_texts(t)),
-            None => (Vec::new(), Vec::new()),
-        };
-        f.solve(&openbim_family::Request {
-            type_name: (!e.type_name.is_empty()).then_some(e.type_name.as_str()),
-            overrides: e.overrides.iter().map(|(n, v)| (n.as_str(), *v)).collect(),
-            texts: e.texts.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-            type_values: type_values.iter().filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Type)).map(|(n, v)| (n.as_str(), *v)).collect(),
-            type_texts: type_texts.iter().filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Type)).map(|(n, v)| (n.as_str(), v.as_str())).collect(),
-        }).ok().and_then(|i| i.opening)
+        // the one request builder, so the schedule reads exactly what the geometry, the ports and the export solve
+        // with: an instance's own value wins over its type's, each in the layer `solve` accepts
+        let parts = crate::request_parts(doc, e, f);
+        f.solve(&parts.request((!e.type_name.is_empty()).then_some(e.type_name.as_str()))).ok().and_then(|i| i.opening)
     } else { None };
     FamFacts { kind, opening }
 }
