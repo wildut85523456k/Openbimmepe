@@ -112,7 +112,7 @@ pub fn fields(kind: ScheduleKind) -> Vec<FieldInfo> {
         Beams => vec![fi("family", "Family", Text), fi("type", "Type", Text), fi("level", "Reference Level", Text), fi("offset", "Start Level Offset", Length), fi("width", "Width", Length), fi("depth", "Depth", Length), fi("length", "Length", Length), fi("volume", "Volume", Volume), fi("material", "Structural Material", Text), fi("usage", "Structural Usage", Text)],
         Stairs => vec![fi("family", "Family", Text), fi("type", "Type", Text), fi("level", "Base Level", Text), fi("width", "Actual Run Width", Length), fi("length", "Run Length", Length), fi("height", "Height", Length), fi("risers", "Actual Number of Risers", Count), fi("treads", "Actual Number of Treads", Count)],
         Railings => vec![fi("family", "Family", Text), fi("type", "Type", Text), fi("level", "Base Level", Text), fi("length", "Length", Length), fi("height", "Height", Length)],
-        Rooms => vec![fi("name", "Name", Text), fi("level", "Level", Text), fi("area", "Area", Area), fi("perimeter", "Perimeter", Length)],
+        Rooms => vec![fi("number", "Number", Text), fi("name", "Name", Text), fi("department", "Department", Text), fi("level", "Level", Text), fi("area", "Area", Area), fi("perimeter", "Perimeter", Length)],
         Doors | Windows => vec![fi("family", "Family", Text), fi("type", "Type", Text), fi("level", "Level", Text), fi("mark", "Mark", Text), fi("host", "Host", Text), fi("width", "Width", Length), fi("height", "Height", Length), fi("sill", "Sill Height", Length), fi("head", "Head Height", Length), fi("area", "Area", Area)],
         Ducts => vec![fi("system", "System Type", Text), fi("type", "Type", Text), fi("level", "Reference Level", Text), fi("size", "Size", Text), fi("width", "Width", Length), fi("height", "Height", Length), fi("length", "Length", Length), fi("area", "Area", Area), fi("offset", "Offset", Length), fi("slope", "Slope (%)", Number), fi("insulation_type", "Insulation Type", Text), fi("insulation_thickness", "Insulation Thickness", Length), fi("lining_type", "Lining Type", Text), fi("lining_thickness", "Lining Thickness", Length)],
         Pipes => vec![fi("system", "System Type", Text), fi("type", "Type", Text), fi("level", "Reference Level", Text), fi("size", "Size", Text), fi("diameter", "Diameter", Length), fi("length", "Length", Length), fi("area", "Area", Area), fi("offset", "Offset", Length), fi("slope", "Slope (%)", Number), fi("insulation_type", "Insulation Type", Text), fi("insulation_thickness", "Insulation Thickness", Length)],
@@ -224,7 +224,7 @@ impl ScheduleDef {
             Beams => (&["type", "level", "length", "volume", "count"], &["length", "volume"]),
             Stairs => (&["type", "level", "width", "height", "risers", "count"], &[]),
             Railings => (&["type", "level", "length", "count"], &["length"]),
-            Rooms => (&["name", "level", "area", "perimeter", "count"], &["area"]),
+            Rooms => (&["number", "name", "level", "area", "perimeter", "count"], &["area"]),
             Doors | Windows => (&["type", "level", "mark", "width", "height", "sill", "count"], &[]),
             Ducts => (&["system", "type", "size", "length", "area", "count"], &["length", "area"]),
             Pipes => (&["system", "type", "size", "length", "count"], &["length"]),
@@ -481,6 +481,7 @@ fn element_cells(doc: &Document, ctx: &Ctx, kind: ScheduleKind, e: &Element) -> 
         }
         (ScheduleKind::Rooms, Some(Geometry::Room { .. })) => {
             c.push(("name", txt(&e.name)));
+            c.push(("number", txt(&doc.room_text(e.id, "Number")))); c.push(("department", txt(&doc.room_text(e.id, "Department"))));
             if let Some((a, p)) = ctx.rooms.get(&e.id) { c.push(("area", num(*a))); c.push(("perimeter", num(*p))); }
         }
         (ScheduleKind::Ducts | ScheduleKind::Pipes, Some(Geometry::Linear { start, end, .. })) => {

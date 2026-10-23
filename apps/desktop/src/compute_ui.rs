@@ -54,6 +54,8 @@ pub(crate) struct ComputeDialog {
     pub hazen_c: f64,
     pub count_static: bool,
     pub keep_sizes: bool,
+    /// the named system object to compute; empty reads every run of the system type (B18)
+    pub scope: String,
     /// elbow, reducer, tee, tap
     pub k: [f64; 4],
     pub catalogue: String,
@@ -62,7 +64,44 @@ pub(crate) struct ComputeDialog {
     pub error: String,
 }
 
+/// A text value on one record line: `%`, `|` and line breaks are escaped.
+fn esc(t: &str) -> String { t.replace('%', "%25").replace('|', "%7C").replace('\n', "%0A").replace('\r', "%0D") }
+fn unesc(t: &str) -> String { t.replace("%0D", "\r").replace("%0A", "\n").replace("%7C", "|").replace("%25", "%") }
+
 impl ComputeDialog {
+    /// The inputs the user typed, as the one `U|compute` line the file keeps (None while they are the defaults), so that
+    /// Compute runs again with the same inputs after the file is reopened (B12).
+    pub(crate) fn record(&self) -> Option<String> {
+        let d = Self::default();
+        let same = self.system == d.system && self.density == d.density && self.viscosity_mpas == d.viscosity_mpas && self.specific_heat == d.specific_heat
+            && self.roughness_mm == d.roughness_mm && self.max_velocity == d.max_velocity && self.max_friction == d.max_friction && self.hazen_c == d.hazen_c
+            && self.count_static == d.count_static && self.keep_sizes == d.keep_sizes && self.scope == d.scope && self.k == d.k && self.catalogue == d.catalogue && self.loading == d.loading;
+        if same { return None; }
+        Some(format!("U|kind=compute|sys={}|rho={:?}|mu={:?}|cp={:?}|rough={:?}|vmax={:?}|fmax={:?}|hw={:?}|static={}|keep={}|k={:?},{:?},{:?},{:?}|cat={}|load={}|scope={}",
+            self.system.code(), self.density, self.viscosity_mpas, self.specific_heat, self.roughness_mm, self.max_velocity, self.max_friction, self.hazen_c,
+            u8::from(self.count_static), u8::from(self.keep_sizes), self.k[0], self.k[1], self.k[2], self.k[3], esc(&self.catalogue), esc(&self.loading), esc(&self.scope)))
+    }
+
+    /// Takes the inputs back from the lines of a file; a line that does not read leaves the dialog at its defaults.
+    pub(crate) fn restore(&mut self, lines: &[String]) {
+        *self = Self::default();
+        let Some(line) = lines.iter().find(|l| l.starts_with("U|kind=compute|")) else { return };
+        let mut d = Self::default();
+        let get = |k: &str| line.split('|').find_map(|f| f.strip_prefix(&format!("{k}=")));
+        let num = |k: &str| get(k).and_then(|v| v.parse::<f64>().ok());
+        let ok = (|| -> Option<()> {
+            d.system = System::from_code(get("sys")?.parse().ok()?)?;
+            d.density = num("rho")?; d.viscosity_mpas = num("mu")?; d.specific_heat = num("cp")?; d.roughness_mm = num("rough")?;
+            d.max_velocity = num("vmax")?; d.max_friction = num("fmax")?; d.hazen_c = num("hw")?;
+            d.count_static = get("static")? == "1"; d.keep_sizes = get("keep")? == "1";
+            let k: Vec<f64> = get("k")?.split(',').filter_map(|v| v.parse().ok()).collect();
+            d.k = k.try_into().ok()?;
+            d.catalogue = unesc(get("cat")?); d.loading = unesc(get("load")?);
+            d.scope = get("scope").map(unesc).unwrap_or_default();
+            Some(())
+        })();
+        if ok.is_some() { *self = d; }
+    }
     /// The fluid of the preset and the limits that go with it: water at 1.5 m/s with no friction limit, or air at 8 m/s
     /// and 1 Pa/m (common low-velocity duct criteria; the dialog shows them and they can be edited).
     pub(crate) fn use_fluid(&mut self, air: bool) {
@@ -80,7 +119,7 @@ impl Default for ComputeDialog {
     fn default() -> Self {
         Self {
             open: false, system: System::ChilledWaterSupply, density: 998.0, viscosity_mpas: 1.0, specific_heat: 4186.0, roughness_mm: 0.045,
-            max_velocity: 1.5, max_friction: 0.0, hazen_c: 0.0, count_static: false, keep_sizes: false, k: [0.3, 0.1, 0.5, 0.5],
+            max_velocity: 1.5, max_friction: 0.0, hazen_c: 0.0, count_static: false, keep_sizes: false, scope: String::new(), k: [0.3, 0.1, 0.5, 0.5],
             catalogue: String::new(), loading: String::new(), report: None, error: String::new(),
         }
     }
@@ -108,11 +147,27 @@ pub(crate) fn parse_catalogue(text: &str, duct: bool) -> Result<Vec<calc::Size>,
     Ok(out)
 }
 
+/// The sizes of Manage > MEP Settings as a catalogue: the pipe diameters, or the duct widths and heights with the
+/// width at least the height and at most four times it (the shapes a duct is made in).
+pub(crate) fn catalogue_from_settings(m: &openbim_document::MepSettings, duct: bool) -> Vec<calc::Size> {
+    if !duct {
+        return m.pipe_diameters_mm.iter().filter(|d| **d > 0.0).map(|d| calc::Size::round(&format!("DN{d}"), d / 1000.0)).collect();
+    }
+    let mut out = Vec::new();
+    for w in m.duct_widths_mm.iter().filter(|w| **w > 0.0) {
+        for h in m.duct_heights_mm.iter().filter(|&&h| h > 0.0 && h <= *w && *w <= 4.0 * h) {
+            out.push(calc::Size::rect(&format!("{w} x {h}"), w / 1000.0, h / 1000.0));
+        }
+    }
+    out
+}
+
 fn describe(e: &ComputeError) -> String {
     match e {
         ComputeError::NoSource => "This system has no source. Use the End Point tool to mark where it starts (a pump, a fan, a riser) on an open end of a duct or pipe, and give the runs this system.".into(),
         ComputeError::MoreThanOneSource => "This system has more than one source; mark one.".into(),
         ComputeError::NoTerminal => "No end point with a demand is connected to the source. Mark the coils, terminals, fixtures or sprinklers with the End Point tool.".into(),
+        ComputeError::UnknownSystem => "The system chosen for the computation is not in the model any more; choose another or all of the type.".into(),
         ComputeError::Loop(id) => format!("Run {} closes a loop. Rings are not computed yet; open the loop or split it into branches.", id.0),
         ComputeError::Calc(c) => match c {
             calc::TreeError::NoSize(i) => format!("No size in the catalogue is enough for branch {i}: add larger sizes, or raise the limits."),
@@ -191,7 +246,8 @@ impl Desktop {
     /// The settings of the dialog as the calculation takes them.
     fn compute_settings(&self) -> Result<ComputeSettings, String> {
         let d = &self.compute;
-        let catalogue = parse_catalogue(&d.catalogue, is_duct(d.system))?;
+        // an empty catalogue follows the sizes of Manage > MEP Settings
+        let catalogue = if d.catalogue.trim().is_empty() { catalogue_from_settings(&self.document.mep().settings, is_duct(d.system)) } else { parse_catalogue(&d.catalogue, is_duct(d.system))? };
         let loading = if d.loading.trim().is_empty() { None } else { Some(calc::LoadingCurve::from_csv(&d.loading).map_err(|e| format!("loading-unit table: {e:?}"))?) };
         Ok(ComputeSettings {
             system: d.system,
@@ -203,6 +259,7 @@ impl Desktop {
             },
             losses: FittingLosses { elbow: d.k[0], transition: d.k[1], tee: d.k[2], tap: d.k[3] },
             keep_sizes: d.keep_sizes,
+            scope: (!d.scope.is_empty()).then(|| d.scope.clone()),
         })
     }
 
@@ -244,6 +301,8 @@ impl Desktop {
         let mut apply = false;
         let mut assign = false;
         let mut select: Option<ElementId> = None;
+        // the systems named in the System Browser, which a computation can be limited to
+        let named: Vec<(String, System)> = self.document.mep().systems.iter().map(|x| (x.name.clone(), x.system)).collect();
         egui::Window::new("Compute").open(&mut open).default_width(560.0).show(ctx, |ui| {
             let d = &mut self.compute;
             ui.horizontal_wrapped(|ui| {
@@ -256,6 +315,14 @@ impl Desktop {
                 if is_duct(d.system) != was_duct { d.use_fluid(is_duct(d.system)); }
                 if ui.button("Water").on_hover_text("density 998, viscosity 1.0 mPa.s, specific heat 4186; velocity limit 1.5 m/s, no friction limit").clicked() { d.use_fluid(false); }
                 if ui.button("Air").on_hover_text("density 1.2, viscosity 0.0181 mPa.s, specific heat 1006; velocity limit 8 m/s and friction limit 1 Pa/m (common low-velocity duct criteria, edit them for the project)").clicked() { d.use_fluid(true); }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Named system");
+                if !d.scope.is_empty() && !named.iter().any(|(n, s)| *n == d.scope && *s == d.system) { d.scope.clear(); }
+                egui::ComboBox::from_id_salt("compute_scope").selected_text(if d.scope.is_empty() { "All of the type" } else { d.scope.as_str() }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut d.scope, String::new(), "All of the type");
+                    for (n, _) in named.iter().filter(|(_, s)| *s == d.system) { ui.selectable_value(&mut d.scope, n.clone(), n); }
+                }).response.on_hover_text("Two loops of one type compute apart when each is a named system of the System Browser");
             });
             egui::CollapsingHeader::new("Settings").default_open(true).show(ui, |ui| {
                 egui::Grid::new("compute_grid").num_columns(4).show(ui, |ui| {
@@ -271,7 +338,7 @@ impl Desktop {
                     ui.label("K tee / tap"); ui.horizontal(|ui| { ui.add(egui::DragValue::new(&mut d.k[2]).speed(0.01).range(0.0..=50.0)); ui.add(egui::DragValue::new(&mut d.k[3]).speed(0.01).range(0.0..=50.0)); }); ui.end_row();
                 });
                 ui.checkbox(&mut d.keep_sizes, "Keep the drawn sizes (only report the losses and the limits)");
-                ui.label(if is_duct(d.system) { "Size catalogue: label, width mm, height mm (inside dimensions), one per line" } else { "Size catalogue: label, inside diameter mm, one per line" });
+                ui.label(if is_duct(d.system) { "Size catalogue (empty = the sizes of Manage > MEP Settings): label, width mm, height mm (inside dimensions), one per line" } else { "Size catalogue (empty = the sizes of Manage > MEP Settings): label, inside diameter mm, one per line" });
                 ui.add(egui::TextEdit::multiline(&mut d.catalogue).desired_rows(4).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
                 if ui.small_button("Load a CSV file...").clicked() {
                     if let Some(p) = rfd::FileDialog::new().set_title("Size catalogue").add_filter("CSV", &["csv", "txt"]).pick_file() {
@@ -499,6 +566,17 @@ mod tests {
         assert!((r.total_flow - 0.6).abs() < 1e-9);
         assert!(r.runs.iter().any(|x| x.critical) && r.runs.iter().any(|x| !x.critical), "the longer way is critical, the branch is not");
         assert_eq!(r.ends.len(), 2);
+        // with no catalogue typed, the sizes of Manage > MEP Settings are used (B13)
+        app.compute.catalogue.clear();
+        app.run_compute();
+        assert!(app.compute.error.is_empty(), "an empty catalogue follows the MEP Settings sizes: {}", app.compute.error);
+        let (_, r2) = app.compute.report.as_ref().expect("report from the MEP Settings sizes");
+        assert!((r2.total_flow - 0.6).abs() < 1e-9);
+        let duct_sizes = catalogue_from_settings(&app.document.mep().settings, true);
+        assert!(duct_sizes.len() > 10 && duct_sizes.iter().all(|s| s.label.contains('x')), "{} duct sizes", duct_sizes.len());
+        assert_eq!(catalogue_from_settings(&app.document.mep().settings, false).len(), app.document.mep().settings.pipe_diameters_mm.len());
+        app.compute.catalogue = "300x200,300,200\n500x300,500,300\n800x400,800,400\n1200x600,1200,600\n".into();
+        app.run_compute();
         // the window draws
         app.compute.open = true;
         let ctx = egui::Context::default();

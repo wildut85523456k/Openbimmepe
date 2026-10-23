@@ -483,6 +483,18 @@ impl Desktop {
     pub(crate) fn footing_click(&mut self, level: ElementId, at: [f64; 2]) {
         let m = |v: f64| v / 1000.0;
         let spec = FootingSpec { width_m: m(self.width_mm), length_m: m(self.height_mm), thickness_m: m(self.footing_thickness_mm), top_offset_m: m(self.slab_offset_mm), material: self.material_pick };
+        // a click on a piece of equipment lays the pad under it, made by it, so that it moves with the unit
+        let equipment = self.document.elements().filter(|e| e.category == Category::Family).filter_map(|e| match e.geometry {
+            Some(openbim_document::Geometry::Placed { at: p, level: l }) if l == level => Some((e.id, (p[0] - at[0]).hypot(p[1] - at[1]))),
+            _ => None,
+        }).filter(|(_, d)| *d <= 0.5).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id);
+        if let Some(unit) = equipment {
+            self.message = match self.document.place_equipment_pad(unit, &spec) {
+                Ok(id) => format!("Pad {} placed under the equipment; it moves with it; undo removes it", id.0),
+                Err(error) => format!("Pad rejected: {error:?}"),
+            };
+            return;
+        }
         self.message = match self.document.place_footing(level, at, &spec) {
             Ok(id) => format!("Footing {} placed; undo removes it", id.0),
             Err(error) => format!("Footing rejected: {error:?}"),
@@ -1284,6 +1296,58 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_footing_clicked_on_a_unit_is_its_pad_and_moves_with_the_unit() {
+        // B24
+        let mut app = Desktop::sample();
+        let level = ElementId(10);
+        let unit = app.document.place_family(level, [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2 }).unwrap();
+        app.footing_click(level, [2.1, 4.4]);
+        assert!(app.message.starts_with("Pad"), "{}", app.message);
+        let pad = app.document.elements().find(|e| e.category == Category::Footing).unwrap().id;
+        assert_eq!(app.document.get(pad).unwrap().parent, Some(unit));
+        let ops = app.document.transform_commands(&[unit], openbim_document::Xf::Move([1.0, 0.0])).unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
+        assert!(matches!(app.document.get(pad).unwrap().geometry, Some(Geometry::Pad { at, .. }) if (at[0] - 3.0).abs() < 1e-9 && (at[1] - 4.5).abs() < 1e-9));
+        // away from any unit it is a plain footing, as before
+        app.footing_click(level, [30.0, 30.0]);
+        let plain = app.document.elements().filter(|e| e.category == Category::Footing && e.parent.is_none()).count();
+        assert_eq!(plain, 1);
+    }
+
+    #[test]
+    fn a_tool_does_not_inherit_the_height_of_the_tool_before_it() {
+        // B5: the Ceiling button sets 2.7 m; the Door button after it must put its door on the floor
+        let mut app = Desktop::sample();
+        app.run_command("ceiling", "Ceiling");
+        assert_eq!(app.slab_offset_mm, 2700.0);
+        app.run_command("door", "Door");
+        assert_eq!(app.slab_offset_mm, 0.0, "the door does not start 2.7 m up");
+        app.run_command("ceiling", "Ceiling");
+        app.run_command("component", "Component");
+        assert_eq!(app.slab_offset_mm, 0.0);
+        app.run_command("ceiling", "Ceiling");
+        app.run_command("floor", "Floor");
+        assert_eq!((app.slab_offset_mm, app.slab_thickness_mm), (0.0, 200.0));
+    }
+
+    #[test]
+    fn undoing_a_level_that_was_just_made_leaves_a_plan_on_a_level_that_exists() {
+        // B25: the view pointed at the new level; after undo it must resolve to a level of the model
+        let mut app = Desktop::sample();
+        app.level_elev_mm = 9000.0;
+        app.level_name = "Roof level".into();
+        app.level_click();
+        let made = match app.view { crate::View::Level(id) => ElementId(id), v => panic!("{v:?}") };
+        assert_eq!(app.plan_level(), made);
+        app.document.undo().unwrap();
+        assert!(app.document.get(made).is_none(), "the level is gone");
+        let now = app.plan_level();
+        assert!(now != ElementId(0) && app.document.get(now).is_some_and(|l| l.geometry == Some(Geometry::Level)), "{now:?}");
+        // and a tool started on it works
+        assert!(app.document.place_walls(now, &[([0.0, 0.0], [3.0, 0.0])], 0.2, 3.0, 0.0, None).is_ok());
+    }
     #[test]
     fn round_and_i_beams_are_placed_edited_drawn_closed_in_3d_and_undone() {
         let mut app = Desktop::sample();

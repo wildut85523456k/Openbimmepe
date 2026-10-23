@@ -413,10 +413,11 @@ impl Element {
             && (k != Category::Truss || self.angle_deg == 0.0)
             && (k != Category::Railing || (self.angle_deg == 0.0 && (self.spacing_m == 0.0 || (0.05..=2.0).contains(&self.spacing_m)) && self.height_m <= 5.0 && self.width_m <= 0.5))
             && (k != Category::BeamSystem || (self.spacing_m.is_finite() && (0.0..=1000.0).contains(&self.spacing_m) && self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
-            && (matches!(self.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening) || self.parent.is_none())
+            && (matches!(self.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening | Category::Footing) || self.parent.is_none())
             && (matches!(k, Category::Rebar | Category::Stair | Category::Elevation) || self.count == 0)
             && (self.category == Category::Family
                 || (self.category == Category::Type && self.type_for == Some(Category::Family) && self.type_name.is_empty())
+                || (self.category == Category::Room && self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.iter().all(|(n, _)| matches!(n.as_str(), "Number" | "Department")))
                 || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
@@ -567,6 +568,9 @@ pub struct Document {
     /// 48-bit identity of this project, kept in its file; it keeps the IFC GlobalIds of one project apart from every
     /// other's. 0 until the project is given one.
     project_key: u64,
+    /// lines the application keeps with the file and the document does not read (the Compute settings, say), each starting
+    /// with `U|`. Not an edit: no revision, nothing to undo.
+    app_records: Vec<String>,
     revision: u64,
     /// Undo checkpoints are local, bounded by the hosting application's policy.
     history: Vec<(BTreeMap<ElementId, Element>, Option<Site>, MepData)>,
@@ -577,6 +581,10 @@ pub struct Document {
 impl Document {
     pub fn new() -> Self { Self::default() }
     pub fn revision(&self) -> u64 { self.revision }
+    /// The application's own lines that the file carries.
+    pub fn app_records(&self) -> &[String] { &self.app_records }
+    /// Replaces them. Only lines starting with `U|` and holding no line break are kept.
+    pub fn set_app_records(&mut self, lines: Vec<String>) { self.app_records = lines.into_iter().filter(|l| l.starts_with("U|") && !l.contains(['\n', '\r'])).collect(); }
     /// The project's identity (0 when it has none yet).
     pub fn project_key(&self) -> u64 { self.project_key }
     /// Sets the identity, from a file that carries one. Not an edit: no revision, nothing to undo.
@@ -793,10 +801,21 @@ impl Document {
         ])?;
         Ok(id)
     }
-    /// What a tag says: the type of its element when it has one (a door's type, a wall type), else its name.
+    /// What a tag says: it reads parameters of its element, as Revit's tags do (B23). A duct or pipe says its system
+    /// and size, a room its number and name; else the type of the element when it has one, else its name.
     pub fn tag_text(&self, tag: ElementId) -> String {
         let Some(Geometry::Tag { host, .. } | Geometry::ViewTag { host, .. }) = self.get(tag).and_then(|t| t.geometry) else { return String::new() };
         let Some(h) = self.get(host) else { return "?".into() };
+        let mm = |x: f64| format!("{}", (x * 1000.0).round() as i64);
+        match h.category {
+            Category::Duct => return format!("{} {}x{}mm", crate::compute::system_of_run(self, h.id).name(), mm(h.width_m), mm(h.height_m)),
+            Category::Pipe => return format!("{} {}mm", crate::compute::system_of_run(self, h.id).name(), mm(h.width_m)),
+            Category::Room => {
+                let number = self.room_text(h.id, "Number");
+                return if number.is_empty() { h.name.clone() } else { format!("{number} {}", h.name) };
+            }
+            _ => {}
+        }
         match h.type_id.and_then(|t| self.get(t)) {
             Some(t) => t.name.clone(),
             None if h.category == Category::Family && !h.type_name.is_empty() => h.type_name.clone(),
@@ -901,6 +920,20 @@ impl Document {
             Command::Create { id, category: Category::Footing, name: format!("Footing {n}"), width_m: f.width_m, height_m: f.length_m, elevation_m: f.top_offset_m },
             Command::SetMaterial { id, material: f.material },
             Command::SetGeometry { id, geometry: Geometry::Pad { at, level, thickness_m: f.thickness_m } },
+        ])?;
+        Ok(id)
+    }
+    /// Lays a pad under the equipment `equipment` (a placed family instance), centred on it. The pad is made by the
+    /// equipment: it moves, copies and goes with it (B24).
+    pub fn place_equipment_pad(&mut self, equipment: ElementId, f: &FootingSpec) -> Result<ElementId, EditError> {
+        let Some(Geometry::Placed { at, level }) = self.get(equipment).filter(|e| e.category == Category::Family).and_then(|e| e.geometry) else { return Err(EditError::InvalidElement) };
+        let id = self.next_id();
+        let n = self.elements.values().filter(|e| e.category == Category::Footing).count() + 1;
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Footing, name: format!("Footing {n}"), width_m: f.width_m, height_m: f.length_m, elevation_m: f.top_offset_m },
+            Command::SetMaterial { id, material: f.material },
+            Command::SetGeometry { id, geometry: Geometry::Pad { at, level, thickness_m: f.thickness_m } },
+            Command::SetParent { id, parent: Some(equipment) },
         ])?;
         Ok(id)
     }
@@ -1199,7 +1232,7 @@ impl Document {
                 }
                 Command::SetFamilyTexts { id, texts } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if el.category != Category::Family { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Family | Category::Room) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.texts = texts.clone();
                     el.revision = revision;
                 }
@@ -1225,7 +1258,7 @@ impl Document {
                 }
                 Command::SetParent { id, parent } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening | Category::Footing) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.parent = *parent;
                     el.revision = revision;
                 }
@@ -1311,8 +1344,8 @@ impl Document {
                 }
                 Command::Rename { id, name } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    // a type and a level carry the name the user edits; every other element is named by its category
-                    if el.category != Category::Type && el.category != Category::Level { return Err(EditError::UnsupportedProperty(*id)); }
+                    // a type, a level and a room carry the name the user edits; every other element is named by its category
+                    if el.category != Category::Type && el.category != Category::Level && el.category != Category::Room { return Err(EditError::UnsupportedProperty(*id)); }
                     el.name = name.trim().into();
                     el.revision = revision;
                 }

@@ -774,6 +774,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
                     }
                     if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
+                    if el.category == openbim_document::Category::Room { room_identity(app, ui, el); }
                     if el.category == openbim_document::Category::Family {
                         read_only_group(ui, "Identity Data", &query, &[("Family", &el.family)]);
                         family_type_combo(app, ui, &el.family);
@@ -1093,6 +1094,28 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
             }
             if !TREE.iter().any(|node| node_matches(app, node, &query)) { ui.weak("No matching items"); }
         });
+}
+
+/// Number, Name and Department of the selected room, editable in place and applied as one undoable step (B21). The
+/// draft is held in the UI memory keyed by the room and its revision, so it is re-read after an undo or another edit.
+fn room_identity(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
+    let key = egui::Id::new(("room_identity", el.id.0, el.revision));
+    let seed = (app.document.room_text(el.id, "Number"), el.name.clone(), app.document.room_text(el.id, "Department"));
+    let mut draft = ui.data_mut(|d| d.get_temp::<(String, String, String)>(key)).unwrap_or(seed);
+    egui::CollapsingHeader::new(RichText::new("Identity Data").strong()).id_salt("room_identity").default_open(true).show(ui, |ui| {
+        egui::Grid::new("room_identity_rows").num_columns(2).striped(true).show(ui, |ui| {
+            ui.label("Number"); ui.add(egui::TextEdit::singleline(&mut draft.0).desired_width(120.0)); ui.end_row();
+            ui.label("Name"); ui.add(egui::TextEdit::singleline(&mut draft.1).desired_width(120.0)); ui.end_row();
+            ui.label("Department"); ui.add(egui::TextEdit::singleline(&mut draft.2).desired_width(120.0)); ui.end_row();
+        });
+        if ui.small_button("Apply").on_hover_text("Sets Number, Name and Department in one undoable step").clicked() {
+            app.message = match app.document.set_room_data(el.id, &draft.0, &draft.1, &draft.2) {
+                Ok(()) => "Room updated; undo restores it".into(),
+                Err(_) => "Room not changed: it needs a name, and its number must be new on its level".into(),
+            };
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(key, draft));
 }
 
 #[cfg(test)]

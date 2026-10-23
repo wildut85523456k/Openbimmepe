@@ -184,6 +184,19 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let right = axes.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
     let back = axes.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
     let mut datum_hits = Vec::new();
+    // the levels of the project as a datum strip along the left edge of a plan: a line and a bubble for each, the
+    // highest on top, the level of this view marked (B22). The levels outside the view range are the ones it is for.
+    if !three_d {
+        let ink = ui.visuals().text_color();
+        let marks = level_bubbles(&app.levels(), level_id);
+        for (row, (name, elevation, here)) in marks.iter().enumerate() {
+            let c = Pos2::new(rect.left() + bubble_r + 10.0, rect.top() + bubble_r + 10.0 + row as f32 * (2.0 * bubble_r + 6.0));
+            let stroke = Stroke::new(if *here { 2.0 } else { 1.0 }, if *here { blue } else { Color32::from_gray(135) });
+            dashed(&painter, Pos2::new(c.x + bubble_r, c.y), Pos2::new(c.x + bubble_r + 26.0, c.y), stroke);
+            painter.circle(c, bubble_r, ui.visuals().panel_fill, stroke);
+            painter.text(Pos2::new(c.x + bubble_r + 30.0, c.y), egui::Align2::LEFT_CENTER, format!("{name}  {elevation:+.3}"), egui::FontId::proportional(note_px), if *here { blue } else { ink });
+        }
+    }
     // the places of the elevation markers of this level, to press on and move
     let mut markers: Vec<(ElementId, Pos2)> = Vec::new();
     // what a double click opens: section lines and elevation markers
@@ -1218,6 +1231,13 @@ pub(crate) fn draw_dimension(painter: &egui::Painter, p1: Pos2, p2: Pos2, q1: Po
     centre
 }
 
+/// The level bubbles of a plan, top first: the name, the elevation and whether it is the level of the view.
+fn level_bubbles(levels: &[(ElementId, String, f64)], current: ElementId) -> Vec<(String, f64, bool)> {
+    let mut v: Vec<_> = levels.iter().map(|(id, n, z)| (n.clone(), *z, *id == current)).collect();
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v
+}
+
 fn dashed(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
     let delta = b - a;
     let length = delta.length();
@@ -1232,6 +1252,14 @@ fn dashed(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_plan_shows_a_bubble_for_every_level_highest_first_and_marks_its_own() {
+        let levels = vec![(ElementId(1), "Level 1".to_string(), 0.0), (ElementId(2), "Level 2".to_string(), 3.2), (ElementId(3), "Basement".to_string(), -3.0)];
+        let marks = super::level_bubbles(&levels, ElementId(1));
+        assert_eq!(marks.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(), ["Level 2", "Level 1", "Basement"]);
+        assert_eq!(marks.iter().map(|m| m.2).collect::<Vec<_>>(), [false, true, false]);
+    }
+
     use super::*;
     #[test]
     fn polygon_picking_rejects_empty_plan_space() {

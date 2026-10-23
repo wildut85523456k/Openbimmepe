@@ -217,7 +217,7 @@ impl Document {
     pub fn filtered(&self, keep: &dyn Fn(&Element) -> bool) -> Document {
         let elements: BTreeMap<ElementId, Element> = self.elements().filter(|e| keep(e)).map(|e| (e.id, e.clone())).collect();
         let mep = self.mep().pruned(&elements);
-        Document { elements, site: self.site(), mep, project_key: self.project_key(), revision: self.revision(), history: Vec::new(), future: Vec::new() }
+        Document { elements, site: self.site(), mep, project_key: self.project_key(), app_records: Vec::new(), revision: self.revision(), history: Vec::new(), future: Vec::new() }
     }
 }
 

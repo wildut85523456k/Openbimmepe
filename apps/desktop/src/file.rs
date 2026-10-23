@@ -23,6 +23,7 @@ pub(crate) fn document_from(text: &str) -> Result<Document, String> {
     doc.transact(0, &ops).map_err(|e| format!("the file does not make a model: {e:?}"))?;
     doc.clear_undo_history();
     doc.set_project_key(native::parse_project_key(&lines));
+    doc.set_app_records(native::parse_app_records(&lines));
     Ok(doc)
 }
 
@@ -36,7 +37,15 @@ pub(crate) struct FileState {
     pub confirm_open: Option<String>,
     /// "New" asked while there were unsaved changes
     pub confirm_new: bool,
+    /// the revision the recovery copy holds, and when it was written (B20)
+    pub autosaved_revision: Option<u64>,
+    pub last_autosave: Option<std::time::Instant>,
+    /// a recovery copy newer than the file it belongs to, waiting for the answer to recover or discard it
+    pub recovery: Option<String>,
 }
+
+/// How often the model is written to its recovery copy while it has unsaved changes.
+pub(crate) const AUTOSAVE_SECONDS: u64 = 60;
 
 impl Desktop {
     pub(crate) fn is_dirty(&self) -> bool { self.document.revision() != self.file.saved_revision }
@@ -59,12 +68,75 @@ impl Desktop {
 
     pub(crate) fn write_model(&mut self, path: &str) {
         self.document.ensure_project_key();
+        self.document.set_app_records(self.compute.record().into_iter().collect());
         let tmp = format!("{path}.saving");
         let result = std::fs::write(&tmp, file_text(&self.document)).and_then(|()| std::fs::rename(&tmp, path));
         self.message = match result {
-            Ok(()) => { self.file.path = Some(path.into()); self.file.saved_revision = self.document.revision(); format!("Saved {path}") }
+            Ok(()) => {
+                // what was saved supersedes the recovery copies of this file and of the model before it had a name
+                let _ = std::fs::remove_file(Self::recovery_path(Some(path)));
+                let _ = std::fs::remove_file(Self::recovery_path(None));
+                self.file.path = Some(path.into()); self.file.saved_revision = self.document.revision(); self.file.autosaved_revision = None;
+                format!("Saved {path}")
+            }
             Err(e) => { let _ = std::fs::remove_file(&tmp); format!("Could not save {path}: {e}") }
         };
+    }
+
+    /// Where the recovery copy of a model is kept: beside its file, or in the temporary folder while it has no name (B20).
+    pub(crate) fn recovery_path(file: Option<&str>) -> std::path::PathBuf {
+        match file { Some(p) => std::path::PathBuf::from(format!("{p}.autosave")), None => std::env::temp_dir().join("openbim-untitled.autosave.obim") }
+    }
+
+    /// Writes the recovery copy when the model has changes that neither the file nor the last copy hold and `interval`
+    /// has passed. The file itself is never touched; the copy is written whole and put in place by a rename, so a crash
+    /// in the middle leaves the previous copy. Returns whether a copy was written.
+    pub(crate) fn autosave_tick(&mut self, interval: std::time::Duration) -> bool {
+        let revision = self.document.revision();
+        if !self.is_dirty() || self.file.autosaved_revision == Some(revision) { return false; }
+        if self.file.last_autosave.is_some_and(|t| t.elapsed() < interval) { return false; }
+        self.document.ensure_project_key();
+        self.document.set_app_records(self.compute.record().into_iter().collect());
+        let path = Self::recovery_path(self.file.path.as_deref());
+        let tmp = path.with_extension("autosave.saving");
+        let ok = std::fs::write(&tmp, file_text(&self.document)).and_then(|()| std::fs::rename(&tmp, &path)).is_ok();
+        if !ok { let _ = std::fs::remove_file(&tmp); }
+        self.file.last_autosave = Some(std::time::Instant::now());
+        if ok { self.file.autosaved_revision = Some(revision); }
+        ok
+    }
+
+    /// Looks for a recovery copy newer than `file` (or, with no file, any copy of an unnamed model) and asks about it.
+    pub(crate) fn check_recovery(&mut self, file: Option<&str>) {
+        let copy = Self::recovery_path(file);
+        let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let Some(newest) = modified(&copy) else { return };
+        if file.and_then(|f| modified(std::path::Path::new(f))).is_some_and(|t| t > newest) { return; }
+        self.file.recovery = Some(copy.display().to_string());
+        self.message = "A recovery copy of unsaved work was found: recover it or discard it".into();
+    }
+
+    /// Takes the recovery copy as the model: it stays unsaved, so the file is not replaced until the user saves.
+    pub(crate) fn recover(&mut self) {
+        let Some(copy) = self.file.recovery.take() else { return };
+        let named = self.file.path.clone();
+        let loaded = std::fs::read_to_string(&copy).map_err(|e| format!("Could not read the recovery copy: {e}")).and_then(|t| document_from(&t).map_err(|e| format!("The recovery copy cannot be opened: {e}")));
+        match loaded {
+            Ok(doc) => {
+                self.document = doc;
+                self.file = FileState { path: named, saved_revision: u64::MAX, ..Default::default() };
+                self.compute.restore(self.document.app_records());
+                self.selected = None;
+                self.sync_duct_controls();
+                self.message = format!("Recovered unsaved work ({} elements); save to keep it", self.document.elements().count());
+            }
+            Err(e) => self.message = e,
+        }
+    }
+
+    /// Throws the recovery copy away.
+    pub(crate) fn discard_recovery(&mut self) {
+        if let Some(copy) = self.file.recovery.take() { let _ = std::fs::remove_file(copy); }
     }
 
     /// Asks which file to open, then opens it (after the question about unsaved changes, if there are any).
@@ -84,9 +156,11 @@ impl Desktop {
             Ok(doc) => {
                 self.document = doc;
                 self.file = FileState { path: Some(path.into()), saved_revision: self.document.revision(), ..Default::default() };
+                self.compute.restore(self.document.app_records());
                 self.selected = None;
                 self.sync_duct_controls();
                 self.message = format!("Opened {path} ({} elements)", self.document.elements().count());
+                self.check_recovery(Some(path));
             }
             Err(e) => self.message = e,
         }
@@ -105,6 +179,7 @@ impl Desktop {
         let _ = self.document.place_level("Level 1", 0.0);
         let _ = self.document.place_level("Level 2", 3.0);
         self.file = FileState::default();
+        self.compute = Default::default();
         self.selected = None;
         self.view = crate::View::Plan;
         self.tool = crate::Tool::Select;
@@ -113,6 +188,15 @@ impl Desktop {
 
     /// The question asked when a file or a new model would replace unsaved changes.
     pub(crate) fn file_window(&mut self, ctx: &egui::Context) {
+        if self.file.recovery.is_some() {
+            let (mut recover, mut discard) = (false, false);
+            egui::Window::new("Recover unsaved work").collapsible(false).resizable(false).show(ctx, |ui| {
+                ui.label("The program stopped before this work was saved, and a recovery copy was kept.");
+                ui.horizontal(|ui| { recover = ui.button("Recover").clicked(); discard = ui.button("Discard").clicked(); });
+            });
+            if recover { self.recover(); } else if discard { self.discard_recovery(); }
+            return;
+        }
         if self.file.confirm_open.is_none() && !self.file.confirm_new { return; }
         let (mut save, mut discard, mut cancel) = (false, false, false);
         egui::Window::new("Unsaved changes").collapsible(false).resizable(false).show(ctx, |ui| {
@@ -206,6 +290,73 @@ mod tests {
         assert_eq!(app.document.elements().count(), 2, "{}", app.message);
         assert!(app.document.elements().all(|e| e.geometry == Some(openbim_document::Geometry::Level)), "a new model holds its levels and no other element");
         assert!(app.file.path.is_none());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_compute_inputs_come_back_from_the_file_and_a_new_model_starts_clean() {
+        let mut app = Desktop::sample();
+        assert!(app.compute.record().is_none(), "nothing typed, nothing written");
+        app.compute.use_fluid(true);
+        app.compute.catalogue = "a|b 300x200,300,200\n500x300,500,300\n100%".into();
+        app.compute.loading = "1,0.1\n2,0.2\n".into();
+        app.compute.k = [0.4, 0.2, 0.6, 0.7];
+        app.compute.count_static = true;
+        app.compute.system = openbim_family::mep::System::SupplyAir;
+        let path = std::env::temp_dir().join(format!("openbim-compute-{}.obim", std::process::id())).to_str().unwrap().to_string();
+        app.write_model(&path);
+        let mut back = Desktop::sample();
+        assert!(back.compute.record().is_none());
+        back.open_path(&path);
+        assert_eq!(back.compute.record(), app.compute.record(), "{}", back.message);
+        assert_eq!((back.compute.max_velocity, back.compute.k, back.compute.count_static), (8.0, [0.4, 0.2, 0.6, 0.7], true));
+        assert_eq!(back.compute.catalogue, app.compute.catalogue, "a bar, a percent sign and line breaks survive");
+        assert_eq!(back.compute.loading, "1,0.1\n2,0.2\n");
+        // the document stays equal to the one that was saved, and Compute inputs of another file do not stay behind
+        assert_eq!(back.document, app.document);
+        back.reset_model();
+        assert!(back.compute.record().is_none());
+        std::fs::remove_file(&path).ok();
+    }
+    #[test]
+    fn unsaved_work_is_kept_in_a_recovery_copy_and_comes_back_after_a_crash() {
+        let mut app = Desktop::sample();
+        let d = dir("recovery");
+        let path = d.join("m.obim");
+        let path = path.to_str().unwrap();
+        app.write_model(path);
+        let copy = Desktop::recovery_path(Some(path));
+        // nothing to keep while the model is as saved
+        assert!(!app.autosave_tick(std::time::Duration::ZERO) && !copy.exists());
+        // a change is written to the copy, not to the file, and only once
+        let saved = std::fs::read_to_string(path).unwrap();
+        app.document.place_beam(openbim_document::ElementId(10), &openbim_document::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.3, 0.5, 2.8)).unwrap();
+        let n = app.document.elements().count();
+        assert!(app.autosave_tick(std::time::Duration::ZERO) && copy.exists());
+        assert!(!app.autosave_tick(std::time::Duration::ZERO), "the same revision is not written again");
+        assert_eq!(std::fs::read_to_string(path).unwrap(), saved, "the file is not touched");
+        assert!(!std::path::Path::new(&format!("{}.saving", copy.display())).exists());
+        // the interval holds back the next copy
+        app.document.place_beam(openbim_document::ElementId(10), &openbim_document::BeamSpec::level([1.0, 2.0], [5.0, 2.0], 0.3, 0.5, 2.8)).unwrap();
+        assert!(!app.autosave_tick(std::time::Duration::from_secs(3600)));
+        // the program stops; the next one opens the file and is told about the copy
+        let mut next = Desktop::sample();
+        next.load_model(path);
+        assert!(next.file.recovery.is_some(), "{}", next.message);
+        let before = next.document.elements().count();
+        next.recover();
+        assert_eq!(next.document.elements().count(), n);
+        assert!(n > before && next.is_dirty(), "the recovered work is unsaved, so the file is not replaced until the user saves");
+        assert_eq!(next.file.path.as_deref(), Some(path));
+        // saving makes the copy unnecessary
+        next.write_model(path);
+        assert!(!copy.exists() && !next.is_dirty());
+        // a copy can be thrown away
+        app.autosave_tick(std::time::Duration::ZERO);
+        let mut again = Desktop::sample();
+        again.load_model(path);
+        if again.file.recovery.is_some() { again.discard_recovery(); }
+        assert!(again.file.recovery.is_none() && !copy.exists());
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

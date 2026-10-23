@@ -388,7 +388,13 @@ pub fn records(doc: &Document) -> Vec<String> {
     }
     out.extend(doc.elements().map(element_record));
     out.extend(mep_records(doc.mep()));
+    out.extend(doc.app_records().iter().cloned());
     out
+}
+
+/// The application's own lines in a file (`U|`), for the application to read.
+pub fn parse_app_records(lines: &[String]) -> Vec<String> {
+    lines.iter().filter(|l| l.starts_with("U|")).cloned().collect()
 }
 
 /// The project key a file carries (its `Y|` record), 0 when it has none (a file from before the key existed).
@@ -1174,7 +1180,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
                 .ok_or_else(|| format!("a record without '{k}'"))
         };
         if [
-            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|", "Y|",
+            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|", "Y|", "U|",
         ]
         .iter()
         .any(|p| line.starts_with(p))

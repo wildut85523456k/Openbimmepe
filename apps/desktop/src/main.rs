@@ -310,7 +310,9 @@ impl Desktop {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::light());
         if let Some(rs) = cc.wgpu_render_state.as_ref() { openbim_viewport_egui::Viewport3d::init(rs); }
-        Self::sample()
+        let mut app = Self::sample();
+        app.check_recovery(None);
+        app
     }
 
     fn sample() -> Self {
@@ -852,6 +854,9 @@ impl Desktop {
         self.compute_window(&ctx);
         self.elec_window(&ctx);
         self.file_window(&ctx);
+        #[cfg(not(test))]
+        self.autosave_tick(std::time::Duration::from_secs(file::AUTOSAVE_SECONDS));
+        ctx.request_repaint_after(std::time::Duration::from_secs(file::AUTOSAVE_SECONDS));
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));
