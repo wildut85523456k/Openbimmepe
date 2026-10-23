@@ -158,12 +158,16 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
+    // sorted once, here and for the whole export: a room's level is an index into this list, and so are the storeys
+    let levels = Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?;
     let (mut walls, mut beams, mut columns, mut slabs, mut roofs, mut stairs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut railings: Vec<openbim_ifc::RailingItem> = Vec::new();
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
     let mut instances = Vec::new();
     let mut mep = Network::new(1);
+    // the designer's names for the systems, so the file's IfcDistributionSystem carries them (Revit's "AHU-1 Supply")
+    mep.system_names = doc.mep().systems.iter().map(|d| (d.system, d.name.clone())).collect();
     // the wall types that have layers, as the file writes them (IFC2X3 has none)
     let wall_types: Vec<(ElementId, openbim_ifc::walls::WallType)> = doc.types_for(Category::Wall).into_iter().filter(|t| t.is_layered()).map(|t| (t.id, wall_type_of(t))).collect();
     for el in doc.elements() {
@@ -245,16 +249,17 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             }
             // the beams, members or bars they make are exported in their place
             (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
-            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::Opening | Category::Section | Category::Elevation | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
+            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Opening | Category::Section | Category::Elevation | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct | Category::Pipe, Some(Geometry::Linear { start, end, level })) => {
                 let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
                 let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);
                 let (a, b) = ([start[0], start[1], z], [end[0], end[1], z + rise]);
-                // the document does not say which system a run belongs to yet
+                // the system the designer gave this run, where they set one; a run with no assignment keeps `Other`
+                let system = doc.mep().run_system(el.id).unwrap_or(System::Other);
                 let run = if el.category == Category::Pipe {
-                    openbim_place::penetrations::Run::round(&el.name, Domain::Pipe, System::Other, a, b, el.width_m)
+                    openbim_place::penetrations::Run::round(&el.name, Domain::Pipe, system, a, b, el.width_m)
                 } else {
-                    openbim_place::penetrations::Run::rect(&el.name, Domain::Duct, System::Other, a, b, el.width_m, el.height_m)
+                    openbim_place::penetrations::Run::rect(&el.name, Domain::Duct, system, a, b, el.width_m, el.height_m)
                 };
                 mep.segments.push(NetSegment { id: el.id.0, run });
             }
@@ -335,13 +340,40 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             slab_voids.extend(doc.shaft_cuts(id).into_iter().map(|(name, outline)| openbim_place::floors::SlabVoid { slab: si, name, outline }));
         }
     }
+    // the holes a run makes in a wall or a slab: the penetrations engine computes them from the runs and the walls
+    // and floors they cross, and the file gets both the openings (the hole itself) and the register of what passes
+    let runs: Vec<openbim_place::penetrations::Run> = mep.segments.iter().map(|s| s.run.clone()).collect();
+    let chains: Vec<WallChain> = walls.iter().map(|w| w.chain.clone()).collect();
+    let (wall_penetrations, wall_issues) = openbim_place::penetrations::find(&chains, &runs, openbim_place::penetrations::DEFAULT_GROUP_RADIUS);
+    for p in &wall_penetrations {
+        let c = &mut walls[p.id.chain].chain;
+        if c.openings.len() <= p.id.segment { c.openings.resize(p.id.segment + 1, Vec::new()); }
+        c.openings[p.id.segment].push(openbim_geom::Opening { offset: p.offset, width: p.width, sill: p.sill, height: p.height });
+    }
+    let slab_outlines: Vec<openbim_place::floors::Slab> = slabs.iter().map(|s| s.slab.clone()).collect();
+    let (floor_penetrations, floor_issues) = openbim_place::floors::find_floor(&slab_outlines, &[], &runs, openbim_place::penetrations::DEFAULT_GROUP_RADIUS);
+    if !wall_issues.is_empty() || !floor_issues.is_empty() { *skipped.entry("runs that do not fit their wall or slab (left out)").or_default() += 1; }
+    // the rooms, as the file writes them: each is the closed space its walls bound, on the level it stands on
+    let mut rooms: Vec<openbim_ifc::RoomItem> = Vec::new();
+    for el in doc.elements().filter(|e| e.category == Category::Room) {
+        let Some(Geometry::Room { level, .. }) = el.geometry else { *skipped.entry("rooms without a place").or_default() += 1; continue };
+        let Some(host) = doc.get(level).filter(|l| matches!(l.geometry, Some(Geometry::Level))) else { *skipped.entry("rooms on a level that is gone").or_default() += 1; continue };
+        let Some(li) = levels.index_of(&host.name) else { *skipped.entry("rooms on a level that is gone").or_default() += 1; continue };
+        let Ok(shape) = doc.room_shape(el.id) else { *skipped.entry("rooms whose walls do not close a space").or_default() += 1; continue };
+        // a room rises to the next level up, as Revit's room height does; the element's own height is the fallback
+        let height = levels.floor_to_floor(li).ok().flatten().unwrap_or(el.height_m);
+        rooms.push(openbim_ifc::RoomItem { id: el.id.0, room: openbim_arch::Room {
+            name: el.name.clone(), usage: String::new(), occupancy: 0.0, level: li,
+            outline: shape.outline, holes: shape.holes, height,
+        } });
+    }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
     let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs, &stairs, &railings);
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
-        levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
-        walls, wall_penetrations: vec![], firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations: vec![], slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
+        levels,
+        walls, wall_penetrations, firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
+        floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms, wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
         wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
@@ -586,6 +618,34 @@ mod tests {
         assert_eq!(iso_time(0), "1970-01-01T00:00:00");
         assert_eq!(iso_time(1_781_998_496), "2026-06-20T23:34:56");
         assert_eq!(iso_time(951_782_400), "2000-02-29T00:00:00");
+    }
+
+    #[test]
+    fn a_run_carries_its_system_and_cuts_its_wall_and_the_rooms_and_systems_reach_the_file() {
+        let mut d = Document::spatial_sample();
+        // a named system of equipment, as the System Browser makes it: the file's group must carry the user's name
+        let fcu = d.place_family(ElementId(10), [2.0, 2.0], &openbim_document::FamilySpec {
+            family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2,
+        }).unwrap();
+        let ops = d.create_system_commands("AHU-1 Supply", System::SupplyAir, &[fcu]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        // the designer's system on the run, which the exporter used to replace with `Other`
+        openbim_document::compute::assign_system(&mut d, &[ElementId(1)], System::SupplyAir).unwrap();
+        // a room in the closed space left of the middle wall
+        d.place_room(ElementId(10), [2.0, 2.0]).unwrap();
+        let out = export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap();
+        // the room is a space of its own
+        assert_eq!(out.text.matches("IFCSPACE(").count(), 1, "{}", out.text);
+        // the duct and the pipe both cross the middle wall: each cuts its own opening
+        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 2, "{}",
+            out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT")).collect::<Vec<_>>().join("\n"));
+        // the run carries the system the designer gave it, not `Other`
+        assert!(out.text.contains("IFCLABEL('VENTILATION')"), "{}", out.text);
+        // the file's distribution system carries the user's name, not the enum's "Supply air 1"
+        assert!(out.text.contains("'AHU-1 Supply'"), "{}",
+            out.text.lines().filter(|l| l.contains("IFCDISTRIBUTIONSYSTEM")).collect::<Vec<_>>().join("\n"));
+        // and the file is the same twice
+        assert_eq!(out.text, export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap().text);
     }
 }
 

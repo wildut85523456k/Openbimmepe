@@ -2008,7 +2008,8 @@ mod tests {
         // exported as a door that fills an opening in the wall
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
         assert_eq!(out.text.matches("IFCDOOR(").count(), 1);
-        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 1);
+        // the door's opening, and the two the sample's duct and pipe cut through the middle wall
+        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 3);
         // it follows the wall: the wall moves, the door goes with it
         app.document.transact(app.document.revision(), &[Command::SetGeometry { id: wall, geometry: Geometry::Linear { start: [start[0], start[1] + 0.5], end: [end[0], end[1] + 0.5], level: ElementId(10) } }]).unwrap();
         assert!(volume(&app, wall) < before - 0.05);
@@ -2334,7 +2335,8 @@ mod tests {
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
         let line = |name: &str| out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains(name)).count();
         assert_eq!((line("Shaft Opening 1"), line("Shaft Opening 2")), (1, 1));
-        assert_eq!(out.text.matches("IFCRELVOIDSELEMENT(").count(), 3, "two shafts in the floor and the wall opening in the wall");
+        // two shafts in the floor, the wall opening in the wall, and the two the sample's runs cut in that wall
+        assert_eq!(out.text.matches("IFCRELVOIDSELEMENT(").count(), 5);
         assert!(out.text.contains("Qto_SlabBaseQuantities"));
         // moving the wall moves its opening with it, and deleting the wall deletes the opening
         let ops = app.document.delete_commands(&[wall]).unwrap();

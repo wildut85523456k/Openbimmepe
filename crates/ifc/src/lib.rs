@@ -1831,8 +1831,12 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
         // systems
         for (code, elems) in by_system {
             let sys = System::from_code(code).unwrap_or(System::Other);
+            // the designer's name for the system, where they gave one (Revit's "AHU-1 Supply"); the enum's own
+            // name with a running number is the fallback for a system the designer never named
+            let name = net.system_names.iter().find(|(s, _)| *s == sys).map(|(_, n)| n.clone())
+                .unwrap_or_else(|| format!("{} {}", sys.name(), ni + 1));
             let g = o.gen_gid();
-            let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&format!("{} {}", sys.name(), ni + 1)), sys.ifc_system()));
+            let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&name), sys.ifc_system()));
             let g = o.gen_gid();
             o.s.add(format!("IFCRELASSIGNSTOGROUP({g},$,$,$,({}),$,#{grp})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
         }

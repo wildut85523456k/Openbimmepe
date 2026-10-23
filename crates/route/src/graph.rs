@@ -120,6 +120,9 @@ pub struct Network {
     pub insulation: Vec<(System, Insulation)>,
     /// insulation laid on single runs and fittings, by their element number; it wins over that of the piece's system
     pub piece_insulation: Vec<(u64, Insulation)>,
+    /// the designer's name for each system, by the system; the file's `IfcDistributionSystem` takes this name
+    /// instead of a generic one built from the enum
+    pub system_names: Vec<(System, String)>,
     next_id: u64,
 }
 
