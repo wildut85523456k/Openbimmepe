@@ -359,6 +359,22 @@ pub struct MemberInfo {
     pub fingerprint: String,
 }
 
+/// A product the app has no element of its own for, kept as a prism over a plan outline and written as an
+/// `IfcBuildingElementProxy` (what other programs write for a thing they have no class for). `class` and `predefined`
+/// say what it was, and `props` (`<set>.<property>` and its value) what the file said of it; they go in the
+/// `OpenBIM_Source` set so that nothing the file said is lost.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProxyItem {
+    pub id: u64,
+    pub name: String,
+    pub outline: Vec<[f64; 2]>,
+    pub bottom: f64,
+    pub top: f64,
+    pub class: String,
+    pub predefined: String,
+    pub props: Vec<(String, String)>,
+}
+
 /// A roof by footprint: its solid as faces (each a ring of points, wound outward) and the shape it is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoofItem {
@@ -410,6 +426,8 @@ pub struct Scene {
     /// firestop records of the wall penetrations (product, installed, inspected), entered by hand or by external software
     pub firestops: Firestops,
     pub slabs: Vec<SlabItem>,
+    /// products with no element of their own, each an `IfcBuildingElementProxy` over a prism
+    pub proxies: Vec<ProxyItem>,
     /// roofs by footprint, each written as an IfcRoof with a faceted solid
     pub roofs: Vec<RoofItem>,
     /// railings, each an IfcRailing whose parts are faceted solids
@@ -483,6 +501,8 @@ pub struct Report {
     pub walls: usize,
     pub openings: usize,
     pub slabs: usize,
+    /// `IfcBuildingElementProxy` written for generic models
+    pub proxies: usize,
     pub roofs: usize,
     pub railings: usize,
     pub stairs: usize,
@@ -1011,6 +1031,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
         families::write_families(&mut o)?;
     }
     write_slabs(&mut o)?;
+    write_proxies(&mut o)?;
     write_roofs(&mut o)?;
     write_railings(&mut o)?;
     write_stairs(&mut o)?;
@@ -1349,6 +1370,33 @@ fn write_member_types(o: &mut Out) -> Result<(), ExportError> {
             o.s.add(format!("IFCRELDEFINESBYTYPE({g},$,$,$,({}),#{ty})", users.join(",")));
         }
         o.report.types += 1;
+    }
+    Ok(())
+}
+
+/// Generic models: a prism each, an `IfcBuildingElementProxy` that says in `ObjectType` and in `OpenBIM_Source` what it was.
+fn write_proxies(o: &mut Out) -> Result<(), ExportError> {
+    let scene = o.scene;
+    for item in &scene.proxies {
+        let finite = item.bottom.is_finite() && item.top.is_finite() && item.outline.iter().all(|p| p[0].is_finite() && p[1].is_finite());
+        if item.outline.len() < 3 || !finite || item.top - item.bottom <= 0.0 {
+            return Err(ExportError::Unsupported(format!("generic model {}: no shape", item.name)));
+        }
+        let st = o.storey_for(item.bottom);
+        let elev = o.storeys[st].2;
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let prof = o.poly_profile(&item.outline);
+        let solid = o.extrusion(prof, [0.0, 0.0, item.bottom - elev], None, None, item.top - item.bottom);
+        let shape = o.shape(&[solid]);
+        let g = o.gid(item.id, 0);
+        let e = o.s.add(format!("IFCBUILDINGELEMENTPROXY({g},$,{},$,{},#{pl},#{shape},$,$)", string(&item.name), string(&item.class)));
+        o.contain(st, e);
+        o.member_entities.push((item.id, e));
+        let mut props: Vec<(&str, Val)> = vec![("IfcClass", Val::Label(item.class.clone()))];
+        if !item.predefined.is_empty() { props.push(("PredefinedType", Val::Label(item.predefined.clone()))); }
+        props.extend(item.props.iter().map(|(k, v)| (k.as_str(), Val::Text(v.clone()))));
+        o.pset(e, "OpenBIM_Source", props);
+        o.report.proxies += 1;
     }
     Ok(())
 }

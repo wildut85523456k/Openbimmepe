@@ -46,7 +46,7 @@ fn scene(walls: Vec<WallItem>) -> Scene {
         georef: None,
         room_settings: Default::default(),
         separation_lines: vec![],
-        pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![],
+        proxies: vec![], pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![],
     }
 }
 fn wall(id: u64) -> WallItem {

@@ -15,7 +15,7 @@ fn scene(rooms: Vec<RoomItem>) -> Scene {
         stairs: vec![], columns: vec![], beams: vec![], materials: Default::default(), shafts: vec![], floor_penetrations: vec![],
         slab_voids: vec![], networks: vec![], families: vec![], items: vec![], rooms, grids: vec![], system_defs: vec![], assemblies: vec![],
         room_lighting: Default::default(), wall_types: vec![], types: vec![], member_info: Default::default(), native: vec![],
-        wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], pset_map: Default::default(),
+        wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], proxies: vec![], pset_map: Default::default(),
     }
 }
 

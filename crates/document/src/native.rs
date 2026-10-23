@@ -11,7 +11,7 @@ use super::{
 /// Written first in every set of records.
 pub const FORMAT: &str = "obim-records-1";
 
-const CATEGORIES: [(Category, &str); 24] = [
+const CATEGORIES: [(Category, &str); 25] = [
     (Category::Wall, "Wall"),
     (Category::Tag, "Tag"),
     (Category::Dimension, "Dimension"),
@@ -36,6 +36,7 @@ const CATEGORIES: [(Category, &str); 24] = [
     (Category::Equipment, "Equipment"),
     (Category::Level, "Level"),
     (Category::Grid, "Grid"),
+    (Category::Generic, "Generic"),
 ];
 
 fn esc(s: &str) -> String {

@@ -225,7 +225,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Wall => ("Walls (1)", "Basic Wall", "wall"), C::Duct => ("Ducts (1)", "Rectangular Duct", "duct"),
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"), C::Section => ("Views (1)", "Section", "section"), C::Elevation => ("Views (1)", "Elevation", "elevation"),
-        C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
+        C::Generic => ("Generic Models (1)", "Generic Model", "component"), C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
     }
 }
 
@@ -874,6 +874,13 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let area = openbim_geom::profile::polygon_area(&el.outline).abs();
                         let (corners, area) = (el.outline.len().to_string(), format!("{area:.3}"));
                         read_only_group(ui, "Derived Geometry", &query, &[("Corners", &corners), ("Area (m²)", &area)]);
+                    }
+                    if el.category == openbim_document::Category::Generic {
+                        // what a file brought in: shown as it came, not edited here
+                        let (height, base, area) = (format!("{:.3}", el.height_m), format!("{:.3}", el.elevation_m - el.height_m), format!("{:.3}", openbim_geom::profile::polygon_area(&el.outline).abs()));
+                        read_only_group(ui, "Derived Geometry", &query, &[("Height (m)", &height), ("Base above level (m)", &base), ("Plan area (m²)", &area)]);
+                        let rows: Vec<(&str, &str)> = el.texts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+                        read_only_group(ui, "Source (IFC)", &query, &rows);
                     }
                     if matches!(el.category, openbim_document::Category::Beam | openbim_document::Category::Column | openbim_document::Category::BeamSystem) { section_combo(app, ui); usage_material_combos(app, ui, el.category != openbim_document::Category::Column); }
                     if el.category == openbim_document::Category::Truss { usage_material_combos(app, ui, false); }
