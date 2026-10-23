@@ -54,8 +54,6 @@ pub(crate) struct JournalState { pub state: openbim_oplog::State, pub seq: u64, 
 const COMPACT_TRANSACTIONS: usize = 500;
 const COMPACT_BYTES: usize = 8 << 20;
 
-/// How often the model is written to its recovery copy while it has unsaved changes.
-pub(crate) const AUTOSAVE_SECONDS: u64 = 15;
 
 impl Desktop {
     pub(crate) fn is_dirty(&self) -> bool { self.document.revision() != self.file.saved_revision }
@@ -96,6 +94,47 @@ impl Desktop {
     /// Where the journal of a model is kept: beside its file, or in the temporary folder while it has no name (B20).
     pub(crate) fn recovery_path(file: Option<&str>) -> std::path::PathBuf {
         match file { Some(p) => std::path::PathBuf::from(format!("{p}.journal")), None => std::env::temp_dir().join("openbim-untitled.journal") }
+    }
+
+    /// The automatic save the user chose in Options (every N minutes, 0 = never): the journal of the unsaved work, or,
+    /// when asked and the model has a file, the file itself.
+    pub(crate) fn autosave(&mut self) {
+        let minutes = self.settings.autosave_minutes;
+        if minutes == 0 { return; }
+        let interval = std::time::Duration::from_secs(u64::from(minutes) * 60);
+        if let (true, Some(path)) = (self.settings.autosave_to_file, self.file.path.clone()) {
+            if self.is_dirty() && self.file.last_autosave.is_none_or(|t| t.elapsed() >= interval) {
+                self.write_model(&path);
+                self.file.last_autosave = Some(std::time::Instant::now());
+                if self.message.starts_with("Saved") { self.message = format!("Autosaved {path}"); }
+            }
+            return;
+        }
+        self.autosave_tick(interval);
+    }
+
+    /// The Options window: how often unsaved work is saved automatically. A change is kept for the next session.
+    pub(crate) fn options_window(&mut self, ctx: &egui::Context) {
+        if !self.show_options { return; }
+        let before = self.settings.clone();
+        let mut open = true;
+        egui::Window::new("Options").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            let mut on = self.settings.autosave_minutes > 0;
+            ui.checkbox(&mut on, "Save automatically");
+            if on && self.settings.autosave_minutes == 0 { self.settings.autosave_minutes = 1; }
+            if !on { self.settings.autosave_minutes = 0; }
+            ui.add_enabled_ui(on, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("every");
+                    ui.add(egui::DragValue::new(&mut self.settings.autosave_minutes).range(1..=crate::app_settings::MAX_AUTOSAVE_MINUTES).suffix(" min"));
+                });
+                ui.checkbox(&mut self.settings.autosave_to_file, "Write the model file itself (a model that has a file)")
+                    .on_hover_text("Off: the unsaved work is kept in a recovery journal beside the file and the file changes only when you save. On: the file is overwritten each time.");
+            });
+            if on && !self.settings.autosave_to_file { ui.small("Unsaved work is kept in a recovery journal; the file changes only when you save."); }
+        });
+        if !open { self.show_options = false; }
+        if self.settings != before && !self.settings.save() { self.message = "The options could not be written; they hold for this session".into(); }
     }
 
     /// Keeps the unsaved work in the journal when the model has changes that neither the file nor the journal hold and
@@ -427,6 +466,42 @@ mod tests {
         torn.load_model(path);
         torn.recover();
         assert_eq!(torn.document.elements().count(), n - 1, "{}", torn.message);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+    #[test]
+    fn the_automatic_save_follows_the_options_off_journal_or_the_file_itself() {
+        let mut app = Desktop::sample();
+        let d = dir("options");
+        let path = d.join("m.obim");
+        let path = path.to_str().unwrap();
+        app.write_model(path);
+        let journal = Desktop::recovery_path(Some(path));
+        let beam = |app: &mut Desktop| { app.document.place_beam(openbim_document::ElementId(10), &openbim_document::BeamSpec::level([1.0, 1.0], [5.0, 1.0], 0.3, 0.5, 2.8)).unwrap(); };
+        // off: nothing is written
+        app.settings.autosave_minutes = 0;
+        beam(&mut app);
+        app.autosave();
+        assert!(!journal.exists());
+        // on, to the journal: the file stays as saved
+        app.settings.autosave_minutes = 1;
+        let saved = std::fs::read_to_string(path).unwrap();
+        app.autosave();
+        assert!(journal.exists() && std::fs::read_to_string(path).unwrap() == saved && app.is_dirty());
+        // on, to the file: the file takes the work, the journal goes, and the model is no longer dirty
+        app.settings.autosave_to_file = true;
+        app.file.last_autosave = None;
+        app.autosave();
+        assert!(!app.is_dirty() && !journal.exists() && std::fs::read_to_string(path).unwrap() != saved, "{}", app.message);
+        assert!(app.message.starts_with("Autosaved"));
+        // a model with no file is still kept in the journal
+        let mut fresh = Desktop::sample();
+        fresh.settings = crate::app_settings::AppSettings { autosave_minutes: 1, autosave_to_file: true };
+        beam(&mut fresh);
+        fresh.file.path = None;
+        fresh.autosave();
+        let untitled = Desktop::recovery_path(None);
+        assert!(untitled.exists());
+        let _ = std::fs::remove_file(untitled);
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

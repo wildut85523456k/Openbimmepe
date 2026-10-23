@@ -29,7 +29,7 @@ not used. Is the log still wanted, and if so, what is in it?
 3. **A transaction is the difference between two states of the records**, so the log never needs to know what a command
    is. The format is described in one place only, `native.rs`.
 4. **The journal is the recovery store.** `<file>.journal` (or a file in the temporary folder for an unnamed model) holds
-   a base snapshot, then appended transactions. It is written every 15 s while the model has unsaved changes. When it
+   a base snapshot, then appended transactions. It is written while the model has unsaved changes, every N minutes as the user chooses in Options (default 1, 0 = off). When it
    reaches 500 transactions or 8 MB it is folded into a new base. A normal Save deletes it. It never replaces the file.
 5. **Reading tolerates a crash.** A torn last record is dropped. A damaged record stops the replay there and the
    recovered work up to it is offered, with a message saying so.
