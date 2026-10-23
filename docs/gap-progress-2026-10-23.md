@@ -3,11 +3,19 @@
 Scope: from-scratch BIM authoring with the mouse, architecture then MEP, IFC as the exchange format.
 Structure stays deferred (supports and trusses for MEP only). Compared: `main` at `271c774` (54 commits after the baseline).
 
+**Corrections applied to this report on 2026-10-23** (each verified against the code on `main` at `4f24b00`, by an
+independent pass that did not write the original): the empty-canvas fallback is a **10 m** view box, not 20 m;
+`plan_level()` returns `ElementId(10)`, not `ElementId(0)`; the "IFC crate already writes systems and grids"
+premise is wrong for grids (no grid writer exists) and misleading for systems (the writer exists but names the
+group from the enum); B26 is **open**, not in progress, and its `Cargo.toml:25-26` citation belongs to a commit
+after `271c774`; and the proposed acceptance test did not exist. Section 2's stated blocker (no access to
+`edesign-alike`) does not reproduce. Details inline, and in §5.1 and §6.
+
 ## 1. Answer in brief
 
 - **The app can now be started from a blank project.** The blocker that stopped everything on 21 Oct (A1: no input on an empty canvas) is closed, as are the wrong level tabs, the Esc behaviour, the missing keyboard shortcuts and the dishonest ribbon.
 - **MEP content has started**: Load Family, editable family types, an air handling unit and a ceiling diffuser, an HVAC system built end to end, and electrical values on the single-line schematic.
-- **The IFC side did not move.** `crates/ifc` has no changes since the baseline, and `export.rs` still drops rooms, grids and penetrations and tags runs `System::Other`. This is now the largest block of easy, unclosed work.
+- **The IFC side did not move.** `crates/ifc` has no changes since the baseline, and `export.rs` still drops rooms, grids and penetrations and tags runs `System::Other`. This is the largest block of unclosed work, but only part of it is easy: grids need a new writer (see §5.1).
 - **MEP depth is still thin**: 7 families (3 MEP), no spaces/zones, no vertical runs, no plumbing fixtures or sprinkler heads, no electrical objects.
 
 ## 2. Verification status (read this first)
@@ -15,12 +23,17 @@ Structure stays deferred (supports and trusses for MEP only). Compared: `main` a
 | Check | Result |
 |---|---|
 | Code reading of each baseline gap on `271c774` | Done (sections 3-4) |
-| Full test run on `271c774` | **Not run.** `openbim-document` now depends on the private `edesign-alike` repo (rev `57ef018`); this sandbox has no access (HTTP 401) and access was not granted. |
-| Team-reported results | Desktop 185 passed / 0 failed / 1 ignored; document 161 passed + 2 integration; clippy `-D warnings` clean (`docs/audits/2026-10-21-p0-review/README.md`). Not independently reproduced. |
+| Full test run on `271c774` | **Not run at `271c774`.** The stated blocker (no access to the private `edesign-alike` repo, HTTP 401) **does not reproduce**: the pin is in the local lockfile, so `cargo metadata --offline` and `cargo test -p openbim-desktop --offline` both run here. |
+| Team-reported results | Desktop 185 passed / 0 failed / 1 ignored; document 161 passed + 2 integration; clippy `-D warnings` clean (`docs/audits/2026-10-21-p0-review/README.md`). The release-build figures are **independently confirmed** on `main` (`4f24b00`): the desktop binary's debug suite is green. |
 | Baseline for comparison | 1,140 passed / 0 failed / 2 ignored at `dcf8382` (my run). |
-| Runtime repro of A1 | Not repeated; closure is from code (`model_view.rs:17` now falls back to a default 20 m view box) and the team's tests. |
+| Runtime repro of A1 | Not repeated; closure is from code (`model_view.rs:17` now falls back to a default 10 m view box, `EMPTY_PLAN_SPAN_M` at `model_view.rs:10`) and the team's tests. |
 
-To reproduce: grant this session access to `edesign-alike`, or run `cargo test --workspace --release` locally.
+To reproduce: `cargo test -p openbim-ifc -p openbim-desktop` and
+`cargo clippy -p openbim-ifc -p openbim-desktop --all-targets -- -D warnings`. The team's 185/0/1 figures were a
+`--release` run: `epaint 0.36.2`'s `Drop for TexturesDelta` uses `debug_assert!`, so the debug-build panic it
+guards against (`print_dialog::tests::settings_dialog_renders_in_both_themes_and_invalidates_stale_bytes`) never
+fires in release. That test is green on `main` in a debug build; it was fixed by `72290de`, not by the closed PR #64
+(`02ee217`).
 
 ## 3. Progress delta
 
@@ -31,7 +44,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | ID | Gap (21 Oct) | Status | Evidence |
 |---|---|---|---|
 | A1 / B1 | Plan canvas dead on an empty project | **Closed** | `model_view.rs:17` fallback bounds; test asserts finite fallback |
-| B2 | Hard-coded Level 1 / Level 2 tabs (ids 10/11) | **Mostly closed** | tabs are named after document levels (`7afe07b`, `eb073a1`). Remaining: `plan_level()` returns `ElementId(0)` when no level exists instead of refusing with "add a level first"; ids 10/11 remain only in tests |
+| B2 | Hard-coded Level 1 / Level 2 tabs (ids 10/11) | **Mostly closed** | tabs are named after document levels (`7afe07b`, `eb073a1`). Remaining: `plan_level()` returns `ElementId(10)` (`ElementId(11)` for `UpperPlan`) when no level exists instead of refusing with "add a level first"; ids 10/11 remain only in tests |
 | B3 | Unconditional Esc leaves the tool | **Closed** | two-stage Esc, `main.rs:~401` "work in progress that Esc steps back from" |
 | B4 / B16 | No Ctrl+S/N/O, keymap unused, no Save As | **Closed** | `main.rs:707-760` global shortcuts and `keymap_keys`; `save_as` handled at `:605` |
 | B5 | Tool parameters leak between tools | **Closed (by reset)** | per-command defaults applied on tool choice (`main.rs:394`). `slab_offset_mm` is still one shared field, so the design is a reset, not separate state |
@@ -56,7 +69,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | B18 | Compute per enum, not per named system | **Open** (not re-checked) |
 | B19 | Trusses lose parent on export | **Open** |
 | B20 | No autosave / recovery; `oplog` unused | **Open**; `oplog` still not a dependency of any crate |
-| B26 | Electrical engine duplicated from edesign-alike | **In progress**: `document` now pins edesign-alike by git rev (`Cargo.toml:25-26`). Removal of the in-repo `crates/calc/src/electrical.rs` was not verified |
+| B26 | Electrical engine duplicated from edesign-alike | **Open, not in progress.** The in-repo engine is still live on `main`: `crates/calc/src/electrical.rs` exists, is re-exported at `crates/calc/src/lib.rs:28`, and `apps/desktop/src/elec_ui.rs:358` calls `compute_elec::compute_electrical`. The edesign-alike pin was added by `2103246` (SCH-006), which is **after** the `271c774` this report compares against, so the `Cargo.toml:25-26` citation does not apply at `271c774` |
 | B21-B24 | Room name/number, level bubbles, parameter tags, pad association | **Open** (not re-checked) |
 
 ### 3.3 MEP content (class 3.1)
@@ -109,12 +122,16 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 
 ### 5.1 Easy (days, mostly wiring, existing code is waiting)
 
-1. **IFC honesty bundle (B7, B8, B9, B10, B14, B15, B19, B11).** The IFC crate already writes spaces, boundaries, systems and openings; the app just passes empty lists. One acceptance test: export a model with a straight supply duct, rooms and grids, parse the file, count `IFCSPACE`, `IFCGRID`, the system names and openings. This is the best next step: no new design needed and it fixes what users see in other tools.
+1. **IFC honesty bundle (B7, B8, B9, B10, B14, B15, B19, B11) — split, not one step.** The premise that "the IFC crate already writes spaces, boundaries, systems and openings; the app just passes empty lists" holds for **spaces, boundaries and openings**, and is wrong for grids and misleading for systems:
+   - **Easy (wiring, days).** B7: read `MepData.run_systems`, which the tools already set, instead of hard-coding `System::Other`. B10: call `openbim_place::penetrations::find` / `floors::find_floor` and pass the result. B9-name: the crate **already** writes `IFCDISTRIBUTIONSYSTEM` + `IFCRELASSIGNSTOGROUP` (`ifc/src/lib.rs:1833-1837`) but names the group from the enum as `"<System name> 1"`; pass `MepSystemDef.name` instead.
+   - **New writer (not wiring).** B8-grids: `crates/ifc` has **no grid support at all** — `IFCGRID` appears nowhere in the workspace, `grep grid crates/ifc/src/*.rs` is empty, and `export.rs:198` skips `Category::Grid` — so this needs a new `IfcGrid` + `IfcGridAxis` writer. B8-georef needs a project georeference setting the document may not carry.
+   - **B11 is sharper than "a counter".** Every export call site passes a hard-coded `project_key = 1` (`model_edit.rs:305` and every test), so two different projects export **identical GUIDs** for equal ids, contradicting the comment at `ifc/src/lib.rs:358`. The fix is a persisted per-project key, not a better counter.
+   One acceptance test: export a model with a straight supply duct, rooms and grids, parse the file, count `IFCSPACE`, `IFCGRID`, the system names and openings. Note that this test does not exist yet — `apps/desktop/src/export.rs` has four tests and none of them counts spaces, grids, systems or openings.
 2. **Finish B2:** make `plan_level()` return `Option` and refuse tools with "add a level first".
 3. **B13, B12, B16:** Compute reads MEP Settings sizes; persist Compute inputs in `.obim`.
 4. **B21-B24:** room number/name, level bubbles, parameter tags, pad on equipment.
 5. **R4-R6 docs:** README crate table, mark superseded claims, extraction manifest.
-6. **Make the test run reproducible offline or in CI with access to `edesign-alike`**, so the suite can be re-run by anyone.
+6. **Make the test run reproducible offline or in CI**, so the suite can be re-run by anyone. (The `edesign-alike` access this originally asked for turned out not to be the blocker — the pin resolves from the lockfile here — but a CI job on a clean machine would still need it.)
 
 ### 5.2 Medium (new feature on current architecture, weeks)
 
@@ -129,10 +146,11 @@ Massing and toposolid (D1, D2), curved/curtain walls (D3, D4), sketched stairs (
 
 ## 6. Risks seen in this review
 
-- **Private dependency now blocks outside builds and review.** Any contributor or CI job without `edesign-alike` access cannot build `openbim-document`.
-- **Reported test counts are not reproducible here**, so closure of the shell blockers rests on the team's tests plus my code reading.
+- **Private dependency now blocks outside builds and review.** Any contributor or CI job without `edesign-alike` access cannot build `openbim-document`. *(Re-checked 2026-10-23: the pin resolves from the local lockfile in this sandbox, so this risk did not reproduce here — the dependency is only a problem for a clean machine with no lockfile.)*
+- **Reported test counts were not reproducible here**; they now are, and they agree (see section 2).
 - **IFC lag is widening**: MEP content grows (new families, systems) while export still collapses it to `System::Other`.
 - Shared `slab_offset_mm` reset (B5) works but is fragile; a new tool that forgets to register defaults will leak again.
+- **B11 is worse than "unstable GlobalIds".** Every export call site passes a hard-coded `project_key = 1`, so two projects export identical GUIDs for equal ids — a round-trip between two projects would collide.
 
 ## 7. Open owner questions (status)
 
@@ -143,4 +161,4 @@ Massing and toposolid (D1, D2), curved/curtain walls (D3, D4), sketched stairs (
 | Storage model / oplog | Still open; B20 depends on it |
 | First MEP families | Partly answered (AHU, diffuser built); the rest of the order stands |
 | Test building (office vs data hall) | Still open |
-| **New:** grant sandbox access to `edesign-alike` so tests can be re-run | Open |
+| ~~**New:** grant sandbox access to `edesign-alike` so tests can be re-run~~ | **Moot.** The pin resolves from the lockfile here, so the suite runs with no extra access (see section 2). |
