@@ -16,6 +16,7 @@ mod wall_shapes;
 mod modify_tools;
 mod export;
 mod import;
+mod journal;
 mod file;
 mod mep_tool;
 mod insulation_ui;

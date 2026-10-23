@@ -40,12 +40,22 @@ pub(crate) struct FileState {
     /// the revision the recovery copy holds, and when it was written (B20)
     pub autosaved_revision: Option<u64>,
     pub last_autosave: Option<std::time::Instant>,
+    /// what the journal on disk holds: its state, the number of its last transaction, how many it has and its size
+    pub journal: Option<JournalState>,
     /// a recovery copy newer than the file it belongs to, waiting for the answer to recover or discard it
     pub recovery: Option<String>,
 }
 
+/// The journal as this session wrote it.
+#[derive(Clone)]
+pub(crate) struct JournalState { pub state: openbim_oplog::State, pub seq: u64, pub transactions: usize, pub bytes: usize }
+
+/// A journal is folded into a new base when it holds this many transactions or this many bytes.
+const COMPACT_TRANSACTIONS: usize = 500;
+const COMPACT_BYTES: usize = 8 << 20;
+
 /// How often the model is written to its recovery copy while it has unsaved changes.
-pub(crate) const AUTOSAVE_SECONDS: u64 = 60;
+pub(crate) const AUTOSAVE_SECONDS: u64 = 15;
 
 impl Desktop {
     pub(crate) fn is_dirty(&self) -> bool { self.document.revision() != self.file.saved_revision }
@@ -76,61 +86,83 @@ impl Desktop {
                 // what was saved supersedes the recovery copies of this file and of the model before it had a name
                 let _ = std::fs::remove_file(Self::recovery_path(Some(path)));
                 let _ = std::fs::remove_file(Self::recovery_path(None));
-                self.file.path = Some(path.into()); self.file.saved_revision = self.document.revision(); self.file.autosaved_revision = None;
+                self.file.path = Some(path.into()); self.file.saved_revision = self.document.revision(); self.file.autosaved_revision = None; self.file.journal = None;
                 format!("Saved {path}")
             }
             Err(e) => { let _ = std::fs::remove_file(&tmp); format!("Could not save {path}: {e}") }
         };
     }
 
-    /// Where the recovery copy of a model is kept: beside its file, or in the temporary folder while it has no name (B20).
+    /// Where the journal of a model is kept: beside its file, or in the temporary folder while it has no name (B20).
     pub(crate) fn recovery_path(file: Option<&str>) -> std::path::PathBuf {
-        match file { Some(p) => std::path::PathBuf::from(format!("{p}.autosave")), None => std::env::temp_dir().join("openbim-untitled.autosave.obim") }
+        match file { Some(p) => std::path::PathBuf::from(format!("{p}.journal")), None => std::env::temp_dir().join("openbim-untitled.journal") }
     }
 
-    /// Writes the recovery copy when the model has changes that neither the file nor the last copy hold and `interval`
-    /// has passed. The file itself is never touched; the copy is written whole and put in place by a rename, so a crash
-    /// in the middle leaves the previous copy. Returns whether a copy was written.
+    /// Keeps the unsaved work in the journal when the model has changes that neither the file nor the journal hold and
+    /// `interval` has passed. The first time it writes the whole model as the base of the journal (written whole and
+    /// renamed into place); after that it appends only the records that changed, which is cheap and which a crash in
+    /// the middle cannot spoil beyond the last record. The file itself is never touched. Returns whether it wrote.
     pub(crate) fn autosave_tick(&mut self, interval: std::time::Duration) -> bool {
+        use std::io::Write;
         let revision = self.document.revision();
         if !self.is_dirty() || self.file.autosaved_revision == Some(revision) { return false; }
         if self.file.last_autosave.is_some_and(|t| t.elapsed() < interval) { return false; }
         self.document.ensure_project_key();
         self.document.set_app_records(self.compute.record().into_iter().collect());
+        let now = crate::journal::state_of(&native::records(&self.document));
         let path = Self::recovery_path(self.file.path.as_deref());
-        let tmp = path.with_extension("autosave.saving");
-        let ok = std::fs::write(&tmp, file_text(&self.document)).and_then(|()| std::fs::rename(&tmp, &path)).is_ok();
-        if !ok { let _ = std::fs::remove_file(&tmp); }
         self.file.last_autosave = Some(std::time::Instant::now());
-        if ok { self.file.autosaved_revision = Some(revision); }
-        ok
+        let ops = self.file.journal.as_ref().map(|j| crate::journal::diff(&j.state, &now));
+        let wrote = match (&self.file.journal, ops) {
+            (Some(j), Some(ops)) if j.transactions < COMPACT_TRANSACTIONS && j.bytes < COMPACT_BYTES => {
+                if ops.is_empty() { true } else {
+                    let seq = j.seq + 1;
+                    let frame = crate::journal::tx_bytes(seq, "autosave", ops);
+                    let ok = std::fs::OpenOptions::new().append(true).open(&path).and_then(|mut f| { f.write_all(&frame)?; f.sync_data() }).is_ok();
+                    if ok { if let Some(j) = self.file.journal.as_mut() { j.state = now; j.seq = seq; j.transactions += 1; j.bytes += frame.len(); } }
+                    ok
+                }
+            }
+            _ => {
+                // the base: the whole model, the earlier transactions folded in
+                let base = crate::journal::base_bytes(0, &now);
+                let tmp = path.with_extension("journal.saving");
+                let ok = std::fs::write(&tmp, &base).and_then(|()| std::fs::rename(&tmp, &path)).is_ok();
+                if ok { self.file.journal = Some(JournalState { state: now, seq: 0, transactions: 0, bytes: base.len() }); } else { let _ = std::fs::remove_file(&tmp); }
+                ok
+            }
+        };
+        if wrote { self.file.autosaved_revision = Some(revision); }
+        wrote
     }
 
-    /// Looks for a recovery copy newer than `file` (or, with no file, any copy of an unnamed model) and asks about it.
+    /// Looks for a journal newer than `file` (or, with no file, any journal of an unnamed model) and asks about it.
     pub(crate) fn check_recovery(&mut self, file: Option<&str>) {
         let copy = Self::recovery_path(file);
         let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
         let Some(newest) = modified(&copy) else { return };
         if file.and_then(|f| modified(std::path::Path::new(f))).is_some_and(|t| t > newest) { return; }
         self.file.recovery = Some(copy.display().to_string());
-        self.message = "A recovery copy of unsaved work was found: recover it or discard it".into();
+        self.message = "Unsaved work from an earlier session was found: recover it or discard it".into();
     }
 
-    /// Takes the recovery copy as the model: it stays unsaved, so the file is not replaced until the user saves.
+    /// Takes the journal as the model: it stays unsaved, so the file is not replaced until the user saves. If the end
+    /// of the journal is damaged, the work up to there is recovered and the message says so.
     pub(crate) fn recover(&mut self) {
         let Some(copy) = self.file.recovery.take() else { return };
         let named = self.file.path.clone();
-        let loaded = std::fs::read_to_string(&copy).map_err(|e| format!("Could not read the recovery copy: {e}")).and_then(|t| document_from(&t).map_err(|e| format!("The recovery copy cannot be opened: {e}")));
+        let loaded = std::fs::read(&copy).map_err(|e| format!("Could not read the journal: {e}")).and_then(|b| crate::journal::read(&b))
+            .and_then(|r| { let doc = document_from(&crate::journal::lines_of(&r.state).join("\n"))?; Ok((doc, r.complete, r.transactions, r.seq)) });
         match loaded {
-            Ok(doc) => {
+            Ok((doc, complete, transactions, seq)) => {
                 self.document = doc;
                 self.file = FileState { path: named, saved_revision: u64::MAX, ..Default::default() };
                 self.compute.restore(self.document.app_records());
                 self.selected = None;
                 self.sync_duct_controls();
-                self.message = format!("Recovered unsaved work ({} elements); save to keep it", self.document.elements().count());
+                self.message = format!("Recovered unsaved work ({} elements, {transactions} autosaves, the last numbered {seq}){}; save to keep it", self.document.elements().count(), if complete { "" } else { ", up to a damaged part of the journal" });
             }
-            Err(e) => self.message = e,
+            Err(e) => self.message = format!("The journal cannot be used: {e}"),
         }
     }
 
@@ -357,6 +389,44 @@ mod tests {
         again.load_model(path);
         if again.file.recovery.is_some() { again.discard_recovery(); }
         assert!(again.file.recovery.is_none() && !copy.exists());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+    #[test]
+    fn later_autosaves_append_only_what_changed_and_a_torn_last_write_loses_only_that_write() {
+        let mut app = Desktop::sample();
+        let d = dir("journal");
+        let path = d.join("m.obim");
+        let path = path.to_str().unwrap();
+        app.write_model(path);
+        let journal = Desktop::recovery_path(Some(path));
+        let beam = |app: &mut Desktop, y: f64| { app.document.place_beam(openbim_document::ElementId(10), &openbim_document::BeamSpec::level([1.0, y], [5.0, y], 0.3, 0.5, 2.8)).unwrap(); };
+        beam(&mut app, 1.0);
+        assert!(app.autosave_tick(std::time::Duration::ZERO));
+        let base = std::fs::metadata(&journal).unwrap().len();
+        beam(&mut app, 2.0);
+        assert!(app.autosave_tick(std::time::Duration::ZERO));
+        let after_one = std::fs::metadata(&journal).unwrap().len();
+        beam(&mut app, 3.0);
+        assert!(app.autosave_tick(std::time::Duration::ZERO));
+        let after_two = std::fs::metadata(&journal).unwrap().len();
+        let whole = file_text(&app.document).len() as u64;
+        assert!(after_one > base && after_two > after_one, "appended, not rewritten");
+        assert!(after_two - after_one < whole / 4, "a transaction holds the changed records ({} bytes), not the model ({whole})", after_two - after_one);
+        assert_eq!(app.file.journal.as_ref().map(|j| j.transactions), Some(2));
+        let n = app.document.elements().count();
+        // the program stops: everything is recovered
+        let mut next = Desktop::sample();
+        next.load_model(path);
+        next.recover();
+        assert_eq!(next.document.elements().count(), n);
+        assert_eq!(next.document.mep(), app.document.mep());
+        // the last write is cut short: the work before it is recovered
+        let bytes = std::fs::read(&journal).unwrap();
+        std::fs::write(&journal, &bytes[..bytes.len() - 4]).unwrap();
+        let mut torn = Desktop::sample();
+        torn.load_model(path);
+        torn.recover();
+        assert_eq!(torn.document.elements().count(), n - 1, "{}", torn.message);
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

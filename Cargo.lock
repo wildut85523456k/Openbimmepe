@@ -2532,6 +2532,7 @@ dependencies = [
  "openbim-geom",
  "openbim-ifc",
  "openbim-keymap",
+ "openbim-oplog",
  "openbim-place",
  "openbim-route",
  "openbim-sheets",
