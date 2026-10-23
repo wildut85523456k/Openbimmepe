@@ -367,6 +367,7 @@ impl Desktop {
         let mut open = true;
         let mut run = false;
         egui::Window::new("Compute electrical").open(&mut open).default_width(640.0).show(ctx, |ui| {
+            ui.colored_label(egui::Color32::from_rgb(190, 90, 30), compute_elec::DEPRECATION_NOTICE);
             let d = &mut self.elec;
             egui::CollapsingHeader::new("Settings").default_open(true).show(ui, |ui| {
                 egui::Grid::new("elec_grid").num_columns(4).show(ui, |ui| {
