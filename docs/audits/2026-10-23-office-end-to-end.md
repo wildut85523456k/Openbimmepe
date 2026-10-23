@@ -10,9 +10,10 @@ exchange (network whole, the fan coil unit carries its IFC GlobalId found in the
 
 A mutation check was run: removing the number from the room name on import makes the test fail.
 
-## What the read-back showed (gaps, not fixed here)
-A file from another program loses, on import: doors, windows, the stair, equipment and the grid (reported as left out).
-The app's own data brings them back; the geometry alone does not.
+## What the read-back showed
+A file from another program lost, on import: doors, windows, the stair, equipment and the grid (reported as left out).
+Doors and windows are read back since PR #83 (`2026-10-23-ifc-door-window-import.md`); the stair, equipment and grid are
+still left out of a file without the app's own data.
 
 ## Not covered
 The data hall for the MEP chain (MEP-004), pointer-driven steps through the ribbon (the harness in TEST-001 of the backlog),
