@@ -75,7 +75,9 @@ impl GeorefInput {
 impl crate::Desktop {
     /// Puts the application's own lines into the document, so that the file and the export see them.
     pub(crate) fn sync_app_records(&mut self) {
-        let records: Vec<String> = self.compute.record().into_iter().chain(self.georef.record()).collect();
+        // the lines of the kinds the app owns are written afresh; any other kind is kept as it is
+        let mut records: Vec<String> = self.document.app_records().iter().filter(|l| !matches!(openbim_document::native::app_record_kind(l), Some("compute" | "georef"))).cloned().collect();
+        records.extend(self.compute.record().into_iter().chain(self.georef.record()));
         self.document.set_app_records(records);
     }
 
@@ -120,6 +122,37 @@ impl crate::Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn syncing_the_apps_own_lines_keeps_the_kinds_it_does_not_own() {
+        let mut app = crate::Desktop::sample();
+        app.document.put_app_record("cost-codes", Some("U|kind=cost-codes|scheme=CSI".into())).unwrap();
+        app.georef = GeorefInput { crs_name: "EPSG:32648".into(), ..Default::default() };
+        app.sync_app_records();
+        assert_eq!(app.document.app_record("cost-codes"), Some("U|kind=cost-codes|scheme=CSI"));
+        assert!(app.document.app_record("georef").is_some());
+        app.georef = GeorefInput::default();
+        app.sync_app_records();
+        assert!(app.document.app_record("georef").is_none(), "a kind the app owns follows its state");
+        assert_eq!(app.document.app_records().len(), 1);
+    }
+
+    #[test]
+    fn the_map_of_an_ifc_file_is_read_into_the_window_when_the_model_has_none() {
+        let mut src = crate::Desktop::sample();
+        src.georef = GeorefInput { crs_name: "EPSG:32648".into(), shared: [500_000.0, 1_281_000.0, 10.0], ..Default::default() };
+        src.sync_app_records();
+        let out = crate::export::export_ifc_with(&src.document, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, true).unwrap();
+        let dir = std::env::temp_dir().join(format!("obim-georef-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.ifc");
+        std::fs::write(&path, out.text).unwrap();
+        let mut app = crate::Desktop::sample();
+        app.document = openbim_document::Document::new();
+        app.read_ifc(path.to_str().unwrap());
+        assert_eq!(app.georef.crs_name, "EPSG:32648", "{}", app.message);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_map_survives_the_file_and_needs_a_name_and_a_site() {

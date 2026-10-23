@@ -305,7 +305,7 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
             }
             Some(Geometry::Area { level }) => {
-                matches!(el.category, Category::Slab | Category::BeamSystem) && valid_ring(&el.outline)
+                matches!(el.category, Category::Slab | Category::Generic | Category::BeamSystem) && valid_ring(&el.outline)
                     && (el.category != Category::BeamSystem || (0.05..=1000.0).contains(&el.spacing_m))
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
                     && el.elevation_m.abs() <= 1e6

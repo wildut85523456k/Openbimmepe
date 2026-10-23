@@ -136,6 +136,9 @@ pub struct Imported {
     pub native: Vec<String>,
     /// what was read but is not a member: class name and how many
     pub skipped: BTreeMap<String, usize>,
+    /// products of a class that is not a member, with a body that is an extruded profile: what an import can keep as
+    /// generic models. They are also counted in `skipped`.
+    pub unmapped: Vec<Member>,
     /// Entity-specific explanations for unsupported products.
     pub diagnostics: Vec<String>,
     /// the lines of every `IfcGrid`, in model coordinates (metres)
@@ -151,7 +154,7 @@ pub struct GridLine {
 }
 
 /// The classes that become members.
-const MEMBERS: [&str; 16] = [
+const MEMBERS: [&str; 17] = [
     "IFCBEAM",
     "IFCMEMBER",
     "IFCCOLUMN",
@@ -168,6 +171,19 @@ const MEMBERS: [&str; 16] = [
     "IFCSPACE",
     "IFCDOOR",
     "IFCWINDOW",
+    "IFCBUILDINGELEMENTPROXY",
+];
+
+/// Products that are not objects of the building: voids, ports, grids and drawings are not kept as generic models.
+const NOT_OBJECTS: [&str; 8] = [
+    "IFCOPENINGELEMENT",
+    "IFCOPENINGSTANDARDCASE",
+    "IFCVIRTUALELEMENT",
+    "IFCGRID",
+    "IFCANNOTATION",
+    "IFCDISTRIBUTIONPORT",
+    "IFCPORT",
+    "IFCSPACE",
 ];
 
 /// Entities that are not products of the building, or are read in another way.
@@ -894,41 +910,44 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
         });
     }
 
+    let member_of = |id: u32, e: &Entity| -> Member {
+        let mut psets = Psets::new();
+        for p in psets_of.get(&id).into_iter().flatten() {
+            if let Some((n, props)) = r.pset(*p) {
+                psets.insert(n, props);
+            }
+        }
+        Member {
+            step_id: id,
+            guid: e
+                .args
+                .first()
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            class: e.class.clone(),
+            predefined: predefined(e),
+            name: e
+                .args
+                .get(2)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            body: r.body(e),
+            storey: contained.get(&id).copied(),
+            psets,
+            material: material_of.get(&id).cloned(),
+            origin: e.args.get(5).and_then(|a| r.placement(a, 0)).map(|m| m.o),
+            x_axis: e.args.get(5).and_then(|a| r.placement(a, 0)).map(|m| m.x),
+            overall: matches!(e.class.as_str(), "IFCDOOR" | "IFCWINDOW")
+                .then(|| Some((e.args.get(8)?.as_f64()?, e.args.get(9)?.as_f64()?)))
+                .flatten(),
+            type_obj: type_of.get(&id).and_then(|t| type_index.get(t)).copied(),
+        }
+    };
     for (&id, e) in &f.entities {
         if MEMBERS.contains(&e.class.as_str()) {
-            let mut psets = Psets::new();
-            for p in psets_of.get(&id).into_iter().flatten() {
-                if let Some((n, props)) = r.pset(*p) {
-                    psets.insert(n, props);
-                }
-            }
-            out.members.push(Member {
-                step_id: id,
-                guid: e
-                    .args
-                    .first()
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                class: e.class.clone(),
-                predefined: predefined(e),
-                name: e
-                    .args
-                    .get(2)
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                body: r.body(e),
-                storey: contained.get(&id).copied(),
-                psets,
-                material: material_of.get(&id).cloned(),
-                origin: e.args.get(5).and_then(|a| r.placement(a, 0)).map(|m| m.o),
-                x_axis: e.args.get(5).and_then(|a| r.placement(a, 0)).map(|m| m.x),
-                overall: matches!(e.class.as_str(), "IFCDOOR" | "IFCWINDOW")
-                    .then(|| Some((e.args.get(8)?.as_f64()?, e.args.get(9)?.as_f64()?)))
-                    .flatten(),
-                type_obj: type_of.get(&id).and_then(|t| type_index.get(t)).copied(),
-            });
+            out.members.push(member_of(id, e));
         } else if e.class == "IFCGRID" {
             // the axes are polylines in the grid's own frame; lengths are scaled to metres already
             let place = e.args.get(5).and_then(|a| r.placement(a, 0)).unwrap_or(Mat::ID);
@@ -963,6 +982,13 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                 "#{id} {}: unsupported product (including null placement/representation)",
                 e.class
             ));
+            // one with a body that is an extruded profile can still be kept as a generic model
+            if !NOT_OBJECTS.contains(&e.class.as_str()) {
+                let m = member_of(id, e);
+                if m.body.is_some() {
+                    out.unmapped.push(m);
+                }
+            }
         }
     }
     Ok(out)

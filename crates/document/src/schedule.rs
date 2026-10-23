@@ -500,6 +500,11 @@ fn element_cells(doc: &Document, ctx: &Ctx, kind: ScheduleKind, e: &Element) -> 
                 if let Some(i) = doc.mep().insulation_of(MepNode::Run(e.id), kind) { push(tk, txt(&i.type_name)); push(tt, num(i.thickness_m)); }
             }
         }
+        (ScheduleKind::GenericModels, Some(Geometry::Area { .. })) if e.category == Category::Generic => {
+            // the class the file called it, and where it stands from
+            push("family", txt(e.texts.iter().find(|(n, _)| n == "IfcClass").map_or("", |(_, v)| v.as_str())));
+            push("offset", num(e.elevation_m - e.height_m));
+        }
         (k, g) if k.is_family() && e.category == Category::Family => {
             push("family", txt(&e.family));
             push("mark", txt(e.texts.iter().find(|(n, _)| n == "mark").map_or("", |(_, v)| v.as_str())));
@@ -556,6 +561,7 @@ fn items(doc: &Document, ctx: &Ctx, kind: ScheduleKind) -> Vec<Item> {
         Rooms => e.category == Category::Room,
         Ducts => e.category == Category::Duct,
         Pipes => e.category == Category::Pipe,
+        GenericModels => e.category == Category::Generic || (e.category == Category::Family && ctx.fams.get(&e.id).is_some_and(|f| f.kind == kind)),
         _ => e.category == Category::Family && ctx.fams.get(&e.id).is_some_and(|f| f.kind == kind),
     }).map(|e| Item::El(e.id)).collect()
 }
@@ -1007,6 +1013,14 @@ mod tests {
         let mut g = ScheduleDef::starter(4, "G", ScheduleKind::GenericModels);
         g.sorts.clear();
         assert!(data(&table(&d, &g)).is_empty());
+        // a generic model a file brought in is one, with the class it came as
+        let pump = d.place_generic(ElementId(10), "Pump", vec![[2.0, 1.0], [3.0, 1.0], [3.0, 2.0], [2.0, 2.0]], 0.1, 0.9, vec![("IfcClass".into(), "IFCPUMP".into())]).unwrap();
+        g.fields = vec![ScheduleField::new("family"), ScheduleField::new("offset"), ScheduleField::new("count")];
+        let t = table(&d, &g);
+        let rows = data(&t);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].ids, vec![pump]);
+        assert_eq!((t.text(rows[0], 0).as_str(), t.text(rows[0], 1).as_str()), ("IFCPUMP", "100"));
     }
 
     #[test]

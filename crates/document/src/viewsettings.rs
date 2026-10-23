@@ -65,6 +65,7 @@ impl ViewCategory {
             Category::Duct => ViewCategory::Model(K::Ducts),
             Category::Pipe => ViewCategory::Model(K::Pipes),
             Category::Equipment => ViewCategory::Model(K::MechanicalEquipment),
+            Category::Generic => ViewCategory::Model(K::GenericModels),
             Category::Family => ViewCategory::Model(family_kind(e)),
             Category::Opening => ViewCategory::Openings,
             Category::Rebar => ViewCategory::Rebar,

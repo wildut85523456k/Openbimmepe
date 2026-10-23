@@ -11,7 +11,7 @@ use super::{
 /// Written first in every set of records.
 pub const FORMAT: &str = "obim-records-1";
 
-const CATEGORIES: [(Category, &str); 24] = [
+const CATEGORIES: [(Category, &str); 25] = [
     (Category::Wall, "Wall"),
     (Category::Tag, "Tag"),
     (Category::Dimension, "Dimension"),
@@ -36,6 +36,7 @@ const CATEGORIES: [(Category, &str); 24] = [
     (Category::Equipment, "Equipment"),
     (Category::Level, "Level"),
     (Category::Grid, "Grid"),
+    (Category::Generic, "Generic"),
 ];
 
 fn esc(s: &str) -> String {
@@ -390,6 +391,12 @@ pub fn records(doc: &Document) -> Vec<String> {
     out.extend(mep_records(doc.mep()));
     out.extend(doc.app_records().iter().cloned());
     out
+}
+
+/// The kind of an application line (`U|kind=<kind>|...`): what it is for, and who reads it.
+pub fn app_record_kind(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("U|kind=")?;
+    Some(rest.split('|').next().unwrap_or(rest)).filter(|k| !k.is_empty())
 }
 
 /// The application's own lines in a file (`U|`), for the application to read.

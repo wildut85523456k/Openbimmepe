@@ -162,6 +162,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     let mut railings: Vec<openbim_ifc::RailingItem> = Vec::new();
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
+    let mut proxies: Vec<openbim_ifc::ProxyItem> = Vec::new();
     let mut instances = Vec::new();
     let mut mep = Network::new(1);
     // the wall types that have layers, as the file writes them (IFC2X3 has none)
@@ -222,6 +223,15 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
                 let role = match el.slab_kind { openbim_document::SlabKind::Foundation => SlabRole::Foundation, openbim_document::SlabKind::Ceiling => SlabRole::Ceiling, _ => SlabRole::Structure };
                 slabs.push(SlabItem { id: el.id.0, slab, role, room_bounding: true });
                 if el.material != Material::Unspecified { materials.insert(el.id.0, el.material.name().to_string()); }
+            }
+            (Category::Generic, Some(Geometry::Area { level })) => {
+                let top = level_of(level).ok_or("a generic model stands on a level that is gone")? + el.elevation_m;
+                let text = |name: &str| el.texts.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+                proxies.push(openbim_ifc::ProxyItem {
+                    id: el.id.0, name: el.name.clone(), outline: el.outline.clone(), bottom: top - el.height_m, top,
+                    class: text("IfcClass").unwrap_or_else(|| "IFCBUILDINGELEMENTPROXY".into()), predefined: text("PredefinedType").unwrap_or_default(),
+                    props: el.texts.iter().filter(|(k, _)| k != "IfcClass" && k != "PredefinedType").cloned().collect(),
+                });
             }
             (Category::Footing, Some(Geometry::Pad { at, level, thickness_m })) => {
                 let top = level_of(level).ok_or("a footing lies on a level that is gone")? + el.elevation_m;
@@ -370,7 +380,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         }
     }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
-    let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs, &stairs, &railings);
+    let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs, &stairs, &railings, &proxies);
     let levels = Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?;
     // the rooms leave as spaces: the number and name the user gave, the department as the use, the floor outline
     // (counter-clockwise, what stands in it as clockwise holes) and the height up to the next level (2.7 m at the top)
@@ -394,7 +404,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         walls, wall_penetrations, firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
         floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms, wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
         wall_joins: vec![], georef: crate::georef_ui::GeorefInput::from_records(doc.app_records()).georef(doc.site()), room_settings: Default::default(), separation_lines: vec![],
-        room_lighting: Default::default(), pset_map: Default::default(), grids, system_defs, assemblies, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
+        room_lighting: Default::default(), proxies, pset_map: Default::default(), grids, system_defs, assemblies, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
 }
@@ -466,8 +476,8 @@ pub fn fingerprint(el: &openbim_document::Element) -> String {
 
 /// The IFC type objects of the document's types, and the `OpenBIM_Element` data of the members that were written.
 #[allow(clippy::too_many_arguments)]
-fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem], roofs: &[openbim_ifc::RoofItem], stairs: &[openbim_ifc::StairItem], railings: &[openbim_ifc::RailingItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
-    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(walls.iter().map(|w| w.id)).chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).chain(roofs.iter().map(|r| r.id)).chain(stairs.iter().map(|s| s.id)).chain(railings.iter().map(|r| r.id)).collect();
+fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamItem], columns: &[ColumnItem], slabs: &[SlabItem], roofs: &[openbim_ifc::RoofItem], stairs: &[openbim_ifc::StairItem], railings: &[openbim_ifc::RailingItem], proxies: &[openbim_ifc::ProxyItem]) -> (Vec<TypeItem>, std::collections::BTreeMap<u64, MemberInfo>) {
+    let written: std::collections::BTreeSet<u64> = mep_ids.iter().copied().chain(walls.iter().map(|w| w.id)).chain(beams.iter().map(|b| b.id)).chain(columns.iter().map(|c| c.id)).chain(slabs.iter().map(|s| s.id)).chain(roofs.iter().map(|r| r.id)).chain(stairs.iter().map(|s| s.id)).chain(railings.iter().map(|r| r.id)).chain(proxies.iter().map(|p| p.id)).collect();
     let mut info = std::collections::BTreeMap::new();
     for el in doc.elements().filter(|e| written.contains(&e.id.0)) {
         let type_name = el.type_id.and_then(|t| doc.get(t)).map(|t| t.name.clone()).unwrap_or_default();
