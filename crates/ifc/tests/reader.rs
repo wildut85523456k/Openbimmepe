@@ -369,12 +369,12 @@ fn i_profile_retains_its_reentrant_outline() {
 
 #[test]
 fn null_placement_unsupported_products_are_counted() {
-    let got = reader::read(&step("#10=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);#11=IFCUNITASSIGNMENT((#10));#12=IFCPROJECT('p',$,'P',$,$,$,$,(),#11);#1=IFCOPENINGELEMENT('o',$,'O',$,$,$,$,$,$);#2=IFCDOOR('d',$,'D',$,$,$,$,$,$);#3=IFCSPACE('s',$,'S',$,$,$,$,$,$);")).unwrap();
-    for class in ["IFCOPENINGELEMENT", "IFCDOOR", "IFCSPACE"] {
+    let got = reader::read(&step("#10=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);#11=IFCUNITASSIGNMENT((#10));#12=IFCPROJECT('p',$,'P',$,$,$,$,(),#11);#1=IFCOPENINGELEMENT('o',$,'O',$,$,$,$,$,$);#2=IFCDOOR('d',$,'D',$,$,$,$,$,$);#3=IFCFURNISHINGELEMENT('s',$,'S',$,$,$,$,$,$);")).unwrap();
+    for class in ["IFCOPENINGELEMENT", "IFCDOOR", "IFCFURNISHINGELEMENT"] {
         assert_eq!(got.skipped.get(class), Some(&1));
     }
     assert_eq!(got.diagnostics.len(), 3);
-    for (id, class) in [(1, "IFCOPENINGELEMENT"), (2, "IFCDOOR"), (3, "IFCSPACE")] {
+    for (id, class) in [(1, "IFCOPENINGELEMENT"), (2, "IFCDOOR"), (3, "IFCFURNISHINGELEMENT")] {
         assert!(got
             .diagnostics
             .iter()

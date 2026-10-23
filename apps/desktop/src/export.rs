@@ -383,7 +383,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         let number = doc.room_text(el.id, "Number");
         let name = if number.is_empty() { el.name.clone() } else { format!("{number} {}", el.name) };
         let height = levels.floor_to_floor(index).ok().flatten().unwrap_or(2.7);
-        rooms.push(openbim_ifc::RoomItem { id: el.id.0, room: Room {
+        rooms.push(openbim_ifc::RoomItem { id: el.id.0, number: number.clone(), room: Room {
             name, usage: doc.room_text(el.id, "Department"), occupancy: 0.0, level: index,
             outline: ccw(shape.outline, true), holes: shape.holes.into_iter().map(|h| ccw(h, false)).collect(), height,
         } });

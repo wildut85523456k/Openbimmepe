@@ -298,6 +298,8 @@ pub struct GridItem {
 /// A room, written as an `IfcSpace` with its base quantities.
 pub struct RoomItem {
     pub id: u64,
+    /// the room number, written as a property so that a reader can tell it from the name
+    pub number: String,
     pub room: Room,
 }
 
@@ -1633,7 +1635,7 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         let g = o.gen_gid();
         o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{},(#{sp}))", o.storeys[st].0));
         o.report.spaces += 1;
-        let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy))];
+        let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy)), ("Number", Val::Label(r.number.clone()))];
         o.pset_mapped(sp, "IfcSpace", "OpenBIM_Space", props, &room.name);
         let vols = boundaries::room_volumes(scene, r);
         let mut clear = room.clone();

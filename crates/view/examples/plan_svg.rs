@@ -12,6 +12,7 @@ use openbim_view::*;
 
 fn room(id: u64, name: &str, usage: &str, o: &[[f64; 2]]) -> RoomItem {
     RoomItem {
+        number: String::new(),
         id,
         room: Room {
             name: name.into(),

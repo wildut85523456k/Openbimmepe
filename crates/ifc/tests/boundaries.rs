@@ -22,7 +22,7 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         networks: vec![],
         families: vec![],
         items: vec![],
-        rooms: vec![RoomItem { id: 90, room }],
+        rooms: vec![RoomItem { id: 90, number: String::new(), room }],
         wall_types: vec![],
         wall_joins: vec![],
         georef: None,

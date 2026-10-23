@@ -4,7 +4,7 @@ use openbim_ifc::{export, export_ifc2x3, export_ifc4x3, RoomItem, Scene};
 use std::collections::BTreeSet;
 
 fn room(id: u64, name: &str, x: f64) -> RoomItem {
-    RoomItem { id, room: Room { name: name.into(), usage: "Office".into(), occupancy: 2.0, level: 0, outline: vec![[x, 0.0], [x + 4.0, 0.0], [x + 4.0, 3.0], [x, 3.0]], holes: vec![], height: 2.7 } }
+    RoomItem { id, number: String::new(), room: Room { name: name.into(), usage: "Office".into(), occupancy: 2.0, level: 0, outline: vec![[x, 0.0], [x + 4.0, 0.0], [x + 4.0, 3.0], [x, 3.0]], holes: vec![], height: 2.7 } }
 }
 
 fn scene(rooms: Vec<RoomItem>) -> Scene {

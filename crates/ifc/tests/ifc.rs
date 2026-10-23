@@ -260,7 +260,7 @@ fn walls_slabs_and_rooms_get_base_quantities() {
     use openbim_place::floors::Slab;
     let mut s = scene(vec![wall(5)]);
     s.slabs = vec![SlabItem { id: 6, slab: Slab { name: "F".into(), top: 0.0, thickness: 0.2, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], fire_rating_min: None }, room_bounding: true, role: Default::default() }];
-    s.rooms = vec![RoomItem { id: 7, room: Room { name: "R".into(), usage: "office".into(), occupancy: 1.0, level: 0, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], holes: vec![vec![[1.0, 1.0], [1.0, 2.0], [2.0, 2.0], [2.0, 1.0]]], height: 2.5 } }];
+    s.rooms = vec![RoomItem { id: 7, number: String::new(), room: Room { name: "R".into(), usage: "office".into(), occupancy: 1.0, level: 0, outline: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], holes: vec![vec![[1.0, 1.0], [1.0, 2.0], [2.0, 2.0], [2.0, 1.0]]], height: 2.5 } }];
     let out = export(&s).unwrap();
     assert_eq!((out.report.walls, out.report.slabs, out.report.spaces, out.report.quantity_sets), (1, 1, 1, 3));
     for n in ["Qto_WallBaseQuantities", "Qto_SlabBaseQuantities", "Qto_SpaceBaseQuantities"] {

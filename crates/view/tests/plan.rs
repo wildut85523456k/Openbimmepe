@@ -487,6 +487,7 @@ fn a_slab_follows_the_view_range_and_its_voids_are_holes() {
 #[test]
 fn rooms_of_the_level_are_regions_with_a_tag_inside_them_and_the_area_without_holes() {
     let room = |level: usize, outline: Vec<[f64; 2]>, holes: Vec<Vec<[f64; 2]>>| RoomItem {
+        number: String::new(),
         id: 9,
         room: Room {
             name: "Office <1>".into(),
@@ -577,6 +578,7 @@ fn separation_lines_of_the_level_are_drawn_and_rooms_and_slabs_go_under_the_wall
     ];
     s.slabs = vec![slab_at(0.0, 0.2)];
     s.rooms = vec![RoomItem {
+        number: String::new(),
         id: 9,
         room: Room {
             name: "R".into(),
@@ -605,6 +607,7 @@ fn separation_lines_of_the_level_are_drawn_and_rooms_and_slabs_go_under_the_wall
     assert!(d.contains("fill-rule=\"evenodd\"") && d.contains(">R</text>") && d.contains("8.0 m²"));
     let mut s2 = scene(vec![], vec![], vec![]);
     s2.rooms = vec![RoomItem {
+        number: String::new(),
         id: 9,
         room: Room {
             name: "A & B <c>".into(),
@@ -629,6 +632,7 @@ fn the_revit_look_has_white_walls_hatched_concrete_and_untinted_rooms() {
     let mut s = scene(vec![straight()], vec![], vec![]);
     s.slabs = vec![slab_at(1.3, 0.2)]; // cut by the plane at 1.2 m
     s.rooms = vec![RoomItem {
+        number: String::new(),
         id: 9,
         room: Room {
             name: "R".into(),
