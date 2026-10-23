@@ -5,11 +5,12 @@ Structure stays deferred (supports and trusses for MEP only). Compared: `main` a
 
 **Corrections applied to this report on 2026-10-23** (each verified against the code on `main` at `4f24b00`, by an
 independent pass that did not write the original): the empty-canvas fallback is a **10 m** view box, not 20 m;
-`plan_level()` returns `ElementId(10)`, not `ElementId(0)`; the "IFC crate already writes systems and grids"
+`plan_level()` was claimed to return `ElementId(10)`; **re-verified: it returns `ElementId(0)` at `model_edit.rs:375`, so the original wording stands**; the "IFC crate already writes systems and grids"
 premise is wrong for grids (no grid writer exists) and misleading for systems (the writer exists but names the
 group from the enum); B26 is **open**, not in progress, and its `Cargo.toml:25-26` citation belongs to a commit
 after `271c774`; and the proposed acceptance test did not exist. Section 2's stated blocker (no access to
-`edesign-alike`) does not reproduce. Details inline, and in §5.1 and §6.
+`edesign-alike`) **does reproduce in this sandbox**: `cargo metadata --offline` fails with 'can't checkout from edesign-alike' (git db present but incomplete); it may work on a machine with a full checkout. Details inline, and in §5.1 and §6.
+> **Re-check 16:36, 23 Oct:** `main` is now `4f24b00`. B7, B8, B10, B14, B15 and `crates/ifc` are unchanged there; the library still holds 7 families. Two of the corrections below were re-verified and one is reversed: `plan_level()` still returns `ElementId(0)`, and `cargo metadata --offline` still fails here on `edesign-alike`.
 
 ## 1. Answer in brief
 
@@ -44,7 +45,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | ID | Gap (21 Oct) | Status | Evidence |
 |---|---|---|---|
 | A1 / B1 | Plan canvas dead on an empty project | **Closed** | `model_view.rs:17` fallback bounds; test asserts finite fallback |
-| B2 | Hard-coded Level 1 / Level 2 tabs (ids 10/11) | **Mostly closed** | tabs are named after document levels (`7afe07b`, `eb073a1`). Remaining: `plan_level()` returns `ElementId(10)` (`ElementId(11)` for `UpperPlan`) when no level exists instead of refusing with "add a level first"; ids 10/11 remain only in tests |
+| B2 | Hard-coded Level 1 / Level 2 tabs (ids 10/11) | **Mostly closed** | tabs are named after document levels (`7afe07b`, `eb073a1`). Remaining: `plan_level()` returns `ElementId(0)` when no level exists (`model_edit.rs:375` on `4f24b00`; re-checked, the 'ElementId(10)' correction below does not hold) instead of refusing with "add a level first"; ids 10/11 remain only in tests |
 | B3 | Unconditional Esc leaves the tool | **Closed** | two-stage Esc, `main.rs:~401` "work in progress that Esc steps back from" |
 | B4 / B16 | No Ctrl+S/N/O, keymap unused, no Save As | **Closed** | `main.rs:707-760` global shortcuts and `keymap_keys`; `save_as` handled at `:605` |
 | B5 | Tool parameters leak between tools | **Closed (by reset)** | per-command defaults applied on tool choice (`main.rs:394`). `slab_offset_mm` is still one shared field, so the design is a reset, not separate state |
