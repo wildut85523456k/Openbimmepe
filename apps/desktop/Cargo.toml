@@ -16,6 +16,7 @@ openbim-oplog = { path = "../../crates/oplog" }
 openbim-arch = { path = "../../crates/arch" }
 openbim-geom = { path = "../../crates/geom" }
 openbim-ifc = { path = "../../crates/ifc" }
+serde_json = "1"
 openbim-place = { path = "../../crates/place" }
 openbim-calc = { path = "../../crates/calc" }
 openbim-family = { path = "../../crates/family" }

@@ -32,6 +32,7 @@ pub use modify::{plan_points, Clipboard};
 pub use layers::{centre_shift, check as check_layers, core_faces, core_range, thickness as layers_thickness, LayerFunction, LocationLine, WallLayer, MAX_LAYERS};
 pub mod compute;
 pub mod compute_elec;
+pub mod electrical_exchange;
 pub mod mep;
 mod mepsys;
 pub mod schematic;
