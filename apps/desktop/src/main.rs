@@ -15,6 +15,8 @@ mod type_editor;
 mod wall_shapes;
 mod modify_tools;
 mod export;
+#[cfg(test)]
+mod office;
 mod import;
 mod app_settings;
 mod georef_ui;
