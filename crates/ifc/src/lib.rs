@@ -698,7 +698,7 @@ impl<'a> Out<'a> {
     /// ids for things that are not model elements (the site, relationships, property sets)
     fn gen_gid(&mut self) -> String {
         self.aux += 1;
-        string(&guid::global_id(self.key, 0, (0xFFFF_FFFFu64 << 32) | self.aux))
+        step::AUX_GID.to_string()
     }
     fn p3(&mut self, p: V3) -> u32 {
         let (a, b, c) = (self.r(p[0], "coordinate"), self.r(p[1], "coordinate"), self.r(p[2], "coordinate"));
@@ -1040,6 +1040,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     if let Some(id) = o.dup {
         return Err(ExportError::DuplicateId(id));
     }
+    o.s.derive_ids(scene.project_key);
     let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp, x43) };
     Ok(Exported { text, report: o.report })
 }

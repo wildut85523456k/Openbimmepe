@@ -76,7 +76,7 @@ impl Desktop {
 
     pub(crate) fn write_model(&mut self, path: &str) {
         self.document.ensure_project_key();
-        self.document.set_app_records(self.compute.record().into_iter().collect());
+        self.sync_app_records();
         let tmp = format!("{path}.saving");
         let result = std::fs::write(&tmp, file_text(&self.document)).and_then(|()| std::fs::rename(&tmp, path));
         self.message = match result {
@@ -147,7 +147,7 @@ impl Desktop {
         if !self.is_dirty() || self.file.autosaved_revision == Some(revision) { return false; }
         if self.file.last_autosave.is_some_and(|t| t.elapsed() < interval) { return false; }
         self.document.ensure_project_key();
-        self.document.set_app_records(self.compute.record().into_iter().collect());
+        self.sync_app_records();
         let now = crate::journal::state_of(&native::records(&self.document));
         let path = Self::recovery_path(self.file.path.as_deref());
         self.file.last_autosave = Some(std::time::Instant::now());
@@ -197,6 +197,7 @@ impl Desktop {
                 self.document = doc;
                 self.file = FileState { path: named, saved_revision: u64::MAX, ..Default::default() };
                 self.compute.restore(self.document.app_records());
+                self.georef = crate::georef_ui::GeorefInput::from_records(self.document.app_records());
                 self.selected = None;
                 self.sync_duct_controls();
                 self.message = format!("Recovered unsaved work ({} elements, {transactions} autosaves, the last numbered {seq}){}; save to keep it", self.document.elements().count(), if complete { "" } else { ", up to a damaged part of the journal" });
@@ -228,6 +229,7 @@ impl Desktop {
                 self.document = doc;
                 self.file = FileState { path: Some(path.into()), saved_revision: self.document.revision(), ..Default::default() };
                 self.compute.restore(self.document.app_records());
+                self.georef = crate::georef_ui::GeorefInput::from_records(self.document.app_records());
                 self.selected = None;
                 self.sync_duct_controls();
                 self.message = format!("Opened {path} ({} elements)", self.document.elements().count());
@@ -251,6 +253,7 @@ impl Desktop {
         let _ = self.document.place_level("Level 2", 3.0);
         self.file = FileState::default();
         self.compute = Default::default();
+        self.georef = Default::default();
         self.selected = None;
         self.view = crate::View::Plan;
         self.tool = crate::Tool::Select;

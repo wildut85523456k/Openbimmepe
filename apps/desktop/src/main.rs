@@ -17,6 +17,7 @@ mod modify_tools;
 mod export;
 mod import;
 mod app_settings;
+mod georef_ui;
 mod journal;
 mod file;
 mod mep_tool;
@@ -272,6 +273,8 @@ struct Desktop {
     /// the settings of the application, kept between sessions
     settings: app_settings::AppSettings,
     show_options: bool,
+    georef: georef_ui::GeorefInput,
+    show_georef: bool,
     dark: bool,
     zoom: f32,
     pan: Vec2,
@@ -354,7 +357,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: Default::default(), show_options: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: Default::default(), show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(),
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -529,6 +532,7 @@ impl Desktop {
                 }
                 if ui.button("Help").clicked() { self.show_help = !self.show_help; }
                 if ui.button("Options").clicked() { self.show_options = !self.show_options; }
+                if ui.button("Georeferencing").clicked() { self.show_georef = !self.show_georef; }
             });
         });
     }
@@ -865,6 +869,7 @@ impl Desktop {
         self.autosave();
         ctx.request_repaint_after(std::time::Duration::from_secs(30));
         self.options_window(&ctx);
+        self.georef_window(&ctx);
         if self.show_properties || self.show_browser {
             egui::Panel::left("side").default_size(310.0).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));

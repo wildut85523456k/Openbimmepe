@@ -65,8 +65,8 @@ pub(crate) struct ComputeDialog {
 }
 
 /// A text value on one record line: `%`, `|` and line breaks are escaped.
-fn esc(t: &str) -> String { t.replace('%', "%25").replace('|', "%7C").replace('\n', "%0A").replace('\r', "%0D") }
-fn unesc(t: &str) -> String { t.replace("%0D", "\r").replace("%0A", "\n").replace("%7C", "|").replace("%25", "%") }
+pub(crate) fn esc(t: &str) -> String { t.replace('%', "%25").replace('|', "%7C").replace('\n', "%0A").replace('\r', "%0D") }
+pub(crate) fn unesc(t: &str) -> String { t.replace("%0D", "\r").replace("%0A", "\n").replace("%7C", "|").replace("%25", "%") }
 
 impl ComputeDialog {
     /// The inputs the user typed, as the one `U|compute` line the file keeps (None while they are the defaults), so that

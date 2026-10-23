@@ -1,5 +1,5 @@
 //! The document as an IFC 4.3 file (IFC4 on request): levels, walls and beams. The document's other elements are named in the warnings.
-use openbim_arch::{Level, Levels};
+use openbim_arch::{Level, Levels, Room};
 use openbim_document::{Category, Document, ElementId, Geometry, Material, Usage};
 use openbim_family::mep::{Domain, System};
 use openbim_geom::WallChain;
@@ -371,12 +371,29 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
     let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs, &stairs, &railings);
+    let levels = Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?;
+    // the rooms leave as spaces: the number and name the user gave, the department as the use, the floor outline
+    // (counter-clockwise, what stands in it as clockwise holes) and the height up to the next level (2.7 m at the top)
+    let mut rooms: Vec<openbim_ifc::RoomItem> = Vec::new();
+    for el in doc.elements().filter(|e| e.category == Category::Room) {
+        let Some(Geometry::Room { level, .. }) = el.geometry else { continue };
+        let (Some(shape), Some(l)) = (doc.room_shape(el.id).ok(), doc.get(level)) else { *skipped.entry("rooms with no closed space").or_default() += 1; continue };
+        let Some(index) = levels.all().iter().position(|x| x.name == l.name && x.elevation == l.elevation_m) else { *skipped.entry("rooms on a level that is gone").or_default() += 1; continue };
+        let ccw = |mut r: Vec<[f64; 2]>, want_ccw: bool| { let a: f64 = (0..r.len()).map(|i| { let (p, q) = (r[i], r[(i + 1) % r.len()]); p[0] * q[1] - q[0] * p[1] }).sum(); if (a > 0.0) != want_ccw { r.reverse(); } r };
+        let number = doc.room_text(el.id, "Number");
+        let name = if number.is_empty() { el.name.clone() } else { format!("{number} {}", el.name) };
+        let height = levels.floor_to_floor(index).ok().flatten().unwrap_or(2.7);
+        rooms.push(openbim_ifc::RoomItem { id: el.id.0, room: Room {
+            name, usage: doc.room_text(el.id, "Department"), occupancy: 0.0, level: index,
+            outline: ccw(shape.outline, true), holes: shape.holes.into_iter().map(|h| ccw(h, false)).collect(), height,
+        } });
+    }
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
-        levels: Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?,
+        levels,
         walls, wall_penetrations, firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
-        floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms: vec![], wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
-        wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
+        floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms, wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
+        wall_joins: vec![], georef: crate::georef_ui::GeorefInput::from_records(doc.app_records()).georef(doc.site()), room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), pset_map: Default::default(), grids, system_defs, assemblies, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
@@ -516,7 +533,7 @@ pub fn export_ifc_with(doc: &Document, project_name: &str, project_key: u64, tim
     let out = match schema { Schema::Ifc4x3 => openbim_ifc::export_ifc4x3(&scene), Schema::Ifc4 => openbim_ifc::export(&scene), Schema::Ifc2x3 => openbim_ifc::export_ifc2x3(&scene) }.map_err(|e| format!("{e:?}"))?;
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
-    if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
+    if doc.site().is_some() && scene.georef.is_none() { warnings.push("the project site is not exported: give the map a name in Georeferencing".into()); }
     Ok(Exported { text: out.text, walls: scene.walls.len(), beams: scene.beams.len(), columns: scene.columns.len(), slabs: scene.slabs.len() + scene.roofs.len(), warnings })
 }
 
@@ -540,6 +557,48 @@ pub fn iso_time(secs: u64) -> String {
 mod tests {
     use super::*;
     use openbim_document::{BeamSpec, ElementId, Section};
+
+    #[test]
+    fn the_site_leaves_with_its_map_once_the_map_has_a_name() {
+        let mut d = Document::spatial_sample();
+        let site = openbim_document::Site { latitude: 11.5564, longitude: 104.9282, angle_to_true_north_deg: 20.0, utc_offset_hours: 7.0 };
+        d.transact(d.revision(), &[openbim_document::Command::SetSite(site)]).unwrap();
+        // a site with no map name: no conversion, and the export says what to do
+        let out = export_ifc(&d, "P", 1, "2026-10-23T00:00:00").unwrap();
+        assert!(!out.text.contains("IFCMAPCONVERSION") && out.warnings.iter().any(|w| w.contains("Georeferencing")), "{:?}", out.warnings);
+        // with the map named, the file has the conversion, the projected CRS and the site's position
+        let g = crate::georef_ui::GeorefInput { crs_name: "EPSG:32648".into(), shared: [500_000.0, 1_281_000.0, 10.0], elevation_m: 11.0, ..Default::default() };
+        d.set_app_records(g.record().into_iter().collect());
+        let out = export_ifc(&d, "P", 1, "2026-10-23T00:00:00").unwrap();
+        assert!(out.text.contains("IFCMAPCONVERSION(") && out.text.contains("IFCPROJECTEDCRS('EPSG:32648'"), "the map is written");
+        let site_line = out.text.lines().find(|l| l.contains("IFCSITE(")).unwrap();
+        assert!(!site_line.contains(",$,$,$,$,$)") && site_line.contains("(11,33,") , "{site_line}");
+        assert!(!out.warnings.iter().any(|w| w.contains("site is not exported")), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn a_room_leaves_as_a_space_with_its_number_name_and_department() {
+        let mut d = Document::spatial_sample();
+        let level = ElementId(10);
+        d.place_walls(level, &[([100.0, 0.0], [106.0, 0.0]), ([106.0, 0.0], [106.0, 4.0]), ([106.0, 4.0], [100.0, 4.0]), ([100.0, 4.0], [100.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let room = d.place_room(level, [103.0, 2.0]).unwrap();
+        d.set_room_data(room, "101", "Plant room", "Services").unwrap();
+        let out = export_ifc(&d, "P", 0x1234, "2026-10-23T00:00:00").unwrap();
+        let spaces: Vec<&str> = out.text.lines().filter(|l| l.contains("IFCSPACE(")).collect();
+        assert_eq!(spaces.len(), 1, "{spaces:?}");
+        assert!(spaces[0].contains("'101 Plant room'"), "{}", spaces[0]);
+        assert!(out.text.contains("'Services'"), "the department is the use of the space");
+        assert!(out.text.contains("Qto_SpaceBaseQuantities"));
+        // without a number the space is named as the room is
+        d.set_room_data(room, "", "Plant room", "").unwrap();
+        let out = export_ifc(&d, "P", 0x1234, "2026-10-23T00:00:00").unwrap();
+        assert!(out.text.contains("IFCSPACE(") && out.text.contains("'Plant room'"));
+        // and the same GlobalId again, as for every element
+        let again = export_ifc(&d, "P", 0x1234, "2026-10-23T00:00:00").unwrap();
+        let gid = |t: &str| t.lines().find(|l| l.contains("IFCSPACE(")).and_then(|l| l.split('\'').nth(1)).map(str::to_string);
+        assert_eq!(gid(&out.text), gid(&again.text));
+        assert!(gid(&out.text).is_some());
+    }
 
     #[test]
     fn the_document_exports_its_walls_and_beams_and_names_what_it_leaves_out() {
