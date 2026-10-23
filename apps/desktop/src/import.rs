@@ -214,11 +214,13 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
 
     let mut planned: Vec<Planned> = Vec::new();
     let mut spaces: Vec<&Member> = Vec::new();
+    let mut fillers: Vec<&Member> = Vec::new();
     let mut ops_rooms: Vec<Command> = Vec::new();
     for m in imp.members.iter() {
         let number = m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
         let class = m.class.as_str();
         if class == "IFCSPACE" { spaces.push(m); continue; }
+        if class == "IFCDOOR" || class == "IFCWINDOW" { fillers.push(m); continue; }
         let category = match class {
             "IFCBEAM" | "IFCMEMBER" => Category::Beam,
             "IFCCOLUMN" => Category::Column,
@@ -404,9 +406,54 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
         let name = match p.category { Category::Wall => "walls", Category::Beam => "beams", Category::Column => "columns", Category::Slab => "slabs", Category::Footing => "pad footings", Category::WallFooting => "strip footings", Category::Pipe => "pipes", _ => "ducts" };
         *report.added.entry(name).or_default() += 1;
     }
+    plan_fillers(doc, &ops, &fillers, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_rooms(doc, &ops, &spaces, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     ops.extend(ops_rooms);
     (ops, report)
+}
+
+/// Doors and windows of the file, put in the wall they stand in: the wall whose axis passes by the product's place, at
+/// the right height. The door or window family of the library is used, at the size the file gives. One that stands in no
+/// wall, or whose size the family does not allow, is left out and said; one the model has already (same wall, same
+/// place) is not made twice.
+fn plan_fillers(doc: &Document, ops: &[Command], fillers: &[&Member], take: &mut dyn FnMut(Option<u64>, &mut BTreeSet<u64>) -> ElementId, used: &mut BTreeSet<u64>, out: &mut Vec<Command>, report: &mut ImportReport) {
+    if fillers.is_empty() { return; }
+    let mut scratch = doc.clone();
+    if !ops.is_empty() && scratch.transact(scratch.revision(), ops).is_err() { return; }
+    let mut skip = |why: &str| *report.skipped.entry(why.to_string()).or_default() += 1;
+    for m in fillers {
+        let door = m.class == "IFCDOOR";
+        let what = if door { "IFCDOOR" } else { "IFCWINDOW" };
+        let (Some(o), Some((h, w))) = (m.origin, m.overall) else { skip(&format!("{what} without a place or a size")); continue };
+        if !(w > 0.0 && h > 0.0) { skip(&format!("{what} without a size")); continue }
+        // the walls of the model with the file's, as lines in plan with their base and top
+        let host = scratch.elements().filter(|e| e.category == Category::Wall).filter_map(|e| {
+            let Some(Geometry::Linear { start, end, level }) = e.geometry else { return None };
+            let base = scratch.get(level)?.elevation_m + e.elevation_m;
+            let (dx, dy) = (end[0] - start[0], end[1] - start[1]);
+            let len = dx.hypot(dy);
+            if len < 1e-9 { return None; }
+            let t = (((o[0] - start[0]) * dx + (o[1] - start[1]) * dy) / len).clamp(0.0, len);
+            let d = (start[0] + dx / len * t - o[0]).hypot(start[1] + dy / len * t - o[1]);
+            (d <= e.width_m / 2.0 + 0.05 && o[2] >= base - 0.05 && o[2] <= base + e.height_m).then_some((d, e.id, t, base, e.width_m))
+        }).min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, wall, along, base, thick)) = host else { skip(&format!("{what} that stands in no wall")); continue };
+        let twin = scratch.elements().any(|e| matches!(e.geometry, Some(Geometry::InWall { host: h2, along_m }) if h2 == wall && (along_m - along).abs() < 0.1 && e.category == Category::Family));
+        if twin { continue; }
+        let sill = (o[2] - base).max(0.0);
+        let (family, mut overrides) = if door { ("Door, single flush", vec![("width".to_string(), w), ("height".to_string(), h)]) } else { ("Window, fixed with mullions", vec![("width".to_string(), w), ("height".to_string(), h), ("sill".to_string(), sill)]) };
+        overrides.push(("wall_t".to_string(), thick));
+        let id = take(None, used);
+        let n = scratch.elements().filter(|e| e.category == Category::Family).count() + 1;
+        let cmds = vec![
+            Command::Create { id, category: Category::Family, name: format!("{family} {n}"), width_m: 1.0, height_m: 1.0, elevation_m: if door { 0.0 } else { sill } },
+            Command::SetFamily { id, family: family.to_string(), type_name: String::new(), overrides, angle_deg: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::InWall { host: wall, along_m: along } },
+        ];
+        if scratch.transact(scratch.revision(), &cmds).is_err() { used.remove(&id.0); skip(&format!("{what} whose size or place the library family does not allow")); continue; }
+        out.extend(cmds);
+        *report.added.entry(if door { "doors" } else { "windows" }).or_default() += 1;
+    }
 }
 
 /// A point inside the polygon: its centroid where that is inside, else the middle of a corner triangle with nothing in it.
@@ -912,13 +959,11 @@ mod tests {
             // These classes are outside the reader's supported extruded-profile subset;
             // the native records above still restore every element exactly.
             let mut skipped = BTreeMap::from([
-                ("IFCDOOR", 1),
                 // the grid and the sample's truss and beam system leave as assemblies; the native records restore them
                 ("IFCELEMENTASSEMBLY", 2),
                 ("IFCGRID", 1),
                 ("IFCOPENINGELEMENT", 5 + crate::export::service_openings(&out.text)),
                 ("IFCRAILING", 3),
-                ("IFCWINDOW", 1),
             ]);
             match schema {
                 crate::export::Schema::Ifc4x3 | crate::export::Schema::Ifc4 => {
@@ -1021,6 +1066,51 @@ mod tests {
         let report = import_ifc(&mut bare, &text).unwrap();
         assert_eq!(bare.elements().filter(|e| e.category == Category::Room).count(), before, "{}", report.text());
         assert!(report.skipped.keys().any(|k| k.contains("IFCSPACE")), "{:?}", report.skipped);
+    }
+
+    fn fillers_of(d: &Document) -> Vec<(String, f64, f64, f64, f64)> {
+        let mut v: Vec<_> = d.elements().filter(|e| e.category == Category::Family).filter_map(|e| {
+            let Some(Geometry::InWall { host, along_m }) = e.geometry else { return None };
+            let vals = d.family_values(e.id);
+            let get = |k: &str| vals.iter().find(|(n, _)| n == k).map_or(f64::NAN, |(_, v)| *v);
+            let _ = host;
+            Some((e.name.split(',').next().unwrap_or("").to_string(), (along_m * 1000.0).round() / 1000.0, get("width"), get("height"), e.elevation_m))
+        }).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    }
+
+    #[test]
+    fn a_door_and_a_window_of_a_file_from_another_program_stand_in_the_wall_they_were_in() {
+        let mut d = Document::spatial_sample();
+        let l = ElementId(10);
+        let walls = d.place_walls(l, &[([100.0, 0.0], [110.0, 0.0]), ([110.0, 0.0], [110.0, 6.0]), ([110.0, 6.0], [100.0, 6.0]), ([100.0, 6.0], [100.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let door = openbim_document::FamilySpec { family: "Door, single flush".into(), type_name: String::new(), overrides: vec![("width".into(), 1.0), ("height".into(), 2.2)], angle_deg: 0.0, elevation_m: 0.0 };
+        d.place_family_in_wall(walls[0], 3.0, &door).unwrap();
+        let window = openbim_document::FamilySpec { family: "Window, fixed with mullions".into(), type_name: String::new(), overrides: vec![("width".into(), 1.5), ("height".into(), 1.1)], angle_deg: 0.0, elevation_m: 1.0 };
+        d.place_family_in_wall(walls[2], 4.0, &window).unwrap();
+        let want = fillers_of(&d);
+        assert_eq!(want.len(), 2);
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-23T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        // the sample's own door-free walls are in the file too; read it into a model with only the box's walls
+        let mut back = Document::new();
+        let report = import_ifc(&mut back, &out.text).unwrap();
+        let got = fillers_of(&back);
+        assert_eq!(report.added.get("doors"), Some(&1), "{}", report.text());
+        assert_eq!(report.added.get("windows"), Some(&1), "{}", report.text());
+        assert_eq!(got.len(), 2, "{got:?}");
+        for (w, g) in want.iter().zip(&got) {
+            assert_eq!(w.0, g.0);
+            assert!((w.1 - g.1).abs() < 0.01 && (w.2 - g.2).abs() < 1e-6 && (w.3 - g.3).abs() < 1e-6, "{w:?} {g:?}");
+        }
+        // twice adds nothing
+        import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(fillers_of(&back).len(), 2);
+        // a door in no wall is said, not placed
+        let text = out.text.lines().filter(|l| !l.contains("=IFCWALL")).collect::<Vec<_>>().join("\n");
+        let mut bare = Document::new();
+        let report = import_ifc(&mut bare, &text).unwrap();
+        assert!(fillers_of(&bare).is_empty() && report.skipped.keys().any(|k| k.contains("stands in no wall")), "{}", report.text());
     }
 
     #[test]
