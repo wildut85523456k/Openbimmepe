@@ -341,7 +341,7 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FamilySpec;
+    use crate::{FamilySpec, FootingSpec, Material};
 
     fn near(a: P, b: P) -> bool { (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9 }
     fn line(d: &Document, id: ElementId) -> (P, P) { match d.get(id).unwrap().geometry { Some(Geometry::Linear { start, end, .. }) => (start, end), g => panic!("{g:?}") } }
@@ -616,5 +616,24 @@ mod tests {
         d.transact(d.revision(), &ops).unwrap();
         assert_eq!((plan(&d, ids[0]), plan(&d, ids[1])), before);
         assert!(d.wall_join_commands(ElementId(10), true, false).is_err());
+    }
+    #[test]
+    fn an_equipment_pad_is_made_by_its_unit_and_moves_copies_and_goes_with_it() {
+        let mut d = Document::spatial_sample();
+        let fan = d.place_family(ElementId(10), [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2 }).unwrap();
+        let spec = FootingSpec { width_m: 1.0, length_m: 1.0, thickness_m: 0.15, top_offset_m: 0.0, material: Material::Concrete };
+        let pad = d.place_equipment_pad(fan, &spec).unwrap();
+        assert_eq!(d.get(pad).unwrap().parent, Some(fan));
+        // a pad cannot be made under something that is not a unit
+        assert!(d.place_equipment_pad(ElementId(10), &spec).is_err());
+        let at = |d: &Document, id| match d.get(id).unwrap().geometry { Some(Geometry::Pad { at, .. }) => at, _ => panic!() };
+        // moving the unit moves the pad
+        let ops = d.transform_commands(&[fan], Xf::Move([1.0, 0.5])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(near(at(&d, pad), [3.0, 5.0]));
+        // deleting the unit takes the pad
+        let ops = d.delete_commands(&[fan]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(d.get(pad).is_none());
     }
 }

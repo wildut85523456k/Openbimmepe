@@ -213,9 +213,12 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
     };
 
     let mut planned: Vec<Planned> = Vec::new();
+    let mut spaces: Vec<&Member> = Vec::new();
+    let mut ops_rooms: Vec<Command> = Vec::new();
     for m in imp.members.iter() {
         let number = m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
         let class = m.class.as_str();
+        if class == "IFCSPACE" { spaces.push(m); continue; }
         let category = match class {
             "IFCBEAM" | "IFCMEMBER" => Category::Beam,
             "IFCCOLUMN" => Category::Column,
@@ -401,7 +404,74 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
         let name = match p.category { Category::Wall => "walls", Category::Beam => "beams", Category::Column => "columns", Category::Slab => "slabs", Category::Footing => "pad footings", Category::WallFooting => "strip footings", Category::Pipe => "pipes", _ => "ducts" };
         *report.added.entry(name).or_default() += 1;
     }
+    plan_rooms(doc, &ops, &spaces, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
+    ops.extend(ops_rooms);
     (ops, report)
+}
+
+/// A point inside the polygon: its centroid where that is inside, else the middle of a corner triangle with nothing in it.
+fn interior_point(poly: &[[f64; 2]]) -> Option<[f64; 2]> {
+    let n = poly.len();
+    if n < 3 { return None; }
+    let a2: f64 = (0..n).map(|i| { let (p, q) = (poly[i], poly[(i + 1) % n]); p[0] * q[1] - q[0] * p[1] }).sum();
+    if a2.abs() < 1e-9 { return None; }
+    let inside = |pt: [f64; 2]| { let mut c = false; for i in 0..n { let (p, q) = (poly[i], poly[(i + 1) % n]); if (p[1] > pt[1]) != (q[1] > pt[1]) && pt[0] < (q[0] - p[0]) * (pt[1] - p[1]) / (q[1] - p[1]) + p[0] { c = !c; } } c };
+    let (mut cx, mut cy) = (0.0, 0.0);
+    for i in 0..n { let (p, q) = (poly[i], poly[(i + 1) % n]); let w = p[0] * q[1] - q[0] * p[1]; cx += (p[0] + q[0]) * w; cy += (p[1] + q[1]) * w; }
+    let c = [cx / (3.0 * a2), cy / (3.0 * a2)];
+    if inside(c) { return Some(c); }
+    let sign = a2.signum();
+    (0..n).find_map(|i| {
+        let (a, b, d) = (poly[(i + n - 1) % n], poly[i], poly[(i + 1) % n]);
+        let cross = (b[0] - a[0]) * (d[1] - b[1]) - (b[1] - a[1]) * (d[0] - b[0]);
+        if cross * sign <= 1e-12 { return None; }
+        let t = [(a[0] + b[0] + d[0]) / 3.0, (a[1] + b[1] + d[1]) / 3.0];
+        inside(t).then_some(t)
+    })
+}
+
+/// Rooms from the spaces of the file (B21 round trip). A room in this app is the closed space around a point, so a
+/// space becomes a room only where the walls, once the file's own are in, enclose a point of its outline; the number
+/// and the name come from the file, and a number another room of the level has already is left out, not guessed.
+#[allow(clippy::too_many_arguments)]
+fn plan_rooms(doc: &Document, ops: &[Command], spaces: &[&Member], level_for: &dyn Fn(&Member, f64) -> (ElementId, f64), take: &mut dyn FnMut(Option<u64>, &mut BTreeSet<u64>) -> ElementId, used: &mut BTreeSet<u64>, out: &mut Vec<Command>, report: &mut ImportReport) {
+    if spaces.is_empty() { return; }
+    let mut scratch = doc.clone();
+    if !ops.is_empty() && scratch.transact(scratch.revision(), ops).is_err() { report.skipped.insert("IFCSPACE (the walls of the file did not make a model to put rooms in)".into(), spaces.len()); return; }
+    let mut skip = |why: &str| *report.skipped.entry(why.to_string()).or_default() += 1;
+    for m in spaces {
+        let Some(body) = m.body.as_ref().filter(|b| b.vertical() && b.outline.len() >= 3) else { skip("IFCSPACE without an extruded floor outline"); continue };
+        let pts: Vec<[f64; 2]> = body.outline.iter().map(|q| [r6(q[0]), r6(q[1])]).collect();
+        let Some(at) = interior_point(&pts) else { skip("IFCSPACE whose outline has no area"); continue };
+        let (level, _) = level_for(m, body.centre[2].min(body.end()[2]));
+        let space = m.psets.get("OpenBIM_Space");
+        let mut number = space.and_then(|p| p.get("Number")).and_then(|p| p.text()).unwrap_or("").trim().to_string();
+        let mut name = m.name.trim().to_string();
+        if !number.is_empty() { if let Some(rest) = name.strip_prefix(&number) { name = rest.trim().to_string(); } }
+        if name.is_empty() { name = if number.is_empty() { "Room".into() } else { number.clone() }; }
+        let department = space.and_then(|p| p.get("Usage")).and_then(|p| p.text()).unwrap_or("").trim().to_string();
+        match scratch.place_room(level, at) {
+            Err(e) if e.contains("already") => continue,
+            Err(_) => { skip("IFCSPACE that the walls do not enclose (a room here is the closed space inside the walls)"); continue }
+            Ok(id) => {
+                if scratch.set_room_data(id, &number, &name, &department).is_err() {
+                    report.notes.push(format!("room \"{name}\": the number {number} is already used on its level, so it was left without one"));
+                    number.clear();
+                    if scratch.set_room_data(id, "", &name, &department).is_err() { skip("IFCSPACE with a name the app does not accept"); continue }
+                }
+            }
+        }
+        let id = take(None, used);
+        let mut texts = Vec::new();
+        if !number.is_empty() { texts.push(("Number".to_string(), number)); }
+        if !department.is_empty() { texts.push(("Department".to_string(), department)); }
+        out.extend([
+            Command::Create { id, category: Category::Room, name, width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Room { at, level } },
+        ]);
+        if !texts.is_empty() { out.push(Command::SetFamilyTexts { id, texts }); }
+        *report.added.entry("rooms").or_default() += 1;
+    }
 }
 
 /// One line about the file at `path` for the import window: its schema, and whether it carries this app's own data.
@@ -678,7 +748,7 @@ mod tests {
             let t = e.type_id.and_then(|t| d.get(t)).map_or(String::new(), |t| t.name.clone());
             format!("{:?}|{:.3}|{:.3}|{:.3}|{:?}|{:?}|{:?}|{:.3?}|{g}|{t}|{:.3?}", e.category, e.width_m, e.height_m, e.elevation_m, e.section, e.usage, e.material, e.slope_ratio.unwrap_or(0.0), e.outline)
         }).collect();
-        v.sort();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
         v
     }
 
@@ -824,7 +894,7 @@ mod tests {
             assert!(out.text.matches("IFCFACETEDBREP(").count() >= 36, "{schema:?}: the parts of the railing");
             // the shaft voids the floor above it; the wall opening voids its wall; the door and the window void theirs
             assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Shaft Opening 1")).count(), 1, "{schema:?}: the shaft is an opening of the floor");
-            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 8, "{schema:?}: door, window, wall opening, shaft, the vertical opening, and the three the runs cut in the middle wall");
+            assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count() - crate::export::service_openings(&out.text), 5, "{schema:?}: door, window, wall opening, shaft and the vertical opening in the floor");
             // the one in the roof is cut in the roof's shape, not a void of its own
             assert_eq!(out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && l.contains("Vertical Opening")).count(), 1, "{schema:?}");
             assert!(out.text.contains("Pset_StairCommon") && out.text.contains(".STRAIGHT_RUN_STAIR."), "{schema:?}");
@@ -843,7 +913,10 @@ mod tests {
             // the native records above still restore every element exactly.
             let mut skipped = BTreeMap::from([
                 ("IFCDOOR", 1),
-                ("IFCOPENINGELEMENT", 8),
+                // the grid and the sample's truss and beam system leave as assemblies; the native records restore them
+                ("IFCELEMENTASSEMBLY", 2),
+                ("IFCGRID", 1),
+                ("IFCOPENINGELEMENT", 5 + crate::export::service_openings(&out.text)),
                 ("IFCRAILING", 3),
                 ("IFCWINDOW", 1),
             ]);
@@ -884,6 +957,70 @@ mod tests {
         let want: Vec<String> = digest(&d).into_iter().map(|l| l.replace("[4.000, 0.000][4.000, 6.000]", "[4.000, 0.100][4.000, 5.900]")).collect();
         let got = digest(&back);
         assert_eq!(want, got, "{}", report.text());
+    }
+
+    /// Two closed rooms; `skip_numbers` walls are drawn first (and left in the model) so that the rooms' own elements take later numbers.
+    fn two_rooms(skip_numbers: usize) -> Document {
+        let mut d = Document::spatial_sample();
+        let l = ElementId(10);
+        for k in 0..skip_numbers { d.place_wall(l, [300.0 + k as f64, 50.0], [300.5 + k as f64, 50.0], 0.1, 3.0, 0.0).unwrap(); }
+        for x in [100.0, 110.0] {
+            d.place_walls(l, &[([x, 0.0], [x + 6.0, 0.0]), ([x + 6.0, 0.0], [x + 6.0, 4.0]), ([x + 6.0, 4.0], [x, 4.0]), ([x, 4.0], [x, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        }
+        let a = d.place_room(l, [103.0, 2.0]).unwrap();
+        d.set_room_data(a, "101", "Plant room", "Services").unwrap();
+        let b = d.place_room(l, [113.0, 2.0]).unwrap();
+        d.set_room_data(b, "", "Store", "").unwrap();
+        d
+    }
+
+    fn rooms_of(d: &Document) -> Vec<(String, String, String, f64)> {
+        let mut v: Vec<_> = d.elements().filter(|e| e.category == Category::Room).map(|e| (d.room_text(e.id, "Number"), e.name.clone(), d.room_text(e.id, "Department"), (d.room_shape(e.id).unwrap().area() * 1000.0).round() / 1000.0)).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    }
+
+    #[test]
+    fn a_space_in_a_file_comes_back_as_a_room_with_its_number_name_and_department() {
+        let d = two_rooms(0);
+        let want = rooms_of(&d);
+        assert_eq!(want.len(), 2);
+        // from the geometry alone (a file from another program), and from the file with the app's own data
+        for own in [false, true] {
+            let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-23T00:00:00", crate::export::Schema::Ifc4x3, own).unwrap();
+            let mut back = Document::new();
+            let report = import_ifc(&mut back, &out.text).unwrap();
+            assert_eq!(rooms_of(&back), want, "own data {own}: {}", report.text());
+            if !own { assert_eq!(report.added.get("rooms"), Some(&2), "{}", report.text()); }
+            // a second import adds nothing: the rooms are there
+            import_ifc(&mut back, &out.text).unwrap();
+            assert_eq!(rooms_of(&back).len(), 2, "own data {own}");
+        }
+    }
+
+    #[test]
+    fn a_space_the_walls_do_not_enclose_and_a_number_already_taken_are_said_not_guessed() {
+        let d = two_rooms(60);
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-23T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        // the file's walls are in, so its spaces are enclosed; a model whose level already has a room 101 keeps it
+        let mut other = Document::spatial_sample();
+        let l = ElementId(10);
+        // the file's elements take numbers this model does not use (an element whose number the model has already is left out)
+        other.place_walls(l, &[([200.0, 0.0], [204.0, 0.0]), ([204.0, 0.0], [204.0, 4.0]), ([204.0, 4.0], [200.0, 4.0]), ([200.0, 4.0], [200.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let r = other.place_room(l, [202.0, 2.0]).unwrap();
+        other.set_room_data(r, "101", "Office", "").unwrap();
+        let report = import_ifc(&mut other, &out.text).unwrap();
+        let rooms = rooms_of(&other);
+        assert_eq!(rooms.len(), 3, "{}", report.text());
+        assert!(rooms.iter().any(|r| r.1 == "Plant room" && r.0.is_empty() && r.2 == "Services"), "the clash leaves the room without a number: {rooms:?}");
+        assert!(report.notes.iter().any(|n| n.contains("101") && n.contains("Plant room")), "{:?}", report.notes);
+        // a space with no walls around it is not made a room
+        let mut bare = Document::spatial_sample();
+        let before = bare.elements().filter(|e| e.category == Category::Room).count();
+        let text = out.text.lines().filter(|l| !l.contains("=IFCWALL")).collect::<Vec<_>>().join("\n");
+        let report = import_ifc(&mut bare, &text).unwrap();
+        assert_eq!(bare.elements().filter(|e| e.category == Category::Room).count(), before, "{}", report.text());
+        assert!(report.skipped.keys().any(|k| k.contains("IFCSPACE")), "{:?}", report.skipped);
     }
 
     #[test]

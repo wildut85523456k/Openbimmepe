@@ -1,5 +1,5 @@
 //! The document as an IFC 4.3 file (IFC4 on request): levels, walls and beams. The document's other elements are named in the warnings.
-use openbim_arch::{Level, Levels};
+use openbim_arch::{Level, Levels, Room};
 use openbim_document::{Category, Document, ElementId, Geometry, Material, Usage};
 use openbim_family::mep::{Domain, System};
 use openbim_geom::WallChain;
@@ -158,16 +158,12 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
     let level_of = |id| doc.get(id).filter(|l| matches!(l.geometry, Some(Geometry::Level))).map(|l| l.elevation_m);
     let levels: Vec<Level> = doc.elements().filter(|e| matches!(e.geometry, Some(Geometry::Level)))
         .map(|e| Level { name: e.name.clone(), elevation: e.elevation_m }).collect();
-    // sorted once, here and for the whole export: a room's level is an index into this list, and so are the storeys
-    let levels = Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?;
     let (mut walls, mut beams, mut columns, mut slabs, mut roofs, mut stairs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut railings: Vec<openbim_ifc::RailingItem> = Vec::new();
     let mut materials = std::collections::BTreeMap::new();
     let mut skipped = std::collections::BTreeMap::<&'static str, usize>::new();
     let mut instances = Vec::new();
     let mut mep = Network::new(1);
-    // the designer's names for the systems, so the file's IfcDistributionSystem carries them (Revit's "AHU-1 Supply")
-    mep.system_names = doc.mep().systems.iter().map(|d| (d.system, d.name.clone())).collect();
     // the wall types that have layers, as the file writes them (IFC2X3 has none)
     let wall_types: Vec<(ElementId, openbim_ifc::walls::WallType)> = doc.types_for(Category::Wall).into_iter().filter(|t| t.is_layered()).map(|t| (t.id, wall_type_of(t))).collect();
     for el in doc.elements() {
@@ -249,12 +245,12 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             }
             // the beams, members or bars they make are exported in their place
             (Category::Family, Some(Geometry::Placed { .. } | Geometry::InWall { .. })) => instances.push(el),
-            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Opening | Category::Section | Category::Elevation | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
+            (Category::Level | Category::Grid | Category::Tag | Category::Dimension | Category::Room | Category::Opening | Category::Section | Category::Elevation | Category::BeamSystem | Category::Truss | Category::Rebar, _) => {}
             (Category::Duct | Category::Pipe, Some(Geometry::Linear { start, end, level })) => {
                 let z = level_of(level).ok_or("a duct or pipe lies on a level that is gone")? + el.elevation_m;
                 let rise = (end[0] - start[0]).hypot(end[1] - start[1]) * el.slope_ratio.unwrap_or(0.0);
                 let (a, b) = ([start[0], start[1], z], [end[0], end[1], z + rise]);
-                // the system the designer gave this run, where they set one; a run with no assignment keeps `Other`
+                // the system the tools gave the run; a run nobody has assigned stays Other
                 let system = doc.mep().run_system(el.id).unwrap_or(System::Other);
                 let run = if el.category == Category::Pipe {
                     openbim_place::penetrations::Run::round(&el.name, Domain::Pipe, system, a, b, el.width_m)
@@ -270,6 +266,39 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         }
     }
     add_connections(doc, &mut mep, &mut skipped);
+    // where the runs cross walls and slabs: an opening each (and its register), as the place crate finds them
+    let (wall_penetrations, floor_penetrations) = if mep.segments.is_empty() { (Vec::new(), Vec::new()) } else {
+        let chains: Vec<WallChain> = walls.iter().map(|w: &WallItem| w.chain.clone()).collect();
+        let runs: Vec<openbim_place::penetrations::Run> = mep.segments.iter().map(|s| s.run.clone()).collect();
+        let gap = openbim_place::penetrations::DEFAULT_GROUP_RADIUS;
+        let (mut wall_pens, _) = openbim_place::penetrations::find(&chains, &runs, gap);
+        // the opening is cut into the wall itself; one that would break the wall is left out and its record says so
+        for pen in wall_pens.iter_mut().filter(|p| p.cut) {
+            let chain = &mut walls[pen.id.chain].chain;
+            let n = chain.segment_count();
+            if chain.openings.len() < n { chain.openings.resize(n, Vec::new()); }
+            chain.openings[pen.id.segment].push(openbim_geom::Opening { offset: pen.offset, width: pen.width, sill: pen.sill, height: pen.height });
+            let fits = chain.plans().ok().is_some_and(|plans| chain.segment_volume_exact(pen.id.segment, &plans[pen.id.segment]).is_ok());
+            if !fits { chain.openings[pen.id.segment].pop(); pen.cut = false; }
+        }
+        let flat: Vec<openbim_place::floors::Slab> = slabs.iter().map(|s: &SlabItem| s.slab.clone()).collect();
+        let (floor_pens, _) = openbim_place::floors::find_floor(&flat, &[], &runs, gap);
+        (wall_pens, floor_pens)
+    };
+    // trusses and beam systems: one assembly each over the beams they made
+    let assemblies: Vec<openbim_ifc::AssemblyDef> = doc.elements().filter(|e| matches!(e.category, Category::Truss | Category::BeamSystem)).map(|e| openbim_ifc::AssemblyDef {
+        id: e.id.0, name: e.name.clone(),
+        kind: if e.category == Category::Truss { openbim_ifc::AssemblyKind::Truss } else { openbim_ifc::AssemblyKind::BeamGrid },
+        members: doc.system_beams(e.id).into_iter().map(|m| m.0).collect(),
+    }).collect();
+    // the systems the user named, with the equipment in them
+    let system_defs: Vec<openbim_ifc::SystemDef> = doc.mep().systems.iter()
+        .map(|d| openbim_ifc::SystemDef { name: d.name.clone(), system: d.system, members: d.members.iter().map(|m| m.0).collect() }).collect();
+    // grid lines leave as one IfcGrid
+    let grids: Vec<openbim_ifc::GridItem> = doc.elements().filter_map(|e| match e.geometry {
+        Some(Geometry::Grid { start, end }) => Some(openbim_ifc::GridItem { id: e.id.0, name: e.name.clone(), start, end }),
+        _ => None,
+    }).collect();
     // family instances, after the walls they may stand in
     let wall_index: std::collections::BTreeMap<u64, usize> = walls.iter().enumerate().map(|(i, w): (usize, &WallItem)| (w.id, i)).collect();
     let lib = library();
@@ -340,42 +369,32 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
             slab_voids.extend(doc.shaft_cuts(id).into_iter().map(|(name, outline)| openbim_place::floors::SlabVoid { slab: si, name, outline }));
         }
     }
-    // the holes a run makes in a wall or a slab: the penetrations engine computes them from the runs and the walls
-    // and floors they cross, and the file gets both the openings (the hole itself) and the register of what passes
-    let runs: Vec<openbim_place::penetrations::Run> = mep.segments.iter().map(|s| s.run.clone()).collect();
-    let chains: Vec<WallChain> = walls.iter().map(|w| w.chain.clone()).collect();
-    let (wall_penetrations, wall_issues) = openbim_place::penetrations::find(&chains, &runs, openbim_place::penetrations::DEFAULT_GROUP_RADIUS);
-    for p in &wall_penetrations {
-        let c = &mut walls[p.id.chain].chain;
-        if c.openings.len() <= p.id.segment { c.openings.resize(p.id.segment + 1, Vec::new()); }
-        c.openings[p.id.segment].push(openbim_geom::Opening { offset: p.offset, width: p.width, sill: p.sill, height: p.height });
-    }
-    let slab_outlines: Vec<openbim_place::floors::Slab> = slabs.iter().map(|s| s.slab.clone()).collect();
-    let (floor_penetrations, floor_issues) = openbim_place::floors::find_floor(&slab_outlines, &[], &runs, openbim_place::penetrations::DEFAULT_GROUP_RADIUS);
-    if !wall_issues.is_empty() || !floor_issues.is_empty() { *skipped.entry("runs that do not fit their wall or slab (left out)").or_default() += 1; }
-    // the rooms, as the file writes them: each is the closed space its walls bound, on the level it stands on
-    let mut rooms: Vec<openbim_ifc::RoomItem> = Vec::new();
-    for el in doc.elements().filter(|e| e.category == Category::Room) {
-        let Some(Geometry::Room { level, .. }) = el.geometry else { *skipped.entry("rooms without a place").or_default() += 1; continue };
-        let Some(host) = doc.get(level).filter(|l| matches!(l.geometry, Some(Geometry::Level))) else { *skipped.entry("rooms on a level that is gone").or_default() += 1; continue };
-        let Some(li) = levels.index_of(&host.name) else { *skipped.entry("rooms on a level that is gone").or_default() += 1; continue };
-        let Ok(shape) = doc.room_shape(el.id) else { *skipped.entry("rooms whose walls do not close a space").or_default() += 1; continue };
-        // a room rises to the next level up, as Revit's room height does; the element's own height is the fallback
-        let height = levels.floor_to_floor(li).ok().flatten().unwrap_or(el.height_m);
-        rooms.push(openbim_ifc::RoomItem { id: el.id.0, room: openbim_arch::Room {
-            name: el.name.clone(), usage: String::new(), occupancy: 0.0, level: li,
-            outline: shape.outline, holes: shape.holes, height,
-        } });
-    }
     let mep_ids: Vec<u64> = mep.segments.iter().map(|s| s.id).collect();
     let (types, member_info) = types_of(doc, &mep_ids, &walls, &beams, &columns, &slabs, &roofs, &stairs, &railings);
+    let levels = Levels::new(levels).map_err(|e| format!("levels: {e:?}"))?;
+    // the rooms leave as spaces: the number and name the user gave, the department as the use, the floor outline
+    // (counter-clockwise, what stands in it as clockwise holes) and the height up to the next level (2.7 m at the top)
+    let mut rooms: Vec<openbim_ifc::RoomItem> = Vec::new();
+    for el in doc.elements().filter(|e| e.category == Category::Room) {
+        let Some(Geometry::Room { level, .. }) = el.geometry else { continue };
+        let (Some(shape), Some(l)) = (doc.room_shape(el.id).ok(), doc.get(level)) else { *skipped.entry("rooms with no closed space").or_default() += 1; continue };
+        let Some(index) = levels.all().iter().position(|x| x.name == l.name && x.elevation == l.elevation_m) else { *skipped.entry("rooms on a level that is gone").or_default() += 1; continue };
+        let ccw = |mut r: Vec<[f64; 2]>, want_ccw: bool| { let a: f64 = (0..r.len()).map(|i| { let (p, q) = (r[i], r[(i + 1) % r.len()]); p[0] * q[1] - q[0] * p[1] }).sum(); if (a > 0.0) != want_ccw { r.reverse(); } r };
+        let number = doc.room_text(el.id, "Number");
+        let name = if number.is_empty() { el.name.clone() } else { format!("{number} {}", el.name) };
+        let height = levels.floor_to_floor(index).ok().flatten().unwrap_or(2.7);
+        rooms.push(openbim_ifc::RoomItem { id: el.id.0, number: number.clone(), room: Room {
+            name, usage: doc.room_text(el.id, "Department"), occupancy: 0.0, level: index,
+            outline: ccw(shape.outline, true), holes: shape.holes.into_iter().map(|h| ccw(h, false)).collect(), height,
+        } });
+    }
     let scene = Scene {
         project_name: project_name.into(), project_key, beams: beams.clone(), materials, timestamp: timestamp.into(),
         levels,
         walls, wall_penetrations, firestops: Default::default(), slabs, roofs, railings, stairs, columns: columns.clone(), shafts: vec![],
         floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms, wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
-        wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![],
-        room_lighting: Default::default(), pset_map: Default::default(), types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
+        wall_joins: vec![], georef: crate::georef_ui::GeorefInput::from_records(doc.app_records()).georef(doc.site()), room_settings: Default::default(), separation_lines: vec![],
+        room_lighting: Default::default(), pset_map: Default::default(), grids, system_defs, assemblies, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
     };
     Ok((scene, skipped))
 }
@@ -514,7 +533,7 @@ pub fn export_ifc_with(doc: &Document, project_name: &str, project_key: u64, tim
     let out = match schema { Schema::Ifc4x3 => openbim_ifc::export_ifc4x3(&scene), Schema::Ifc4 => openbim_ifc::export(&scene), Schema::Ifc2x3 => openbim_ifc::export_ifc2x3(&scene) }.map_err(|e| format!("{e:?}"))?;
     let mut warnings = out.report.warnings;
     warnings.extend(skipped.into_iter().map(|(what, n)| format!("{n} {what} not exported yet")));
-    if doc.site().is_some() { warnings.push("the project site is not exported: it needs a coordinate reference system".into()); }
+    if doc.site().is_some() && scene.georef.is_none() { warnings.push("the project site is not exported: give the map a name in Georeferencing".into()); }
     Ok(Exported { text: out.text, walls: scene.walls.len(), beams: scene.beams.len(), columns: scene.columns.len(), slabs: scene.slabs.len() + scene.roofs.len(), warnings })
 }
 
@@ -538,6 +557,48 @@ pub fn iso_time(secs: u64) -> String {
 mod tests {
     use super::*;
     use openbim_document::{BeamSpec, ElementId, Section};
+
+    #[test]
+    fn the_site_leaves_with_its_map_once_the_map_has_a_name() {
+        let mut d = Document::spatial_sample();
+        let site = openbim_document::Site { latitude: 11.5564, longitude: 104.9282, angle_to_true_north_deg: 20.0, utc_offset_hours: 7.0 };
+        d.transact(d.revision(), &[openbim_document::Command::SetSite(site)]).unwrap();
+        // a site with no map name: no conversion, and the export says what to do
+        let out = export_ifc(&d, "P", 1, "2026-10-23T00:00:00").unwrap();
+        assert!(!out.text.contains("IFCMAPCONVERSION") && out.warnings.iter().any(|w| w.contains("Georeferencing")), "{:?}", out.warnings);
+        // with the map named, the file has the conversion, the projected CRS and the site's position
+        let g = crate::georef_ui::GeorefInput { crs_name: "EPSG:32648".into(), shared: [500_000.0, 1_281_000.0, 10.0], elevation_m: 11.0, ..Default::default() };
+        d.set_app_records(g.record().into_iter().collect());
+        let out = export_ifc(&d, "P", 1, "2026-10-23T00:00:00").unwrap();
+        assert!(out.text.contains("IFCMAPCONVERSION(") && out.text.contains("IFCPROJECTEDCRS('EPSG:32648'"), "the map is written");
+        let site_line = out.text.lines().find(|l| l.contains("IFCSITE(")).unwrap();
+        assert!(!site_line.contains(",$,$,$,$,$)") && site_line.contains("(11,33,") , "{site_line}");
+        assert!(!out.warnings.iter().any(|w| w.contains("site is not exported")), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn a_room_leaves_as_a_space_with_its_number_name_and_department() {
+        let mut d = Document::spatial_sample();
+        let level = ElementId(10);
+        d.place_walls(level, &[([100.0, 0.0], [106.0, 0.0]), ([106.0, 0.0], [106.0, 4.0]), ([106.0, 4.0], [100.0, 4.0]), ([100.0, 4.0], [100.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let room = d.place_room(level, [103.0, 2.0]).unwrap();
+        d.set_room_data(room, "101", "Plant room", "Services").unwrap();
+        let out = export_ifc(&d, "P", 0x1234, "2026-10-23T00:00:00").unwrap();
+        let spaces: Vec<&str> = out.text.lines().filter(|l| l.contains("IFCSPACE(")).collect();
+        assert_eq!(spaces.len(), 1, "{spaces:?}");
+        assert!(spaces[0].contains("'101 Plant room'"), "{}", spaces[0]);
+        assert!(out.text.contains("'Services'"), "the department is the use of the space");
+        assert!(out.text.contains("Qto_SpaceBaseQuantities"));
+        // without a number the space is named as the room is
+        d.set_room_data(room, "", "Plant room", "").unwrap();
+        let out = export_ifc(&d, "P", 0x1234, "2026-10-23T00:00:00").unwrap();
+        assert!(out.text.contains("IFCSPACE(") && out.text.contains("'Plant room'"));
+        // and the same GlobalId again, as for every element
+        let again = export_ifc(&d, "P", 0x1234, "2026-10-23T00:00:00").unwrap();
+        let gid = |t: &str| t.lines().find(|l| l.contains("IFCSPACE(")).and_then(|l| l.split('\'').nth(1)).map(str::to_string);
+        assert_eq!(gid(&out.text), gid(&again.text));
+        assert!(gid(&out.text).is_some());
+    }
 
     #[test]
     fn the_document_exports_its_walls_and_beams_and_names_what_it_leaves_out() {
@@ -664,4 +725,11 @@ pub mod tests_support {
             min_transition_len: 0.1, connector_stub: 0.5, margin: 0.0, catalogue: None,
         }
     }
+}
+
+/// The openings the runs of the sample cut (named W<chain>-S<segment>-P<n> in walls and F<slab>-P<n> in floors), which the
+/// tests that count the openings of doors, windows and shafts leave out.
+#[cfg(test)]
+pub(crate) fn service_openings(text: &str) -> usize {
+    text.lines().filter(|l| l.contains("IFCOPENINGELEMENT(") && (l.contains(",'W") || l.contains(",'F")) && l.chars().filter(|c| *c == '-').count() >= 1 && l.contains("-P")).count()
 }

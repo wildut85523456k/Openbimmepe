@@ -22,14 +22,14 @@ fn scene(walls: Vec<WallChain>, slabs: Vec<Slab>, room: Room) -> Scene {
         networks: vec![],
         families: vec![],
         items: vec![],
-        rooms: vec![RoomItem { id: 90, room }],
+        rooms: vec![RoomItem { id: 90, number: String::new(), room }],
         wall_types: vec![],
         wall_joins: vec![],
         georef: None,
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
+        pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![], types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     }
 }
 fn room(outline: &[[f64; 2]], level: usize) -> Room {

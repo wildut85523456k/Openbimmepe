@@ -12,6 +12,7 @@ use openbim_view::*;
 
 fn room(id: u64, name: &str, usage: &str, o: &[[f64; 2]]) -> RoomItem {
     RoomItem {
+        number: String::new(),
         id,
         room: Room {
             name: name.into(),
@@ -186,7 +187,7 @@ fn main() {
         room_settings: Default::default(),
         separation_lines: vec![],
         room_lighting: Default::default(),
-        pset_map: Default::default(), types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
+        pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![], types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
     };
     let v = plan_view(&scene, 0, ViewRange::new(2.3, cut, 0.0, -1.0).unwrap()).unwrap();
     std::fs::write(&out, svg_with(&v, &look)).unwrap();

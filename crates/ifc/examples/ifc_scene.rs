@@ -231,10 +231,10 @@ pub fn build_scene(edit: bool) -> Scene {
         // lighting inputs of the office (made-up numbers for the test)
         room_lighting: [(A | 960, openbim_ifc::lighting::RoomLighting { work_plane_height_m: Some(0.8), boundary_zone_m: Some(0.5), maintenance_factor: Some(0.8), required_lux: Some(500.0), min_uniformity: Some(0.6), max_ugr: Some(19.0), min_cri: Some(80.0), reflectance_ceiling: Some(0.7), reflectance_walls: Some(0.5), reflectance_floor: Some(0.2) })].into_iter().collect(),
         rooms: vec![
-            RoomItem { id: A | 960, room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[3.575, 0.1], [9.9, 0.1], [9.9, 7.9], [7.3, 7.9], [7.3, 7.7], [6.7, 7.7], [6.7, 7.9], [3.575, 7.9]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } },
-            RoomItem { id: A | 961, room: Room { name: "Store".into(), usage: "store".into(), occupancy: 0.0, level: 1, outline: vec![[2.0, 3.075], [6.0, 3.075], [6.0, 7.0], [2.0, 7.0]], holes: vec![], height: 2.8 } },
+            RoomItem { id: A | 960, number: String::new(), room: Room { name: "Office".into(), usage: "office".into(), occupancy: 6.0, level: 0, outline: vec![[3.575, 0.1], [9.9, 0.1], [9.9, 7.9], [7.3, 7.9], [7.3, 7.7], [6.7, 7.7], [6.7, 7.9], [3.575, 7.9]], holes: vec![vec![[4.0, 4.0], [4.0, 5.0], [5.0, 5.0], [5.0, 4.0]]], height: 2.8 } },
+            RoomItem { id: A | 961, number: String::new(), room: Room { name: "Store".into(), usage: "store".into(), occupancy: 0.0, level: 1, outline: vec![[2.0, 3.075], [6.0, 3.075], [6.0, 7.0], [2.0, 7.0]], holes: vec![], height: 2.8 } },
         ],
-        types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![], pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
+        types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![], grids: vec![], system_defs: vec![], assemblies: vec![], pset_map: PsetMap::from_text("# class\tparameter\tproperty set\tproperty\tkind\nIfcDoor\tmark\tPset_DoorCommon\tReference\tidentifier\nIfcWindow\tmark\tPset_WindowCommon\tReference\tidentifier\n").unwrap(),
     }
 }
 

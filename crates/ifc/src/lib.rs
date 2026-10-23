@@ -253,9 +253,53 @@ pub struct FamilyItem {
     pub host: Option<(usize, usize, f64)>,
 }
 
+/// A system the user named (Revit's piping or duct system): its name, its kind, and the equipment that belongs to it
+/// by element number. The runs that connect to those members belong to it too.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SystemDef {
+    pub name: String,
+    pub system: System,
+    pub members: Vec<u64>,
+}
+
+/// What an assembly of members is: a truss, or a beam system (a grid of beams).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssemblyKind {
+    Truss,
+    BeamGrid,
+}
+
+/// A truss or a beam system and the beams and members it made, written as an `IfcElementAssembly` that aggregates them,
+/// so that another program sees one truss and not a heap of loose members.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssemblyDef {
+    /// the element number of the truss or beam system in the model
+    pub id: u64,
+    pub name: String,
+    pub kind: AssemblyKind,
+    /// element numbers of its members (beams)
+    pub members: Vec<u64>,
+}
+
+/// A stable 64-bit number for a name (FNV-1a), the element number of things that have a name and no number.
+fn name_key(s: &str) -> u64 {
+    s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+}
+
+/// A grid line in plan: a named straight axis between two points, in metres.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridItem {
+    pub id: u64,
+    pub name: String,
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+}
+
 /// A room, written as an `IfcSpace` with its base quantities.
 pub struct RoomItem {
     pub id: u64,
+    /// the room number, written as a property so that a reader can tell it from the name
+    pub number: String,
     pub room: Room,
 }
 
@@ -387,6 +431,12 @@ pub struct Scene {
     pub families: Vec<FamilyRef>,
     pub items: Vec<FamilyItem>,
     pub rooms: Vec<RoomItem>,
+    /// grid lines, written as one `IfcGrid` with its axes
+    pub grids: Vec<GridItem>,
+    /// the systems the user named; each is written as its own `IfcDistributionSystem` with that name
+    pub system_defs: Vec<SystemDef>,
+    /// trusses and beam systems, each an `IfcElementAssembly` over its members
+    pub assemblies: Vec<AssemblyDef>,
     /// lighting inputs of rooms, by the room's element number
     pub room_lighting: std::collections::BTreeMap<u64, lighting::RoomLighting>,
     pub wall_types: Vec<walls::WallType>,
@@ -446,6 +496,12 @@ pub struct Report {
     /// occurrences whose shape is a mapped item of their type's shared shape
     pub mapped: usize,
     pub spaces: usize,
+    /// grid axes written (all in the one `IfcGrid`)
+    pub grid_axes: usize,
+    /// distribution systems written under the user's own name
+    pub named_systems: usize,
+    /// `IfcElementAssembly` written for trusses and beam systems
+    pub assemblies: usize,
     pub space_boundaries: usize,
     pub wall_types: usize,
     pub wall_joins: usize,
@@ -644,7 +700,7 @@ impl<'a> Out<'a> {
     /// ids for things that are not model elements (the site, relationships, property sets)
     fn gen_gid(&mut self) -> String {
         self.aux += 1;
-        string(&guid::global_id(self.key, 0, (0xFFFF_FFFFu64 << 32) | self.aux))
+        step::AUX_GID.to_string()
     }
     fn p3(&mut self, p: V3) -> u32 {
         let (a, b, c) = (self.r(p[0], "coordinate"), self.r(p[1], "coordinate"), self.r(p[2], "coordinate"));
@@ -939,7 +995,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     let mut storey_ids = Vec::new();
     for l in scene.levels.all() {
         let pl = o.place(Some(bld_pl), [0.0, 0.0, l.elevation], None, None);
-        let g = o.gen_gid();
+        let g = o.gid(name_key(&l.name), 0xF010);
         let e = o.r(l.elevation, "level elevation");
         let st = o.s.add(format!("IFCBUILDINGSTOREY({g},$,{},$,$,#{pl},$,$,.ELEMENT.,{e})", string(&l.name)));
         storey_ids.push(st);
@@ -960,8 +1016,10 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     write_stairs(&mut o)?;
     write_columns(&mut o)?;
     write_beams(&mut o)?;
+    write_assemblies(&mut o);
     write_member_materials(&mut o);
     write_spaces(&mut o)?;
+    write_grids(&mut o);
     if v2 {
         if !scene.networks.is_empty() {
             o.report.warnings.push("IFC2X3: service networks are not written".into());
@@ -984,6 +1042,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     if let Some(id) = o.dup {
         return Err(ExportError::DuplicateId(id));
     }
+    o.s.derive_ids(scene.project_key);
     let text = if v2 { o.s.finish_2x3(&scene.project_name, &scene.timestamp, oh) } else { o.s.finish(&scene.project_name, &scene.timestamp, x43) };
     Ok(Exported { text, report: o.report })
 }
@@ -1173,6 +1232,31 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         o.member_entities.push((c.id, e));
     }
     Ok(())
+}
+
+/// A truss or beam system becomes an `IfcElementAssembly` that aggregates its members; the members then leave the
+/// storey's list, because the assembly is what the storey contains.
+fn write_assemblies(o: &mut Out) {
+    let scene = o.scene;
+    for def in &scene.assemblies {
+        let ents: Vec<u32> = def.members.iter().filter_map(|m| o.member_entities.iter().find(|(id, _)| id == m).map(|(_, e)| *e)).collect();
+        if ents.is_empty() {
+            o.report.warnings.push(format!("{}: none of its {} members was written, so there is no assembly", def.name, def.members.len()));
+            continue;
+        }
+        let st = o.contained.iter().find(|(_, v)| v.contains(&ents[0])).map(|(k, _)| *k).unwrap_or(0);
+        for v in o.contained.values_mut() {
+            v.retain(|e| !ents.contains(e));
+        }
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let g = o.gid(def.id, 0);
+        let kind = match def.kind { AssemblyKind::Truss => "TRUSS", AssemblyKind::BeamGrid => "BEAM_GRID" };
+        let asm = o.s.add(format!("IFCELEMENTASSEMBLY({g},$,{},$,$,#{pl},$,$,.NOTDEFINED.,.{kind}.)", string(&def.name)));
+        o.contain(st, asm);
+        let g = o.gid(def.id, 1);
+        o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{asm},({}))", ents.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
+        o.report.assemblies += 1;
+    }
 }
 
 fn write_beams(o: &mut Out) -> Result<(), ExportError> {
@@ -1494,6 +1578,34 @@ fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
     Ok(())
 }
 
+/// Grid lines as one `IfcGrid`. Lines nearer the Y axis than the X axis are U axes, the others V axes; a grid with
+/// only one direction writes them all as U axes (an `IfcGrid` needs at least one). The grid is contained in the
+/// lowest storey, as a grid has no level of its own.
+fn write_grids(o: &mut Out) {
+    let scene = o.scene;
+    if scene.grids.is_empty() || o.storeys.is_empty() {
+        return;
+    }
+    let (mut u, mut v): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
+    for gr in &scene.grids {
+        let (a, b) = (o.p2(gr.start[0], gr.start[1]), o.p2(gr.end[0], gr.end[1]));
+        let curve = o.s.add(format!("IFCPOLYLINE((#{a},#{b}))"));
+        let axis = o.s.add(format!("IFCGRIDAXIS({},#{curve},.T.)", string(&gr.name)));
+        o.report.grid_axes += 1;
+        let (dx, dy) = ((gr.end[0] - gr.start[0]).abs(), (gr.end[1] - gr.start[1]).abs());
+        if dy >= dx { u.push(axis) } else { v.push(axis) }
+    }
+    if u.is_empty() {
+        std::mem::swap(&mut u, &mut v);
+    }
+    let list = |ids: &[u32]| if ids.is_empty() { "$".to_string() } else { format!("({})", ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")) };
+    let pl = o.place(Some(o.storeys[0].1), [0.0; 3], None, None);
+    let first = scene.grids[0].id;
+    let g = o.gid(first, 0x2000);
+    let grid = o.s.add(format!("IFCGRID({g},$,'Grid',$,$,#{pl},$,{},{},$)", list(&u), list(&v)));
+    o.contained.entry(0).or_default().push(grid);
+}
+
 fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
     for (ri, r) in scene.rooms.iter().enumerate() {
@@ -1523,7 +1635,7 @@ fn write_spaces(o: &mut Out) -> Result<(), ExportError> {
         let g = o.gen_gid();
         o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{},(#{sp}))", o.storeys[st].0));
         o.report.spaces += 1;
-        let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy))];
+        let props = vec![("Usage", Val::Label(room.usage.clone())), ("Occupancy", Val::Real(room.occupancy)), ("Number", Val::Label(r.number.clone()))];
         o.pset_mapped(sp, "IfcSpace", "OpenBIM_Space", props, &room.name);
         let vols = boundaries::room_volumes(scene, r);
         let mut clear = room.clone();
@@ -1615,6 +1727,7 @@ fn write_boundaries(o: &mut Out, r: &RoomItem, space: u32) {
 /// Port entities of one piece, in port order.
 struct PieceOut {
     ports: Vec<u32>,
+    entity: u32,
 }
 
 fn write_port(o: &mut Out, key: (u64, u16), name: &str, pl_rel: u32, loc: V3, z: V3, ds: (Domain, System, FlowDir)) -> u32 {
@@ -1698,8 +1811,20 @@ fn piece_flow(net: &openbim_route::graph::Network) -> (Vec<Vec<FlowDir>>, Vec<Ve
     (segs, fits)
 }
 
+/// One `IfcDistributionSystem` under the user's own name, with its members. Its ids come from the name, so they stay put
+/// when other things are added.
+fn write_named_system(o: &mut Out, def: &SystemDef, elems: &[u32]) {
+    let h = name_key(&def.name);
+    let g = o.gid(h, 0xF000);
+    let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&def.name), def.system.ifc_system()));
+    let g = o.gid(h, 0xF001);
+    o.s.add(format!("IFCRELASSIGNSTOGROUP({g},$,$,$,({}),$,#{grp})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
+    o.report.named_systems += 1;
+}
+
 fn write_networks(o: &mut Out) -> Result<(), ExportError> {
     let scene = o.scene;
+    let mut written_defs: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     for (ni, net) in scene.networks.iter().enumerate() {
         let mut segs: Vec<PieceOut> = Vec::new();
         let mut fits: Vec<PieceOut> = Vec::new();
@@ -1737,7 +1862,7 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             let p1 = write_port(o, (sg.id, 0x1001), "End", pl, [0.0, 0.0, len], [0.0, 0.0, 1.0], (r.domain, r.system, seg_flow[si][1]));
             nest(o, e, &[p0, p1]);
             by_system.entry(r.system.code()).or_default().push(e);
-            segs.push(PieceOut { ports: vec![p0, p1] });
+            segs.push(PieceOut { ports: vec![p0, p1], entity: e });
         }
         for (fi, nf) in net.fittings.iter().enumerate() {
             let f: &Fitting = &nf.fitting;
@@ -1779,7 +1904,7 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             }
             nest(o, e, &ports);
             by_system.entry(nf.system.code()).or_default().push(e);
-            fits.push(PieceOut { ports });
+            fits.push(PieceOut { ports, entity: e });
         }
         // equipment: one bare placeholder per equipment element, owning all that element's connector ports
         let mut holder: BTreeMap<u64, (u32, u32, V3, Vec<u32>)> = BTreeMap::new();
@@ -1828,17 +1953,74 @@ fn write_networks(o: &mut Out) -> Result<(), ExportError> {
             o.s.add(format!("IFCRELCONNECTSPORTS({g},$,$,$,#{ea},#{eb},$)"));
             o.report.connections += 1;
         }
-        // systems
+        // systems: the ones the user named take the runs connected to their equipment; what is left of a kind goes into one
+        // group named after the kind
+        let mut claimed: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+        let key = |n: NodeRef| match n { NodeRef::Segment(i) => (0u8, i), NodeRef::Fitting(i) => (1, i), NodeRef::Equipment(i) => (2, i) };
+        let mut named: Vec<(&SystemDef, Vec<u32>)> = Vec::new();
+        for (di, def) in scene.system_defs.iter().enumerate() {
+            if written_defs.contains(&di) {
+                continue;
+            }
+            let starts: Vec<usize> = net.equipment.iter().enumerate().filter(|(_, q)| def.members.contains(&q.element)).map(|(i, _)| i).collect();
+            if starts.is_empty() {
+                continue;
+            }
+            let mut seen: std::collections::BTreeSet<(u8, usize)> = starts.iter().map(|&i| (2u8, i)).collect();
+            let mut todo: Vec<(u8, usize)> = seen.iter().copied().collect();
+            while let Some(at) = todo.pop() {
+                for (a, b) in net.links() {
+                    let (ka, kb) = (key(a.node), key(b.node));
+                    let other = if ka == at { kb } else if kb == at { ka } else { continue };
+                    if seen.insert(other) {
+                        todo.push(other);
+                    }
+                }
+            }
+            let mut elems: Vec<u32> = Vec::new();
+            for &(kind, i) in &seen {
+                match kind {
+                    0 => elems.extend(segs.get(i).map(|p| p.entity)),
+                    1 => elems.extend(fits.get(i).map(|p| p.entity)),
+                    _ => {}
+                }
+            }
+            for el in &def.members {
+                let ent = scene.items.iter().position(|it| it.id == *el).and_then(|i| o.item_entities.get(i).copied()).or_else(|| holder.get(el).map(|h| h.0));
+                match ent {
+                    Some(x) => elems.push(x),
+                    None => o.report.warnings.push(format!("system {}: member {el} is not written, so it is not in the group", def.name)),
+                }
+            }
+            elems.sort_unstable();
+            elems.dedup();
+            claimed.extend(elems.iter().copied());
+            written_defs.insert(di);
+            named.push((def, elems));
+        }
+        for (def, elems) in named {
+            write_named_system(o, def, &elems);
+        }
         for (code, elems) in by_system {
+            let elems: Vec<u32> = elems.into_iter().filter(|e| !claimed.contains(e)).collect();
+            if elems.is_empty() {
+                continue;
+            }
             let sys = System::from_code(code).unwrap_or(System::Other);
-            // the designer's name for the system, where they gave one (Revit's "AHU-1 Supply"); the enum's own
-            // name with a running number is the fallback for a system the designer never named
-            let name = net.system_names.iter().find(|(s, _)| *s == sys).map(|(_, n)| n.clone())
-                .unwrap_or_else(|| format!("{} {}", sys.name(), ni + 1));
             let g = o.gen_gid();
-            let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&name), sys.ifc_system()));
+            let grp = o.s.add(format!("IFCDISTRIBUTIONSYSTEM({g},$,{},$,$,$,.{}.)", string(&format!("{} {}", sys.name(), ni + 1)), sys.ifc_system()));
             let g = o.gen_gid();
             o.s.add(format!("IFCRELASSIGNSTOGROUP({g},$,$,$,({}),$,#{grp})", elems.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
+        }
+    }
+    // a system whose equipment is not joined to any run still exists: it holds the equipment that was written
+    for (di, def) in scene.system_defs.iter().enumerate() {
+        if written_defs.contains(&di) {
+            continue;
+        }
+        let elems: Vec<u32> = def.members.iter().filter_map(|el| scene.items.iter().position(|it| it.id == *el).and_then(|i| o.item_entities.get(i).copied())).collect();
+        if !elems.is_empty() {
+            write_named_system(o, def, &elems);
         }
     }
     Ok(())

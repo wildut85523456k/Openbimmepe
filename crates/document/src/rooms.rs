@@ -121,6 +121,24 @@ impl Document {
     }
 
     /// The floor of the room `id`, from the walls around its point as they are now.
+    /// The Number and Department of a room (instance parameters, empty until set); its Name is the element name.
+    pub fn room_text(&self, id: ElementId, key: &str) -> String {
+        self.get(id).and_then(|e| e.texts.iter().find(|(n, _)| n == key).map(|(_, v)| v.clone())).unwrap_or_default()
+    }
+    /// Sets the Number, Name and Department of a room in one undoable step (B21). The name may not be empty; a number
+    /// another room of the same level already has is refused, as Revit warns about it.
+    pub fn set_room_data(&mut self, id: ElementId, number: &str, name: &str, department: &str) -> Result<(), EditError> {
+        let Some(Geometry::Room { level, .. }) = self.get(id).filter(|e| e.category == Category::Room).and_then(|e| e.geometry) else { return Err(EditError::InvalidElement) };
+        let (number, name, department) = (number.trim(), name.trim(), department.trim());
+        if name.is_empty() || number.len() > 64 || name.len() > 64 || department.len() > 64 { return Err(EditError::InvalidElement); }
+        if !number.is_empty() && self.elements().any(|e| e.id != id && matches!(e.geometry, Some(Geometry::Room { level: l, .. }) if l == level) && self.room_text(e.id, "Number") == number) {
+            return Err(EditError::InvalidElement);
+        }
+        let mut texts = Vec::new();
+        if !number.is_empty() { texts.push(("Number".to_string(), number.to_string())); }
+        if !department.is_empty() { texts.push(("Department".to_string(), department.to_string())); }
+        self.transact(self.revision, &[Command::Rename { id, name: name.to_string() }, Command::SetFamilyTexts { id, texts }]).map(|_| ())
+    }
     pub fn room_shape(&self, id: ElementId) -> Result<RoomShape, String> {
         match self.get(id).and_then(|e| e.geometry) {
             Some(Geometry::Room { at, level }) => self.room_region_at(level, at),
@@ -194,5 +212,53 @@ mod tests {
         let ops = d.transform_commands(&[wall], crate::Xf::Move([1.0, 0.0])).unwrap();
         d.transact(d.revision(), &ops).unwrap();
         assert!(near(d.room_shape(room).unwrap().area(), 3.8 * 3.8 - 0.16), "{}", d.room_shape(room).unwrap().area());
+    }
+    #[test]
+    fn a_room_has_a_number_a_name_and_a_department_that_undo_and_survive_saving() {
+        let mut d = Document::spatial_sample();
+        let level = ElementId(10);
+        d.place_walls(level, &[([100.0, 0.0], [106.0, 0.0]), ([106.0, 0.0], [106.0, 4.0]), ([106.0, 4.0], [100.0, 4.0]), ([100.0, 4.0], [100.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        d.place_walls(level, &[([200.0, 0.0], [206.0, 0.0]), ([206.0, 0.0], [206.0, 4.0]), ([206.0, 4.0], [200.0, 4.0]), ([200.0, 4.0], [200.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let a = d.place_room(level, [103.0, 2.0]).unwrap();
+        let b = d.place_room(level, [203.0, 2.0]).unwrap();
+        d.set_room_data(a, "101", "Plant room", "Services").unwrap();
+        assert_eq!((d.get(a).unwrap().name.as_str(), d.room_text(a, "Number").as_str(), d.room_text(a, "Department").as_str()), ("Plant room", "101", "Services"));
+        // another room of the level cannot take the number, and a room has a name
+        assert!(d.set_room_data(b, "101", "Store", "").is_err());
+        assert!(d.set_room_data(b, "102", " ", "").is_err());
+        d.set_room_data(b, "102", "Store", "").unwrap();
+        // the schedule reads them
+        let def = crate::schedule::ScheduleDef::starter(900, "Rooms", crate::schedule::ScheduleKind::Rooms);
+        let table = d.schedule_table(&def);
+        let text = format!("{table:?}");
+        assert!(text.contains("101") && text.contains("Plant room"), "{text}");
+        // one undo takes the whole edit back
+        d.undo().unwrap();
+        assert_eq!(d.room_text(b, "Number"), "");
+        // saving and reopening keeps them
+        let (els, site) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
+        let mut back = Document::new();
+        back.transact(0, &crate::native::restore_commands(els, site)).unwrap();
+        assert_eq!((back.get(a).unwrap().name.as_str(), back.room_text(a, "Number").as_str()), ("Plant room", "101"));
+    }
+    #[test]
+    fn a_tag_reads_the_parameters_of_its_element_the_system_and_size_of_a_duct_and_the_number_and_name_of_a_room() {
+        let mut d = Document::spatial_sample();
+        let level = ElementId(10);
+        d.place_walls(level, &[([100.0, 0.0], [106.0, 0.0]), ([106.0, 0.0], [106.0, 4.0]), ([106.0, 4.0], [100.0, 4.0]), ([100.0, 4.0], [100.0, 0.0])], 0.2, 3.0, 0.0, None).unwrap();
+        let room = d.place_room(level, [103.0, 2.0]).unwrap();
+        let tag = d.place_tag(room, [103.0, 2.0], [103.0, 2.0]).unwrap();
+        assert_eq!(d.tag_text(tag), "Room 1");
+        d.set_room_data(room, "101", "Plant room", "").unwrap();
+        assert_eq!(d.tag_text(tag), "101 Plant room");
+        // a duct says its system and its size
+        let duct = d.elements().find(|e| e.category == Category::Duct).expect("the sample has ducts");
+        let (id, w, h) = (duct.id, duct.width_m, duct.height_m);
+        let t = d.place_tag(id, [0.0, 0.0], [0.0, 0.0]).unwrap();
+        let text = d.tag_text(t);
+        assert!(text.ends_with(&format!("{}x{}mm", (w * 1000.0).round() as i64, (h * 1000.0).round() as i64)) && text.len() > 8, "{text}");
+        // and the tag follows the parameter when it changes
+        d.set_room_data(room, "102", "Plant room", "").unwrap();
+        assert_eq!(d.tag_text(tag), "102 Plant room");
     }
 }
