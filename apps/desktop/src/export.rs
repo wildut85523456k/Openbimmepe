@@ -680,6 +680,34 @@ mod tests {
         assert_eq!(iso_time(1_781_998_496), "2026-06-20T23:34:56");
         assert_eq!(iso_time(951_782_400), "2000-02-29T00:00:00");
     }
+
+    #[test]
+    fn a_run_carries_its_system_and_cuts_its_wall_and_the_rooms_and_systems_reach_the_file() {
+        let mut d = Document::spatial_sample();
+        // a named system of equipment, as the System Browser makes it: the file's group must carry the user's name
+        let fcu = d.place_family(ElementId(10), [2.0, 2.0], &openbim_document::FamilySpec {
+            family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2,
+        }).unwrap();
+        let ops = d.create_system_commands("AHU-1 Supply", System::SupplyAir, &[fcu]).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        // the designer's system on the run, which the exporter used to replace with `Other`
+        openbim_document::compute::assign_system(&mut d, &[ElementId(1)], System::SupplyAir).unwrap();
+        // a room in the closed space left of the middle wall
+        d.place_room(ElementId(10), [2.0, 2.0]).unwrap();
+        let out = export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap();
+        // the room is a space of its own
+        assert_eq!(out.text.matches("IFCSPACE(").count(), 1, "{}", out.text);
+        // the duct and the pipe both cross the middle wall: each cuts its own opening
+        assert_eq!(out.text.matches("IFCOPENINGELEMENT(").count(), 2, "{}",
+            out.text.lines().filter(|l| l.contains("IFCOPENINGELEMENT")).collect::<Vec<_>>().join("\n"));
+        // the run carries the system the designer gave it, not `Other`
+        assert!(out.text.contains("IFCLABEL('VENTILATION')"), "{}", out.text);
+        // the file's distribution system carries the user's name, not the enum's "Supply air 1"
+        assert!(out.text.contains("'AHU-1 Supply'"), "{}",
+            out.text.lines().filter(|l| l.contains("IFCDISTRIBUTIONSYSTEM")).collect::<Vec<_>>().join("\n"));
+        // and the file is the same twice
+        assert_eq!(out.text, export_ifc(&d, "Sample", 1, "2026-10-17T00:00:00").unwrap().text);
+    }
 }
 
 /// Shared by the tests of the export, the import and the file.
