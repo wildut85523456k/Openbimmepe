@@ -20,6 +20,8 @@ pub struct ImportReport {
     pub notes: Vec<String>,
     /// what was left out and why, with how many
     pub skipped: BTreeMap<String, usize>,
+    /// what the reader said about single entities it could not use (`#12 IFCSTAIR: unsupported product ...`)
+    pub diagnostics: Vec<String>,
 }
 
 impl ImportReport {
@@ -32,6 +34,32 @@ impl ImportReport {
         if !self.skipped.is_empty() {
             let left: Vec<String> = self.skipped.iter().map(|(k, n)| format!("{n} {k}")).collect();
             s.push_str(&format!(". Left out: {}", left.join("; ")));
+        }
+        s
+    }
+}
+
+impl ImportReport {
+    /// The log written next to the file read, as Revit writes `<file>.ifc.log`: what came in, what was left out and why,
+    /// and what the reader said about single entities, one per line.
+    pub fn log_text(&self, file: &str, when: &str) -> String {
+        let mut s = format!("Import log for {file}\nRead on {when}, schema {}\n\n", self.schema);
+        s.push_str(&format!("{}\n\n", self.text()));
+        s.push_str("Added\n");
+        if self.added.is_empty() && self.levels == 0 { s.push_str("  nothing\n"); }
+        for (k, n) in &self.added { s.push_str(&format!("  {n} {k}\n")); }
+        if self.levels > 0 { s.push_str(&format!("  {} levels\n", self.levels)); }
+        if self.restored > 0 { s.push_str(&format!("  {} elements restored from the file's own records\n", self.restored)); }
+        s.push_str("\nLeft out\n");
+        if self.skipped.is_empty() { s.push_str("  nothing\n"); }
+        for (k, n) in &self.skipped { s.push_str(&format!("  {n} {k}\n")); }
+        if !self.notes.is_empty() {
+            s.push_str("\nNotes\n");
+            for n in &self.notes { s.push_str(&format!("  {n}\n")); }
+        }
+        if !self.diagnostics.is_empty() {
+            s.push_str("\nReader\n");
+            for d in &self.diagnostics { s.push_str(&format!("  {d}\n")); }
         }
         s
     }
@@ -167,7 +195,7 @@ fn wall_axis(pts: &[[f64; 2]]) -> Option<([f64; 2], [f64; 2], f64)> {
 
 /// Plans the import of `imp` into `doc`: the commands, and the report.
 pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
-    let mut report = ImportReport { schema: imp.schema.clone(), skipped: imp.skipped.iter().map(|(k, n)| (format!("{k} (not an extruded profile this app reads)"), *n)).collect(), ..Default::default() };
+    let mut report = ImportReport { schema: imp.schema.clone(), diagnostics: imp.diagnostics.clone(), skipped: imp.skipped.iter().map(|(k, n)| (format!("{k} (not an extruded profile this app reads)"), *n)).collect(), ..Default::default() };
     let mut ops: Vec<Command> = Vec::new();
     let mut used: BTreeSet<u64> = doc.elements().map(|e| e.id.0).collect();
     let mut next = doc.next_id().0;
