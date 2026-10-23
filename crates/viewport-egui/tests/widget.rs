@@ -103,7 +103,7 @@ fn clicking_selects_the_element_under_the_cursor() {
             levels: Levels::new(vec![Level { name: "L0".into(), elevation: 0.0 }]).unwrap(),
             walls: vec![WallItem { id: 1, name: "W".into(), chain: WallChain::new(vec![[0.0, 0.0], [6.0, 0.0]], false, 0.3, 3.0), wall_type: None, room_bounding: true }],
             wall_penetrations: vec![], firestops: Default::default(), slabs: vec![], columns: vec![], shafts: vec![], floor_penetrations: vec![], slab_voids: vec![], networks: vec![],
-            families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![], types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
+            families: vec![], items: vec![], rooms: vec![], wall_types: vec![], wall_joins: vec![], georef: None, room_settings: Default::default(), separation_lines: vec![], room_lighting: Default::default(), proxies: vec![], pset_map: Default::default(), grids: vec![], system_defs: vec![], assemblies: vec![], types: vec![], member_info: Default::default(), roofs: vec![], railings: vec![], stairs: vec![], native: vec![],
         };
         Batch::new(&openbim_view::MeshCache::new().update(&s).unwrap().meshes)
     };

@@ -305,6 +305,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Category::Slab if app.document.get(id).is_some_and(|e| e.slab_kind == openbim_document::SlabKind::Ceiling) => if three_d { Color32::from_rgb(232, 230, 220) } else { Color32::from_rgba_unmultiplied(232, 230, 220, 70) },
             Category::Slab if app.document.get(id).is_some_and(|e| e.is_roof()) => if three_d { Color32::from_rgb(178, 96, 78) } else { Color32::from_rgba_unmultiplied(178, 96, 78, 90) },
             Category::Slab => if app.dark { Color32::from_rgb(92, 92, 100) } else { Color32::from_rgb(205, 205, 212) },
+            Category::Generic => Color32::from_rgb(158, 140, 170),
             Category::Duct => Color32::from_rgb(70, 157, 194),
             Category::Pipe => Color32::from_rgb(136, 153, 166),
             _ => Color32::GRAY,

@@ -132,6 +132,12 @@ pub enum Category {
     Equipment,
     Level,
     Grid,
+    /// A generic model: what a file from another program holds that this app has no element for (a pump, a tank, a
+    /// piece of furniture drawn as a plain solid). A prism on a level, like a slab: its plan `outline`, `height_m`
+    /// tall (`width_m` the same) with its top `elevation_m` above the level. Its `texts` keep what the file said about
+    /// it: `IfcClass`, `PredefinedType` and `Pset_<name>.<property>` values. It is exported as an
+    /// IfcBuildingElementProxy that names the class it came from.
+    Generic,
 }
 
 impl Category {
@@ -408,7 +414,7 @@ impl Element {
         (matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || self.section == Section::Rectangle)
             && (matches!(k, Category::Beam | Category::BeamSystem | Category::Truss) || self.usage == Usage::Girder)
             && (matches!(k, Category::Beam | Category::Column | Category::Slab | Category::Footing | Category::WallFooting | Category::BeamSystem | Category::Truss) || self.material == Material::Unspecified)
-            && (matches!(k, Category::Slab | Category::BeamSystem | Category::Truss | Category::Railing | Category::Stair) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor) || (k == Category::Opening && self.slab_kind == SlabKind::Floor))
+            && (matches!(k, Category::Slab | Category::Generic | Category::BeamSystem | Category::Truss | Category::Railing | Category::Stair) || (self.outline.is_empty() && self.slab_kind == SlabKind::Floor) || (k == Category::Opening && self.slab_kind == SlabKind::Floor))
             && (matches!(k, Category::Beam | Category::Wall) || self.join_ends == [true; 2])
             && (matches!(k, Category::BeamSystem | Category::Truss | Category::Rebar | Category::Railing) || (self.spacing_m == 0.0 && (self.angle_deg == 0.0 || k == Category::Family)))
             && (k != Category::Truss || self.angle_deg == 0.0)
@@ -419,12 +425,14 @@ impl Element {
             && (self.category == Category::Family
                 || (self.category == Category::Type && self.type_for == Some(Category::Family) && self.type_name.is_empty())
                 || (self.category == Category::Room && self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.iter().all(|(n, _)| matches!(n.as_str(), "Number" | "Department")))
+                || (self.category == Category::Generic && self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty())
                 || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
             && self.overrides.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.is_finite())
             && (self.category != Category::Family || (self.angle_deg.is_finite() && self.angle_deg.abs() <= 360.0))
             && (k != Category::Slab || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 5.0))
+            && (k != Category::Generic || ((self.width_m - self.height_m).abs() <= 1e-9 && self.width_m <= 200.0))
             && (!matches!(k, Category::Beam | Category::Column | Category::BeamSystem | Category::Truss) || (self.section != Section::Circle || (self.width_m - self.height_m).abs() <= 1e-9) && self.profile().check().is_ok())
             && (self.category != Category::Type || self.type_for.is_some_and(Self::can_have_type))
             && (self.category == Category::Type || self.type_for.is_none())
@@ -885,6 +893,18 @@ impl Document {
         ])?;
         Ok(id)
     }
+    /// Puts a generic model on `level`: a prism over `outline` in plan from `base_offset_m` above the level, `extent_m`
+    /// tall. `texts` keep what the source said about it (the class it came from and its properties).
+    pub fn place_generic(&mut self, level: ElementId, name: &str, outline: Vec<[f64; 2]>, base_offset_m: f64, extent_m: f64, texts: Vec<(String, String)>) -> Result<ElementId, EditError> {
+        let id = self.next_id();
+        self.transact(self.revision, &[
+            Command::Create { id, category: Category::Generic, name: name.to_string(), width_m: extent_m, height_m: extent_m, elevation_m: base_offset_m + extent_m },
+            Command::SetOutline { id, outline },
+            Command::SetFamilyTexts { id, texts },
+            Command::SetGeometry { id, geometry: Geometry::Area { level } },
+        ])?;
+        Ok(id)
+    }
     /// Hangs a ceiling on `level`: `outline` in plan, `height_m` above the level to its underside, `thickness_m` thick.
     pub fn place_ceiling(&mut self, level: ElementId, outline: Vec<[f64; 2]>, height_m: f64, thickness_m: f64, material: Material) -> Result<ElementId, EditError> {
         let id = self.next_id();
@@ -1220,7 +1240,7 @@ impl Document {
                 }
                 Command::SetOutline { id, outline } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Slab | Category::BeamSystem | Category::Truss | Category::Opening | Category::Railing | Category::Stair) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Slab | Category::Generic | Category::BeamSystem | Category::Truss | Category::Opening | Category::Railing | Category::Stair) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.outline = outline.clone();
                     if el.slab_kind == SlabKind::Roof && el.slope_edges.len() != el.outline.len() { el.slope_edges = vec![true; el.outline.len()]; }
                     el.revision = revision;
@@ -1233,7 +1253,7 @@ impl Document {
                 }
                 Command::SetFamilyTexts { id, texts } => {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
-                    if !matches!(el.category, Category::Family | Category::Room) { return Err(EditError::UnsupportedProperty(*id)); }
+                    if !matches!(el.category, Category::Family | Category::Room | Category::Generic) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.texts = texts.clone();
                     el.revision = revision;
                 }
