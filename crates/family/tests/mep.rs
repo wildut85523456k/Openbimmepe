@@ -317,6 +317,67 @@ fn classification_rules() {
     assert!(f.compile().is_ok());
 }
 
+/// Every family in the shipped library carries a Uniclass 2015 code, whatever it is: this is the
+/// invariant, so a family added without a code fails here (docs/revit-style-ui/09).
+#[test]
+fn every_library_family_carries_a_uniclass_code() {
+    let lib = library::all().expect("library compiles");
+    assert!(!lib.is_empty(), "the library is empty");
+    for fam in &lib {
+        let codes: Vec<&(String, String)> = fam
+            .classification()
+            .iter()
+            .filter(|(sys, _)| sys == "Uniclass")
+            .collect();
+        assert!(!codes.is_empty(), "{} carries no Uniclass code", fam.name());
+        for (_, c) in codes {
+            assert!(
+                c.starts_with("Pr_") || c.starts_with("Ss_") || c.starts_with("EF_"),
+                "{}: Uniclass code {} is not a Pr_/Ss_/EF_ code",
+                fam.name(),
+                c
+            );
+        }
+    }
+}
+
+/// The code each library family carries is the one decided for it; adding a family without an entry
+/// here fails this test (docs/revit-style-ui/09). The IFC export test in crates/ifc checks the codes
+/// are written out of the app.
+#[test]
+fn library_families_carry_the_decided_uniclass_codes() {
+    let decided: &[(&str, &str)] = &[
+        ("Lever handle", "Pr_30_36_59"),
+        ("Door, single flush", "Pr_30_59_24"),
+        ("Window, fixed with mullions", "Pr_30_59_98"),
+        ("Door, arched", "Pr_30_59_24"),
+        ("Fan coil unit, ducted", "Pr_70_65_04_88"),
+        ("Air handling unit", "Pr_60_65_03"),
+        ("Ceiling diffuser, square", "Pr_70_65_04_02"),
+        ("VAV terminal unit, single duct", "Pr_70_65_04_94"),
+        ("Pump, end suction", "Pr_65_53"),
+        ("Valve, globe", "Pr_65_54"),
+        ("WC, close coupled", "Pr_40_20_93"),
+        ("Washbasin, wall hung", "Pr_40_20_96"),
+        ("Sprinkler head, pendent", "Pr_70_55_84"),
+        ("Luminaire, recessed", "Pr_70_70_48"),
+        ("Distribution board, 12-way", "Pr_60_70_22"),
+        ("Pipe hanger, clevis", "Pr_20_85_47"),
+    ];
+    let lib = library::all().expect("library compiles");
+    assert_eq!(lib.len(), decided.len(), "a library family has no decided code");
+    for (fam, (name, code)) in lib.iter().zip(decided) {
+        assert_eq!(fam.name(), *name, "library order changed");
+        let got = fam
+            .classification()
+            .iter()
+            .find(|(sys, _)| sys == "Uniclass")
+            .map(|(_, c)| c.as_str())
+            .unwrap_or("");
+        assert_eq!(got, *code, "{name}: wrong Uniclass code");
+    }
+}
+
 fn with_conn(c: ConnectorDef) -> Family {
     let mut f = fan_coil();
     f.connectors = vec![c];

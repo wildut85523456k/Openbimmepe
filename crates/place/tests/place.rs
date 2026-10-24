@@ -310,7 +310,7 @@ fn a_bad_placement_is_skipped_and_the_rest_is_built() {
     let walls = || vec![room(6.0, 4.0, 0.2, 3.0)];
     let good = || model(walls(), vec![pl(0, 0, 0, 3.0)]).build().unwrap();
     // the same door plus one on top of it, one outside, one with a bad family, one with a bad wall, one with NaN
-    let mut ps = vec![pl(0, 0, 0, 3.0), pl(0, 0, 0, 3.3), pl(0, 0, 0, 0.5), pl(9, 0, 0, 3.0), pl(0, 0, 9, 3.0), pl(0, 0, 1, f64::NAN)];
+    let mut ps = vec![pl(0, 0, 0, 3.0), pl(0, 0, 0, 3.3), pl(0, 0, 0, 0.5), pl(library_families().len(), 0, 0, 3.0), pl(0, 0, 9, 3.0), pl(0, 0, 1, f64::NAN)];
     ps.push(pl(0, 7, 0, 1.0));
     let l = model(walls(), ps).build_lenient().unwrap();
     assert_eq!(l.volume, good().volume);
