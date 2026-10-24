@@ -164,7 +164,9 @@ fn a_position_that_is_not_a_number_is_refused_as_the_full_build_refuses_it() {
     let mut m = model(start());
     let mut b = m.build().unwrap();
     assert!(!m.update_quick(&mut b, 0, pl(0, 0, 12, 1.0)));
-    assert!(!m.update_quick(&mut b, 0, pl(9, 0, 0, 1.0)));
+    // a family index past the end of the list, whatever the library holds
+    let past = m.families.len();
+    assert!(!m.update_quick(&mut b, 0, pl(past, 0, 0, 1.0)));
     assert!(!m.update_quick(&mut b, 0, pl(0, 9, 0, 1.0)));
     // the old position of the placement no longer exists in the chain (the chain was shortened after the build)
     let mut m = model(start());
