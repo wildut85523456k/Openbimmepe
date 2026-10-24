@@ -414,6 +414,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.strong(match app.tool { crate::Tool::Move => "Modify | Move", crate::Tool::Copy => "Modify | Copy", crate::Tool::Rotate => "Modify | Rotate", _ => "Modify | Mirror" });
             ui.separator();
             if app.tool == crate::Tool::Mirror { ui.checkbox(&mut app.mirror_copy, "Copy"); }
+            if app.tool == crate::Tool::Move { ui.checkbox(&mut app.move_disjoin, "Disjoin").on_hover_text("Move the element alone: its joins to pipes, ducts and fittings are broken first and nothing follows"); }
             let what = match app.selected_id().and_then(|id| app.document.get(id)) { Some(e) => e.name.clone(), None => "nothing selected: click an element".to_string() };
             ui.label(what);
             if !app.edit_num.is_empty() { ui.label(format!("typed: {}", app.edit_num)); }

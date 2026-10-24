@@ -696,6 +696,9 @@ pub fn mep_records(m: &super::MepData) -> Vec<String> {
             esc(&q.connector)
         ));
     }
+    for l in &m.fam_links {
+        out.push(format!("K|a={}|ac={}|b={}|bc={}", l.a.0, esc(&l.a_connector), l.b.0, esc(&l.b_connector)));
+    }
     for n in &m.elec_nodes {
         let kind = match n.kind {
             super::ElecKind::Source => "S",
@@ -738,7 +741,7 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
     let mut m = super::MepData::default();
     for line in lines {
         if ![
-            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|",
+            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "K|", "M|", "J|", "G|", "H|", "W|", "R|",
             "X|",
         ]
         .iter()
@@ -1006,6 +1009,15 @@ pub fn parse_mep(lines: &[String]) -> Result<super::MepData, String> {
             });
             continue;
         }
+        if line.starts_with("K|") {
+            m.fam_links.push(super::FamLink {
+                a: ElementId(int(get("a")?)?),
+                a_connector: unesc(get("ac")?)?,
+                b: ElementId(int(get("b")?)?),
+                b_connector: unesc(get("bc")?)?,
+            });
+            continue;
+        }
         if line.starts_with("Q|") {
             m.equip_links.push(super::EquipLink {
                 port: parse_port(get("p")?)?,
@@ -1187,7 +1199,7 @@ pub fn parse_records(lines: &[String]) -> Result<(Vec<Element>, Option<Site>), S
                 .ok_or_else(|| format!("a record without '{k}'"))
         };
         if [
-            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "M|", "J|", "G|", "H|", "W|", "R|", "Y|", "U|",
+            "T|", "L|", "P|", "Z|", "N|", "B|", "C|", "Q|", "K|", "M|", "J|", "G|", "H|", "W|", "R|", "Y|", "U|",
         ]
         .iter()
         .any(|p| line.starts_with(p))

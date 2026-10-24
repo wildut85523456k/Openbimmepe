@@ -143,6 +143,14 @@ pub struct Viewport3d {
     selection_generation: u64,
     /// What the last click found, if anything.
     pub last_hit: Option<Hit>,
+    /// Whether to find what is under the pointer on every frame (`hover_hit`). Off by default: it costs a pick a frame.
+    pub track_hover: bool,
+    /// What is under the pointer now, when `track_hover` is on.
+    pub hover_hit: Option<Hit>,
+    /// Lines drawn over the picture, in model coordinates, with their colour (a preview of what a click would make).
+    pub overlay_lines: Vec<([f64; 3], [f64; 3], [u8; 3])>,
+    /// Rings drawn over the picture at points of the model.
+    pub overlay_rings: Vec<([f64; 3], [u8; 3])>,
     /// Seconds a ViewCube click takes to turn the camera; 0 for no animation.
     pub snap_seconds: f64,
     anim: Option<(Camera, Camera, f64)>,
@@ -161,7 +169,7 @@ impl Viewport3d {
     }
 
     pub fn new() -> Viewport3d {
-        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, sun: Sun::default(), labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, snap_seconds: 0.35, anim: None, batch: None, generation: 0, memory_budget: None, problem: Arc::new(std::sync::Mutex::new(None)) }
+        Viewport3d { camera: Camera::default_3d([0.0; 3], 20.0), style: Style::Shaded, sun: Sun::default(), labels: CubeLabels::en(), datums: Vec::new(), section: None, selection: Arc::new(HashSet::new()), selection_generation: 0, last_hit: None, track_hover: false, hover_hit: None, overlay_lines: Vec::new(), overlay_rings: Vec::new(), snap_seconds: 0.35, anim: None, batch: None, generation: 0, memory_budget: None, problem: Arc::new(std::sync::Mutex::new(None)) }
     }
 
     /// Why the model could not be put on the graphics card (too large for `memory_budget`), if that is so.
@@ -238,6 +246,7 @@ impl Viewport3d {
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("The 3D view cannot show this model: {why}.\nPlans, sections and schedules are not affected."), FontId::proportional(14.0), ui.visuals().weak_text_color());
         }
         self.paint_datums(ui, rect);
+        self.paint_overlay(ui, rect);
         self.paint_cube(ui, &cells, over_cube);
         resp
     }
@@ -251,6 +260,12 @@ impl Viewport3d {
             i.pointer.hover_pos(),
         ));
         if resp.dragged() || (resp.hovered() && scroll != 0.0) { self.anim = None; }
+        self.hover_hit = None;
+        if self.track_hover && resp.hovered() && !buttons.left && !buttons.middle && !buttons.right {
+            if let (Some(p), Some(b)) = (pos, self.batch.clone()) {
+                self.hover_hit = pick(&b, &self.camera, [(p.x - rect.left()) as f64, (p.y - rect.top()) as f64], size, self.section);
+            }
+        }
         if resp.clicked_by(PointerButton::Primary) {
             if let (Some(p), Some(b)) = (pos, self.batch.clone()) {
                 self.last_hit = pick(&b, &self.camera, [(p.x - rect.left()) as f64, (p.y - rect.top()) as f64], size, self.section);
@@ -334,6 +349,18 @@ impl Viewport3d {
             let p = s.position();
             ui.weak(format!("sun {:.0}° up, {:.0}° from north", p.elevation, p.azimuth));
         });
+    }
+
+    fn paint_overlay(&self, ui: &Ui, rect: Rect) {
+        let p = ui.painter().with_clip_rect(rect);
+        let size = [rect.width() as f64, rect.height() as f64];
+        let at = |q: [f64; 3]| self.camera.project(q, size).map(|s| rect.min + Vec2::new(s[0] as f32, s[1] as f32));
+        for (a, b, c) in &self.overlay_lines {
+            if let (Some(a), Some(b)) = (at(*a), at(*b)) { p.line_segment([a, b], Stroke::new(2.0, Color32::from_rgb(c[0], c[1], c[2]))); }
+        }
+        for (q, c) in &self.overlay_rings {
+            if let Some(q) = at(*q) { p.circle_stroke(q, 8.0, Stroke::new(2.0, Color32::from_rgb(c[0], c[1], c[2]))); }
+        }
     }
 
     fn paint_datums(&self, ui: &Ui, rect: Rect) {

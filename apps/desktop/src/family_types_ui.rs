@@ -353,4 +353,30 @@ mod tests {
         let dot = inlet.dir[0] * out.dir[0] + inlet.dir[1] * out.dir[1];
         assert!((dot + 45f64.to_radians().cos()).abs() < 1e-6, "the two connectors face 135 degrees apart (a 45 degree turn): {:?} {:?}", inlet.dir, out.dir);
     }
+
+    #[test]
+    fn a_csv_gives_the_tee_and_the_reducer_a_type_for_each_pair_of_sizes_and_the_elbow_its_turn() {
+        let mut app = Desktop::sample();
+        let mut tee = FamilyTypesDialog::open(&app.document, "Pipe tee").unwrap();
+        assert_eq!(tee.import_csv("type,pipe d (mm),branch d (mm),branch\nT50x50,50,50,left\nT50x32,50,32,up\nT80x50,80,50,down\n"), Ok((0, 3)));
+        assert!(app.apply_family_types(&mut tee), "{}", tee.error);
+        let mut red = FamilyTypesDialog::open(&app.document, "Pipe reducer").unwrap();
+        assert_eq!(red.import_csv("type;pipe d (mm);pipe d2 (mm);length (mm);flat\nR50x32;50;32;80;concentric\nR50x32 ecc;50;32;80;bottom\n"), Ok((0, 2)));
+        assert!(app.apply_family_types(&mut red), "{}", red.error);
+        // a branch larger than the run is a row the family refuses, and the table says which
+        let mut bad = FamilyTypesDialog::open(&app.document, "Pipe tee").unwrap();
+        assert!(bad.import_csv("type,pipe d (mm),branch d (mm)\nT32x50,32,50\n").is_ok());
+        assert!(!app.apply_family_types(&mut bad) && bad.error.contains("T32x50"), "{}", bad.error);
+        // the elbow takes its turn from a choice column
+        let mut el = elbow_table(&app);
+        assert_eq!(el.import_csv("type,pipe_d,turn\nDN50 up,50,up\n"), Ok((0, 1)));
+        assert!(app.apply_family_types(&mut el), "{}", el.error);
+        let spec = FamilySpec { family: "Pipe elbow".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 1.0 };
+        let e = app.document.place_family(ElementId(10), [2.0, 2.0], &spec).unwrap();
+        let t = app.document.types_for(Category::Family).iter().find(|t| t.name == "DN50 up").map(|t| t.id).unwrap();
+        app.document.assign_type(&[e], t).unwrap();
+        let c = crate::elec_ui::instance_connectors(&app.document, e);
+        assert_eq!(c.len(), 2);
+        assert!(c[1].dir[2] > 0.99, "an up elbow leaves upwards: {:?}", c[1].dir);
+    }
 }

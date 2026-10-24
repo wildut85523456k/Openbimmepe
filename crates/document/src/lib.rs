@@ -51,7 +51,7 @@ pub use elec::{ElecCable, ElecKind, ElecNode};
 pub use sheet::{schedule_ref, schedule_view, view_element, PaperSize, SheetDef, TitleBlock, Viewport, MAX_SHEETS, MAX_VIEWPORTS};
 pub use viewsettings::{Detail, RangeClass, ViewCategory, ViewRange, ViewSettings, MAX_SCALE, MIN_SCALE, STANDARD_SCALES};
 pub use schedule::{family_kind, field_info, fields as schedule_fields, FieldInfo, FieldType, FilterOp, RowKind, ScheduleDef, ScheduleField, ScheduleFilter, ScheduleKind, ScheduleSort, ScheduleTable, TableRow, Value as ScheduleValue, MAX_FIELDS, MAX_FILTERS, MAX_SCHEDULES, MAX_SORTS};
-pub use mep::{EquipLink, EndDemand, EndRole, InsulationKind, MepData, MepInsulation, MepSettings, MepSystemDef, MAX_SYSTEM_MEMBERS, MAX_INSULATION_M, MIN_INSULATION_M, MepEndpoint, MepFitting, MepNode, MepPort, MepTap};
+pub use mep::{EquipLink, FamLink, EndDemand, EndRole, InsulationKind, MepData, MepInsulation, MepSettings, MepSystemDef, MAX_SYSTEM_MEMBERS, MAX_INSULATION_M, MIN_INSULATION_M, MepEndpoint, MepFitting, MepNode, MepPort, MepTap, Splice, default_route_prefs};
 pub use schematic::{Discipline, DraftGroup, DraftLevel, DraftNode, Family, Rect, SchematicDraft, SchematicZone, ZoneAmbiguity, MAX_ZONE_LABEL, MAX_ZONES, ZONE_BASE};
 pub use schematic_view::{DiagramRow, RenderedWire, SchematicView, Symbol, SymbolKind};
 pub use warnings::{Warning, WarningKind};

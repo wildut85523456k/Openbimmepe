@@ -131,6 +131,7 @@ impl Desktop {
     /// Whether a connector of a piece of equipment has a duct or pipe joined to it.
     fn connector_joined(&self, element: ElementId, name: &str) -> bool {
         self.document.mep().equip_links.iter().any(|q| q.element == element && q.connector == name)
+            || self.document.mep().fam_links.iter().any(|l| (l.a == element && l.a_connector == name) || (l.b == element && l.b_connector == name))
     }
 
     /// The Generate Layout button: for the system of the equipment selected, or the only system there is.

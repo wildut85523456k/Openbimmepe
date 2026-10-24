@@ -1,7 +1,7 @@
 //! Editing what is already drawn, as Revit does: delete (with what stands on it), move, copy, rotate and mirror. Each
 //! gives the commands of one undoable step; the model is not changed until they are applied.
 use super::{Category, Command, Document, Element, ElementId, Geometry};
-use super::mep::MepNode;
+use super::mep::{MepData, MepNode, MepPort};
 use std::collections::{BTreeMap, BTreeSet};
 
 type P = [f64; 2];
@@ -133,7 +133,7 @@ impl Document {
     }
 
     /// The elements `ids` and what goes with them, each already changed by `xf`.
-    fn transformed_set(&self, ids: &[ElementId], xf: Xf, for_copy: bool) -> Result<Vec<Element>, String> {
+    fn transformed_set(&self, ids: &[ElementId], xf: Xf, for_copy: bool, disjoin: bool) -> Result<Vec<Element>, String> {
         let all = self.with_dependents(ids);
         if all.is_empty() { return Err("nothing selected".into()); }
         let mut out = Vec::new();
@@ -142,7 +142,7 @@ impl Document {
             if matches!(e.category, Category::Level | Category::Type) { return Err(format!("{} cannot be moved in the plan", e.name)); }
             if !for_copy && e.pinned { return Err(format!("{} is pinned: unpin it first", e.name)); }
             // a duct or pipe joined to fittings would leave them behind
-            if !for_copy && matches!(e.category, Category::Duct | Category::Pipe) && self.run_is_joined(id) {
+            if !for_copy && !disjoin && matches!(e.category, Category::Duct | Category::Pipe) && self.run_is_joined(id) {
                 return Err(format!("{} is joined to fittings or equipment; moving a joined network is not supported yet", e.name));
             }
             out.push(self.transformed(e, xf)?);
@@ -151,8 +151,22 @@ impl Document {
     }
 
     /// Moves, turns or mirrors `ids` and what goes with them (their doors, windows, footings, tags, bars and members).
-    pub fn transform_commands(&self, ids: &[ElementId], xf: Xf) -> Result<Vec<Command>, String> {
-        let moved = self.transformed_set(ids, xf, false)?;
+    pub fn transform_commands(&self, ids: &[ElementId], xf: Xf) -> Result<Vec<Command>, String> { self.transform_commands_noted(ids, xf).map(|(ops, _)| ops) }
+
+    /// The same, with the ducts and pipes joined to the moved equipment following it, and notes on the ones that
+    /// could not: a run joined to a moved family element has that end carried to where the connector went, the other
+    /// end stays, and the run keeps its height at both ends (its slope follows). A run that cannot follow without
+    /// breaking something - a fitting at its other end that would be left at the wrong angle, a branch on it, or a
+    /// length under 20 mm - stays where it is and is unjoined from the equipment, and the note says so.
+    pub fn transform_commands_noted(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<String>), String> { self.transform_commands_with(ids, xf, false) }
+
+    /// Move with Revit's Disjoin option: the elements move alone. Every join between a moved duct, pipe or family
+    /// element and something that stays is broken first (nothing follows, nothing is rebuilt), and the notes say which.
+    pub fn transform_commands_disjoined(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<String>), String> { self.transform_commands_with(ids, xf, true) }
+
+    fn transform_commands_with(&self, ids: &[ElementId], xf: Xf, disjoin: bool) -> Result<(Vec<Command>, Vec<String>), String> {
+        let moved = self.transformed_set(ids, xf, false, disjoin)?;
+        let moved_ids: Vec<ElementId> = moved.iter().map(|e| e.id).collect();
         let mut ops = Vec::new();
         for e in moved {
             let old = self.get(e.id).ok_or("an element is gone")?;
@@ -164,7 +178,151 @@ impl Document {
                 ops.push(Command::SetFamily { id: e.id, family: e.family.clone(), type_name: e.type_name.clone(), overrides: e.overrides.clone(), angle_deg: e.angle_deg });
             }
         }
+        let notes = if disjoin { self.disjoin_commands(&moved_ids, &mut ops)? } else { self.follow_commands(&moved_ids, xf, &mut ops) };
         if ops.is_empty() { return Err("nothing changes".into()); }
+        Ok((ops, notes))
+    }
+
+    /// Breaks the joins of `moved` with what stays (see `transform_commands_disjoined`).
+    fn disjoin_commands(&self, moved: &[ElementId], ops: &mut Vec<Command>) -> Result<Vec<String>, String> {
+        let mut data = self.mep().clone();
+        let is_moved_run = |n: &MepNode| matches!(n, MepNode::Run(r) if moved.contains(r));
+        if let Some(t) = data.taps.iter().find(|t| moved.contains(&t.run)) {
+            return Err(format!("{} has a branch taken off it: it cannot be moved on its own", self.get(t.run).map_or("a run".into(), |e| e.name.clone())));
+        }
+        let name = |i: ElementId| self.get(i).map_or(String::new(), |e| e.name.clone());
+        let mut notes = Vec::new();
+        let before = (data.links.len(), data.equip_links.len(), data.fam_links.len(), data.endpoints.len());
+        // run <-> fitting: the fitting stays, so every link of a moved run is broken
+        data.links.retain(|(a, b)| !(is_moved_run(&a.node) || is_moved_run(&b.node)));
+        data.endpoints.retain(|e| !is_moved_run(&e.port.node));
+        // run <-> equipment: broken unless both moved
+        data.equip_links.retain(|q| {
+            let (run_moved, el_moved) = (is_moved_run(&q.port.node), moved.contains(&q.element));
+            let keep = run_moved == el_moved && (run_moved || !matches!(q.port.node, MepNode::Run(_)));
+            keep || (!run_moved && !el_moved)
+        });
+        let mut apart: Vec<(String, String)> = Vec::new();
+        data.fam_links.retain(|l| { let keep = moved.contains(&l.a) == moved.contains(&l.b); if !keep { apart.push((name(l.a), name(l.b))); } keep });
+        if before != (data.links.len(), data.equip_links.len(), data.fam_links.len(), data.endpoints.len()) {
+            notes.push("Disjoined: what was joined to the moved elements was left where it was".to_string());
+            for (a, b) in apart { notes.push(format!("{a} and {b} are no longer joined")); }
+            ops.push(Command::SetMep(Box::new(data)));
+        }
+        Ok(notes)
+    }
+
+    /// The runs joined to the family elements in `moved`, carried along (see `transform_commands_noted`).
+    fn follow_commands(&self, moved: &[ElementId], xf: Xf, ops: &mut Vec<Command>) -> Vec<String> {
+        let (mut notes, mut data) = (Vec::new(), self.mep().clone());
+        let mut runs: Vec<ElementId> = Vec::new();
+        for q in &data.equip_links {
+            if let MepNode::Run(r) = q.port.node { if moved.contains(&q.element) && !moved.contains(&r) && !runs.contains(&r) { runs.push(r); } }
+        }
+        let mut mep_changed = false;
+        let mut touched: Vec<ElementId> = runs.clone();
+        for r in runs {
+            let (Some(e), Some(run)) = (self.get(r), self.mep_run(r)) else { continue };
+            let Some(Geometry::Linear { start, end, level }) = e.geometry else { continue };
+            let carried = |port: usize| data.equip_links.iter().any(|q| q.port == MepPort { node: MepNode::Run(r), port } && moved.contains(&q.element));
+            let (ns, ne) = (if carried(0) { xf.point(start) } else { start }, if carried(1) { xf.point(end) } else { end });
+            let len = (ne[0] - ns[0]).hypot(ne[1] - ns[1]);
+            // a fitting at an end that stays is left at the wrong angle unless the run keeps its direction
+            let (od, nd) = ([end[0] - start[0], end[1] - start[1]], [ne[0] - ns[0], ne[1] - ns[1]]);
+            let (cross, dot) = (od[0] * nd[1] - od[1] * nd[0], od[0] * nd[0] + od[1] * nd[1]);
+            let straight = cross.abs() < 1e-6 * od[0].hypot(od[1]) * len.max(1e-9) && dot > 0.0;
+            let far_fixed = [0usize, 1].iter().any(|&p| !carried(p) && data.partner(MepPort { node: MepNode::Run(r), port: p }).is_some());
+            let has_taps = data.taps.iter().any(|t| t.run == r);
+            // Revit keeps the far fitting: it is rebuilt for the new angle, so the pipe stays joined at both ends
+            let mut rebuilt = None;
+            let mut why = if len < 0.02 { Some("it would be left shorter than 20 mm".to_string()) } else if has_taps { Some("a branch is taken off it".to_string()) } else { None };
+            if why.is_none() && far_fixed && !straight {
+                match self.rebuild_far_elbow(r, carried(0), xf, moved, &mut data, &mut touched) {
+                    Ok(o) => rebuilt = Some(o),
+                    Err(m) => why = Some(format!("the fitting at its other end could not follow ({m})")),
+                }
+            }
+            let names: Vec<String> = data.equip_links.iter().filter(|q| q.port.node == MepNode::Run(r) && moved.contains(&q.element)).filter_map(|q| self.get(q.element).map(|x| x.name.clone())).collect();
+            match why {
+                None if rebuilt.is_some() => { ops.extend(rebuilt.unwrap_or_default()); mep_changed = true; }
+                None => {
+                    let slope = (run.b[2] - run.a[2]) / len;
+                    ops.push(Command::SetGeometry { id: r, geometry: Geometry::Linear { start: ns, end: ne, level } });
+                    ops.push(Command::SetSlope { id: r, slope_ratio: slope });
+                }
+                Some(why) => {
+                    data.equip_links.retain(|q| !(q.port.node == MepNode::Run(r) && moved.contains(&q.element)));
+                    mep_changed = true;
+                    notes.push(format!("{} stays where it was and is no longer joined to {}: {why}", e.name, names.join(", ")));
+                }
+            }
+        }
+        // two fittings joined to each other: moving only one of them takes them apart, as in Revit
+        let apart: Vec<(String, String)> = data.fam_links.iter().filter(|l| moved.contains(&l.a) != moved.contains(&l.b))
+            .filter_map(|l| Some((self.get(l.a)?.name.clone(), self.get(l.b)?.name.clone()))).collect();
+        if !apart.is_empty() {
+            data.fam_links.retain(|l| moved.contains(&l.a) == moved.contains(&l.b));
+            mep_changed = true;
+            for (a, b) in apart { notes.push(format!("{a} and {b} are no longer joined: only one of them moved")); }
+        }
+        if mep_changed { ops.push(Command::SetMep(Box::new(data))); }
+        notes
+    }
+
+    /// Rebuilds the elbow at the far end of run `r` (whose end `carried_start` says is the one carried by `xf`) for the
+    /// new direction of the run: the corner stays, the elbow is cut again by the router, and both runs it joins are
+    /// re-cut to it. Gives the commands for the two runs and updates the fitting in `data`; the links keep their ports.
+    fn rebuild_far_elbow(&self, r: ElementId, carried_start: bool, xf: Xf, moved: &[ElementId], data: &mut MepData, touched: &mut Vec<ElementId>) -> Result<Vec<Command>, String> {
+        use openbim_place::penetrations::RunSize;
+        use openbim_route::snaps::{SnapSettings, Snaps};
+        use openbim_route::FittingKind;
+        let run = self.mep_run(r).ok_or("not a run")?;
+        let (cp, fp) = (usize::from(!carried_start), usize::from(carried_start)); // carried port, port at the fitting
+        let link = data.partner(MepPort { node: MepNode::Run(r), port: fp }).ok_or("no fitting")?;
+        let MepNode::Fitting(fid) = link.node else { return Err("it is joined to another run".into()) };
+        let fi = data.fittings.iter().position(|f| f.id == fid).ok_or("fitting missing")?;
+        if !matches!(data.fittings[fi].fitting.kind, FittingKind::Elbow { .. }) { return Err("it is not an elbow".into()); }
+        let other = data.partner(MepPort { node: MepNode::Fitting(fid), port: 1 - link.port }).ok_or("the elbow has no run on its other side")?;
+        let MepNode::Run(r2) = other.node else { return Err("the elbow is joined to a fitting".into()) };
+        if touched.contains(&r2) || moved.contains(&r2) || data.taps.iter().any(|t| t.run == r2) { return Err("the next run cannot be changed".into()); }
+        let run2 = self.mep_run(r2).ok_or("not a run")?;
+        let level2 = match self.get(r2).and_then(|e| e.geometry.map(|g| (e, g))) { Some((_, Geometry::Linear { level, .. })) => level, _ => return Err("not a run".into()) };
+        let level1 = match self.get(r).and_then(|e| e.geometry.map(|g| (e, g))) { Some((_, Geometry::Linear { level, .. })) => level, _ => return Err("not a run".into()) };
+        let old = &data.fittings[fi];
+        let corner = old.fitting.at;
+        let at = |q: &openbim_place::penetrations::Run, port: usize| if port == 0 { q.a } else { q.b };
+        let near = at(&run, cp);
+        let moved_xy = xf.point([near[0], near[1]]);
+        let n = [moved_xy[0], moved_xy[1], near[2]];
+        let far2 = at(&run2, 1 - other.port);
+        let dim = |s: RunSize| match s { RunSize::Round { diameter } => diameter, RunSize::Rect { width, height, .. } => width.max(height) };
+        let mut prefs = crate::mep::default_route_prefs(old.domain, old.system);
+        prefs.bend_radius_factor = if dim(run.size) > 0.0 && old.fitting.radius > 0.0 { old.fitting.radius / dim(run.size) } else { prefs.bend_radius_factor };
+        let off = Snaps::new(SnapSettings::off());
+        let route = openbim_route::route_path(&[n, corner, far2], &[run.size, run2.size], &prefs, &off).map_err(|e| format!("{e}"))?;
+        if route.runs.len() != 2 || route.fittings.len() != 1 || !matches!(route.fittings[0].kind, FittingKind::Elbow { .. }) { return Err("no elbow fits the new angle".into()); }
+        let mut f = route.fittings[0].clone();
+        // keep the elbow's port order, which the links refer to
+        let to_n = [n[0] - corner[0], n[1] - corner[1], n[2] - corner[2]];
+        let i_n = usize::from(f.ports[0][0] * to_n[0] + f.ports[0][1] * to_n[1] + f.ports[0][2] * to_n[2] <= 0.0);
+        if i_n != link.port { f.ports.swap(0, 1); f.port_sizes.swap(0, 1); f.trim.swap(0, 1); }
+        f.type_name = old.fitting.type_name.clone();
+        f.part_code = old.fitting.part_code.clone();
+        data.fittings[fi].fitting = f;
+        touched.push(r2);
+        // run 1 goes n -> corner trimmed; run 2 goes corner trimmed -> far end
+        let (lz1, lz2) = (self.get(level1).map_or(0.0, |l| l.elevation_m), self.get(level2).map_or(0.0, |l| l.elevation_m));
+        let mut ops = Vec::new();
+        // route run 0 is a = n side, b = fitting side; port 0 of the element is its start
+        let (s1, t1) = if carried_start { (route.runs[0].a, route.runs[0].b) } else { (route.runs[0].b, route.runs[0].a) };
+        let (s2, t2) = if other.port == 0 { (route.runs[1].a, route.runs[1].b) } else { (route.runs[1].b, route.runs[1].a) };
+        for (id, level, lz, s, t) in [(r, level1, lz1, s1, t1), (r2, level2, lz2, s2, t2)] {
+            let len = (t[0] - s[0]).hypot(t[1] - s[1]);
+            if len < 0.02 { return Err("a run would be left shorter than 20 mm".into()); }
+            ops.push(Command::SetGeometry { id, geometry: Geometry::Linear { start: [s[0], s[1]], end: [t[0], t[1]], level } });
+            ops.push(Command::MoveElevation { id, elevation_m: s[2] - lz });
+            ops.push(Command::SetSlope { id, slope_ratio: (t[2] - s[2]) / len });
+        }
         Ok(ops)
     }
 
@@ -319,7 +477,7 @@ impl Document {
 
     /// Copies `ids` and what goes with them, changed by `xf`: the commands and the numbers of the copies of `ids`.
     pub fn copy_commands(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<ElementId>), String> {
-        let copies = self.transformed_set(ids, xf, true)?;
+        let copies = self.transformed_set(ids, xf, true, false)?;
         let mut next = self.next_id().0;
         let map: BTreeMap<ElementId, ElementId> = copies.iter().map(|e| { let n = ElementId(next); next += 1; (e.id, n) }).collect();
         let re = |h: ElementId| map.get(&h).copied().unwrap_or(h);

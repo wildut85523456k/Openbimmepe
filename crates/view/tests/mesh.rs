@@ -354,7 +354,9 @@ fn every_family_of_the_library_is_meshed_from_its_solids() {
     assert!(fams.len() >= 5);
     for (k, fam) in fams.iter().enumerate() {
         let inst = fam.solve(&Request::default()).unwrap();
-        let want: f64 = inst.solids.iter().map(|(_, b)| b.volume()).sum();
+        // boxes, plus the extrusions, revolves and sweeps of the forms (a void only cuts: the families here have none)
+        assert!(inst.forms.iter().all(|f| !f.void), "{} has a void form: its volume needs the cut", fam.name());
+        let want: f64 = inst.solids.iter().map(|(_, b)| b.volume()).sum::<f64>() + inst.forms.iter().map(|f| f.mesh().map_or(0.0, |m| m.volume())).sum::<f64>();
         let mut s = scene();
         let frame = Frame {
             origin: [2.0, 2.0, 0.5],

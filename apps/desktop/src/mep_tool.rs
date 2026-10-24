@@ -7,18 +7,11 @@ use openbim_document::ElementId;
 use openbim_family::mep::{Domain, System};
 use openbim_place::penetrations::RunSize;
 use openbim_route::snaps::{SnapSettings, Snaps};
-use openbim_route::{route_path, AngleSet, Junction, RoutingPrefs};
+use openbim_route::{route_path, RoutingPrefs};
 
 /// What the drawing tool assumes: elbows at any angle, rounded as Revit's defaults (a duct bends on one width, a pipe
 /// on one and a half diameters), a reducer at no more than 30 degrees, and a tee for a branch.
-pub(crate) fn route_prefs(domain: Domain, system: System) -> RoutingPrefs {
-    RoutingPrefs {
-        domain, system, label: if domain == Domain::Duct { format!("{} Duct", system.name()) } else { format!("{} Pipe", system.name()) },
-        elbow_angles: AngleSet::Any, bend_radius_factor: if domain == Domain::Duct { 1.0 } else { 1.5 }, min_straight: 0.0,
-        junction: Junction::Tee, tee_angles: AngleSet::Any, tee_half_factor: 1.0, branch_stub_factor: 1.0, pick_tolerance: 0.02,
-        transition_angle_deg: 30.0, min_transition_len: 0.1, connector_stub: 0.5, margin: 0.0, catalogue: None,
-    }
-}
+pub(crate) fn route_prefs(domain: Domain, system: System) -> RoutingPrefs { openbim_document::default_route_prefs(domain, system) }
 
 /// Where the drawn line sits across the duct or pipe (Revit's Horizontal Justification), looking along the way it is drawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

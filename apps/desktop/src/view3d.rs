@@ -233,17 +233,28 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // the selection of the app drives the view; a click in the view drives the app
     let wanted: HashSet<Element> = app.selected_id().and_then(|id| element(&app.document, id)).into_iter().collect();
     app.view3d.select(wanted.clone());
+    // the Family tool previews the family under the pointer, as the plan does
+    app.view3d.track_hover = app.tool == crate::Tool::Family;
+    app.view3d.overlay_lines.clear();
+    app.view3d.overlay_rings.clear();
+    if let Some(g) = app.view3d.hover_hit.filter(|_| app.tool == crate::Tool::Family).and_then(|h| app.family_ghost_at_hit(&h)) {
+        let ink = if g.refused { [200, 70, 60] } else { [70, 130, 200] };
+        let n = g.hull.len();
+        for i in 0..n {
+            let (a, b) = (g.hull[i], g.hull[(i + 1) % n]);
+            for z in [g.z.0, g.z.1] { app.view3d.overlay_lines.push(([a[0], a[1], z], [b[0], b[1], z], ink)); }
+            app.view3d.overlay_lines.push(([a[0], a[1], g.z.0], [a[0], a[1], g.z.1], ink));
+        }
+        for (c, joined) in &g.connectors { if *joined { app.view3d.overlay_rings.push((*c, [60, 170, 90])); } }
+    }
     app.view3d.ui(ui);
     if app.tool == crate::Tool::Family {
         // a click in 3D places the family: a door or window goes into the wall under the click, anything else stands
         // on the level of what it was dropped on. The hit is consumed so one click places one element.
         if let Some(hit) = app.view3d.last_hit.take() {
-            let id = ElementId(hit.element.id);
-            let wall = app.document.get(id).is_some_and(|e| e.category == Category::Wall).then_some(id);
-            let level = app.document.get(id).and_then(|e| match e.geometry { Some(Geometry::Linear { level, .. }) | Some(Geometry::Placed { level, .. }) => Some(level), _ => None })
-                .or_else(|| app.levels().first().map(|l| l.0));
+            let (level, at, wall) = app.family_hit_target(&hit);
             match level {
-                Some(level) => app.family_click(level, [hit.point[0], hit.point[1]], wall),
+                Some(level) => app.family_click(level, at, wall),
                 None => app.message = "Add a level first: Architecture > Datum > Level".into(),
             }
         }

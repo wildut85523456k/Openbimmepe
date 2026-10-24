@@ -42,6 +42,11 @@ pub struct MepTap {
     pub distance: f64,
 }
 
+/// Where a run is cut for an element that stands in it: the end of the first piece and the start of the second (the
+/// element's two connectors, named), and the size of the second piece, width and height (a reducer changes it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Splice { pub left_end: [f64; 3], pub right_start: [f64; 3], pub right_size: (f64, f64), pub left_conn: String, pub right_conn: String }
+
 /// What an open end of the network is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EndRole {
@@ -72,6 +77,16 @@ pub struct EquipLink {
     pub element: ElementId,
     /// the connector's name in the family
     pub connector: String,
+}
+
+/// A connector of one family instance joined to a connector of another (two fittings placed end to end, a valve on a
+/// pump), as Revit joins connectors that meet. Each connector is in at most one join.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FamLink {
+    pub a: ElementId,
+    pub a_connector: String,
+    pub b: ElementId,
+    pub b_connector: String,
 }
 
 /// A source or a terminal at an open port of a run or fitting.
@@ -196,13 +211,15 @@ pub struct MepData {
     pub elec_cables: Vec<crate::elec::ElecCable>,
     /// run ends joined to equipment connectors
     pub equip_links: Vec<EquipLink>,
+    /// connectors of two family instances joined to each other
+    pub fam_links: Vec<FamLink>,
     /// the single-line schematic views generated from this model (doc 06, SCH-003): undoable views,
     /// regenerated from the model on every generation, so they are session-only and not part of `is_empty`
     pub schematics: Vec<crate::SchematicView>,
 }
 
 impl MepData {
-    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() && self.sheets.is_empty() && self.zones.is_empty() }
+    pub fn is_empty(&self) -> bool { self.fittings.is_empty() && self.links.is_empty() && self.taps.is_empty() && self.run_systems.is_empty() && self.endpoints.is_empty() && self.elec_nodes.is_empty() && self.elec_cables.is_empty() && self.equip_links.is_empty() && self.fam_links.is_empty() && self.settings == MepSettings::default() && self.insulations.is_empty() && self.systems.is_empty() && self.schedules.is_empty() && self.view_settings.is_empty() && self.sheets.is_empty() && self.zones.is_empty() }
 
     /// The system the designer gave a run, if any.
     pub fn run_system(&self, id: ElementId) -> Option<System> { self.run_systems.iter().find(|(r, _)| *r == id).map(|(_, s)| *s) }
@@ -249,6 +266,7 @@ impl MepData {
             taps: self.taps.iter().filter(|t| is_run(elements.get(&t.run))).copied().collect(),
             run_systems: self.run_systems.iter().filter(|(r, _)| is_run(elements.get(r))).copied().collect(),
             endpoints: self.endpoints.iter().filter(|e| alive(&e.port.node)).copied().collect(),
+            fam_links: self.fam_links.iter().filter(|l| [l.a, l.b].iter().all(|i| elements.get(i).is_some_and(|x| x.category == Category::Family))).cloned().collect(),
             equip_links: self.equip_links.iter().filter(|q| alive(&q.port.node) && elements.get(&q.element).is_some_and(|x| x.category == Category::Family)).cloned().collect(),
             elec_nodes: self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).cloned().map(|mut n| { if n.element.is_some_and(|e| elements.get(&e).is_none_or(|x| x.category != Category::Family)) { n.element = None; n.connector.clear(); } n }).collect(),
             elec_cables: { let keep: std::collections::BTreeSet<u64> = self.elec_nodes.iter().filter(|n| elements.get(&n.level).is_some_and(|l| l.category == Category::Level)).map(|n| n.id).collect(); self.elec_cables.iter().filter(|c| keep.contains(&c.from) && keep.contains(&c.to)).cloned().collect() },
@@ -310,6 +328,12 @@ impl MepData {
         for q in &self.equip_links {
             let open = matches!(q.port.node, MepNode::Run(_)) && ports(&q.port.node).is_some_and(|n| q.port.port < n) && self.partner(q.port).is_none();
             if !open || q.connector.is_empty() || !elements.get(&q.element).is_some_and(|x| x.category == Category::Family) || !linked.insert(q.port) { return Err(EditError::InvalidMep); }
+        }
+        let mut joined = std::collections::BTreeSet::new();
+        for l in &self.fam_links {
+            let ok = l.a != l.b && !l.a_connector.is_empty() && !l.b_connector.is_empty() && [l.a, l.b].iter().all(|i| elements.get(i).is_some_and(|x| x.category == Category::Family));
+            let free = |i: ElementId, c: &str| !self.equip_links.iter().any(|q| q.element == i && q.connector == c);
+            if !ok || !free(l.a, &l.a_connector) || !free(l.b, &l.b_connector) || !joined.insert((l.a, l.a_connector.clone())) || !joined.insert((l.b, l.b_connector.clone())) { return Err(EditError::InvalidMep); }
         }
         if self.settings != self.settings.cleaned() { return Err(EditError::InvalidMep); }
         let mut layered = std::collections::BTreeSet::new();
@@ -506,6 +530,56 @@ impl crate::Document {
         Ok(ids)
     }
 
+    /// Cuts a duct or pipe, sloped or level, where an element of a family now stands in it, as Revit does when a tee, a
+    /// reducer or a valve is dropped on a run: the run ends at `left_end` (where the element's first connector is,
+    /// `left_conn`) and a new run of the same kind, system and height continues from `right_start` (its second
+    /// connector, `right_conn`) to the old end, `right_size` wide and high (a reducer changes the size). The joins at
+    /// the old end, its end point, the taps beyond the cut and the system go with the new piece; the element is joined
+    /// to both pieces. All in one transaction. Refused when the cut points are off the run (more than 60 mm in height), not in order
+    /// along the run, leave a piece shorter than 20 mm, or a tap sits in the gap. On a sloped run the element stands level
+    /// and the two pieces take the slope that joins them to it.
+    pub fn splice_into_run(&mut self, run: ElementId, element: ElementId, cut: &Splice) -> Result<ElementId, EditError> {
+        use crate::Command;
+        let Splice { left_end, right_start, right_size, left_conn, right_conn } = cut.clone();
+        let r = self.mep_run(run).ok_or(EditError::NotFound(run))?;
+        let (category, name, level) = match self.get(run) {
+            Some(e) => (e.category, e.name.clone(), match e.geometry { Some(Geometry::Linear { level, .. }) => level, _ => return Err(EditError::InvalidMep) }),
+            None => return Err(EditError::NotFound(run)),
+        };
+                let len = (r.b[0] - r.a[0]).hypot(r.b[1] - r.a[1]);
+        if len < 1e-6 { return Err(EditError::InvalidGeometry(run)); }
+        let u = [(r.b[0] - r.a[0]) / len, (r.b[1] - r.a[1]) / len];
+        let along = |p: [f64; 3]| (p[0] - r.a[0]) * u[0] + (p[1] - r.a[1]) * u[1];
+        // a level element in a sloped run sits a little off the line: at most 60 mm at either cut
+        let z_on_line = |p: [f64; 3]| r.a[2] + (r.b[2] - r.a[2]) * (((p[0] - r.a[0]) * u[0] + (p[1] - r.a[1]) * u[1]) / len);
+        let across = |p: [f64; 3]| ((p[0] - r.a[0]) * u[1] - (p[1] - r.a[1]) * u[0]).abs().max(((p[2] - z_on_line(p)).abs() - 0.06).max(0.0));
+        let (sa, sb) = (along(left_end), along(right_start));
+        if across(left_end) > 1e-3 || across(right_start) > 1e-3 || sa < 0.02 || sb > len - 0.02 || sb < sa { return Err(EditError::InvalidMep); }
+        let mut data = self.mep.clone();
+        if data.taps.iter().any(|t| t.run == run && t.distance > sa - 1e-9 && t.distance < sb + 1e-9) { return Err(EditError::InvalidMep); }
+        let z0 = self.get(level).filter(|l| l.category == Category::Level).ok_or(EditError::NotFound(level))?.elevation_m;
+        let new = self.next_id();
+        let ops_head = vec![
+            Command::SetGeometry { id: run, geometry: Geometry::Linear { start: [r.a[0], r.a[1]], end: [left_end[0], left_end[1]], level } },
+            Command::SetSlope { id: run, slope_ratio: (left_end[2] - r.a[2]) / sa },
+            Command::Create { id: new, category, name: format!("{name} 2"), width_m: right_size.0, height_m: right_size.1, elevation_m: right_start[2] - z0 },
+            Command::SetSlope { id: new, slope_ratio: (r.b[2] - right_start[2]) / (len - sb) },
+            Command::SetGeometry { id: new, geometry: Geometry::Linear { start: [right_start[0], right_start[1]], end: [r.b[0], r.b[1]], level } },
+        ];
+        let (old, moved) = (MepPort { node: MepNode::Run(run), port: 1 }, MepPort { node: MepNode::Run(new), port: 1 });
+        for l in data.links.iter_mut() { if l.0 == old { l.0 = moved; } else if l.1 == old { l.1 = moved; } }
+        for e in data.endpoints.iter_mut() { if e.port == old { e.port = moved; } }
+        for q in data.equip_links.iter_mut() { if q.port == old { q.port = moved; } }
+        for t in data.taps.iter_mut() { if t.run == run && t.distance >= sb { t.run = new; t.distance -= sb; } }
+        if let Some(sys) = data.run_system(run) { data.run_systems.push((new, sys)); }
+        data.equip_links.push(EquipLink { port: MepPort { node: MepNode::Run(run), port: 1 }, element, connector: left_conn });
+        data.equip_links.push(EquipLink { port: MepPort { node: MepNode::Run(new), port: 0 }, element, connector: right_conn });
+        let mut ops = ops_head;
+        ops.push(Command::SetMep(Box::new(data)));
+        self.transact(self.revision(), &ops)?;
+        Ok(new)
+    }
+
     /// Puts a routed path into the model: one duct or pipe element for every run, the fittings between them, and the
     /// links, in one transaction. Ducts are rectangular and pipes round; a vertical run, a turned duct (roll) or a
     /// round duct cannot be held by the model yet and refuse the whole route.
@@ -550,6 +624,18 @@ impl crate::Document {
         ops.push(Command::SetMep(Box::new(data)));
         self.transact(self.revision(), &ops)?;
         Ok(ids)
+    }
+}
+
+/// The routing preferences a run is drawn with unless the user changed them: any elbow angle, tees, a bend radius of
+/// 1.5 diameters for pipe and 1 for duct.
+pub fn default_route_prefs(domain: Domain, system: System) -> openbim_route::RoutingPrefs {
+    use openbim_route::{AngleSet, Junction, RoutingPrefs};
+    RoutingPrefs {
+        domain, system, label: if domain == Domain::Duct { format!("{} Duct", system.name()) } else { format!("{} Pipe", system.name()) },
+        elbow_angles: AngleSet::Any, bend_radius_factor: if domain == Domain::Duct { 1.0 } else { 1.5 }, min_straight: 0.0,
+        junction: Junction::Tee, tee_angles: AngleSet::Any, tee_half_factor: 1.0, branch_stub_factor: 1.0, pick_tolerance: 0.02,
+        transition_angle_deg: 30.0, min_transition_len: 0.1, connector_stub: 0.5, margin: 0.0, catalogue: None,
     }
 }
 

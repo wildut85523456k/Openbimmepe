@@ -314,16 +314,32 @@ pub fn window() -> Family {
     }
 }
 
-/// Pipe elbow, welded or press fit, with the same bore at both ends. Origin: the centre of the inlet face; the
-/// pipe enters along +X and turns to the left (towards +Y) by `angle`, 90 degrees or less, so one family gives the 90, 45 and 22.5 degree elbows of a range; the outlet connector is aimed along the end of the bend. The bend is a circle swept round a vertical
-/// axis at `bend_r` (a multiple of the outside diameter, 1.5 for a long-radius elbow). A type table gives the range:
-/// one row per nominal size.
+/// Pipe elbow, welded or press fit, with the same bore at both ends. The `turn` says which way the bend goes, the
+/// `angle` how far (10 to 90 degrees, so one family gives the 90, 45 and 22.5 degree elbows of a range) and a type
+/// table gives the sizes. The inlet is at the origin. A left or a down bend takes the pipe in along +X; a right or an
+/// up bend is the same bend the other way round, so its pipe comes in along -X. The outlet connector is aimed along
+/// the end of the bend, in plan or up and down, so the run that joins it needs no further fitting.
 pub fn pipe_elbow() -> Family {
     use crate::forms::{FormDef, ProfileDef};
     use Dir::*;
     use Domain::*;
     use FlowDir::*;
     use System::*;
+    let form = |turn: &str, about_v: bool, at: &str| {
+        let mut f = FormDef::revolve(&format!("bend {turn}"), crate::Axis::X, "0", about_v, at, "angle", ProfileDef::circle("0", "0", "pipe_d / 2"));
+        f.material = Some("body".into());
+        f.visible = Some(format!("turn.{turn}"));
+        f
+    };
+    let conn = |turn: &str, name: &str, at: (&str, &str, &str), dir: Dir, aim: Option<(&str, &str)>| {
+        let mut c = ConnectorDef::new(&format!("{name} {turn}"), Pipe, ChilledWaterSupply, Both, at, dir, ShapeDef::Round("pipe_d".into()))
+            .flow("water_flow")
+            .visible_if(&format!("turn.{turn}"));
+        if let Some((az, el)) = aim { c = c.aim(az, el); }
+        c
+    };
+    // where the bend ends: along the run, and sideways or up by the same sagitta
+    let (run, side) = ("bend_r * sin(angle)", "bend_r - bend_r * cos(angle)");
     Family {
         name: "Pipe elbow".into(),
         code: "FAM-0017".into(),
@@ -332,22 +348,125 @@ pub fn pipe_elbow() -> Family {
             V::input("pipe_d", 0.05, 0.01, 0.6, Type),
             V::number("radius_factor", 1.5, 1.0, 5.0, Type),
             V::angle("angle", 90.0, 10.0, 90.0, Type),
+            V::choice("turn", &["left", "right", "up", "down"], "left", Type),
             V::number("water_flow", 0.0005, 0.0, 0.5, Type),
             V::material("body", "Pipe fitting", Type),
             V::formula("bend_r", "radius_factor * pipe_d"),
         ],
+        forms: vec![form("left", true, "bend_r"), form("right", true, "-bend_r"), form("up", false, "bend_r"), form("down", false, "-bend_r")],
+        checks: vec![chk("the bend is wider than the pipe", "bend_r > pipe_d / 2")],
+        connectors: vec![
+            conn("left", "in", ("0", "0", "0"), MinusX, None),
+            conn("left", "out", (run, side, "0"), PlusY, Some(("angle", "0"))),
+            conn("right", "in", ("0", "0", "0"), PlusX, None),
+            conn("right", "out", ("-bend_r * sin(angle)", &format!("-({side})"), "0"), MinusY, Some(("180 deg + angle", "0"))),
+            conn("up", "in", ("0", "0", "0"), PlusX, None),
+            conn("up", "out", ("-bend_r * sin(angle)", "0", side), PlusZ, Some(("180 deg", "angle"))),
+            conn("down", "in", ("0", "0", "0"), MinusX, None),
+            conn("down", "out", (run, "0", &format!("-({side})")), MinusZ, Some(("0 deg", "-angle"))),
+        ],
+        category: Category::PipeFitting,
+        host: Some(Host::Free),
+        ..Default::default()
+    }
+}
+
+/// Pipe reducer, concentric or eccentric. Origin: the centre of the large end; the pipe comes in along +X at the
+/// large bore `pipe_d` and leaves at the small bore `pipe_d2` after `length`. `flat` is the side that stays flat:
+/// concentric (the axes coincide), or bottom, top, left, right (that side of the pipe runs straight through and the
+/// small end sits off-centre by half the difference of the bores). A type table gives the pairs of sizes.
+pub fn pipe_reducer() -> Family {
+    use crate::forms::{FormDef, ProfileDef};
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Pipe reducer".into(),
+        code: "FAM-0018".into(),
+        classification: vec![("Uniclass".into(), "Pr_65_52_63".into())],
+        values: vec![
+            V::input("pipe_d", 0.05, 0.015, 0.6, Type),
+            V::input("pipe_d2", 0.032, 0.01, 0.6, Type),
+            V::input("length", 0.1, 0.03, 1.0, Type),
+            V::choice("flat", &["concentric", "bottom", "top", "left", "right"], "concentric", Type),
+            V::number("water_flow", 0.0005, 0.0, 0.5, Type),
+            V::material("body", "Pipe fitting", Type),
+            // where the small end's centre is, across the pipe (y, to the left) and up (z)
+            V::formula("off_y", "(pipe_d - pipe_d2) / 2 * (flat.left - flat.right)"),
+            V::formula("off_z", "(pipe_d - pipe_d2) / 2 * (flat.top - flat.bottom)"),
+        ],
         forms: vec![{
-            let mut f = FormDef::revolve("bend", crate::Axis::X, "0", true, "bend_r", "angle", ProfileDef::circle("0", "0", "pipe_d / 2"));
+            let mut f = FormDef::blend("cone", crate::Axis::X, "0", "length", ProfileDef::circle("0", "0", "pipe_d / 2"), ProfileDef::circle("off_y", "off_z", "pipe_d2 / 2"));
             f.material = Some("body".into());
             f
         }],
-        checks: vec![chk("the bend is wider than the pipe", "bend_r > pipe_d / 2")],
+        checks: vec![chk("the small end is smaller than the large end", "pipe_d2 < pipe_d")],
         connectors: vec![
-            ConnectorDef::new("in", Pipe, ChilledWaterSupply, In, ("0", "0", "0"), MinusX, ShapeDef::Round("pipe_d".into()))
-                .flow("water_flow"),
-            ConnectorDef::new("out", Pipe, ChilledWaterSupply, Out, ("bend_r * sin(angle)", "bend_r - bend_r * cos(angle)", "0"), PlusY, ShapeDef::Round("pipe_d".into()))
-                .aim("angle", "0")
-                .flow("water_flow"),
+            ConnectorDef::new("large", Pipe, ChilledWaterSupply, Both, ("0", "0", "0"), MinusX, ShapeDef::Round("pipe_d".into())).flow("water_flow"),
+            ConnectorDef::new("small", Pipe, ChilledWaterSupply, Both, ("length", "off_y", "off_z"), PlusX, ShapeDef::Round("pipe_d2".into())).flow("water_flow"),
+        ],
+        category: Category::PipeFitting,
+        host: Some(Host::Free),
+        ..Default::default()
+    }
+}
+
+/// Pipe tee, equal or reducing. Origin: the centre of the junction; the run goes along X at `pipe_d` for `leg` each
+/// side, and the branch leaves at `branch_d` for `branch_len` to the left (+Y), to the right (-Y), up or down, as the
+/// `branch` choice says. A type table gives the sizes of the range.
+pub fn pipe_tee() -> Family {
+    use crate::forms::{FormDef, ProfileDef};
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    let form = |side: &str, axis: crate::Axis, from: &str, to: &str| {
+        let mut f = FormDef::extrusion(&format!("branch {side}"), axis, from, to, ProfileDef::circle("0", "0", "branch_d / 2"));
+        f.material = Some("body".into());
+        f.visible = Some(format!("branch.{side}"));
+        f
+    };
+    let conn = |side: &str, at: (&str, &str, &str), dir: Dir| {
+        ConnectorDef::new(&format!("branch {side}"), Pipe, ChilledWaterSupply, Both, at, dir, ShapeDef::Round("branch_d".into()))
+            .flow("water_flow")
+            .visible_if(&format!("branch.{side}"))
+    };
+    Family {
+        name: "Pipe tee".into(),
+        code: "FAM-0019".into(),
+        classification: vec![("Uniclass".into(), "Pr_65_52_63".into())],
+        values: vec![
+            V::input("pipe_d", 0.05, 0.015, 0.6, Type),
+            V::input("branch_d", 0.05, 0.015, 0.6, Type),
+            V::input("leg", 0.075, 0.03, 1.0, Type),
+            V::input("branch_len", 0.075, 0.03, 1.0, Type),
+            V::choice("branch", &["left", "right", "up", "down"], "left", Type),
+            V::number("water_flow", 0.0005, 0.0, 0.5, Type),
+            V::material("body", "Pipe fitting", Type),
+        ],
+        forms: vec![
+            {
+                let mut f = FormDef::extrusion("run", crate::Axis::X, "-leg", "leg", ProfileDef::circle("0", "0", "pipe_d / 2"));
+                f.material = Some("body".into());
+                f
+            },
+            form("left", crate::Axis::Y, "0", "branch_len"),
+            form("right", crate::Axis::Y, "-branch_len", "0"),
+            form("up", crate::Axis::Z, "0", "branch_len"),
+            form("down", crate::Axis::Z, "-branch_len", "0"),
+        ],
+        checks: vec![
+            chk("the branch is not larger than the run", "branch_d <= pipe_d"),
+            chk("the branch is longer than the run is wide", "branch_len > pipe_d / 2"),
+        ],
+        connectors: vec![
+            ConnectorDef::new("run in", Pipe, ChilledWaterSupply, Both, ("-leg", "0", "0"), MinusX, ShapeDef::Round("pipe_d".into())).flow("water_flow"),
+            ConnectorDef::new("run out", Pipe, ChilledWaterSupply, Both, ("leg", "0", "0"), PlusX, ShapeDef::Round("pipe_d".into())).flow("water_flow"),
+            conn("left", ("0", "branch_len", "0"), PlusY),
+            conn("right", ("0", "-branch_len", "0"), MinusY),
+            conn("up", ("0", "0", "branch_len"), PlusZ),
+            conn("down", ("0", "0", "-branch_len"), MinusZ),
         ],
         category: Category::PipeFitting,
         host: Some(Host::Free),
@@ -378,6 +497,8 @@ pub fn families() -> Vec<Family> {
         panel_board(),
         hanger(),
         pipe_elbow(),
+        pipe_reducer(),
+        pipe_tee(),
     ]
 }
 

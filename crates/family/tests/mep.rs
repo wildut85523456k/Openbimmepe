@@ -364,6 +364,8 @@ fn library_families_carry_the_decided_uniclass_codes() {
         ("Distribution board, 12-way", "Pr_60_70_22"),
         ("Pipe hanger, clevis", "Pr_20_85_47"),
         ("Pipe elbow", "Pr_65_52_63"),
+        ("Pipe reducer", "Pr_65_52_63"),
+        ("Pipe tee", "Pr_65_52_63"),
     ];
     let lib = library::all().expect("library compiles");
     assert_eq!(lib.len(), decided.len(), "a library family has no decided code");
@@ -402,6 +404,8 @@ fn library_families_carry_their_own_unique_codes_apart_from_uniclass() {
         ("Distribution board, 12-way", "FAM-0015"),
         ("Pipe hanger, clevis", "FAM-0016"),
         ("Pipe elbow", "FAM-0017"),
+        ("Pipe reducer", "FAM-0018"),
+        ("Pipe tee", "FAM-0019"),
     ];
     let lib = library::all().expect("library compiles");
     assert_eq!(lib.len(), decided.len(), "a library family has no decided code");
@@ -1633,7 +1637,7 @@ fn the_pipe_elbow_outlet_follows_its_angle_and_ends_where_the_bend_ends() {
     let c = library::pipe_elbow().compile().unwrap();
     for angle in [90.0_f64, 45.0, 22.5] {
         let i = c.solve(&Request { type_values: vec![("angle", angle)], ..Default::default() }).unwrap();
-        let (inlet, out) = (conn(&i, "in"), conn(&i, "out"));
+        let (inlet, out) = (conn(&i, "in left"), conn(&i, "out left"));
         let r = 1.5 * 0.05;
         let a = angle.to_radians();
         assert!(close3(inlet.pos, [0.0, 0.0, 0.0]) && inlet.dir == [-1.0, 0.0, 0.0]);
@@ -1643,5 +1647,97 @@ fn the_pipe_elbow_outlet_follows_its_angle_and_ends_where_the_bend_ends() {
         let v = i.forms[0].volume();
         let want = a * r * std::f64::consts::PI * 0.025 * 0.025;
         assert!((v - want).abs() < want * 1e-6, "{angle}: {v} vs {want}");
+    }
+}
+
+#[test]
+fn the_pipe_elbow_turns_left_right_up_and_down_and_each_outlet_is_where_the_bend_ends() {
+    let c = library::pipe_elbow().compile().unwrap();
+    let (r, rad) = (1.5 * 0.05, 0.025);
+    for turn in ["left", "right", "up", "down"] {
+        for angle in [90.0_f64, 45.0] {
+            let i = c.solve(&Request { type_values: vec![("angle", angle)], type_texts: vec![("turn", turn)], ..Default::default() }).unwrap();
+            assert_eq!(i.connectors.len(), 2, "{turn}: only the connectors of its own turn");
+            assert_eq!(i.forms.len(), 1, "{turn}: only its own bend");
+            let (inlet, out) = (conn(&i, &format!("in {turn}")), conn(&i, &format!("out {turn}")));
+            let a = angle.to_radians();
+            // the pipe runs along +x for left and down, along -x for right and up; the bend goes to the side it names
+            let sx = if turn == "right" || turn == "up" { -1.0 } else { 1.0 };
+            let (sy, sz) = (match turn { "left" => 1.0, "right" => -1.0, _ => 0.0 }, match turn { "up" => 1.0, "down" => -1.0, _ => 0.0 });
+            let want_pos = [sx * r * a.sin(), (sy + sz * 0.0) * (r - r * a.cos()), sz * (r - r * a.cos())];
+            assert!(close3(out.pos, want_pos), "{turn} {angle}: {:?} vs {want_pos:?}", out.pos);
+            let want_dir = [sx * a.cos(), sy * a.sin(), sz * a.sin()];
+            assert!(close3(out.dir, want_dir), "{turn} {angle}: {:?} vs {want_dir:?}", out.dir);
+            assert!(close3(inlet.dir, [-sx, 0.0, 0.0]), "{turn}: the inlet faces away from the bend");
+            // the bend is the solid between the two: its box holds the outlet's centre, and its end face is the outlet's
+            let (lo, hi) = i.forms[0].bounds_local();
+            for k in 0..3 { assert!(lo[k] - 1e-9 <= out.pos[k] && out.pos[k] <= hi[k] + 1e-9, "{turn} {angle} axis {k}: {lo:?} {hi:?} {:?}", out.pos); }
+            let want = a * r * std::f64::consts::PI * rad * rad;
+            assert!((i.forms[0].volume() - want).abs() < want * 1e-6, "{turn} {angle}");
+        }
+    }
+}
+
+#[test]
+fn the_reducer_and_the_tee_carry_the_sizes_of_their_type_on_every_connector() {
+    let red = library::pipe_reducer().compile().unwrap();
+    let i = red.solve(&Request { type_values: vec![("pipe_d", 0.1), ("pipe_d2", 0.065), ("length", 0.15)], ..Default::default() }).unwrap();
+    let (large, small) = (conn(&i, "large"), conn(&i, "small"));
+    assert_eq!(large.size, Size::Round { diameter: 0.1 });
+    assert_eq!(small.size, Size::Round { diameter: 0.065 });
+    assert!(close3(small.pos, [0.15, 0.0, 0.0]) && small.dir == [1.0, 0.0, 0.0] && large.dir == [-1.0, 0.0, 0.0]);
+    let (lo, hi) = i.forms[0].bounds_local();
+    assert!(close3(lo, [0.0, -0.05, -0.05]) && close3(hi, [0.15, 0.05, 0.05]), "{lo:?} {hi:?}");
+    // a small end as large as the large end is refused
+    assert!(red.solve(&Request { type_values: vec![("pipe_d", 0.05), ("pipe_d2", 0.05)], ..Default::default() }).is_err());
+
+    let tee = library::pipe_tee().compile().unwrap();
+    let i = tee.solve(&Request { type_values: vec![("pipe_d", 0.08), ("branch_d", 0.05), ("leg", 0.12), ("branch_len", 0.1)], ..Default::default() }).unwrap();
+    assert_eq!(i.connectors.len(), 3);
+    assert_eq!(conn(&i, "run in").size, Size::Round { diameter: 0.08 });
+    assert_eq!(conn(&i, "run out").size, Size::Round { diameter: 0.08 });
+    let b = conn(&i, "branch left");
+    assert_eq!(b.size, Size::Round { diameter: 0.05 });
+    assert!(close3(b.pos, [0.0, 0.1, 0.0]) && b.dir == [0.0, 1.0, 0.0]);
+    let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+    for f in &i.forms { let (l, h) = f.bounds_local(); for k in 0..3 { lo[k] = lo[k].min(l[k]); hi[k] = hi[k].max(h[k]); } }
+    assert!(close3(lo, [-0.12, -0.04, -0.04]) && close3(hi, [0.12, 0.1, 0.04]), "{lo:?} {hi:?}");
+    // the branch goes right, up or down as well
+    for (side, dir, pos) in [("right", [0.0, -1.0, 0.0], [0.0, -0.1, 0.0]), ("up", [0.0, 0.0, 1.0], [0.0, 0.0, 0.1]), ("down", [0.0, 0.0, -1.0], [0.0, 0.0, -0.1])] {
+        let i = tee.solve(&Request { type_values: vec![("pipe_d", 0.08), ("branch_d", 0.05), ("leg", 0.12), ("branch_len", 0.1)], type_texts: vec![("branch", side)], ..Default::default() }).unwrap();
+        assert_eq!(i.connectors.len(), 3, "{side}");
+        let b = conn(&i, &format!("branch {side}"));
+        assert!(close3(b.pos, pos) && close3(b.dir, dir), "{side}: {:?} {:?}", b.pos, b.dir);
+        let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+        for f in &i.forms { let (l, h) = f.bounds_local(); for k in 0..3 { lo[k] = lo[k].min(l[k]); hi[k] = hi[k].max(h[k]); } }
+        for k in 0..3 { assert!(lo[k] - 1e-9 <= b.pos[k] && b.pos[k] <= hi[k] + 1e-9, "{side}: the branch end lies on the solid"); }
+        assert_eq!(i.forms.len(), 2, "{side}: the run and its own branch only");
+    }
+    // a branch larger than the run is refused
+    assert!(tee.solve(&Request { type_values: vec![("pipe_d", 0.05), ("branch_d", 0.08)], ..Default::default() }).is_err());
+}
+
+#[test]
+fn the_eccentric_reducer_keeps_its_flat_side_straight() {
+    let red = library::pipe_reducer().compile().unwrap();
+    let (d, d2, l) = (0.1_f64, 0.065_f64, 0.15_f64);
+    for (flat, want) in [("concentric", [0.0, 0.0]), ("bottom", [0.0, -0.0175]), ("top", [0.0, 0.0175]), ("left", [0.0175, 0.0]), ("right", [-0.0175, 0.0])] {
+        let i = red.solve(&Request { type_values: vec![("pipe_d", d), ("pipe_d2", d2), ("length", l)], type_texts: vec![("flat", flat)], ..Default::default() }).unwrap();
+        let small = conn(&i, "small");
+        assert!(close3(small.pos, [l, want[0], want[1]]), "{flat}: {:?}", small.pos);
+        assert!(small.dir == [1.0, 0.0, 0.0], "an eccentric reducer still leaves along the run");
+        // the flat side: the solid reaches the large pipe's wall on that side all the way to the small end
+        let (lo, hi) = i.forms[0].bounds_local();
+        let (ylo, yhi, zlo, zhi) = (lo[1], hi[1], lo[2], hi[2]);
+        match flat {
+            "bottom" => assert!(close(zlo, -d / 2.0), "{flat}"),
+            "top" => assert!(close(zhi, d / 2.0), "{flat}"),
+            "left" => assert!(close(yhi, d / 2.0), "{flat}"),
+            "right" => assert!(close(ylo, -d / 2.0), "{flat}"),
+            _ => {}
+        }
+        // and the small end's wall on the flat side is in line with the large pipe's wall
+        let wall = match flat { "bottom" => small.pos[2] - d2 / 2.0 + d / 2.0, "top" => d / 2.0 - (small.pos[2] + d2 / 2.0), "left" => d / 2.0 - (small.pos[1] + d2 / 2.0), "right" => small.pos[1] - d2 / 2.0 + d / 2.0, _ => 0.0 };
+        assert!(close(wall, 0.0), "{flat}: the flat side runs straight, off by {wall}");
     }
 }

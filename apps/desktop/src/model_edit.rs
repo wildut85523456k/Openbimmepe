@@ -753,6 +753,7 @@ impl Desktop {
     pub(crate) fn family_click(&mut self, level: ElementId, at: [f64; 2], wall: Option<ElementId>) {
         let spec = FamilySpec { family: self.family_pick.clone(), type_name: self.family_type.clone(), overrides: Vec::new(), angle_deg: self.angle_deg, elevation_m: self.slab_offset_mm / 1000.0 };
         let in_wall = spec.family.starts_with("Door") || spec.family.starts_with("Window");
+        if !in_wall && (self.family_snap_click(level, at).is_some() || self.family_splice_click(level, at).is_some()) { return; }
         let result = if in_wall {
             let Some(w) = wall else { self.message = format!("{}: click the wall it goes in", spec.family); return; };
             let Some(Geometry::Linear { start, end, .. }) = self.document.get(w).and_then(|e| e.geometry) else { return; };
@@ -912,13 +913,15 @@ impl Desktop {
         let ids = if self.edit_src.is_empty() { self.selected_ids() } else { self.edit_src.clone() };
         if ids.is_empty() { return; }
         let copying = self.tool == Tool::Copy || (self.tool == Tool::Mirror && self.mirror_copy);
+        let mut moved_notes: Vec<String> = Vec::new();
         let made = if copying { self.document.copy_commands(&ids, xf).map(|(ops, firsts)| (ops, Some(firsts))) }
-            else { self.document.transform_commands(&ids, xf).map(|ops| (ops, None)) };
+            else if self.tool == Tool::Move && self.move_disjoin { self.document.transform_commands_disjoined(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) }
+            else { self.document.transform_commands_noted(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) };
         let result = made.and_then(|(ops, new)| self.document.transact(self.document.revision(), &ops).map(|_| new).map_err(|e| format!("{e:?}")));
         match result {
             Ok(new) => {
                 if let Some(n) = new { self.select_many(n); }
-                self.message = format!("{} done; undo takes it back", match self.tool { Tool::Move => "Move", Tool::Copy => "Copy", Tool::Rotate => "Rotate", _ => "Mirror" });
+                self.message = format!("{} done; undo takes it back{}", match self.tool { Tool::Move => "Move", Tool::Copy => "Copy", Tool::Rotate => "Rotate", _ => "Mirror" }, if moved_notes.is_empty() { String::new() } else { format!(". {}", moved_notes.join("; ")) });
                 if self.tool == Tool::Copy { self.edit_pts.truncate(1); self.edit_src = ids; } else { self.choose_tool(Tool::Select); }
             }
             Err(e) => { self.message = format!("Cannot do that: {e}"); self.edit_pts.clear(); self.edit_src.clear(); }

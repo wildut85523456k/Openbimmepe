@@ -100,8 +100,10 @@ Codes verified against the live Uniclass July 2026 tables.
 | Distribution board, 12-way | `Pr_60_70_22` | Distribution boxes and switchboards | solid |
 | Pipe hanger, clevis | `Pr_20_85_47` | Legs, pedestals, hangers, stringers | best fit (no dedicated code) |
 | Pipe elbow | `Pr_65_52_63` | Pipes and fittings | general group (no elbow-specific code), confirmed by the user |
+| Pipe reducer | `Pr_65_52_63` | Pipes and fittings | general group |
+| Pipe tee | `Pr_65_52_63` | Pipes and fittings | general group |
 
-All sixteen are authored in `library.rs` and asserted by two tests:
+All nineteen are authored in `library.rs` and asserted by two tests:
 `crates/family/tests/mep.rs::every_library_family_carries_a_uniclass_code` (the invariant: every
 family carries a code) and `::library_families_carry_the_decided_uniclass_codes` (the decided
 code per family). The IFC export test
@@ -167,7 +169,7 @@ via `Compiled::classification()` (`lib.rs:1612`), and exported to IFC as a
 `Pset_OpenBIM_Family.Classification` label (`crates/ifc/src/families.rs:237-238`).
 
 **Family code and native classification (done).** A family has its own unique, stable code
-(`Family.code`, library `FAM-0001`..`FAM-0017`, at most 32 letters, digits, `.`, `_`, `-`), independent
+(`Family.code`, library `FAM-0001`..`FAM-0019`, at most 32 letters, digits, `.`, `_`, `-`), independent
 of its name and of its Uniclass code: two families of one Uniclass group (the two doors, `Pr_30_59_24`)
 have two codes. The Uniclass code is an attribute saying which group a family belongs to, so that
 common specifications can later be attached to the whole group. The IFC export (IFC4 and IFC4X3; the

@@ -893,10 +893,29 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
         let to_model = |p: Pos2| { let v = (p - centre - pan) / scale + bc; [(v.x as f64 / 0.05).round() * 0.05, (-v.y as f64 / 0.05).round() * 0.05] };
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
+        else if ui.input(|i| i.key_pressed(egui::Key::Space)) && !ui.ctx().egui_wants_keyboard_input() { app.angle_deg = (app.angle_deg + 90.0) % 360.0; app.message = format!("{} turned to {:.0} degrees", app.family_pick, app.angle_deg); }
+        else if ui.input(|i| i.key_pressed(egui::Key::Tab)) && !ui.ctx().egui_wants_keyboard_input() { app.family_snap_k += 1; app.message = format!("{}: the next connector of the family meets the open one", app.family_pick); }
         else if pick.is_some() {
             if let Some(p) = pick {
                 let wall = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some_and(|e| e.category == Category::Wall)).map(|(_, id, _, _)| *id);
                 app.family_click(level_id, to_model(p), wall);
+            }
+        }
+        // the ghost: the family where a click would put it, before the click
+        if let Some(h) = response.hover_pos().filter(|_| pick.is_none() && !ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+            if let Some(g) = app.family_ghost(level_id, to_model(h)) {
+                let ink = if g.refused { Color32::from_rgb(200, 70, 60) } else { Color32::from_rgb(70, 130, 200) };
+                let ring: Vec<Pos2> = g.hull.iter().map(|p| screen([p[0], p[1], level_z])).collect();
+                if ring.len() >= 3 {
+                    painter.add(egui::Shape::convex_polygon(ring.clone(), Color32::from_rgba_unmultiplied(ink.r(), ink.g(), ink.b(), 70), Stroke::new(1.5, ink)));
+                }
+                for (c, joined) in &g.connectors {
+                    let sp = screen([c[0], c[1], level_z]);
+                    if *joined { painter.circle_stroke(sp, 8.0, Stroke::new(2.0, Color32::from_rgb(60, 170, 90))); } else { painter.circle_filled(sp, 3.0, ink); }
+                }
+                if let (Some(text), Some(first)) = (&g.label, ring.first()) {
+                    painter.text(*first + egui::vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, text, egui::FontId::proportional(12.0), ink);
+                }
             }
         }
     } else if app.tool == crate::Tool::WallOpening && !three_d {
