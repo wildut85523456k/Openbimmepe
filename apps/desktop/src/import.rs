@@ -2,6 +2,7 @@
 //! extruded profile, and the types they share. All of it is one transaction, so one undo takes it back. What the file
 //! has and the document cannot hold is counted in the report.
 use openbim_document::{Category, Command, Document, ElementId, Geometry, Material, Section, SlabKind, TypeValues, Usage};
+use crate::class_map::{ClassMap, Target};
 use openbim_ifc::reader::{Imported, Member, Section as Shape};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -196,7 +197,10 @@ fn wall_axis(pts: &[[f64; 2]]) -> Option<([f64; 2], [f64; 2], f64)> {
 }
 
 /// Plans the import of `imp` into `doc`: the commands, and the report.
-pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
+pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) { plan_with(doc, imp, &ClassMap::default()) }
+
+/// The same, with the user's class map: what it says a class becomes replaces what the importer does with it.
+pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command>, ImportReport) {
     let mut report = ImportReport { schema: imp.schema.clone(), diagnostics: imp.diagnostics.clone(), skipped: imp.skipped.iter().map(|(k, n)| (format!("{k} (not an extruded profile this app reads)"), *n)).collect(), ..Default::default() };
     let mut ops: Vec<Command> = Vec::new();
     let mut used: BTreeSet<u64> = doc.elements().map(|e| e.id.0).collect();
@@ -246,13 +250,30 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
     let mut spaces: Vec<&Member> = Vec::new();
     let mut fillers: Vec<&Member> = Vec::new();
     let mut ops_rooms: Vec<Command> = Vec::new();
-    for m in imp.members.iter() {
+    // products of classes the reader does not read, which the reader counted as left out
+    let counted: BTreeSet<u32> = imp.unmapped.iter().map(|m| m.step_id).collect();
+    let mut carriers: Vec<&Member> = Vec::new();
+    let mut map_note = false;
+    for m in imp.members.iter().chain(imp.unmapped.iter()) {
         let number = m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
         let class = m.class.as_str();
-        if class == "IFCSPACE" { spaces.push(m); continue; }
-        if class == "IFCDOOR" || class == "IFCWINDOW" { fillers.push(m); continue; }
-        if class == "IFCBUILDINGELEMENTPROXY" { continue; } // kept as a generic model, below
-        let category = match class {
+        let target = map.target(class, &m.predefined);
+        if target == Some(Target::Ignore) {
+            if counted.contains(&m.step_id) { claim(&mut report, m); }
+            skip(&mut report, &format!("{class} (the class map says to leave it out)"));
+            report.diagnostics.push(format!("#{} {} \"{}\": left out by the class map", m.step_id, class, m.name));
+            continue;
+        }
+        if class == "IFCSPACE" || class == "IFCDOOR" || class == "IFCWINDOW" {
+            if target.is_some() && !map_note { map_note = true; report.notes.push("a class map row for IFCSPACE, IFCDOOR or IFCWINDOW is ignored unless it says Ignore: they are always rooms, doors and windows".into()); }
+            if class == "IFCSPACE" { spaces.push(m); } else { fillers.push(m); }
+            continue;
+        }
+        let forced = match target { Some(Target::Category(Category::Generic)) => { carriers.push(m); continue } Some(Target::Category(c)) => Some(c), _ => None };
+        // a class with no element of its own (a proxy, or one the reader does not read) is kept as a generic model
+        if forced.is_none() && (class == "IFCBUILDINGELEMENTPROXY" || counted.contains(&m.step_id)) { carriers.push(m); continue; }
+        if forced.is_some() && counted.contains(&m.step_id) { claim(&mut report, m); }
+        let category = if let Some(c) = forced { c } else { match class {
             "IFCBEAM" | "IFCMEMBER" => Category::Beam,
             "IFCCOLUMN" => Category::Column,
             "IFCSLAB" if m.predefined == "LANDING" => { skip(&mut report, "IFCSLAB LANDING (the landing of a stair written by another program is not read yet)"); continue }
@@ -266,7 +287,7 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
             "IFCPIPESEGMENT" => Category::Pipe,
             "IFCDUCTSEGMENT" => Category::Duct,
             _ => { skip(&mut report, &format!("{class} (no such element in the app)")); continue }
-        };
+        } };
         if let Some(n) = number {
             if doc.get(ElementId(n)).is_some_and(|e| e.category == category) { skip(&mut report, "elements already in the model (same element number)"); continue; }
         }
@@ -449,8 +470,7 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
         ]);
         *report.added.entry("grid lines").or_default() += 1;
     }
-    let carriers: Vec<&Member> = imp.members.iter().filter(|m| m.class == "IFCBUILDINGELEMENTPROXY").chain(imp.unmapped.iter()).collect();
-    plan_carriers(doc, &ops, &carriers, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
+    plan_carriers(doc, &ops, &carriers, &counted, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_fillers(doc, &ops, &fillers, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_rooms(doc, &ops, &spaces, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     ops.extend(ops_rooms);
@@ -462,25 +482,24 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
 /// products in as Generic Models too). Only a body that is an extruded profile standing upright is a prism; a product
 /// that has another kind of body stays out and is counted, as it was before.
 #[allow(clippy::too_many_arguments)]
-fn plan_carriers(doc: &Document, ops: &[Command], carriers: &[&Member], level_for: &dyn Fn(&Member, f64) -> (ElementId, f64), take: &mut dyn FnMut(Option<u64>, &mut BTreeSet<u64>) -> ElementId, used: &mut BTreeSet<u64>, out: &mut Vec<Command>, report: &mut ImportReport) {
+fn plan_carriers(doc: &Document, ops: &[Command], carriers: &[&Member], counted: &BTreeSet<u32>, level_for: &dyn Fn(&Member, f64) -> (ElementId, f64), take: &mut dyn FnMut(Option<u64>, &mut BTreeSet<u64>) -> ElementId, used: &mut BTreeSet<u64>, out: &mut Vec<Command>, report: &mut ImportReport) {
     if carriers.is_empty() { return; }
     let mut scratch = doc.clone();
     if !ops.is_empty() && scratch.transact(scratch.revision(), ops).is_err() { report.skipped.insert("generic models (the elements of the file did not make a model to put them in)".into(), carriers.len()); return; }
     for m in carriers {
-        let proxy = m.class == "IFCBUILDINGELEMENTPROXY";
+        // the reader counted it as left out; what is kept is taken off that count, what is not stays on it
+        let by_reader = counted.contains(&m.step_id);
         // a proxy this app wrote says what it was in its own set
         let source = m.psets.get("OpenBIM_Source");
         let class = source.and_then(|s| s.get("IfcClass")).and_then(|p| p.text()).unwrap_or(&m.class).to_string();
         let predefined = source.and_then(|s| s.get("PredefinedType")).and_then(|p| p.text()).unwrap_or(&m.predefined).to_string();
         let number = m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
-        // the key the class was counted under by the reader; a product that is not kept stays counted there
-        let counted = format!("{} (not an extruded profile this app reads)", m.class);
         let leave = |report: &mut ImportReport, why: &str| {
-            if proxy { *report.skipped.entry(format!("IFCBUILDINGELEMENTPROXY {why}")).or_default() += 1; }
+            if !by_reader { *report.skipped.entry(format!("{} {why}", m.class)).or_default() += 1; }
             report.diagnostics.push(format!("#{} {} \"{}\": {why}", m.step_id, m.class, m.name));
         };
         if let Some(n) = number {
-            if doc.get(ElementId(n)).is_some_and(|e| e.category == Category::Generic) { *report.skipped.entry("elements already in the model (same element number)".into()).or_default() += 1; if !proxy { uncount(report, &counted); } continue; }
+            if doc.get(ElementId(n)).is_some_and(|e| e.category == Category::Generic) { *report.skipped.entry("elements already in the model (same element number)".into()).or_default() += 1; if by_reader { claim(report, m); } continue; }
         }
         let Some(body) = &m.body else { leave(report, "has no extruded profile"); continue };
         let pts: Vec<[f64; 2]> = body.outline.iter().map(|q| [r6(q[0]), r6(q[1])]).collect();
@@ -520,17 +539,17 @@ fn plan_carriers(doc: &Document, ops: &[Command], carriers: &[&Member], level_fo
         }
         out.extend(cmds);
         *report.added.entry("generic models").or_default() += 1;
-        if !proxy {
-            uncount(report, &counted);
-            let said = format!("#{} {}: unsupported product", m.step_id, m.class);
-            report.diagnostics.retain(|l| !l.starts_with(&said));
-        }
+        if by_reader { claim(report, m); }
     }
 }
 
-/// One product less is left out under `key`.
-fn uncount(report: &mut ImportReport, key: &str) {
-    if let Some(n) = report.skipped.get_mut(key) { *n -= 1; if *n == 0 { report.skipped.remove(key); } }
+/// A product the reader counted as left out is taken after all (kept, or sent elsewhere by the class map): it comes off
+/// that count and its line in the log.
+fn claim(report: &mut ImportReport, m: &Member) {
+    let key = format!("{} (not an extruded profile this app reads)", m.class);
+    if let Some(n) = report.skipped.get_mut(&key) { *n -= 1; if *n == 0 { report.skipped.remove(&key); } }
+    let said = format!("#{} {}: unsupported product", m.step_id, m.class);
+    report.diagnostics.retain(|l| !l.starts_with(&said));
 }
 
 /// `s` cut to at most `max` bytes at a character boundary.
@@ -881,7 +900,12 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
 }
 
 /// Reads `text` and adds what it holds to the document, as one transaction.
-pub fn import_ifc(doc: &mut Document, text: &str) -> Result<ImportReport, String> {
+#[cfg(test)]
+pub fn import_ifc(doc: &mut Document, text: &str) -> Result<ImportReport, String> { import_ifc_with(doc, text, &ClassMap::default()) }
+
+/// The same, with the user's class map. A file with the app's own records is put back from them (the map is for files
+/// that are read from their geometry).
+pub fn import_ifc_with(doc: &mut Document, text: &str, map: &ClassMap) -> Result<ImportReport, String> {
     let imp = openbim_ifc::reader::read(text).map_err(|e| e.to_string())?;
     let mut note = None;
     if !imp.native.is_empty() {
@@ -890,7 +914,7 @@ pub fn import_ifc(doc: &mut Document, text: &str) -> Result<ImportReport, String
             Err(why) => note = Some(format!("The app's own data in the file could not be used ({why}); the file's geometry was read instead")),
         }
     }
-    let (ops, mut report) = plan(doc, &imp);
+    let (ops, mut report) = plan_with(doc, &imp, map);
     report.notes.extend(note);
     if report.added.is_empty() && report.levels == 0 { return Ok(report); }
     doc.transact(doc.revision(), &ops).map_err(|e| format!("the model does not accept what the file holds: {e:?}"))?;
@@ -1306,6 +1330,62 @@ mod tests {
         assert!(report.skipped.keys().all(|k| !k.contains("IFCPUMP")), "kept, so not left out: {}", report.text());
         // the file's log has no complaint about it
         assert!(report.diagnostics.iter().all(|l| !l.contains("IFCPUMP")), "{:?}", report.diagnostics);
+    }
+
+    fn pump_file() -> String {
+        let d = pump_model();
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        out.text.replace("IFCBUILDINGELEMENTPROXY(", "IFCPUMP(")
+    }
+
+    #[test]
+    fn a_class_map_row_that_says_ignore_leaves_the_class_out_and_the_log_says_the_map_did() {
+        let text = pump_file();
+        let map = ClassMap::parse("IFCPUMP\tIgnore\n").unwrap();
+        let mut back = Document::new();
+        let report = import_ifc_with(&mut back, &text, &map).unwrap();
+        assert!(generics_of(&back).is_empty(), "{}", report.text());
+        assert_eq!(report.skipped.get("IFCPUMP (the class map says to leave it out)"), Some(&1), "{}", report.text());
+        assert!(report.skipped.keys().all(|k| !k.contains("not an extruded profile") || !k.contains("IFCPUMP")), "counted once: {}", report.text());
+        assert!(report.diagnostics.iter().any(|l| l.contains("IFCPUMP") && l.contains("left out by the class map")), "{:?}", report.diagnostics);
+        assert!(report.diagnostics.iter().all(|l| !l.contains("IFCPUMP") || l.contains("class map")), "{:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn a_class_map_row_can_make_a_class_an_element_of_the_app_or_a_generic_model() {
+        let text = pump_file();
+        // a pump as a slab: its body is a prism, so it is one
+        let mut as_slab = Document::new();
+        let report = import_ifc_with(&mut as_slab, &text, &ClassMap::parse("IFCPUMP\tSlab\n").unwrap()).unwrap();
+        let slabs: Vec<_> = as_slab.elements().filter(|e| e.category == Category::Slab && e.name == "Pump 1").collect();
+        assert_eq!(slabs.len(), 1, "{}", report.text());
+        assert!(generics_of(&as_slab).is_empty() && report.skipped.keys().all(|k| !k.contains("IFCPUMP")), "{}", report.text());
+        // walls as generic models: the wall class is read, but the map says otherwise
+        let walls = crate::export::export_ifc_with(&Document::spatial_sample(), "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap().text;
+        let mut normal = Document::new();
+        import_ifc(&mut normal, &walls).unwrap();
+        let n = normal.elements().filter(|e| e.category == Category::Wall).count();
+        assert!(n > 0);
+        let mut generic = Document::new();
+        let report = import_ifc_with(&mut generic, &walls, &ClassMap::parse("IFCWALL\tGeneric\nIFCWALLSTANDARDCASE\tGeneric\n").unwrap()).unwrap();
+        assert_eq!(generic.elements().filter(|e| e.category == Category::Wall).count(), 0, "{}", report.text());
+        assert_eq!(generics_of(&generic).len(), n, "{}", report.text());
+        assert!(generics_of(&generic).iter().all(|g| g.texts.iter().any(|(k, v)| k == "IfcClass" && v.starts_with("IFCWALL"))));
+        // the row for a predefined type wins over the row for any, and a class with no row is read as usual
+        let mut kept = Document::new();
+        import_ifc_with(&mut kept, &walls, &ClassMap::parse("IFCPUMP\tIgnore\n").unwrap()).unwrap();
+        assert_eq!(kept.elements().filter(|e| e.category == Category::Wall).count(), n);
+    }
+
+    #[test]
+    fn a_stair_a_class_map_sends_to_generic_that_has_no_prism_body_is_counted_not_lost() {
+        let text = pump_file().replace("IFCPUMP(", "IFCSTAIR(");
+        let mut imp = openbim_ifc::reader::read(&text).unwrap();
+        let stair = imp.members.iter_mut().find(|m| m.class == "IFCSTAIR").expect("a stair is a member");
+        stair.body = None;
+        let (ops, report) = plan_with(&Document::new(), &imp, &ClassMap::parse("IFCSTAIR\tGeneric\n").unwrap());
+        assert!(!ops.iter().any(|c| matches!(c, Command::Create { category: Category::Generic, .. })));
+        assert_eq!(report.skipped.get("IFCSTAIR has no extruded profile"), Some(&1), "{}", report.text());
     }
 
     #[test]
