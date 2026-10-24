@@ -73,6 +73,8 @@ fn r6(x: f64) -> f64 { (x * 1e6).round() / 1e6 }
 /// What one member of the file becomes.
 struct Planned {
     category: Category,
+    /// risers of a stair
+    count: u32,
     name: String,
     width: f64,
     height: f64,
@@ -280,7 +282,7 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
             "IFCSLAB" => Category::Slab,
             "IFCCOVERING" if m.predefined == "CEILING" => Category::Slab,
             "IFCCOVERING" => { skip(&mut report, "IFCCOVERING that is not a ceiling (no such element in the app)"); continue }
-            "IFCSTAIR" => { skip(&mut report, "IFCSTAIR (a stair written by another program is not read yet)"); continue }
+            "IFCSTAIR" => Category::Stair,
             "IFCROOF" => { skip(&mut report, "IFCROOF (a roof written by another program is not read yet)"); continue }
             "IFCFOOTING" => if m.predefined == "STRIP_FOOTING" { Category::WallFooting } else { Category::Footing },
             "IFCWALL" | "IFCWALLSTANDARDCASE" => Category::Wall,
@@ -293,7 +295,7 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
         }
         let Some(body) = &m.body else { skip(&mut report, &format!("{class} without an extruded profile")); continue };
         let mut p = Planned {
-            category, name: m.name.clone(), width: 0.0, height: 0.0, elevation: 0.0, section: Section::Rectangle, usage: Usage::Girder,
+            category, count: 0, name: m.name.clone(), width: 0.0, height: 0.0, elevation: 0.0, section: Section::Rectangle, usage: Usage::Girder,
             material: material_of(m.material.as_deref()), slope: None, slab_kind: SlabKind::Floor, outline: Vec::new(),
             geometry: Geometry::Level, wall_footing_at: None, number, type_obj: m.type_obj,
         };
@@ -372,6 +374,17 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
                     }
                 }
             }
+            Category::Stair => {
+                match read_stair(body, &m.psets) {
+                    Ok(st) => {
+                        let (lid, lz) = level_for(m, st.foot_z);
+                        (p.width, p.height, p.elevation, p.count) = (r6(st.width), r6(st.risers as f64 * st.riser), r6(st.foot_z - lz), st.risers);
+                        p.geometry = Geometry::Linear { start: [r6(st.start[0]), r6(st.start[1])], end: [r6(st.end[0]), r6(st.end[1])], level: lid };
+                        p.material = Material::Unspecified;
+                    }
+                    Err(why) => { skip(&mut report, &format!("{class} {why}")); continue }
+                }
+            }
             _ => continue,
         }
         if p.name.trim().is_empty() { p.name = format!("{} {}", class.trim_start_matches("IFC").to_lowercase(), m.step_id); }
@@ -447,6 +460,7 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
             Category::Column => ops.extend([Command::SetSection { id, section: p.section }, Command::SetMaterial { id, material: p.material }]),
             Category::Slab => ops.extend([Command::SetSlabKind { id, kind: p.slab_kind }, Command::SetMaterial { id, material: p.material }, Command::SetOutline { id, outline: p.outline.clone() }]),
             Category::Footing | Category::WallFooting => ops.push(Command::SetMaterial { id, material: p.material }),
+            Category::Stair => ops.push(Command::SetCount { id, count: p.count }),
             Category::Pipe | Category::Duct => { if let Some(s) = p.slope.filter(|s| *s != 0.0) { ops.push(Command::SetSlope { id, slope_ratio: s }); } }
             _ => {}
         }
@@ -476,6 +490,48 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
     plan_rooms(doc, &ops, &spaces, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     ops.extend(ops_rooms);
     (ops, report)
+}
+
+/// A straight run of steps as the app has it: the foot of the first riser at the middle of the width and the end of
+/// the last tread, on the same line.
+#[derive(Debug, PartialEq)]
+struct StairRun { start: [f64; 2], end: [f64; 2], width: f64, risers: u32, riser: f64, foot_z: f64 }
+
+/// A stair whose body is the side profile of its steps extruded across its width (the way this app writes one, and
+/// others do): the profile stands in a vertical plane, rises by equal steps and is closed along its foot. The treads
+/// are the horizontal runs between the steps; the last riser leads from the top tread to the floor above, so a run of
+/// n steps in the profile has n + 1 risers. A body that is anything else is refused with the reason.
+fn read_stair(body: &openbim_ifc::reader::Body, psets: &openbim_ifc::reader::Psets) -> Result<StairRun, String> {
+    if body.dir[2].abs() > 1e-6 { return Err("has a body that is not extruded across its width".into()); }
+    let l = body.dir[0].hypot(body.dir[1]);
+    let (dw, u) = ([body.dir[0] / l, body.dir[1] / l], [-body.dir[1] / l, body.dir[0] / l]);
+    if body.outline.len() < 4 { return Err("has a profile with too few corners".into()); }
+    let pts: Vec<(f64, f64, f64)> = body.outline.iter().map(|p| (p[0] * u[0] + p[1] * u[1], p[0] * dw[0] + p[1] * dw[1], p[2])).collect();
+    let (w_lo, w_hi) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
+    if w_hi - w_lo > 1e-4 { return Err("has a profile that is not in one vertical plane".into()); }
+    let (z_lo, z_hi) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.2), a.1.max(p.2)));
+    let mut levels: Vec<f64> = Vec::new();
+    for p in &pts { if p.2 > z_lo + 1e-4 && !levels.iter().any(|z| (z - p.2).abs() < 1e-4) { levels.push(p.2); } }
+    levels.sort_by(f64::total_cmp);
+    let n = levels.len();
+    if n < 2 { return Err("has fewer than two steps in its body".into()); }
+    let riser = (z_hi - z_lo) / n as f64;
+    if levels.iter().enumerate().any(|(i, z)| (z - z_lo - riser * (i + 1) as f64).abs() > 1e-3) { return Err("has steps that are not of equal height".into()); }
+    if let Some(r) = psets.get("Pset_StairCommon").and_then(|p| p.get("NumberOfRiser")).and_then(|p| p.num()) {
+        if (r - (n + 1) as f64).abs() > 1e-9 { return Err("has a NumberOfRiser that does not match the steps of its body".into()); }
+    }
+    let (t_lo, t_hi) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
+    let top: Vec<f64> = pts.iter().filter(|p| p.2 > z_hi - 1e-4).map(|p| p.0).collect();
+    let (top_lo, top_hi) = (top.iter().cloned().fold(f64::MAX, f64::min), top.iter().cloned().fold(f64::MIN, f64::max));
+    // the climb goes toward the end where the highest step is
+    let up = if (t_hi - top_hi).abs() + 1e-6 < (top_lo - t_lo).abs() { 1.0 } else if (top_lo - t_lo).abs() + 1e-6 < (t_hi - top_hi).abs() { -1.0 } else { return Err("has a body with no direction of climb".into()) };
+    let (foot_t, run) = (if up > 0.0 { t_lo } else { t_hi }, t_hi - t_lo);
+    let tread = run / n as f64;
+    let width = body.depth;
+    let (risers, w_mid) = ((n + 1) as u32, w_lo + width / 2.0);
+    if !(0.05..=0.4).contains(&riser) || !(0.1..=1.0).contains(&tread) || !(0.2..=10.0).contains(&width) || risers > 200 { return Err("has figures a stair does not have".into()); }
+    let at = |t: f64| [u[0] * t + dw[0] * w_mid, u[1] * t + dw[1] * w_mid];
+    Ok(StairRun { start: at(foot_t), end: at(foot_t + up * run), width, risers, riser, foot_z: z_lo })
 }
 
 /// What a product of a class the app has no element for is kept as: a generic model, a prism over the plan of its
@@ -1439,6 +1495,45 @@ mod tests {
         assert!(!report.skipped.keys().any(|k| k.contains("IFCGRID")), "{:?}", report.skipped);
         import_ifc(&mut back, &out.text).unwrap();
         assert_eq!(lines(&back).len(), 6);
+    }
+
+    #[test]
+    fn a_straight_stair_of_a_file_from_another_program_comes_back_in_any_direction() {
+        let mut d = Document::spatial_sample();
+        let specs = [([1.0, 1.0], [1.0, 9.0], 18, 0.0), ([20.0, 5.0], [10.0, 5.0], 12, 0.15), ([30.0, 30.0], [40.0, 40.0], 9, 0.0), ([5.0, 15.0], [5.0, 14.0], 20, 0.0)];
+        let mut want = Vec::new();
+        for (start, toward, risers, off) in specs {
+            let spec = openbim_document::StairSpec { start, toward, width_m: 1.2, rise_m: risers as f64 * 0.17, risers, tread_m: 0.27, base_offset_m: off };
+            let id = d.place_stair(ElementId(10), &spec).unwrap();
+            want.push((d.get(id).unwrap().clone(), d.stair_figures(id).unwrap()));
+        }
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        let mut back = Document::new();
+        let report = import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(report.added.get("stairs"), None, "not counted under another name");
+        for (e, f) in &want {
+            let got = back.elements().find(|g| g.category == Category::Stair && matches!((e.geometry, g.geometry), (Some(Geometry::Linear { start: a, .. }), Some(Geometry::Linear { start: b, .. })) if close2(a, b))).unwrap_or_else(|| panic!("{:?}: {}", e.geometry, report.text()));
+            let gf = back.stair_figures(got.id).unwrap();
+            assert_eq!((gf.risers, gf.treads), (f.risers, f.treads), "{}", report.text());
+            assert!((gf.riser_m - f.riser_m).abs() < 1e-5 && (gf.tread_m - f.tread_m).abs() < 1e-5 && (gf.rise_m - f.rise_m).abs() < 1e-5, "{gf:?} {f:?}");
+            assert!((got.width_m - e.width_m).abs() < 1e-5 && (got.elevation_m - e.elevation_m).abs() < 1e-5, "{} {}", got.elevation_m, e.elevation_m);
+            if let (Some(Geometry::Linear { end: a, .. }), Some(Geometry::Linear { end: b, .. })) = (e.geometry, got.geometry) { assert!(close2(a, b), "{a:?} {b:?}"); }
+        }
+        assert_eq!(back.elements().filter(|e| e.category == Category::Stair).count(), 4);
+    }
+
+    #[test]
+    fn a_stair_whose_riser_count_disagrees_with_its_body_is_left_out_and_said() {
+        let mut d = Document::new();
+        d.transact(d.revision(), &[Command::Create { id: ElementId(1), category: Category::Level, name: "L".into(), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 }, Command::SetGeometry { id: ElementId(1), geometry: Geometry::Level }]).unwrap();
+        d.place_stair(ElementId(1), &openbim_document::StairSpec { start: [0.0, 0.0], toward: [0.0, 5.0], width_m: 1.0, rise_m: 2.0, risers: 12, tread_m: 0.28, base_offset_m: 0.0 }).unwrap();
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        let bad = out.text.replace("'NumberOfRiser',$,IFCINTEGER(12)", "'NumberOfRiser',$,IFCINTEGER(30)");
+        assert!(bad != out.text, "the figure is written where it was expected");
+        let mut back = Document::new();
+        let report = import_ifc(&mut back, &bad).unwrap();
+        assert!(back.elements().all(|e| e.category != Category::Stair), "{}", report.text());
+        assert!(report.skipped.keys().any(|k| k.contains("IFCSTAIR") && k.contains("NumberOfRiser")), "{:?}", report.skipped);
     }
 
     #[test]
