@@ -302,7 +302,8 @@ fn annotations(out: &mut Vec<Prim>, doc: &Document, level_id: ElementId, p: &dyn
         match el.geometry {
             Some(Geometry::Grid { start, end }) => {
                 let (a, b) = (p(start), p(end));
-                out.push(Prim::Line { a, b, rgb: GRAY, w: 0.13, dash: Some((12.0, 2.5)) });
+                // a curved grid is drawn as its arc, cut into short steps
+                for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { out.push(Prim::Line { a: p(w[0]), b: p(w[1]), rgb: GRAY, w: 0.13, dash: Some((12.0, 2.5)) }); }
                 for c in [a, b] { bubble(out, c, r, &el.name, GRAY); }
             }
             Some(Geometry::Linear { start, end, level }) if el.category == Category::Section && level == level_id => {

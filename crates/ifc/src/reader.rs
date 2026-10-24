@@ -151,6 +151,8 @@ pub struct GridLine {
     pub name: String,
     pub start: [f64; 2],
     pub end: [f64; 2],
+    /// 0 for a straight axis; otherwise tan(sweep/4), positive counter-clockwise (DXF bulge)
+    pub bulge: f64,
 }
 
 /// The classes that become members.
@@ -251,6 +253,36 @@ struct R<'a> {
 }
 
 impl R<'_> {
+    /// An `IfcTrimmedCurve` over an `IfcCircle` as (start, end, bulge) in the circle's frame. Trims by point
+    /// parameter is not read. An arc over half a circle has no bulge in range: bulge is `None`.
+    fn arc(&self, curve: &Entity) -> Option<([f64; 2], [f64; 2], Option<f64>)> {
+        let f = self.f;
+        let circle = f.deref(curve.args.first()?).filter(|c| c.class == "IFCCIRCLE")?;
+        let radius = circle.args.get(1)?.as_f64().filter(|r| *r > 0.0 && r.is_finite())?;
+        let pos = f.deref(circle.args.first()?)?;
+        let centre = self.point(pos.args.first()?)?;
+        let (cx, cy) = (centre[0], centre[1]);
+        let angle_of = |trim: &Value| -> Option<f64> {
+            let items = trim.as_list();
+            for t in items {
+                if let Some(p) = self.point(t) {
+                    return Some((p[1] - cy).atan2(p[0] - cx));
+                }
+            }
+            // a trim by parameter needs the file's plane-angle unit, which is not read: left out
+            None
+        };
+        let (a1, a2) = (angle_of(curve.args.get(1)?)?, angle_of(curve.args.get(2)?)?);
+        let same = !matches!(curve.args.get(3), Some(Value::Enum(s)) if s == "F");
+        let tau = std::f64::consts::TAU;
+        let sweep = if same { (a2 - a1).rem_euclid(tau) } else { -((a1 - a2).rem_euclid(tau)) };
+        if sweep == 0.0 {
+            return None;
+        }
+        let at = |a: f64| [cx + radius * a.cos(), cy + radius * a.sin()];
+        let bulge = (sweep.abs() <= std::f64::consts::PI + 1e-9).then(|| (sweep / 4.0).tan());
+        Some((at(a1), at(a2), bulge))
+    }
     fn point(&self, v: &Value) -> Option<Vec<f64>> {
         let e = self.f.deref(v)?;
         if e.class != "IFCCARTESIANPOINT" {
@@ -955,12 +987,25 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                 let Some(axes) = e.args.get(list) else { continue };
                 for ax in axes.as_list() {
                     let Some(axis) = f.deref(ax).filter(|a| a.class == "IFCGRIDAXIS") else { continue };
-                    let Some(curve) = axis.args.get(1).and_then(|c| f.deref(c)).filter(|c| c.class == "IFCPOLYLINE") else { continue };
+                    let Some(curve) = axis.args.get(1).and_then(|c| f.deref(c)).filter(|c| matches!(c.class.as_str(), "IFCPOLYLINE" | "IFCTRIMMEDCURVE")) else { continue };
+                    let name = axis.args.first().and_then(Value::as_str).unwrap_or("").to_string();
+                    if curve.class == "IFCTRIMMEDCURVE" {
+                        if let Some((s, e, b)) = r.arc(curve) {
+                            let (s, e) = (place.apply([s[0], s[1], 0.0]), place.apply([e[0], e[1], 0.0]));
+                            if b.is_none() {
+                                out.diagnostics.push(format!("grid axis {name}: arc over half a circle kept as a straight line"));
+                            }
+                            out.grids.push(GridLine { name, start: [s[0], s[1]], end: [e[0], e[1]], bulge: b.unwrap_or(0.0) });
+                        } else {
+                            out.diagnostics.push(format!("grid axis {name}: curve not read (only circle arcs trimmed by points are)"));
+                        }
+                        continue;
+                    }
                     let pts: Vec<V3> = curve.args.first().map(|l| l.as_list()).unwrap_or(&[]).iter()
                         .filter_map(|p| r.point(p)).map(|c| place.apply([c[0], c[1], c.get(2).copied().unwrap_or(0.0)])).collect();
                     if let (Some(a), Some(b)) = (pts.first(), pts.last()) {
                         if (a[0] - b[0]).hypot(a[1] - b[1]) > 1e-9 {
-                            out.grids.push(GridLine { name: axis.args.first().and_then(Value::as_str).unwrap_or("").to_string(), start: [a[0], a[1]], end: [b[0], b[1]] });
+                            out.grids.push(GridLine { name, start: [a[0], a[1]], end: [b[0], b[1]], bulge: 0.0 });
                         }
                     }
                 }

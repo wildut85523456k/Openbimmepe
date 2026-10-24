@@ -293,6 +293,9 @@ pub struct GridItem {
     pub name: String,
     pub start: [f64; 2],
     pub end: [f64; 2],
+    /// 0 for a straight axis; otherwise tan(sweep/4), positive counter-clockwise, |bulge| <= 1. Written as an
+    /// `IfcTrimmedCurve` over an `IfcCircle`.
+    pub bulge: f64,
 }
 
 /// A room, written as an `IfcSpace` with its base quantities.
@@ -1626,6 +1629,24 @@ fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
     Ok(())
 }
 
+/// Centre and radius of a curved grid line, `None` for a straight one (or a bulge out of range).
+fn grid_circle(g: &GridItem) -> Option<([f64; 2], f64)> {
+    let b = g.bulge;
+    if !(b.is_finite() && b != 0.0 && b.abs() <= 1.0) {
+        return None;
+    }
+    let (dx, dy) = (g.end[0] - g.start[0], g.end[1] - g.start[1]);
+    let chord = dx.hypot(dy);
+    if chord <= 0.0 {
+        return None;
+    }
+    let sweep = 4.0 * b.atan();
+    let radius = chord / (2.0 * (sweep.abs() / 2.0).sin());
+    let off = (chord / 2.0) / (sweep / 2.0).tan();
+    let (nx, ny) = (-dy / chord, dx / chord);
+    Some(([(g.start[0] + g.end[0]) / 2.0 + nx * off, (g.start[1] + g.end[1]) / 2.0 + ny * off], radius))
+}
+
 /// Grid lines as one `IfcGrid`. Lines nearer the Y axis than the X axis are U axes, the others V axes; a grid with
 /// only one direction writes them all as U axes (an `IfcGrid` needs at least one). The grid is contained in the
 /// lowest storey, as a grid has no level of its own.
@@ -1637,7 +1658,17 @@ fn write_grids(o: &mut Out) {
     let (mut u, mut v): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
     for gr in &scene.grids {
         let (a, b) = (o.p2(gr.start[0], gr.start[1]), o.p2(gr.end[0], gr.end[1]));
-        let curve = o.s.add(format!("IFCPOLYLINE((#{a},#{b}))"));
+        let curve = match grid_circle(gr) {
+            Some((c, radius)) => {
+                let centre = o.p2(c[0], c[1]);
+                let place = o.s.add(format!("IFCAXIS2PLACEMENT2D(#{centre},$)"));
+                let rad = o.r(radius, "radius");
+                let circle = o.s.add(format!("IFCCIRCLE(#{place},{rad})"));
+                let sense = if gr.bulge > 0.0 { ".T." } else { ".F." };
+                o.s.add(format!("IFCTRIMMEDCURVE(#{circle},(#{a}),(#{b}),{sense},.CARTESIAN.)"))
+            }
+            None => o.s.add(format!("IFCPOLYLINE((#{a},#{b}))")),
+        };
         let axis = o.s.add(format!("IFCGRIDAXIS({},#{curve},.T.)", string(&gr.name)));
         o.report.grid_axes += 1;
         let (dx, dy) = ((gr.end[0] - gr.start[0]).abs(), (gr.end[1] - gr.start[1]).abs());
