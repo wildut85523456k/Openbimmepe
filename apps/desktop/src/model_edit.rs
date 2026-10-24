@@ -319,6 +319,7 @@ impl Desktop {
     pub(crate) fn load_family_window(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.load_family_dialog.take() else { return };
         let (mut open, mut go) = (true, false);
+        let mut edit_family: Option<String> = None;
         egui::Window::new("Load Family").open(&mut open).collapsible(false).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Catalogue");
@@ -329,8 +330,15 @@ impl Desktop {
             });
             ui.small("A tab-separated catalogue: a 'family' line naming a family in the library, then a 'type' line naming its inputs, then one line per type. Every row becomes a type of that family in this project.");
             ui.small("Nothing is created unless the whole file is accepted, so a refused file leaves the project as it was.");
+            ui.horizontal(|ui| {
+                ui.label("Family types");
+                egui::ComboBox::from_id_salt("load_family_types_of").selected_text("Edit the table of…").show_ui(ui, |ui| {
+                    for f in crate::export::library() { if ui.selectable_label(false, f.name()).clicked() { edit_family = Some(f.name().to_string()); } }
+                });
+            });
             go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Load")).clicked();
         });
+        if let Some(f) = edit_family { self.open_family_types(&f); }
         if go { self.read_family_catalogue(dialog.path.trim()); } else if open { self.load_family_dialog = Some(dialog); }
     }
 

@@ -314,9 +314,50 @@ pub fn window() -> Family {
     }
 }
 
+/// Pipe elbow, welded or press fit, with the same bore at both ends. Origin: the centre of the inlet face; the
+/// pipe enters along +X and turns to the left (towards +Y) by `angle`, 90 degrees or less, so one family gives the 90, 45 and 22.5 degree elbows of a range; the outlet connector is aimed along the end of the bend. The bend is a circle swept round a vertical
+/// axis at `bend_r` (a multiple of the outside diameter, 1.5 for a long-radius elbow). A type table gives the range:
+/// one row per nominal size.
+pub fn pipe_elbow() -> Family {
+    use crate::forms::{FormDef, ProfileDef};
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Pipe elbow".into(),
+        code: "FAM-0017".into(),
+        classification: vec![("Uniclass".into(), "Pr_65_52_63".into())],
+        values: vec![
+            V::input("pipe_d", 0.05, 0.01, 0.6, Type),
+            V::number("radius_factor", 1.5, 1.0, 5.0, Type),
+            V::angle("angle", 90.0, 10.0, 90.0, Type),
+            V::number("water_flow", 0.0005, 0.0, 0.5, Type),
+            V::material("body", "Pipe fitting", Type),
+            V::formula("bend_r", "radius_factor * pipe_d"),
+        ],
+        forms: vec![{
+            let mut f = FormDef::revolve("bend", crate::Axis::X, "0", true, "bend_r", "angle", ProfileDef::circle("0", "0", "pipe_d / 2"));
+            f.material = Some("body".into());
+            f
+        }],
+        checks: vec![chk("the bend is wider than the pipe", "bend_r > pipe_d / 2")],
+        connectors: vec![
+            ConnectorDef::new("in", Pipe, ChilledWaterSupply, In, ("0", "0", "0"), MinusX, ShapeDef::Round("pipe_d".into()))
+                .flow("water_flow"),
+            ConnectorDef::new("out", Pipe, ChilledWaterSupply, Out, ("bend_r * sin(angle)", "bend_r - bend_r * cos(angle)", "0"), PlusY, ShapeDef::Round("pipe_d".into()))
+                .aim("angle", "0")
+                .flow("water_flow"),
+        ],
+        category: Category::PipeFitting,
+        host: Some(Host::Free),
+        ..Default::default()
+    }
+}
+
 /// All sample families, uncompiled, in the order handle, door, window, arched door, fan coil unit, air handling
 /// unit, ceiling diffuser, VAV terminal unit, pump, valve, WC, washbasin, sprinkler head, luminaire, panel board,
-/// pipe/duct hanger. This is the one list: `all()` compiles it, and a loader that has to check a catalogue
+/// pipe/duct hanger, pipe elbow. This is the one list: `all()` compiles it, and a loader that has to check a catalogue
 /// against the library reads it. Every family carries a Uniclass code (see docs/revit-style-ui/09).
 pub fn families() -> Vec<Family> {
     vec![
@@ -336,6 +377,7 @@ pub fn families() -> Vec<Family> {
         luminaire(),
         panel_board(),
         hanger(),
+        pipe_elbow(),
     ]
 }
 

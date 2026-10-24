@@ -11,12 +11,15 @@ mod section_ui;
 mod view_tools;
 mod view_notes;
 mod model_edit;
+mod family_types_ui;
 mod type_editor;
 mod wall_shapes;
 mod modify_tools;
 mod export;
 #[cfg(test)]
 mod office;
+#[cfg(test)]
+mod data_hall;
 mod import;
 mod class_map;
 mod app_settings;
@@ -263,6 +266,7 @@ struct Desktop {
     export_dialog: Option<model_edit::ExportDialog>,
     import_dialog: Option<model_edit::ImportDialog>,
     load_family_dialog: Option<model_edit::LoadFamilyDialog>,
+    family_types_dialog: Option<family_types_ui::FamilyTypesDialog>,
     /// P2: the type of a family the selected instance takes, and the type-scoped parameters being edited on it.
     family_type_editing: Option<openbim_document::ElementId>,
     family_type_values: Vec<(String, f64)>,
@@ -360,7 +364,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: Default::default(), show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: Default::default(), show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(),
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -848,6 +852,7 @@ impl Desktop {
         self.export_window(&ctx);
         self.import_window(&ctx);
         self.load_family_window(&ctx);
+        self.family_types_window(&ctx);
         self.types_window(&ctx);
         self.mep_settings_window(&ctx);
         self.insulation_window(&ctx);

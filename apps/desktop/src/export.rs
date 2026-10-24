@@ -72,23 +72,29 @@ pub fn instance_texts_of(doc: &openbim_document::Document, el: &openbim_document
 /// that edits a type rather than one instance of it. Empty if the type's values do not solve (a value out of the
 /// family's range, say), which is also what every instance of that type would report.
 pub fn family_type_inputs(doc: &openbim_document::Document, type_id: openbim_document::ElementId, f: &openbim_family::Compiled) -> (Vec<(String, f64)>, Vec<TextInput>) {
+    family_type_inputs_of(f, &doc.family_type_values(type_id), &doc.family_type_texts(type_id)).unwrap_or_default()
+}
+
+/// The same for named values and texts that are not (yet) a type of the document: with none it gives the family's own
+/// defaults, which is the first row of a table for a family that has no type.
+pub fn family_type_inputs_of(f: &openbim_family::Compiled, values: &[(String, f64)], texts: &[(String, String)]) -> Option<TypeInputs> {
     // route each stored value by its scope: a catalogue may carry an instance-scoped column, and putting it in the
     // type layer makes the family refuse the request (and the editor show nothing)
     let mut parts = RequestParts::default();
-    for (n, v) in doc.family_type_values(type_id) {
-        if f.input_scope(&n) == Some(openbim_family::Scope::Type) { parts.type_values.push((n, v)); } else { parts.overrides.push((n, v)); }
+    for (n, v) in values {
+        if f.input_scope(n) == Some(openbim_family::Scope::Type) { parts.type_values.push((n.clone(), *v)); } else { parts.overrides.push((n.clone(), *v)); }
     }
-    for (n, v) in doc.family_type_texts(type_id) {
-        if f.input_scope(&n) == Some(openbim_family::Scope::Type) { parts.type_texts.push((n, v)); } else { parts.texts.push((n, v)); }
+    for (n, v) in texts {
+        if f.input_scope(n) == Some(openbim_family::Scope::Type) { parts.type_texts.push((n.clone(), v.clone())); } else { parts.texts.push((n.clone(), v.clone())); }
     }
-    let Ok(inst) = f.solve(&parts.request(None)) else { return (Vec::new(), Vec::new()) };
+    let inst = f.solve(&parts.request(None)).ok()?;
     let nums = f.input_values(&inst).into_iter()
         .filter(|(n, _)| *n != "wall_t" && f.input_scope(n) == Some(openbim_family::Scope::Type))
         .map(|(n, v)| (n.to_string(), v)).collect();
     let txts = f.input_texts(&inst).into_iter()
         .filter(|(n, _)| f.input_scope(n) == Some(openbim_family::Scope::Type))
         .map(|(n, v)| (n.to_string(), v.to_string(), f.choice_options(n).map(<[String]>::to_vec).unwrap_or_default())).collect();
-    (nums, txts)
+    Some((nums, txts))
 }
 
 /// The instance values of a family (its numbers and yes/no inputs of instance scope, `wall_t` left out because the
@@ -113,6 +119,8 @@ pub fn instance_values_with(family: &str, type_name: &str, overrides: &[(String,
 
 /// An instance-scope choice, text or material input: its name, current value and, for a choice, the options.
 pub type TextInput = (String, String, Vec<String>);
+/// The numbers and the texts of a type's inputs.
+pub type TypeInputs = (Vec<(String, f64)>, Vec<TextInput>);
 
 /// The choices, texts and materials of a family instance that its instance can set, as solved for `type_name`,
 /// `overrides` and `texts`.

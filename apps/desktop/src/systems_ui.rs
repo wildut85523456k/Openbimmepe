@@ -155,7 +155,7 @@ impl Desktop {
         self.generate_layout_for(name, None, 0);
     }
 
-    fn generate_layout_for(&mut self, name: &str, trunk_mm: Option<[f64; 2]>, keep: usize) {
+    pub(crate) fn generate_layout_for(&mut self, name: &str, trunk_mm: Option<[f64; 2]>, keep: usize) {
         let Some(def) = self.document.mep().systems.iter().find(|s| s.name == name).cloned() else { self.message = format!("Generate Layout: there is no system \"{name}\""); return };
         let level = self.systems.layout.as_ref().map_or_else(|| self.plan_level(), |l| l.level);
         let (conns, without) = self.system_connectors(&def);

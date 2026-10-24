@@ -389,6 +389,57 @@ impl Document {
         texts.len() <= 64 && texts.iter().all(|(n, v)| !n.trim().is_empty() && n.len() <= 64 && v.len() <= 256)
     }
 
+    /// Saves a whole table of types of one family in one transaction (one undo step): rows with an id change that
+    /// type (name and values), rows without one become new types, and `delete` removes types no element uses. Every
+    /// row is solved against the library family first and the names are checked, so a table with one bad row
+    /// (a diameter out of range, a name used twice, a type still in use) changes nothing and says which row.
+    pub fn save_family_types(&mut self, family: &str, rows: &[TypeRow], delete: &[ElementId]) -> Result<Vec<ElementId>, String> {
+        let Some(f) = openbim_family::library::all().ok().and_then(|l| l.into_iter().find(|f| f.name() == family)) else { return Err(format!("no family {family} in the library")) };
+        let mut names: Vec<&str> = Vec::new();
+        for (k, r) in rows.iter().enumerate() {
+            let n = r.name.trim();
+            if n.is_empty() { return Err(format!("row {}: the type needs a name", k + 1)); }
+            if names.contains(&n) { return Err(format!("row {}: the name {n} is used twice", k + 1)); }
+            names.push(n);
+            if !Self::family_values_ok(&r.values) || !Self::family_texts_ok(&r.texts) { return Err(format!("row {} ({n}): a value is not a number or a text is too long", k + 1)); }
+            let mut parts = RequestParts::default();
+            for (nm, v) in &r.values { if f.input_scope(nm) == Some(openbim_family::Scope::Type) { parts.type_values.push((nm.clone(), *v)); } else { parts.overrides.push((nm.clone(), *v)); } }
+            for (nm, v) in &r.texts { if f.input_scope(nm) == Some(openbim_family::Scope::Type) { parts.type_texts.push((nm.clone(), v.clone())); } else { parts.texts.push((nm.clone(), v.clone())); } }
+            if let Err(e) = f.solve(&parts.request(None)) { return Err(format!("row {} ({n}): the family refuses these values ({e:?})", k + 1)); }
+        }
+        for d in delete {
+            if self.get(*d).is_none_or(|t| t.category != Category::Type || t.family != family) { return Err(format!("element {} is not a type of {family}", d.0)); }
+            if !self.instances_of(*d).is_empty() { return Err(format!("{} is used by elements and cannot be deleted", self.get(*d).map_or("a type", |t| t.name.as_str()))); }
+        }
+        for t in self.types_for(Category::Family) {
+            let own = rows.iter().any(|r| r.id == Some(t.id)) || delete.contains(&t.id);
+            if !own && names.contains(&t.name.as_str()) { return Err(format!("the name {} is already a type of {}", t.name, t.family)); }
+        }
+        let mut next = self.next_id().0;
+        let (mut ops, mut ids) = (Vec::new(), Vec::new());
+        for r in rows {
+            let id = match r.id {
+                Some(id) => {
+                    let ty = self.get(id).filter(|t| t.category == Category::Type && t.family == family).ok_or_else(|| format!("element {} is not a type of {family}", id.0))?;
+                    if ty.name != r.name.trim() { ops.push(Command::Rename { id, name: r.name.trim().into() }); }
+                    id
+                }
+                None => {
+                    let id = ElementId(next); next += 1;
+                    ops.push(Command::Create { id, category: Category::Type, name: r.name.trim().into(), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 });
+                    ops.push(Command::SetTypeFor { id, category: Category::Family });
+                    id
+                }
+            };
+            ops.push(Command::SetFamilyType { id, family: family.into(), values: r.values.clone(), texts: r.texts.clone() });
+            ids.push(id);
+        }
+        for d in delete { ops.push(Command::Delete { id: *d }); }
+        if ops.is_empty() { return Ok(ids); }
+        self.transact(self.revision, &ops).map_err(|e| format!("{e:?}"))?;
+        Ok(ids)
+    }
+
     /// Deletes a type that no element uses.
     pub fn delete_type(&mut self, type_id: ElementId) -> Result<(), EditError> {
         if self.get(type_id).is_none_or(|t| t.category != Category::Type) { return Err(EditError::NotFound(type_id)); }
@@ -780,6 +831,15 @@ mod tests {
 /// of type scope in `type_values` (the family refuses it otherwise), so the two layers cannot simply be merged: this
 /// is the one place that knows which is which. Every consumer of a family instance — the geometry, the ports, the
 /// schedules, the properties panel, the exports — builds its request here.
+/// One row of a family's type table: the type it is (none for a new one), its name and its values.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeRow {
+    pub id: Option<ElementId>,
+    pub name: String,
+    pub values: Vec<(String, f64)>,
+    pub texts: Vec<(String, String)>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RequestParts {
     pub overrides: Vec<(String, f64)>,

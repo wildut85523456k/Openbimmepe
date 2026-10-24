@@ -803,6 +803,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                                     });
                                     ui.small("A type is shared: this changes every instance of it. An instance's own value in Instance Parameters still wins.");
                                     if ui.button("Apply to the type").clicked() { app.apply_family_type(); }
+                                    if ui.button("Table of types…").on_hover_text("Every type of this family in one table").clicked() { let f = el.family.clone(); app.open_family_types(&f); }
                                 });
                             }
                         }

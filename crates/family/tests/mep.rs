@@ -363,6 +363,7 @@ fn library_families_carry_the_decided_uniclass_codes() {
         ("Luminaire, recessed", "Pr_70_70_48"),
         ("Distribution board, 12-way", "Pr_60_70_22"),
         ("Pipe hanger, clevis", "Pr_20_85_47"),
+        ("Pipe elbow", "Pr_65_52_63"),
     ];
     let lib = library::all().expect("library compiles");
     assert_eq!(lib.len(), decided.len(), "a library family has no decided code");
@@ -400,6 +401,7 @@ fn library_families_carry_their_own_unique_codes_apart_from_uniclass() {
         ("Luminaire, recessed", "FAM-0014"),
         ("Distribution board, 12-way", "FAM-0015"),
         ("Pipe hanger, clevis", "FAM-0016"),
+        ("Pipe elbow", "FAM-0017"),
     ];
     let lib = library::all().expect("library compiles");
     assert_eq!(lib.len(), decided.len(), "a library family has no decided code");
@@ -1624,4 +1626,22 @@ fn the_type_layer_sits_between_the_librarys_named_type_and_the_instances_own_val
     // and an unknown name is refused whatever layer it comes from
     assert!(matches!(c.solve(&Request { type_values: vec![("nope", 1.0)], ..Default::default() }), Err(FamilyError::UnknownValue(_))));
     assert!(matches!(c.solve(&Request { overrides: vec![("nope", 1.0)], ..Default::default() }), Err(FamilyError::UnknownValue(_))));
+}
+
+#[test]
+fn the_pipe_elbow_outlet_follows_its_angle_and_ends_where_the_bend_ends() {
+    let c = library::pipe_elbow().compile().unwrap();
+    for angle in [90.0_f64, 45.0, 22.5] {
+        let i = c.solve(&Request { type_values: vec![("angle", angle)], ..Default::default() }).unwrap();
+        let (inlet, out) = (conn(&i, "in"), conn(&i, "out"));
+        let r = 1.5 * 0.05;
+        let a = angle.to_radians();
+        assert!(close3(inlet.pos, [0.0, 0.0, 0.0]) && inlet.dir == [-1.0, 0.0, 0.0]);
+        assert!(close3(out.pos, [r * a.sin(), r - r * a.cos(), 0.0]), "{angle}: {:?}", out.pos);
+        assert!(close3(out.dir, [a.cos(), a.sin(), 0.0]), "{angle}: {:?}", out.dir);
+        // the solid is the bend of that angle: Pappus, angle x centre-line radius x section area
+        let v = i.forms[0].volume();
+        let want = a * r * std::f64::consts::PI * 0.025 * 0.025;
+        assert!((v - want).abs() < want * 1e-6, "{angle}: {v} vs {want}");
+    }
 }
