@@ -437,6 +437,18 @@ pub fn plan(doc: &Document, imp: &Imported) -> (Vec<Command>, ImportReport) {
         let name = match p.category { Category::Wall => "walls", Category::Beam => "beams", Category::Column => "columns", Category::Slab => "slabs", Category::Footing => "pad footings", Category::WallFooting => "strip footings", Category::Pipe => "pipes", _ => "ducts" };
         *report.added.entry(name).or_default() += 1;
     }
+    // grid lines: those the model has already (same name and ends) are not made twice
+    let known: Vec<(String, [f64; 2], [f64; 2])> = doc.elements().filter_map(|e| match e.geometry { Some(Geometry::Grid { start, end }) if e.category == Category::Grid => Some((e.name.clone(), start, end)), _ => None }).collect();
+    for g in &imp.grids {
+        let (a, b) = ([r6(g.start[0]), r6(g.start[1])], [r6(g.end[0]), r6(g.end[1])]);
+        if known.iter().any(|k| k.0 == g.name && close2(k.1, a) && close2(k.2, b)) { continue; }
+        let id = take(None, &mut used);
+        ops.extend([
+            Command::Create { id, category: Category::Grid, name: if g.name.trim().is_empty() { "Grid".into() } else { g.name.clone() }, width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
+            Command::SetGeometry { id, geometry: Geometry::Grid { start: a, end: b } },
+        ]);
+        *report.added.entry("grid lines").or_default() += 1;
+    }
     let carriers: Vec<&Member> = imp.members.iter().filter(|m| m.class == "IFCBUILDINGELEMENTPROXY").chain(imp.unmapped.iter()).collect();
     plan_carriers(doc, &ops, &carriers, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_fillers(doc, &ops, &fillers, &mut take, &mut used, &mut ops_rooms, &mut report);
@@ -1091,7 +1103,6 @@ mod tests {
             let mut skipped = BTreeMap::from([
                 // the grid and the sample's truss and beam system leave as assemblies; the native records restore them
                 ("IFCELEMENTASSEMBLY", 2),
-                ("IFCGRID", 1),
                 ("IFCOPENINGELEMENT", 5 + crate::export::service_openings(&out.text)),
                 ("IFCRAILING", 3),
             ]);
@@ -1331,6 +1342,22 @@ mod tests {
         assert_eq!(mine.app_record("cost-codes"), Some("U|kind=cost-codes|scheme=Uniclass"));
         assert_eq!(mine.app_record("phasing"), Some("U|kind=phasing|n=3"));
         assert_eq!(report.adopted, vec!["phasing".to_string()], "{}", report.text());
+    }
+
+    #[test]
+    fn the_grid_lines_of_a_file_from_another_program_come_back_by_name_and_are_not_doubled() {
+        let d = Document::spatial_sample();
+        let lines = |d: &Document| { let mut v: Vec<(String, [f64; 2], [f64; 2])> = d.elements().filter_map(|e| match e.geometry { Some(Geometry::Grid { start, end }) => Some((e.name.clone(), start, end)), _ => None }).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v };
+        let want = lines(&d);
+        assert_eq!(want.len(), 6);
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        let mut back = Document::new();
+        let report = import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(lines(&back), want, "{}", report.text());
+        assert_eq!(report.added.get("grid lines"), Some(&6));
+        assert!(!report.skipped.keys().any(|k| k.contains("IFCGRID")), "{:?}", report.skipped);
+        import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(lines(&back).len(), 6);
     }
 
     #[test]
