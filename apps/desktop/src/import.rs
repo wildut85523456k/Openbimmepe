@@ -585,6 +585,13 @@ fn plan_equipment(doc: &Document, ops: &[Command], items: &[(&Member, &FamilyPic
             continue;
         }
         let Some(o) = m.origin else { continue };
+        // the same family in the same place (a file that carries no element numbers is read again)
+        let twin = scratch.elements().any(|e| e.category == Category::Family && e.family == pick.family && matches!(e.geometry, Some(Geometry::Placed { at, level }) if (at[0] - o[0]).abs() < 0.01 && (at[1] - o[1]).abs() < 0.01 && scratch.get(level).is_some_and(|l| (l.elevation_m + e.elevation_m - o[2]).abs() < 0.005)));
+        if twin {
+            claim(report, m);
+            *report.skipped.entry("elements already in the model (same family at the same place)".to_string()).or_default() += 1;
+            continue;
+        }
         let angle = m.x_axis.map_or(0.0, |x| x[1].atan2(x[0]).to_degrees());
         let angle = if angle.abs() < 1e-9 { 0.0 } else { (angle * 1e6).round() / 1e6 };
         let (lid, lz) = level_for(m, o[2]);
@@ -998,7 +1005,8 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
     // members that are new, or that were changed elsewhere, are read from their geometry
     let rest = Imported {
         members: imp.members.iter().filter(|m| number_of(m).is_none_or(|n| changed.contains(&n) || !native_numbers.contains(&n))).cloned().collect(),
-        equipment: imp.equipment.iter().filter(|m| number_of(m).is_none_or(|n| !native_numbers.contains(&n))).cloned().collect(),
+        // the records hold every family instance exactly; what the file shows of them is not news
+        equipment: Vec::new(),
         skipped: BTreeMap::new(), native: Vec::new(), unmapped: Vec::new(), ..imp.clone()
     };
     let (ops2, mut report) = plan(&scratch, &rest);
