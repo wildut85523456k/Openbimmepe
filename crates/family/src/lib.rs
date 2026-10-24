@@ -443,6 +443,9 @@ impl Xf {
 #[derive(Debug, Clone, Default)]
 pub struct Family {
     pub name: String,
+    /// the family's own code: unique in a library, stable when the family is renamed, and nothing to do with any
+    /// classification (two families of one Uniclass group have two codes). Empty for a family that has none yet.
+    pub code: String,
     pub values: Vec<ValueDef>,
     pub solids: Vec<SolidDef>,
     pub nested: Vec<NestedDef>,
@@ -730,6 +733,7 @@ pub struct Inner {
     depth: usize,
     category: Category,
     host: Host,
+    code: String,
     classification: Vec<(String, String)>,
     lighting: Option<light::LightingDef>,
     connectors: Vec<mep::CConnector>,
@@ -1448,6 +1452,9 @@ fn compile_one(
             "a family that cuts an opening must be hosted by a wall",
         ));
     }
+    if !fam.code.is_empty() && (fam.code.len() > 32 || !fam.code.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))) {
+        return Err(FamilyError::BadMeta("a family code is at most 32 letters, digits, '.', '_' or '-'"));
+    }
     if fam.classification.len() > mep::MAX_CLASSIFICATIONS {
         return Err(FamilyError::TooMany("classification entries"));
     }
@@ -1501,6 +1508,7 @@ fn compile_one(
         depth,
         category: fam.category,
         host,
+        code: fam.code.clone(),
         classification: fam.classification.clone(),
         lighting: fam.lighting.clone(),
         connectors,
@@ -1611,6 +1619,10 @@ impl Inner {
     }
     pub fn classification(&self) -> &[(String, String)] {
         &self.classification
+    }
+    /// the family's own code, empty when it has none
+    pub fn code(&self) -> &str {
+        &self.code
     }
     /// lighting data of a luminaire family
     pub fn lighting(&self) -> Option<&light::LightingDef> {

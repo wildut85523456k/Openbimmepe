@@ -200,7 +200,7 @@ const NOT_OBJECTS: [&str; 8] = [
 ];
 
 /// Entities that are not products of the building, or are read in another way.
-const NOT_PRODUCTS: [&str; 4] = ["IFCBUILDINGSTOREY", "IFCBUILDING", "IFCSITE", "IFCPROJECT"];
+const NOT_PRODUCTS: [&str; 6] = ["IFCBUILDINGSTOREY", "IFCBUILDING", "IFCSITE", "IFCPROJECT", "IFCCLASSIFICATION", "IFCCLASSIFICATIONREFERENCE"];
 
 type V3 = [f64; 3];
 

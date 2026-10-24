@@ -378,6 +378,57 @@ fn library_families_carry_the_decided_uniclass_codes() {
     }
 }
 
+/// A family's own code is its identity: unique, kept when the family is renamed, and independent of the Uniclass
+/// group it belongs to. This table is decided once; a code is never reused or changed. A new family takes the next
+/// number and its row is added here.
+#[test]
+fn library_families_carry_their_own_unique_codes_apart_from_uniclass() {
+    let decided: &[(&str, &str)] = &[
+        ("Lever handle", "FAM-0001"),
+        ("Door, single flush", "FAM-0002"),
+        ("Window, fixed with mullions", "FAM-0003"),
+        ("Door, arched", "FAM-0004"),
+        ("Fan coil unit, ducted", "FAM-0005"),
+        ("Air handling unit", "FAM-0006"),
+        ("Ceiling diffuser, square", "FAM-0007"),
+        ("VAV terminal unit, single duct", "FAM-0008"),
+        ("Pump, end suction", "FAM-0009"),
+        ("Valve, globe", "FAM-0010"),
+        ("WC, close coupled", "FAM-0011"),
+        ("Washbasin, wall hung", "FAM-0012"),
+        ("Sprinkler head, pendent", "FAM-0013"),
+        ("Luminaire, recessed", "FAM-0014"),
+        ("Distribution board, 12-way", "FAM-0015"),
+        ("Pipe hanger, clevis", "FAM-0016"),
+    ];
+    let lib = library::all().expect("library compiles");
+    assert_eq!(lib.len(), decided.len(), "a library family has no decided code");
+    for (fam, (name, code)) in lib.iter().zip(decided) {
+        assert_eq!((fam.name(), fam.code()), (*name, *code));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    assert!(lib.iter().all(|f| seen.insert(f.code().to_string())), "a family code is used twice");
+    // the two doors are one Uniclass group and two families
+    let uniclass = |n: &str| lib.iter().find(|f| f.name() == n).unwrap().classification().iter().find(|(s, _)| s == "Uniclass").map(|(_, c)| c.clone());
+    assert_eq!(uniclass("Door, single flush"), uniclass("Door, arched"));
+    assert_ne!(lib.iter().find(|f| f.name() == "Door, single flush").unwrap().code(), lib.iter().find(|f| f.name() == "Door, arched").unwrap().code());
+}
+
+#[test]
+fn a_family_code_that_is_not_a_plain_token_is_refused() {
+    use openbim_family::Family;
+    let mut f = library::families().remove(0);
+    for bad in ["has space", "FAM/1", "é", &"X".repeat(33)] {
+        f.code = bad.to_string();
+        assert!(f.compile().is_err(), "{bad:?}");
+    }
+    for ok in ["", "FAM-0001", "mepe.fan_coil-2"] {
+        f.code = ok.to_string();
+        assert!(f.compile().is_ok(), "{ok:?}");
+    }
+    let _: Option<Family> = None;
+}
+
 fn with_conn(c: ConnectorDef) -> Family {
     let mut f = fan_coil();
     f.connectors = vec![c];

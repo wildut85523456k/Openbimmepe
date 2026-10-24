@@ -511,3 +511,35 @@ fn beams_and_columns_take_round_and_i_sections() {
     s.columns = vec![col, h];
     assert_eq!(export(&s).unwrap().text.matches("IFCCOLUMN(").count(), 2);
 }
+
+/// A family is written with its own code, and its Uniclass code as a native IfcClassificationReference of one shared
+/// IfcClassification: the group is then something a reader can select on to attach common specifications.
+#[test]
+fn a_family_type_carries_its_code_and_a_native_classification() {
+    use openbim_family::{library, Request};
+    let fams = library::all().unwrap();
+    let doors: Vec<usize> = fams.iter().enumerate().filter(|(_, f)| f.name().starts_with("Door")).map(|(i, _)| i).collect();
+    assert_eq!(doors.len(), 2);
+    let mut s = scene(vec![wall(5)]);
+    s.families = fams.iter().enumerate().map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() }).collect();
+    s.items = doors.iter().enumerate().map(|(n, &k)| FamilyItem {
+        id: 10 + n as u64,
+        name: format!("D{n}"),
+        family: k,
+        type_name: None,
+        frame: Frame { origin: [n as f64 * 2.0, 0.0, 0.0], x: [1.0, 0.0] },
+        instance: fams[k].solve(&Request::default()).unwrap(),
+        host: None,
+    }).collect();
+    for x43 in [false, true] {
+        let out = if x43 { openbim_ifc::export_ifc4x3(&s).unwrap() } else { export(&s).unwrap() };
+        for k in &doors {
+            assert!(out.text.contains(&format!("'{}'", fams[*k].code())), "type pset carries the code");
+        }
+        assert_eq!(out.text.matches("IFCCLASSIFICATION(").count(), 1, "one classification for the system");
+        assert_eq!(out.text.matches("IFCCLASSIFICATIONREFERENCE(").count(), 1, "the two doors share one Uniclass group");
+        assert_eq!(out.text.matches("IFCRELASSOCIATESCLASSIFICATION(").count(), 2, "each type is associated with it");
+        assert!(out.text.contains("'NBS'") && out.text.contains("'Uniclass 2015'") && out.text.contains("'Pr_30_59_24'"));
+        assert!(!out.text.to_lowercase().contains("doors, shutters"), "no licensed code title is stored");
+    }
+}

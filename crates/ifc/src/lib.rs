@@ -700,6 +700,9 @@ struct Out<'a> {
     item_entities: Vec<u32>,
     /// writing IFC2X3 (for DIALux and other readers that stop at 2x3) instead of IFC4
     v2: bool,
+    /// (IFC4 and IFC4X3 only: IFC2X3 export writes no family types.) The IfcClassification of each system written, and the IfcClassificationReference of each (system, code)
+    class_sys: BTreeMap<String, u32>,
+    class_ref: BTreeMap<(String, String), u32>,
 }
 
 impl<'a> Out<'a> {
@@ -721,6 +724,36 @@ impl<'a> Out<'a> {
         string(&guid::global_id(self.key, part, element))
     }
     /// ids for things that are not model elements (the site, relationships, property sets)
+    /// Associate `owner` (a type or element entity) with a classification reference, writing the classification and
+    /// the reference once each. Only the code and the edition are written, never the title of the code (the Uniclass
+    /// tables are licensed; see docs/revit-style-ui/09-classification-standards.md).
+    fn classify(&mut self, owner: u32, system: &str, code: &str) {
+        let (source, name, edition) = match system {
+            "Uniclass" => ("NBS", "Uniclass 2015", "2015"),
+            other => ("", other, ""),
+        };
+        let opt = |v: &str| if v.is_empty() { "$".to_string() } else { string(v) };
+        let sys = match self.class_sys.get(system) {
+            Some(&e) => e,
+            None => {
+                let e = self.s.add(format!("IFCCLASSIFICATION({},{},$,{},$,$,$)", opt(source), opt(edition), string(name)));
+                self.class_sys.insert(system.to_string(), e);
+                e
+            }
+        };
+        let key = (system.to_string(), code.to_string());
+        let r = match self.class_ref.get(&key) {
+            Some(&e) => e,
+            None => {
+                let e = self.s.add(format!("IFCCLASSIFICATIONREFERENCE($,{},$,#{sys},$,$)", string(code)));
+                self.class_ref.insert(key, e);
+                e
+            }
+        };
+        let g = self.gen_gid();
+        self.s.add(format!("IFCRELASSOCIATESCLASSIFICATION({g},$,$,$,(#{owner}),#{r})"));
+    }
+
     fn gen_gid(&mut self) -> String {
         self.aux += 1;
         step::AUX_GID.to_string()
@@ -939,7 +972,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     if scene.levels.all().is_empty() {
         return Err(ExportError::NoLevels);
     }
-    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), member_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2 };
+    let mut o = Out { s: Step::default(), key: scene.project_key, scene, bad: None, aux: 0, used: Default::default(), dup: None, body_ctx: 0, storeys: Vec::new(), contained: BTreeMap::new(), report: Report::default(), opening_ids: Vec::new(), item_ports: BTreeMap::new(), wall_entities: Vec::new(), slab_entities: Vec::new(), column_entities: Vec::new(), member_entities: Vec::new(), virtual_entities: BTreeMap::new(), item_entities: Vec::new(), v2, class_sys: BTreeMap::new(), class_ref: BTreeMap::new() };
     // context and units
     let wcs = o.axis([0.0; 3], None, None);
     if let Some(gr) = &scene.georef {

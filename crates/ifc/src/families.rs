@@ -233,6 +233,9 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 };
                 let mut psets = Vec::new();
                 let mut props = vec![("Family", Val::Label(fam.name().to_string())), ("Category", Val::Label(fam.category().ifc_class().to_string()))];
+                if !fam.code().is_empty() {
+                    props.push(("Code", Val::Label(fam.code().to_string())));
+                }
                 props.extend(props_of(fam, &it.instance, openbim_family::Scope::Type));
                 for (sys, code) in fam.classification() {
                     props.push(("Classification", Val::Label(format!("{sys}: {code}"))));
@@ -288,6 +291,9 @@ pub(crate) fn write_families(o: &mut Out) -> Result<(), ExportError> {
                 let maps = map.map_or("$".to_string(), |m| format!("(#{m})"));
                 let te = o.s.add(format!("{cls}({g},$,{},$,$,({}),{maps},{})", string(&tname), psets.join(","), type_tail(fam.category())));
                 o.report.types += 1;
+                for (sys, code) in fam.classification() {
+                    o.classify(te, sys, code);
+                }
                 groups.push(Group { family: it.family, type_name: it.type_name.clone(), reference: k, map, type_entity: te, occurrences: Vec::new() });
                 groups.len() - 1
             }

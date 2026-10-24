@@ -165,11 +165,23 @@ validated at compile (max 8, no duplicate system, 64-char limit, `lib.rs:1451-14
 via `Compiled::classification()` (`lib.rs:1612`), and exported to IFC as a
 `Pset_OpenBIM_Family.Classification` label (`crates/ifc/src/families.rs:237-238`).
 
-**Improvement (not yet done):** IFC has a native `IfcClassification` +
-`IfcClassificationReference` (source, edition, editionDate, name). Today the code writes
-classification as a property-set label, which a viewer shows as text but does not treat as a
-classification. Emitting `IfcClassificationReference` would make Uniclass codes appear as
-classifications natively in Solibri / Navis / other viewers — an `openbim-ifc` change.
+**Family code and native classification (done).** A family has its own unique, stable code
+(`Family.code`, library `FAM-0001`..`FAM-0016`, at most 32 letters, digits, `.`, `_`, `-`), independent
+of its name and of its Uniclass code: two families of one Uniclass group (the two doors, `Pr_30_59_24`)
+have two codes. The Uniclass code is an attribute saying which group a family belongs to, so that
+common specifications can later be attached to the whole group. The IFC export (IFC4 and IFC4X3; the
+IFC2X3 export writes no family types) writes, per family type:
+
+- the code as `OpenBIM_Family.Code`;
+- one `IfcClassification` per system (`Uniclass`: source NBS, name "Uniclass 2015", edition 2015);
+- one `IfcClassificationReference` per (system, code), shared by all types of the group;
+- one `IfcRelAssociatesClassification` per type.
+
+Only code and edition are written, never the title of a code (licence, section 5). The importer finds a
+family by `OpenBIM_Family.Code` first and by name second, so a family renamed since the file was written
+is still found; a class map row `family:<name or code>` accepts either.
+
+**Not yet done:** attaching specifications to a Uniclass group and applying them to its families.
 
 ## 7. Sources
 

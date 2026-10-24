@@ -553,11 +553,22 @@ struct FamilyPick { family: String, type_name: String, overrides: Vec<(String, f
 /// instance values come from `OpenBIM_Instance` where they are inputs of the family; the type is the file's type when the
 /// family has one of that name.
 fn pick_family(m: &Member, imp: &Imported, map: &ClassMap, library: &[openbim_family::Compiled]) -> Option<FamilyPick> {
-    let (name, by_map) = match map.family(&m.class, &m.predefined) {
+    let tset = m.type_obj.and_then(|t| imp.types.get(t)).and_then(|t| t.psets.get("OpenBIM_Family"));
+    // a family is found by its own code first (it survives a rename), then by its name; the class map may give either
+    let (key, by_map) = match map.family(&m.class, &m.predefined) {
         Some(n) => (n.to_string(), true),
-        None => (m.type_obj.and_then(|t| imp.types.get(t)).and_then(|t| t.psets.get("OpenBIM_Family")).and_then(|p| p.get("Family")).and_then(|p| p.text())?.to_string(), false),
+        None => (tset.and_then(|p| p.get("Code").and_then(|c| c.text()).filter(|c| !c.is_empty()).or_else(|| p.get("Family").and_then(|f| f.text())))?.to_string(), false),
     };
-    let fam = library.iter().find(|f| f.name() == name)?;
+    let by_code = |k: &str| library.iter().find(|f| !f.code().is_empty() && f.code() == k);
+    let fam = if by_map {
+        by_code(&key).or_else(|| library.iter().find(|f| f.name() == key))?
+    } else {
+        match tset.and_then(|p| p.get("Code")).and_then(|c| c.text()).and_then(by_code) {
+            Some(f) => f,
+            None => library.iter().find(|f| Some(f.name()) == tset.and_then(|p| p.get("Family")).and_then(|f| f.text()))?,
+        }
+    };
+    let name = fam.name().to_string();
     if matches!(fam.category(), openbim_family::Category::Door | openbim_family::Category::Window) { return None; }
     if !by_map && !fam.category().ifc_class().eq_ignore_ascii_case(&m.class) { return None; }
     let type_name = m.type_obj.and_then(|t| imp.types.get(t)).map(|t| t.name.as_str()).filter(|n| fam.type_names().contains(n)).unwrap_or("").to_string();
@@ -1658,6 +1669,28 @@ mod tests {
                 assert!(back.elements().all(|e| e.category != Category::Generic), "not also kept as a generic model");
             }
         }
+    }
+
+    #[test]
+    fn a_family_is_found_by_its_code_when_its_name_in_the_file_is_out_of_date() {
+        use openbim_document::FamilySpec;
+        let mut d = Document::spatial_sample();
+        d.place_family(ElementId(10), [2.0, 4.5], &FamilySpec { family: "Air handling unit".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 0.0 }).unwrap();
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        let code = openbim_family::library::all().unwrap().iter().find(|f| f.name() == "Air handling unit").unwrap().code().to_string();
+        assert!(out.text.contains(&format!("'{code}'")));
+        // the file was written when the family had another name: only its code still says which family it is
+        let stale = out.text.replace("'Air handling unit'", "'AHU (old name)'");
+        assert_ne!(stale, out.text);
+        let mut back = Document::new();
+        import_ifc(&mut back, &stale).unwrap();
+        let got = family_instances(&back);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "Air handling unit");
+        // a class map row may name the family by its code too
+        let mut d2 = Document::new();
+        import_ifc_with(&mut d2, &pump_file(), &ClassMap::parse(&format!("IFCPUMP\tfamily:{code}\n")).unwrap()).unwrap();
+        assert_eq!(family_instances(&d2)[0].0, "Air handling unit");
     }
 
     #[test]

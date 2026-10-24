@@ -27,6 +27,7 @@ fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
 pub fn handle() -> Family {
     Family {
         name: "Lever handle".into(),
+        code: "FAM-0001".into(),
         classification: vec![("Uniclass".into(), "Pr_30_36_59".into())],
         values: vec![
             V::input("leaf_t", 0.04, 0.02, 0.1, Type),
@@ -97,6 +98,7 @@ pub fn handle() -> Family {
 pub fn door() -> Family {
     Family {
         name: "Door, single flush".into(),
+        code: "FAM-0002".into(),
         classification: vec![("Uniclass".into(), "Pr_30_59_24".into())],
         values: vec![
             V::input("width", 0.9, 0.5, 3.0, Type),
@@ -166,6 +168,7 @@ pub fn door() -> Family {
 pub fn arched_door() -> Family {
     Family {
         name: "Door, arched".into(),
+        code: "FAM-0004".into(),
         classification: vec![("Uniclass".into(), "Pr_30_59_24".into())],
         values: vec![
             V::input("width", 1.0, 0.5, 3.0, Type),
@@ -242,6 +245,7 @@ pub fn window() -> Family {
     };
     Family {
         name: "Window, fixed with mullions".into(),
+        code: "FAM-0003".into(),
         classification: vec![("Uniclass".into(), "Pr_30_59_98".into())],
         values: vec![
             V::input("width", 1.2, 0.3, 4.0, Type),
@@ -350,6 +354,7 @@ pub fn fan_coil() -> Family {
     use System::*;
     Family {
         name: "Fan coil unit, ducted".into(),
+        code: "FAM-0005".into(),
         classification: vec![("Uniclass".into(), "Pr_70_65_04_88".into())],
         values: vec![
             V::input("length", 1.0, 0.4, 3.0, Instance),
@@ -485,6 +490,7 @@ pub fn ahu() -> Family {
     use System::*;
     Family {
         name: "Air handling unit".into(),
+        code: "FAM-0006".into(),
         classification: vec![("Uniclass".into(), "Pr_60_65_03".into())],
         values: vec![
             V::input("length", 2.5, 1.0, 6.0, Instance),
@@ -640,6 +646,7 @@ pub fn ceiling_diffuser() -> Family {
     use System::*;
     Family {
         name: "Ceiling diffuser, square".into(),
+        code: "FAM-0007".into(),
         classification: vec![("Uniclass".into(), "Pr_70_65_04_02".into())],
         values: vec![
             V::input("face", 0.6, 0.15, 1.2, Instance),
@@ -702,6 +709,7 @@ pub fn vav() -> Family {
     use System::*;
     Family {
         name: "VAV terminal unit, single duct".into(),
+        code: "FAM-0008".into(),
         classification: vec![("Uniclass".into(), "Pr_70_65_04_94".into())],
         values: vec![
             V::input("length", 0.9, 0.4, 2.5, Instance),
@@ -772,6 +780,7 @@ pub fn pump() -> Family {
     use System::*;
     Family {
         name: "Pump, end suction".into(),
+        code: "FAM-0009".into(),
         classification: vec![("Uniclass".into(), "Pr_65_53".into())],
         values: vec![
             V::input("length", 0.9, 0.4, 3.0, Instance),
@@ -863,6 +872,7 @@ pub fn valve() -> Family {
     use System::*;
     Family {
         name: "Valve, globe".into(),
+        code: "FAM-0010".into(),
         classification: vec![("Uniclass".into(), "Pr_65_54".into())],
         values: vec![
             V::input("body_l", 0.2, 0.08, 0.6, Instance),
@@ -911,6 +921,7 @@ pub fn wc() -> Family {
     use System::*;
     Family {
         name: "WC, close coupled".into(),
+        code: "FAM-0011".into(),
         classification: vec![("Uniclass".into(), "Pr_40_20_93".into())],
         values: vec![
             V::input("length", 0.7, 0.5, 1.0, Instance),
@@ -961,6 +972,7 @@ pub fn washbasin() -> Family {
     use System::*;
     Family {
         name: "Washbasin, wall hung".into(),
+        code: "FAM-0012".into(),
         classification: vec![("Uniclass".into(), "Pr_40_20_96".into())],
         values: vec![
             V::input("length", 0.6, 0.4, 1.0, Instance),
@@ -1011,6 +1023,7 @@ pub fn sprinkler_head() -> Family {
     use System::*;
     Family {
         name: "Sprinkler head, pendent".into(),
+        code: "FAM-0013".into(),
         classification: vec![("Uniclass".into(), "Pr_70_55_84".into())],
         values: vec![
             V::input("frame_h", 0.06, 0.02, 0.15, Instance),
@@ -1060,6 +1073,7 @@ pub fn luminaire() -> Family {
     use System::*;
     Family {
         name: "Luminaire, recessed".into(),
+        code: "FAM-0014".into(),
         classification: vec![("Uniclass".into(), "Pr_70_70_48".into())],
         values: vec![
             V::input("length", 0.6, 0.3, 2.4, Instance),
@@ -1122,6 +1136,7 @@ pub fn panel_board() -> Family {
     use System::*;
     Family {
         name: "Distribution board, 12-way".into(),
+        code: "FAM-0015".into(),
         classification: vec![("Uniclass".into(), "Pr_60_70_22".into())],
         values: vec![
             V::input("height", 0.8, 0.4, 2.0, Instance),
@@ -1185,6 +1200,7 @@ pub fn panel_board() -> Family {
 pub fn hanger() -> Family {
     Family {
         name: "Pipe hanger, clevis".into(),
+        code: "FAM-0016".into(),
         classification: vec![("Uniclass".into(), "Pr_20_85_47".into())],
         values: vec![
             V::input("rod_h", 0.5, 0.1, 3.0, Instance),
