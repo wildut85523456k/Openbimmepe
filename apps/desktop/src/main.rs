@@ -18,6 +18,7 @@ mod export;
 #[cfg(test)]
 mod office;
 mod import;
+mod class_map;
 mod app_settings;
 mod georef_ui;
 mod journal;

@@ -6,7 +6,7 @@ use openbim_document::{Xf, FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSyste
 pub(crate) struct ExportDialog { pub path: String, pub schema: crate::export::Schema, pub own_data: bool }
 
 /// The state of the import window.
-pub(crate) struct ImportDialog { pub path: String }
+pub(crate) struct ImportDialog { pub path: String, pub map_path: String }
 
 /// The state of the Load Family window: the catalogue file typed or picked.
 #[derive(Default)]
@@ -274,7 +274,7 @@ impl Desktop {
 
     /// Opens the import window.
     pub(crate) fn import_ifc_file(&mut self) {
-        self.import_dialog = Some(ImportDialog { path: String::new() });
+        self.import_dialog = Some(ImportDialog { path: String::new(), map_path: String::new() });
     }
 
     /// The import window: a file, what it is, and the button.
@@ -289,11 +289,24 @@ impl Desktop {
                     if let Some(p) = rfd::FileDialog::new().set_title("Import IFC").add_filter("IFC (IFC2X3, IFC4, IFC 4.3)", &["ifc"]).pick_file() { dialog.path = p.display().to_string(); }
                 }
             });
+            ui.horizontal(|ui| {
+                ui.label("Class map");
+                ui.text_edit_singleline(&mut dialog.map_path);
+                if ui.button("Browse...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("IFC class map").add_filter("Class map (tab separated)", &["txt", "tsv", "tab"]).pick_file() { dialog.map_path = p.display().to_string(); }
+                }
+                if ui.button("Save example...").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("Save an example class map").set_file_name("ifc-class-map.txt").save_file() {
+                        self.message = match std::fs::write(&p, crate::class_map::EXAMPLE) { Ok(()) => format!("Saved an example class map to {}", p.display()), Err(e) => format!("Could not save {}: {e}", p.display()) };
+                    }
+                }
+            });
+            ui.small("Optional. One row per line: IFC class, app category (Wall, Beam, Column, Slab, Footing, WallFooting, Pipe, Duct, Generic, Ignore), and the predefined type if the row is for one. A class with no row is read as usual.");
             if !dialog.path.trim().is_empty() { ui.small(crate::import::describe_file(dialog.path.trim())); }
             ui.small("Reads IFC2X3, IFC4 and IFC 4.3. A file written by this app with its own data comes back exactly; any other file is read from its geometry.");
             go = ui.add_enabled(!dialog.path.trim().is_empty(), egui::Button::new("Import")).clicked();
         });
-        if go { self.read_ifc(dialog.path.trim()); } else if open { self.import_dialog = Some(dialog); }
+        if go { self.read_ifc_with(dialog.path.trim(), dialog.map_path.trim()); } else if open { self.import_dialog = Some(dialog); }
     }
 
     /// Opens the Load Family window: a catalogue file, what it will do, and the button.
@@ -343,13 +356,23 @@ impl Desktop {
 
     /// Reads the file at `path` into the document, as one undoable step, and writes the import log next to it
     /// (`<file>.log`, as Revit writes `<file>.ifc.log`).
-    pub(crate) fn read_ifc(&mut self, path: &str) {
+    #[cfg(test)]
+    pub(crate) fn read_ifc(&mut self, path: &str) { self.read_ifc_with(path, ""); }
+
+    /// The same with the class map in the file `map_path` (none when it is empty). A map that does not read refuses the
+    /// import before anything is read, and the log says so.
+    pub(crate) fn read_ifc_with(&mut self, path: &str, map_path: &str) {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let when = crate::export::iso_time(secs);
-        let (message, log) = match std::fs::read(path) {
-            Err(e) => (format!("Could not read {path}: {e}"), None),
-            Ok(bytes) => { self.sync_app_records(); match crate::import::import_ifc(&mut self.document, &String::from_utf8_lossy(&bytes)) {
-                Ok(report) => {
+        let map = if map_path.is_empty() { Ok(crate::class_map::ClassMap::default()) } else {
+            std::fs::read_to_string(map_path).map_err(|e| format!("Could not read the class map {map_path}: {e}")).and_then(|t| crate::class_map::ClassMap::parse(&t).map_err(|e| format!("The class map {map_path} is refused, {e}")))
+        };
+        let (message, log) = match (std::fs::read(path), map) {
+            (_, Err(why)) => (format!("Import refused, nothing changed: {why}"), Some(format!("Import log for {path}\nRead on {when}\n\nImport refused, nothing changed: {why}\n"))),
+            (Err(e), _) => (format!("Could not read {path}: {e}"), None),
+            (Ok(bytes), Ok(map)) => { self.sync_app_records(); match crate::import::import_ifc_with(&mut self.document, &String::from_utf8_lossy(&bytes), &map) {
+                Ok(mut report) => {
+                    if !map.is_empty() { report.notes.push(format!("class map {map_path}: {} rows", map.len())); }
                     self.sync_duct_controls(); self.selected = None;
                     // the file's own settings (Compute inputs, georeferencing, any other kind) that the model had none of
                     if !report.adopted.is_empty() { self.compute.restore(self.document.app_records()); self.georef = crate::georef_ui::GeorefInput::from_records(self.document.app_records()); }
@@ -2257,6 +2280,39 @@ mod tests {
         app.document.delete_type(t).unwrap();
         ctx.run_ui(Default::default(), |ui| app.types_window(ui.ctx())).textures_delta.clear();
         assert_eq!(app.types_dialog.as_ref().unwrap().picked, None, "a type that is gone is let go");
+    }
+
+    #[test]
+    fn the_import_window_uses_a_class_map_and_refuses_one_that_does_not_read() {
+        let mut src = Desktop::sample();
+        src.document.place_generic(ElementId(10), "Pump 1", vec![[2.0, 1.0], [3.2, 1.0], [3.2, 1.8], [2.0, 1.8]], 0.1, 0.9, vec![("IfcClass".into(), "IFCPUMP".into())]).unwrap();
+        let text = crate::export::export_ifc_with(&src.document, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap().text.replace("IFCBUILDINGELEMENTPROXY(", "IFCPUMP(");
+        let dir = std::env::temp_dir().join(format!("obim-class-map-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (ifc, good, bad) = (dir.join("m.ifc"), dir.join("good.txt"), dir.join("bad.txt"));
+        std::fs::write(&ifc, text).unwrap();
+        std::fs::write(&good, "IFCPUMP\tIgnore\n").unwrap();
+        std::fs::write(&bad, "IFCPUMP\tTeapot\n").unwrap();
+        let (ifc, good, bad) = (ifc.to_str().unwrap(), good.to_str().unwrap(), bad.to_str().unwrap());
+        let generics = |a: &Desktop| a.document.elements().filter(|e| e.category == openbim_document::Category::Generic).count();
+        // a map that does not read: nothing is read, and the log says why
+        let mut app = Desktop::sample();
+        app.document = openbim_document::Document::new();
+        app.read_ifc_with(ifc, bad);
+        assert!(app.message.contains("refused") && app.message.contains("line 1"), "{}", app.message);
+        assert_eq!(app.document.elements().count(), 0);
+        assert!(std::fs::read_to_string(format!("{ifc}.log")).unwrap().contains("Import refused"));
+        // with the map: the pump is left out and the log says the map did it
+        app.read_ifc_with(ifc, good);
+        assert_eq!(generics(&app), 0, "{}", app.message);
+        let log = std::fs::read_to_string(format!("{ifc}.log")).unwrap();
+        assert!(log.contains("left out by the class map") && log.contains("class map"), "{log}");
+        // without it: kept as a generic model
+        let mut plain = Desktop::sample();
+        plain.document = openbim_document::Document::new();
+        plain.read_ifc_with(ifc, "");
+        assert_eq!(generics(&plain), 1, "{}", plain.message);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
