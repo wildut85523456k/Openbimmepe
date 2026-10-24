@@ -4,6 +4,7 @@
 use crate::{
     compile_library, ArrayDef, Axis::*, Category, CheckDef, Compiled, ConnectorDef, Dim, Dir,
     Domain, Family, FamilyError, FlowDir, Host, NestedDef, OpeningDef, PlanDef, Scope::*, ShapeDef,
+    light::{LightingDef, Mounting},
     SolidDef, System, TextSrc, TypeDef, ValueDef as V, NUMBER, U_VALUE,
 };
 
@@ -310,10 +311,28 @@ pub fn window() -> Family {
 }
 
 /// All sample families, uncompiled, in the order handle, door, window, arched door, fan coil unit, air handling
-/// unit, ceiling diffuser. This is the one list: `all()` compiles it, and a loader that has to check a catalogue
-/// against the library reads it.
+/// unit, ceiling diffuser, VAV terminal unit, pump, valve, WC, washbasin, sprinkler head, luminaire, panel board,
+/// pipe/duct hanger. This is the one list: `all()` compiles it, and a loader that has to check a catalogue
+/// against the library reads it. Every family carries a Uniclass code (see docs/revit-style-ui/09).
 pub fn families() -> Vec<Family> {
-    vec![handle(), door(), window(), arched_door(), fan_coil(), ahu(), ceiling_diffuser()]
+    vec![
+        handle(),
+        door(),
+        window(),
+        arched_door(),
+        fan_coil(),
+        ahu(),
+        ceiling_diffuser(),
+        vav(),
+        pump(),
+        valve(),
+        wc(),
+        washbasin(),
+        sprinkler_head(),
+        luminaire(),
+        panel_board(),
+        hanger(),
+    ]
 }
 
 /// All sample families compiled together, in the same order as `families()`.
@@ -668,6 +687,533 @@ pub fn ceiling_diffuser() -> Family {
             PlanDef::line(("0", "y0"), ("0", "y1")),
         ],
         category: Category::AirTerminal,
+        ..Default::default()
+    }
+}
+
+/// Variable air volume (VAV) terminal unit, single duct, pressure independent. Origin: centre of the casing in
+/// plan, underside of the casing. The inlet is the duct drop above the unit (+Z), the outlet faces down (-Z)
+/// towards the diffuser, and the control connector carries the damper actuator signal. Sizes and flows are
+/// illustrative defaults to be replaced by the manufacturer data.
+pub fn vav() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "VAV terminal unit, single duct".into(),
+        classification: vec![("Uniclass".into(), "Pr_70_65_04_94".into())],
+        values: vec![
+            V::input("length", 0.9, 0.4, 2.5, Instance),
+            V::input("width", 0.35, 0.15, 1.0, Type),
+            V::input("height", 0.3, 0.15, 0.8, Type),
+            V::input("inlet_d", 0.2, 0.05, 0.6, Type),
+            V::input("outlet_d", 0.2, 0.05, 0.6, Type),
+            V::number("air_flow", 0.1, 0.005, 2.0, Type),
+            V::number("min_flow", 0.03, 0.0, 0.5, Type),
+            V::number("pressure_drop", 50.0, 0.0, 500.0, Type),
+            V::material("casing", "VAV casing", Type),
+            V::plane("x0", X, "-length / 2"),
+            V::plane("x1", X, "length / 2"),
+            V::plane("y0", Y, "-width / 2"),
+            V::plane("y1", Y, "width / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "height"),
+            V::plane("z2", Z, "height + 150 mm"),
+            V::plane("ix0", X, "-inlet_d / 2"),
+            V::plane("ix1", X, "inlet_d / 2"),
+            V::plane("iy0", Y, "-inlet_d / 2"),
+            V::plane("iy1", Y, "inlet_d / 2"),
+        ],
+        solids: vec![
+            SolidDef::new("casing", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("casing"),
+            SolidDef::new("inlet", ("ix0", "ix1"), ("iy0", "iy1"), ("z1", "z2")).material("casing"),
+        ],
+        checks: vec![
+            chk("the inlet fits inside the casing", "inlet_d < width && inlet_d < length"),
+            chk("the outlet fits inside the casing", "outlet_d < width && outlet_d < length"),
+            chk("the minimum flow is below the maximum", "min_flow < air_flow"),
+        ],
+        connectors: vec![
+            ConnectorDef::new(
+                "supply",
+                Duct,
+                SupplyAir,
+                In,
+                ("0", "0", "z2"),
+                PlusZ,
+                ShapeDef::Round("inlet_d".into()),
+            )
+            .flow("air_flow")
+            .pressure_drop("pressure_drop"),
+            ConnectorDef::new("outlet", Duct, SupplyAir, Out, ("0", "0", "z0"), MinusZ, ShapeDef::Round("outlet_d".into()))
+                .flow("air_flow"),
+            ConnectorDef::new("control", Electrical, Controls, In, ("x1", "0", "height / 2"), PlusX, ShapeDef::Signal),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        category: Category::UnitaryEquipment,
+        host: Some(Host::Ceiling),
+        ..Default::default()
+    }
+}
+
+/// End-suction centrifugal pump, close coupled: a base, a volute casing and a motor. Origin: centre of the base
+/// in plan, underside of the base. The suction enters along +X at the centreline, the discharge leaves along -X
+/// at the top of the volute. Sizes and flows are illustrative defaults to be replaced by the manufacturer data.
+pub fn pump() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Pump, end suction".into(),
+        classification: vec![("Uniclass".into(), "Pr_65_53".into())],
+        values: vec![
+            V::input("length", 0.9, 0.4, 3.0, Instance),
+            V::input("width", 0.5, 0.3, 1.5, Instance),
+            V::input("height", 0.5, 0.3, 1.5, Instance),
+            V::input("base_h", 0.05, 0.02, 0.2, Type),
+            V::input("suction_d", 0.1, 0.025, 0.4, Type),
+            V::input("discharge_d", 0.075, 0.02, 0.3, Type),
+            V::number("water_flow", 0.001, 0.00001, 0.1, Type),
+            V::number("head_m", 20.0, 0.0, 200.0, Type),
+            V::number("voltage", 400.0, 12.0, 1000.0, Type),
+            V::number("power", 2200.0, 1.0, 50000.0, Type),
+            V::material("casing", "Pump casing", Type),
+            V::plane("x0", X, "-length / 2"),
+            V::plane("x1", X, "length / 2"),
+            V::plane("y0", Y, "-width / 2"),
+            V::plane("y1", Y, "width / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "base_h"),
+            V::plane("z2", Z, "height"),
+            V::plane("sx0", X, "-suction_d / 2"),
+            V::plane("sx1", X, "suction_d / 2"),
+            V::plane("sy0", Y, "-suction_d / 2"),
+            V::plane("sy1", Y, "suction_d / 2"),
+        ],
+        solids: vec![
+            SolidDef::new("base", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("casing"),
+            SolidDef::new("volute", ("sx0", "sx1"), ("sy0", "sy1"), ("z1", "z2")).material("casing"),
+            SolidDef::new("motor", ("x0", "sx1"), ("sy0", "sy1"), ("z1", "z2")).material("casing"),
+        ],
+        checks: vec![
+            chk("the suction fits the casing", "suction_d < width"),
+            chk("the discharge is smaller than the suction", "discharge_d < suction_d"),
+            chk("the base is thinner than the unit", "base_h < height"),
+        ],
+        connectors: vec![
+            ConnectorDef::new(
+                "suction",
+                Pipe,
+                ChilledWaterSupply,
+                In,
+                ("x0", "0", "height / 2"),
+                MinusX,
+                ShapeDef::Round("suction_d".into()),
+            )
+            .flow("water_flow"),
+            ConnectorDef::new(
+                "discharge",
+                Pipe,
+                ChilledWaterSupply,
+                Out,
+                ("x1", "0", "height / 2"),
+                PlusX,
+                ShapeDef::Round("discharge_d".into()),
+            )
+            .flow("water_flow"),
+            ConnectorDef::new(
+                "power",
+                Electrical,
+                Power,
+                In,
+                ("0", "y1", "height / 2"),
+                PlusY,
+                ShapeDef::Electrical {
+                    voltage: "voltage".into(),
+                    poles: "3".into(),
+                },
+            )
+            .flow("power"),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        category: Category::Pump,
+        host: Some(Host::Floor),
+        ..Default::default()
+    }
+}
+
+/// Globe valve, screwed, in a pipe run. Origin: centre of the body in plan, on the pipe centreline. Flow is
+/// along X. Sizes and flows are illustrative defaults to be replaced by the manufacturer data.
+pub fn valve() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Valve, globe".into(),
+        classification: vec![("Uniclass".into(), "Pr_65_54".into())],
+        values: vec![
+            V::input("body_l", 0.2, 0.08, 0.6, Instance),
+            V::input("body_d", 0.1, 0.05, 0.3, Type),
+            V::input("pipe_d", 0.05, 0.015, 0.2, Type),
+            V::number("water_flow", 0.0005, 0.000001, 0.05, Type),
+            V::number("kv", 6.0, 0.1, 100.0, Type),
+            V::material("body", "Valve body", Type),
+            V::plane("x0", X, "-body_l / 2"),
+            V::plane("x1", X, "body_l / 2"),
+            V::plane("y0", Y, "-body_d / 2"),
+            V::plane("y1", Y, "body_d / 2"),
+            V::plane("z0", Z, "-body_d / 2"),
+            V::plane("z1", Z, "body_d / 2"),
+        ],
+        solids: vec![SolidDef::new("body", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("body")],
+        checks: vec![
+            chk("the pipe fits the body", "pipe_d < body_d"),
+            chk("the body is longer than it is wide", "body_l > body_d"),
+        ],
+        connectors: vec![
+            ConnectorDef::new("in", Pipe, ChilledWaterSupply, In, ("x0", "0", "0"), MinusX, ShapeDef::Round("pipe_d".into()))
+                .flow("water_flow"),
+            ConnectorDef::new("out", Pipe, ChilledWaterSupply, Out, ("x1", "0", "0"), PlusX, ShapeDef::Round("pipe_d".into()))
+                .flow("water_flow"),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        category: Category::Valve,
+        host: Some(Host::Free),
+        ..Default::default()
+    }
+}
+
+/// Wash-down WC with a close-coupled cistern. Origin: centre of the bowl in plan, on the floor. The water
+/// supply enters at the back (+Y) and the sanitary discharge leaves at the base (-Y). Sizes and flows are
+/// illustrative defaults to be replaced by the manufacturer data.
+pub fn wc() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "WC, close coupled".into(),
+        classification: vec![("Uniclass".into(), "Pr_40_20_93".into())],
+        values: vec![
+            V::input("length", 0.7, 0.5, 1.0, Instance),
+            V::input("width", 0.4, 0.3, 0.6, Instance),
+            V::input("height", 0.8, 0.5, 1.2, Instance),
+            V::input("supply_d", 0.015, 0.008, 0.05, Type),
+            V::input("discharge_d", 0.1, 0.05, 0.2, Type),
+            V::number("wfu", 4.0, 0.0, 10.0, Type),
+            V::number("cwfu", 4.0, 0.0, 10.0, Type),
+            V::number("discharge_flow", 0.002, 0.0001, 0.02, Type),
+            V::material("finish", "WC finish", Type),
+            V::plane("x0", X, "-width / 2"),
+            V::plane("x1", X, "width / 2"),
+            V::plane("y0", Y, "-length / 2"),
+            V::plane("y1", Y, "length / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "height"),
+        ],
+        solids: vec![SolidDef::new("bowl", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("finish")],
+        checks: vec![
+            chk("the discharge fits the bowl", "discharge_d < width"),
+            chk("the WC stands on the floor", "height > 0"),
+        ],
+        connectors: vec![
+            ConnectorDef::new("supply", Pipe, DomesticCold, In, ("0", "y1", "height / 2"), PlusY, ShapeDef::Round("supply_d".into())),
+            ConnectorDef::new("discharge", Pipe, Sanitary, Out, ("0", "y0", "0"), MinusY, ShapeDef::Round("discharge_d".into()))
+                .flow("discharge_flow"),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        category: Category::SanitaryTerminal,
+        host: Some(Host::Floor),
+        ..Default::default()
+    }
+}
+
+/// Wall-hung washbasin with a pedestal. Origin: centre of the basin in plan, on the wall face (+Y is the room).
+/// The water supply enters at the back (-Y) and the waste leaves at the base. Sizes and flows are illustrative
+/// defaults to be replaced by the manufacturer data.
+pub fn washbasin() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Washbasin, wall hung".into(),
+        classification: vec![("Uniclass".into(), "Pr_40_20_96".into())],
+        values: vec![
+            V::input("length", 0.6, 0.4, 1.0, Instance),
+            V::input("width", 0.5, 0.35, 0.8, Instance),
+            V::input("height", 0.8, 0.6, 1.1, Instance),
+            V::input("supply_d", 0.015, 0.008, 0.05, Type),
+            V::input("waste_d", 0.04, 0.025, 0.08, Type),
+            V::number("wfu", 2.0, 0.0, 10.0, Type),
+            V::number("hwfu", 2.0, 0.0, 10.0, Type),
+            V::number("waste_flow", 0.0005, 0.00001, 0.01, Type),
+            V::material("finish", "Basin finish", Type),
+            V::plane("x0", X, "-width / 2"),
+            V::plane("x1", X, "width / 2"),
+            V::plane("y0", Y, "-length / 2"),
+            V::plane("y1", Y, "length / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "height"),
+        ],
+        solids: vec![SolidDef::new("basin", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("finish")],
+        checks: vec![
+            chk("the waste fits the basin", "waste_d < width"),
+            chk("the basin stands off the floor", "height > 0"),
+        ],
+        connectors: vec![
+            ConnectorDef::new("supply", Pipe, DomesticHot, In, ("0", "y0", "height / 2"), MinusY, ShapeDef::Round("supply_d".into())),
+            ConnectorDef::new("waste", Pipe, Sanitary, Out, ("0", "y1", "0"), PlusY, ShapeDef::Round("waste_d".into()))
+                .flow("waste_flow"),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        category: Category::SanitaryTerminal,
+        host: Some(Host::Wall),
+        ..Default::default()
+    }
+}
+
+/// Pendent sprinkler head, standard response. Origin: the deflector on the ceiling plane; the frame rises above
+/// it into the branch pipe. The one connector is the branch pipe above. Sizes and flows are illustrative
+/// defaults to be replaced by the manufacturer data.
+pub fn sprinkler_head() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Sprinkler head, pendent".into(),
+        classification: vec![("Uniclass".into(), "Pr_70_55_84".into())],
+        values: vec![
+            V::input("frame_h", 0.06, 0.02, 0.15, Instance),
+            V::input("deflector_d", 0.04, 0.02, 0.1, Type),
+            V::input("pipe_d", 0.02, 0.01, 0.08, Type),
+            V::number("k_factor", 80.0, 50.0, 360.0, Type),
+            V::number("design_area", 12.0, 6.0, 40.0, Type),
+            V::number("flow", 0.00013, 0.00001, 0.001, Type),
+            V::material("frame", "Sprinkler frame", Type),
+            V::plane("x0", X, "-deflector_d / 2"),
+            V::plane("x1", X, "deflector_d / 2"),
+            V::plane("y0", Y, "-deflector_d / 2"),
+            V::plane("y1", Y, "deflector_d / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "frame_h"),
+            V::plane("zd", Z, "10 mm"),
+            V::plane("px0", X, "-pipe_d / 2"),
+            V::plane("px1", X, "pipe_d / 2"),
+            V::plane("py0", Y, "-pipe_d / 2"),
+            V::plane("py1", Y, "pipe_d / 2"),
+        ],
+        solids: vec![
+            SolidDef::new("frame", ("px0", "px1"), ("py0", "py1"), ("z0", "z1")).material("frame"),
+            SolidDef::new("deflector", ("x0", "x1"), ("y0", "y1"), ("z0", "zd")).material("frame"),
+        ],
+        checks: vec![
+            chk("the frame is narrower than the deflector", "pipe_d < deflector_d"),
+            chk("the frame hangs below the pipe", "frame_h > 0"),
+        ],
+        connectors: vec![
+            ConnectorDef::new("pipe", Pipe, FireProtection, In, ("0", "0", "z1"), PlusZ, ShapeDef::Round("pipe_d".into())),
+        ],
+        plan: vec![PlanDef::circle(("0", "0"), "deflector_d / 2")],
+        category: Category::Sprinkler,
+        host: Some(Host::Ceiling),
+        ..Default::default()
+    }
+}
+
+/// Recessed luminaire, 2x36 W, with a prismatic diffuser. Origin: centre of the diffuser on the ceiling plane.
+/// The one connector is the power supply. Sizes and flows are illustrative defaults to be replaced by the
+/// manufacturer data.
+pub fn luminaire() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Luminaire, recessed".into(),
+        classification: vec![("Uniclass".into(), "Pr_70_70_48".into())],
+        values: vec![
+            V::input("length", 0.6, 0.3, 2.4, Instance),
+            V::input("width", 0.15, 0.1, 0.6, Instance),
+            V::input("height", 0.1, 0.05, 0.4, Type),
+            V::number("voltage", 230.0, 12.0, 1000.0, Type),
+            V::number("power", 72.0, 1.0, 1000.0, Type),
+            V::material("housing", "Luminaire housing", Type),
+            V::plane("x0", X, "-length / 2"),
+            V::plane("x1", X, "length / 2"),
+            V::plane("y0", Y, "-width / 2"),
+            V::plane("y1", Y, "width / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "height"),
+        ],
+        solids: vec![SolidDef::new("housing", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("housing")],
+        checks: vec![chk("the diffuser is wider than it is deep", "length > width")],
+        connectors: vec![
+            ConnectorDef::new(
+                "power",
+                Electrical,
+                Power,
+                In,
+                ("0", "0", "z1"),
+                PlusZ,
+                ShapeDef::Electrical {
+                    voltage: "voltage".into(),
+                    poles: "2".into(),
+                },
+            )
+            .flow("power"),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        lighting: Some(LightingDef {
+            flux_lm: Some(6400.0),
+            power_w: Some(72.0),
+            cct_k: Some(4000.0),
+            cri: Some(80.0),
+            mounting: Mounting::Recessed,
+            ..Default::default()
+        }),
+        category: Category::LightFixture,
+        host: Some(Host::Ceiling),
+        ..Default::default()
+    }
+}
+
+/// Distribution board, surface mounted, 12-way. Origin: centre of the board on the wall face. The supply enters
+/// at the top (+Z) and the circuits leave at the bottom (-Z). Sizes and flows are illustrative defaults to be
+/// replaced by the manufacturer data.
+pub fn panel_board() -> Family {
+    use Dir::*;
+    use Domain::*;
+    use FlowDir::*;
+    use System::*;
+    Family {
+        name: "Distribution board, 12-way".into(),
+        classification: vec![("Uniclass".into(), "Pr_60_70_22".into())],
+        values: vec![
+            V::input("height", 0.8, 0.4, 2.0, Instance),
+            V::input("width", 0.5, 0.3, 1.5, Instance),
+            V::input("depth", 0.15, 0.08, 0.4, Type),
+            V::number("voltage", 400.0, 12.0, 1000.0, Type),
+            V::number("current", 100.0, 1.0, 630.0, Type),
+            V::material("enclosure", "Enclosure", Type),
+            V::plane("x0", X, "-width / 2"),
+            V::plane("x1", X, "width / 2"),
+            V::plane("y0", Y, "-depth / 2"),
+            V::plane("y1", Y, "depth / 2"),
+            V::plane("z0", Z, "0"),
+            V::plane("z1", Z, "height"),
+        ],
+        solids: vec![SolidDef::new("enclosure", ("x0", "x1"), ("y0", "y1"), ("z0", "z1")).material("enclosure")],
+        checks: vec![chk("the board is taller than it is wide", "height > width")],
+        connectors: vec![
+            ConnectorDef::new(
+                "supply",
+                Electrical,
+                Power,
+                In,
+                ("0", "0", "z1"),
+                PlusZ,
+                ShapeDef::Electrical {
+                    voltage: "voltage".into(),
+                    poles: "4".into(),
+                },
+            )
+            .flow("current"),
+            ConnectorDef::new(
+                "circuits",
+                Electrical,
+                Power,
+                Out,
+                ("0", "0", "z0"),
+                MinusZ,
+                ShapeDef::Electrical {
+                    voltage: "voltage".into(),
+                    poles: "4".into(),
+                },
+            )
+            .flow("current"),
+        ],
+        plan: vec![
+            PlanDef::line(("x0", "y0"), ("x1", "y0")),
+            PlanDef::line(("x1", "y0"), ("x1", "y1")),
+            PlanDef::line(("x1", "y1"), ("x0", "y1")),
+            PlanDef::line(("x0", "y1"), ("x0", "y0")),
+        ],
+        category: Category::DistributionBoard,
+        host: Some(Host::Wall),
+        ..Default::default()
+    }
+}
+
+/// Clevis hanger with a pipe clamp, for a pipe or duct run. Origin: the point on the host face where the rod
+/// meets it; the rod hangs below and the clamp sits at the bottom. No connector: the run is placed against it.
+/// Sizes are illustrative defaults to be replaced by the manufacturer data.
+pub fn hanger() -> Family {
+    Family {
+        name: "Pipe hanger, clevis".into(),
+        classification: vec![("Uniclass".into(), "Pr_20_85_47".into())],
+        values: vec![
+            V::input("rod_h", 0.5, 0.1, 3.0, Instance),
+            V::input("rod_d", 0.012, 0.006, 0.05, Type),
+            V::input("pipe_d", 0.15, 0.025, 0.6, Type),
+            V::material("steel", "Hanger steel", Type),
+            V::plane("x0", X, "-pipe_d / 2"),
+            V::plane("x1", X, "pipe_d / 2"),
+            V::plane("y0", Y, "-pipe_d / 2"),
+            V::plane("y1", Y, "pipe_d / 2"),
+            V::plane("z0", Z, "-rod_h"),
+            V::plane("z1", Z, "0"),
+            V::plane("zc", Z, "z0 + 20 mm"),
+            V::plane("rx0", X, "-rod_d / 2"),
+            V::plane("rx1", X, "rod_d / 2"),
+            V::plane("ry0", Y, "-rod_d / 2"),
+            V::plane("ry1", Y, "rod_d / 2"),
+        ],
+        solids: vec![
+            SolidDef::new("rod", ("rx0", "rx1"), ("ry0", "ry1"), ("z0", "z1")).material("steel"),
+            SolidDef::new("clamp", ("x0", "x1"), ("y0", "y1"), ("z0", "zc")).material("steel"),
+        ],
+        checks: vec![
+            chk("the clamp is narrower than the pipe", "rod_d < pipe_d"),
+            chk("the rod hangs below the host", "rod_h > 0"),
+        ],
+        plan: vec![PlanDef::circle(("0", "0"), "pipe_d / 2")],
+        category: Category::Generic,
+        host: Some(Host::Face),
         ..Default::default()
     }
 }

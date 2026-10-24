@@ -190,7 +190,23 @@ fn every_library_family_classifies_in_ifc_export() {
         .collect();
     s.items = items;
     let out = export(&s).unwrap();
-    for code in ["Pr_30_36_59", "Pr_30_59_24", "Pr_30_59_98", "Pr_70_65_04_88", "Pr_60_65_03", "Pr_70_65_04_02"] {
+    for code in [
+        "Pr_30_36_59",
+        "Pr_30_59_24",
+        "Pr_30_59_98",
+        "Pr_70_65_04_88",
+        "Pr_60_65_03",
+        "Pr_70_65_04_02",
+        "Pr_70_65_04_94",
+        "Pr_65_53",
+        "Pr_65_54",
+        "Pr_40_20_93",
+        "Pr_40_20_96",
+        "Pr_70_55_84",
+        "Pr_70_70_48",
+        "Pr_60_70_22",
+        "Pr_20_85_47",
+    ] {
         assert!(out.text.contains(&format!("Uniclass: {code}")), "IFC export missing classification {code}");
     }
 }
