@@ -256,7 +256,12 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
     let counted: BTreeSet<u32> = imp.unmapped.iter().map(|m| m.step_id).collect();
     let mut carriers: Vec<&Member> = Vec::new();
     let mut map_note = false;
+    // equipment that a family of the library stands for
+    let library = openbim_family::library::all().unwrap_or_default();
+    let picks: BTreeMap<u32, FamilyPick> = imp.equipment.iter().filter(|m| map.target(&m.class, &m.predefined) != Some(Target::Ignore)).filter_map(|m| pick_family(m, imp, map, &library).map(|p| (m.step_id, p))).collect();
+    let mut equipment: Vec<(&Member, &FamilyPick)> = Vec::new();
     for m in imp.members.iter().chain(imp.unmapped.iter()) {
+        if let Some(p) = picks.get(&m.step_id) { equipment.push((m, p)); continue; }
         let number = m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
         let class = m.class.as_str();
         let target = map.target(class, &m.predefined);
@@ -485,6 +490,11 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
         if g.bulge != 0.0 { ops.push(Command::SetBulge { id, bulge: g.bulge }); }
         *report.added.entry("grid lines").or_default() += 1;
     }
+    // equipment the reader found but nothing else would have kept (no extruded body)
+    for m in &imp.equipment {
+        if let Some(p) = picks.get(&m.step_id) { if !equipment.iter().any(|(e, _)| e.step_id == m.step_id) { equipment.push((m, p)); } }
+    }
+    plan_equipment(doc, &ops, &equipment, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_carriers(doc, &ops, &carriers, &counted, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_fillers(doc, &ops, &fillers, &mut take, &mut used, &mut ops_rooms, &mut report);
     plan_rooms(doc, &ops, &spaces, &level_for, &mut take, &mut used, &mut ops_rooms, &mut report);
@@ -532,6 +542,75 @@ fn read_stair(body: &openbim_ifc::reader::Body, psets: &openbim_ifc::reader::Pse
     if !(0.05..=0.4).contains(&riser) || !(0.1..=1.0).contains(&tread) || !(0.2..=10.0).contains(&width) || risers > 200 { return Err("has figures a stair does not have".into()); }
     let at = |t: f64| [u[0] * t + dw[0] * w_mid, u[1] * t + dw[1] * w_mid];
     Ok(StairRun { start: at(foot_t), end: at(foot_t + up * run), width, risers, riser, foot_z: z_lo })
+}
+
+/// The library family that stands for a product of equipment, with the type and the instance values.
+#[derive(Debug, PartialEq)]
+struct FamilyPick { family: String, type_name: String, overrides: Vec<(String, f64)> }
+
+/// A product's family: the one the class map names for its class, else the one the file says (a type that carries
+/// `OpenBIM_Family.Family`, as this app writes it), and then only a family of the library of the same IFC class. The
+/// instance values come from `OpenBIM_Instance` where they are inputs of the family; the type is the file's type when the
+/// family has one of that name.
+fn pick_family(m: &Member, imp: &Imported, map: &ClassMap, library: &[openbim_family::Compiled]) -> Option<FamilyPick> {
+    let (name, by_map) = match map.family(&m.class, &m.predefined) {
+        Some(n) => (n.to_string(), true),
+        None => (m.type_obj.and_then(|t| imp.types.get(t)).and_then(|t| t.psets.get("OpenBIM_Family")).and_then(|p| p.get("Family")).and_then(|p| p.text())?.to_string(), false),
+    };
+    let fam = library.iter().find(|f| f.name() == name)?;
+    if matches!(fam.category(), openbim_family::Category::Door | openbim_family::Category::Window) { return None; }
+    if !by_map && !fam.category().ifc_class().eq_ignore_ascii_case(&m.class) { return None; }
+    let type_name = m.type_obj.and_then(|t| imp.types.get(t)).map(|t| t.name.as_str()).filter(|n| fam.type_names().contains(n)).unwrap_or("").to_string();
+    let overrides = m.psets.get("OpenBIM_Instance").map(|set| set.iter().filter_map(|(k, v)| {
+        let x = v.num().filter(|x| x.is_finite())?;
+        (fam.input_scope(k) == Some(openbim_family::Scope::Instance)).then(|| (k.clone(), x))
+    }).collect()).unwrap_or_default();
+    Some(FamilyPick { family: name, type_name, overrides })
+}
+
+/// Family instances for the equipment of the file: placed where the product is, turned as its x axis is, at its height
+/// above the level it is in. One the model has already (same element number) is not made twice; one whose values the
+/// family does not allow stays left out, and the log says so. The ports and the pipes and ducts that join them are not
+/// read from another program's file.
+#[allow(clippy::too_many_arguments)]
+fn plan_equipment(doc: &Document, ops: &[Command], items: &[(&Member, &FamilyPick)], level_for: &dyn Fn(&Member, f64) -> (ElementId, f64), take: &mut dyn FnMut(Option<u64>, &mut BTreeSet<u64>) -> ElementId, used: &mut BTreeSet<u64>, out: &mut Vec<Command>, report: &mut ImportReport) {
+    if items.is_empty() { return; }
+    let mut scratch = doc.clone();
+    if !ops.is_empty() && scratch.transact(scratch.revision(), ops).is_err() { return; }
+    for (m, pick) in items {
+        let number = m.psets.get("OpenBIM_Element").and_then(|p| p.get("ElementNumber")).and_then(|p| p.num()).map(|n| n as u64);
+        if number.is_some_and(|n| scratch.get(ElementId(n)).is_some_and(|e| e.category == Category::Family)) {
+            claim(report, m);
+            *report.skipped.entry("elements already in the model (same element number)".to_string()).or_default() += 1;
+            continue;
+        }
+        let Some(o) = m.origin else { continue };
+        // the same family in the same place (a file that carries no element numbers is read again)
+        let twin = scratch.elements().any(|e| e.category == Category::Family && e.family == pick.family && matches!(e.geometry, Some(Geometry::Placed { at, level }) if (at[0] - o[0]).abs() < 0.01 && (at[1] - o[1]).abs() < 0.01 && scratch.get(level).is_some_and(|l| (l.elevation_m + e.elevation_m - o[2]).abs() < 0.005)));
+        if twin {
+            claim(report, m);
+            *report.skipped.entry("elements already in the model (same family at the same place)".to_string()).or_default() += 1;
+            continue;
+        }
+        let angle = m.x_axis.map_or(0.0, |x| x[1].atan2(x[0]).to_degrees());
+        let angle = if angle.abs() < 1e-9 { 0.0 } else { (angle * 1e6).round() / 1e6 };
+        let (lid, lz) = level_for(m, o[2]);
+        let id = take(number, used);
+        let n = scratch.elements().filter(|e| e.category == Category::Family).count() + 1;
+        let cmds = vec![
+            Command::Create { id, category: Category::Family, name: if m.name.trim().is_empty() { format!("{} {n}", pick.family) } else { clip(m.name.trim(), 64) }, width_m: 1.0, height_m: 1.0, elevation_m: r6(o[2] - lz) },
+            Command::SetFamily { id, family: pick.family.clone(), type_name: pick.type_name.clone(), overrides: pick.overrides.clone(), angle_deg: angle },
+            Command::SetGeometry { id, geometry: Geometry::Placed { at: [r6(o[0]), r6(o[1])], level: lid } },
+        ];
+        if scratch.transact(scratch.revision(), &cmds).is_err() {
+            used.remove(&id.0);
+            report.diagnostics.push(format!("#{} {} \"{}\": the family {} does not allow its place or values", m.step_id, m.class, m.name, pick.family));
+            continue;
+        }
+        claim(report, m);
+        out.extend(cmds);
+        *report.added.entry("equipment").or_default() += 1;
+    }
 }
 
 /// What a product of a class the app has no element for is kept as: a generic model, a prism over the plan of its
@@ -887,7 +966,7 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
     saved.transact(0, &openbim_document::native::restore_commands(elements.clone(), None)).map_err(|e| format!("the records do not make a model: {e:?}"))?;
     let mut read = Document::new();
     {
-        let only_members = Imported { skipped: BTreeMap::new(), native: Vec::new(), unmapped: Vec::new(), ..imp.clone() };
+        let only_members = Imported { skipped: BTreeMap::new(), native: Vec::new(), unmapped: Vec::new(), equipment: Vec::new(), ..imp.clone() };
         let (ops, _) = plan(&read, &only_members);
         if !ops.is_empty() { let _ = read.transact(0, &ops); }
     }
@@ -926,6 +1005,8 @@ fn restore(doc: &mut Document, imp: &Imported) -> Result<ImportReport, String> {
     // members that are new, or that were changed elsewhere, are read from their geometry
     let rest = Imported {
         members: imp.members.iter().filter(|m| number_of(m).is_none_or(|n| changed.contains(&n) || !native_numbers.contains(&n))).cloned().collect(),
+        // the records hold every family instance exactly; what the file shows of them is not news
+        equipment: Vec::new(),
         skipped: BTreeMap::new(), native: Vec::new(), unmapped: Vec::new(), ..imp.clone()
     };
     let (ops2, mut report) = plan(&scratch, &rest);
@@ -1534,6 +1615,83 @@ mod tests {
         let report = import_ifc(&mut back, &bad).unwrap();
         assert!(back.elements().all(|e| e.category != Category::Stair), "{}", report.text());
         assert!(report.skipped.keys().any(|k| k.contains("IFCSTAIR") && k.contains("NumberOfRiser")), "{:?}", report.skipped);
+    }
+
+    /// family, type, place, turn, height, instance values
+    type Instance = (String, String, [f64; 2], f64, f64, Vec<(String, f64)>);
+
+    fn family_instances(d: &Document) -> Vec<Instance> {
+        let mut v: Vec<_> = d.elements().filter(|e| e.category == Category::Family && !e.family.starts_with("Door") && !e.family.starts_with("Window")).filter_map(|e| match e.geometry {
+            Some(Geometry::Placed { at, .. }) => Some((e.family.clone(), e.type_name.clone(), at, e.angle_deg, e.elevation_m, e.overrides.clone())),
+            _ => None,
+        }).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    }
+
+    #[test]
+    fn the_equipment_of_a_file_comes_back_as_its_family_where_and_as_it_stood() {
+        use openbim_document::FamilySpec;
+        let mut d = Document::spatial_sample();
+        let spec = |family: &str, angle_deg: f64, elevation_m: f64, overrides: Vec<(String, f64)>| FamilySpec { family: family.into(), type_name: String::new(), overrides, angle_deg, elevation_m };
+        d.place_family(ElementId(10), [2.0, 4.5], &spec("Fan coil unit, ducted", 90.0, 2.2, vec![("length".into(), 1.4)])).unwrap();
+        d.place_family(ElementId(10), [12.0, 3.0], &spec("Air handling unit", 30.0, 0.0, vec![])).unwrap();
+        d.place_family(ElementId(10), [7.5, 6.25], &spec("Ceiling diffuser, square", 0.0, 2.6, vec![])).unwrap();
+        let want = family_instances(&d);
+        assert_eq!(want.len(), 3);
+        for own in [true, false] {
+            let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, own).unwrap();
+            let mut back = Document::new();
+            let report = import_ifc(&mut back, &out.text).unwrap();
+            let got = family_instances(&back);
+            assert_eq!(got.len(), want.len(), "own data {own}: {}", report.text());
+            for (w, g) in want.iter().zip(&got) {
+                assert_eq!((&w.0, &w.1), (&g.0, &g.1), "own data {own}");
+                assert!((w.2[0] - g.2[0]).abs() < 1e-5 && (w.2[1] - g.2[1]).abs() < 1e-5, "{w:?} {g:?}");
+                assert!((w.3 - g.3).abs() < 1e-4 && (w.4 - g.4).abs() < 1e-5, "own data {own}: {w:?} {g:?}");
+            }
+            if !own {
+                assert!(got.iter().any(|g| g.0 == "Fan coil unit, ducted" && g.5.iter().any(|(k, v)| k == "length" && (v - 1.4).abs() < 1e-5)), "the instance value comes back: {got:?}");
+                assert_eq!(report.added.get("equipment"), Some(&3), "{}", report.text());
+                assert!(report.skipped.keys().all(|k| !k.contains("IFCUNITARYEQUIPMENT") && !k.contains("IFCAIRTERMINAL")), "kept, so not left out: {:?}", report.skipped);
+                assert!(report.diagnostics.iter().all(|l| !l.contains("IFCUNITARYEQUIPMENT") && !l.contains("IFCAIRTERMINAL")), "{:?}", report.diagnostics);
+                assert!(back.elements().all(|e| e.category != Category::Generic), "not also kept as a generic model");
+            }
+        }
+    }
+
+    #[test]
+    fn a_class_map_row_reads_a_class_as_a_library_family_and_a_family_that_is_not_there_keeps_the_generic_model() {
+        let text = pump_file();
+        let map = ClassMap::parse("IFCPUMP\tfamily:Air handling unit\n").unwrap();
+        let mut d = Document::new();
+        let report = import_ifc_with(&mut d, &text, &map).unwrap();
+        let got = family_instances(&d);
+        assert_eq!(got.len(), 1, "{}", report.text());
+        assert_eq!(got[0].0, "Air handling unit");
+        assert!(d.elements().all(|e| e.category != Category::Generic), "the pump is a family now, not also a generic model");
+        assert!(report.skipped.keys().all(|k| !k.contains("IFCPUMP")), "{:?}", report.skipped);
+        // a name that is not in the library: the pump stays a generic model
+        let mut d2 = Document::new();
+        import_ifc_with(&mut d2, &text, &ClassMap::parse("IFCPUMP\tfamily:No such family\n").unwrap()).unwrap();
+        assert!(family_instances(&d2).is_empty());
+        assert_eq!(d2.elements().filter(|e| e.category == Category::Generic).count(), 1);
+        // a row that names no family is refused
+        assert!(ClassMap::parse("IFCPUMP\tfamily:\n").is_err());
+        // the text of a map keeps the family
+        assert_eq!(ClassMap::parse(&map.to_text()).unwrap(), map);
+    }
+
+    #[test]
+    fn equipment_that_the_model_has_already_is_not_made_twice() {
+        use openbim_document::FamilySpec;
+        let mut d = Document::spatial_sample();
+        d.place_family(ElementId(10), [2.0, 4.5], &FamilySpec { family: "Fan coil unit, ducted".into(), type_name: String::new(), overrides: vec![], angle_deg: 0.0, elevation_m: 2.2 }).unwrap();
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
+        let mut back = Document::new();
+        import_ifc(&mut back, &out.text).unwrap();
+        import_ifc(&mut back, &out.text).unwrap();
+        assert_eq!(family_instances(&back).len(), 1);
     }
 
     #[test]

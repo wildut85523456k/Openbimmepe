@@ -12,6 +12,11 @@
 //! A row only changes what the importer does by default; a class with no row is read as before. The categories are the
 //! ones an extruded body can become (`Wall`, `Beam`, `Column`, `Slab`, `Footing`, `WallFooting`, `Pipe`, `Duct`),
 //! `Generic` (kept as a generic model with its class and properties) and `Ignore` (left out, and the log says the map did).
+//!
+//! A row can also say `family:<name of a library family>` (separate the columns with tabs when the name has spaces):
+//! the products of the class become instances of that family, placed where the product is and turned as it is.
+//! `IFCUNITARYEQUIPMENT<TAB>family:Air handling unit<TAB>AIRHANDLER` is one. A file this app wrote names its families
+//! itself, so it needs no row. A product whose family cannot be used is kept as a generic model.
 use openbim_document::Category;
 
 pub const MAX_ROWS: usize = 10_000;
@@ -30,6 +35,9 @@ struct Row {
     /// upper case, `None` for any
     predefined: Option<String>,
     target: Target,
+    /// the library family the class is read as (the row said `family:<name>`); the target is then `Generic`, which is
+    /// what the product becomes if the family cannot be used
+    family: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -66,12 +74,16 @@ impl ClassMap {
             if cols.len() < 2 || cols.len() > 3 { return Err(at("a row is the class, the category and optionally the predefined type")); }
             let class = cols[0].to_ascii_uppercase();
             if !class.starts_with("IFC") || class.len() <= 3 || !class.bytes().all(|b| b.is_ascii_alphanumeric()) { return Err(at(&format!("'{}' is not an IFC class", cols[0]))); }
-            let target = TARGETS.iter().find(|(n, _)| n.eq_ignore_ascii_case(cols[1])).map(|t| t.1)
-                .ok_or_else(|| at(&format!("'{}' is not a category (use {})", cols[1], TARGETS.map(|t| t.0).join(", "))))?;
+            let family = cols[1].get(..7).filter(|p| p.eq_ignore_ascii_case("family:")).map(|_| cols[1][7..].trim().to_string());
+            if family.as_deref() == Some("") { return Err(at("'family:' needs the name of a library family")); }
+            let target = if family.is_some() { Target::Category(Category::Generic) } else {
+                TARGETS.iter().find(|(n, _)| n.eq_ignore_ascii_case(cols[1])).map(|t| t.1)
+                    .ok_or_else(|| at(&format!("'{}' is not a category (use {}, or family:<name of a library family>)", cols[1], TARGETS.map(|t| t.0).join(", "))))?
+            };
             let predefined = cols.get(2).copied().filter(|p| !p.is_empty() && *p != "*").map(|p| p.trim_matches('.').to_ascii_uppercase());
             if rows.iter().any(|r| r.class == class && r.predefined == predefined) { return Err(at(&format!("{class} is given twice"))); }
             if rows.len() >= MAX_ROWS { return Err(at("too many rows")); }
-            rows.push(Row { class, predefined, target });
+            rows.push(Row { class, predefined, target, family });
         }
         Ok(ClassMap { rows })
     }
@@ -86,6 +98,15 @@ impl ClassMap {
             .map(|r| r.target)
     }
 
+    /// The library family the map says the class (with its predefined type) is read as, if it says one.
+    pub fn family(&self, class: &str, predefined: &str) -> Option<&str> {
+        let class = class.to_ascii_uppercase();
+        let predefined = predefined.trim_matches('.').to_ascii_uppercase();
+        self.rows.iter().find(|r| r.class == class && r.predefined.as_deref() == Some(predefined.as_str()) && !predefined.is_empty())
+            .or_else(|| self.rows.iter().find(|r| r.class == class && r.predefined.is_none()))
+            .and_then(|r| r.family.as_deref())
+    }
+
     pub fn is_empty(&self) -> bool { self.rows.is_empty() }
     pub fn len(&self) -> usize { self.rows.len() }
 
@@ -94,7 +115,7 @@ impl ClassMap {
     pub fn to_text(&self) -> String {
         let mut s = String::from("# IFC class\tapp category\tpredefined type (optional)\n");
         for r in &self.rows {
-            let name = TARGETS.iter().find(|t| t.1 == r.target).map_or("Generic", |t| t.0);
+            let name = r.family.as_ref().map_or_else(|| TARGETS.iter().find(|t| t.1 == r.target).map_or("Generic", |t| t.0).to_string(), |f| format!("family:{f}"));
             s.push_str(&format!("{}\t{name}{}\n", r.class, r.predefined.as_ref().map_or(String::new(), |p| format!("\t{p}"))));
         }
         s

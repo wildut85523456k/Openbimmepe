@@ -143,6 +143,10 @@ pub struct Imported {
     pub diagnostics: Vec<String>,
     /// the lines of every `IfcGrid`, in model coordinates (metres)
     pub grids: Vec<GridLine>,
+    /// products of the classes of equipment and fixtures (pumps, fans, terminals...), with or without a body this
+    /// reader can read. They are also counted in `skipped` and, with an extruded body, in `unmapped`: the importer takes
+    /// them off those when it makes a family instance of them.
+    pub equipment: Vec<Member>,
 }
 
 /// One axis of an `IfcGrid`: its tag and the ends of its polyline in plan.
@@ -174,6 +178,13 @@ const MEMBERS: [&str; 17] = [
     "IFCDOOR",
     "IFCWINDOW",
     "IFCBUILDINGELEMENTPROXY",
+];
+
+/// The classes of equipment and fixtures that a family of the library can stand for.
+const EQUIPMENT: [&str; 17] = [
+    "IFCAIRTERMINAL", "IFCFAN", "IFCDAMPER", "IFCPUMP", "IFCBOILER", "IFCCHILLER", "IFCCOIL", "IFCUNITARYEQUIPMENT", "IFCTANK",
+    "IFCVALVE", "IFCSANITARYTERMINAL", "IFCLIGHTFIXTURE", "IFCELECTRICDISTRIBUTIONBOARD", "IFCOUTLET", "IFCSWITCHINGDEVICE",
+    "IFCFIRESUPPRESSIONTERMINAL", "IFCFURNITURE",
 ];
 
 /// Products that are not objects of the building: voids, ports, grids and drawings are not kept as generic models.
@@ -1028,9 +1039,13 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                 e.class
             ));
             // one with a body that is an extruded profile can still be kept as a generic model
-            if !NOT_OBJECTS.contains(&e.class.as_str()) {
+            let equipment = EQUIPMENT.contains(&e.class.as_str());
+            if equipment || !NOT_OBJECTS.contains(&e.class.as_str()) {
                 let m = member_of(id, e);
-                if m.body.is_some() {
+                if equipment {
+                    out.equipment.push(m.clone());
+                }
+                if m.body.is_some() && !NOT_OBJECTS.contains(&e.class.as_str()) {
                     out.unmapped.push(m);
                 }
             }
