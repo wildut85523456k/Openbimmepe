@@ -224,9 +224,9 @@ fn a_curved_line_is_a_trimmed_circle_that_reads_back_with_its_bulge_in_every_sch
 #[test]
 fn an_arc_over_half_a_circle_reads_as_a_straight_line_and_says_so() {
     // three quarters of a circle of radius 5 about the origin, counter-clockwise from (5,0) to (0,-5)
-    let text = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');\nFILE_NAME('x','2026-10-24T00:00:00',(''),(''),'','','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n#1=IFCCARTESIANPOINT((0.,0.));\n#2=IFCAXIS2PLACEMENT2D(#1,$);\n#3=IFCCIRCLE(#2,5.);\n#4=IFCCARTESIANPOINT((5.,0.));\n#5=IFCCARTESIANPOINT((0.,-5.));\n#6=IFCTRIMMEDCURVE(#3,(#4),(#5),.T.,.CARTESIAN.);\n#7=IFCGRIDAXIS('Z',#6,.T.);\n#8=IFCGRID('0000000000000000000000',$,'Grid',$,$,$,(#7),$,$,$);\nENDSEC;\nEND-ISO-10303-21;\n";
+    let text = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');\nFILE_NAME('x','2026-10-24T00:00:00',(''),(''),'','','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n#20=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);\n#21=IFCUNITASSIGNMENT((#20));\n#22=IFCPROJECT('0000000000000000000001',$,'P',$,$,$,$,$,#21);\n#1=IFCCARTESIANPOINT((0.,0.));\n#2=IFCAXIS2PLACEMENT2D(#1,$);\n#3=IFCCIRCLE(#2,5.);\n#4=IFCCARTESIANPOINT((5.,0.));\n#5=IFCCARTESIANPOINT((0.,-5.));\n#6=IFCTRIMMEDCURVE(#3,(#4),(#5),.T.,.CARTESIAN.);\n#7=IFCGRIDAXIS('Z',#6,.T.);\n#8=IFCGRID('0000000000000000000000',$,'Grid',$,$,$,$,(#7),$,$);\nENDSEC;\nEND-ISO-10303-21;\n";
     let back = openbim_ifc::reader::read(text).unwrap();
-    assert_eq!(back.grids.len(), 1);
+    assert_eq!(back.grids.len(), 1, "{:?}", back.diagnostics);
     assert_eq!((back.grids[0].start, back.grids[0].bulge), ([5.0, 0.0], 0.0));
     assert!(back.diagnostics.iter().any(|d| d.contains("half a circle")), "{:?}", back.diagnostics);
 }

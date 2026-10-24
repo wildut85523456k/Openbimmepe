@@ -253,8 +253,8 @@ struct R<'a> {
 }
 
 impl R<'_> {
-    /// An `IfcTrimmedCurve` over an `IfcCircle` as (start, end, bulge) in the circle's frame. Trims by point or by
-    /// parameter (degrees, the IFC default). An arc over half a circle has no bulge in range: bulge is `None`.
+    /// An `IfcTrimmedCurve` over an `IfcCircle` as (start, end, bulge) in the circle's frame. Trims by point
+    /// parameter is not read. An arc over half a circle has no bulge in range: bulge is `None`.
     fn arc(&self, curve: &Entity) -> Option<([f64; 2], [f64; 2], Option<f64>)> {
         let f = self.f;
         let circle = f.deref(curve.args.first()?).filter(|c| c.class == "IFCCIRCLE")?;
@@ -262,9 +262,6 @@ impl R<'_> {
         let pos = f.deref(circle.args.first()?)?;
         let centre = self.point(pos.args.first()?)?;
         let (cx, cy) = (centre[0], centre[1]);
-        // the circle's x axis (IfcAxis2Placement2D RefDirection), default global X
-        let rd = pos.args.get(1).and_then(|d| f.deref(d)).and_then(|d| d.args.first()).map(|l| l.as_list().iter().filter_map(Value::as_f64).collect::<Vec<_>>());
-        let base = rd.filter(|v| v.len() >= 2).map_or(0.0, |v| v[1].atan2(v[0]));
         let angle_of = |trim: &Value| -> Option<f64> {
             let items = trim.as_list();
             for t in items {
@@ -272,10 +269,8 @@ impl R<'_> {
                     return Some((p[1] - cy).atan2(p[0] - cx));
                 }
             }
-            items.iter().find_map(|t| match t {
-                Value::Typed(n, v) if n == "IFCPARAMETERVALUE" => v.first()?.as_f64().map(|d| base + d.to_radians()),
-                _ => None,
-            })
+            // a trim by parameter needs the file's plane-angle unit, which is not read: left out
+            None
         };
         let (a1, a2) = (angle_of(curve.args.get(1)?)?, angle_of(curve.args.get(2)?)?);
         let same = !matches!(curve.args.get(3), Some(Value::Enum(s)) if s == "F");
@@ -1001,6 +996,8 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
                                 out.diagnostics.push(format!("grid axis {name}: arc over half a circle kept as a straight line"));
                             }
                             out.grids.push(GridLine { name, start: [s[0], s[1]], end: [e[0], e[1]], bulge: b.unwrap_or(0.0) });
+                        } else {
+                            out.diagnostics.push(format!("grid axis {name}: curve not read (only circle arcs trimmed by points are)"));
                         }
                         continue;
                     }

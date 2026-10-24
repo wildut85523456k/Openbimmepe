@@ -18,9 +18,9 @@ hit-test keep the chord. Properties shows radius, sweep and length (read only).
 ## IFC
 - Out: `IFCTRIMMEDCURVE` over an `IFCCIRCLE` (`IFCAXIS2PLACEMENT2D`), trimmed by the end points, sense `.T.`/`.F.` for the
   direction; all three schemas. Straight lines stay `IFCPOLYLINE`.
-- In: trimmed circles trimmed by point or by parameter (degrees, the IFC default). An arc over half a circle cannot be held
+- In: trimmed circles trimmed by points. A trim by parameter is not read (it needs the file's plane-angle unit): the axis is left out and the import log says so. An arc over half a circle cannot be held
   by a bulge: it is kept as a straight line and the import log says so. Import skips a line the model already has (same
   name, ends and bulge).
 
 ## Not done
-Drawing tool for arcs, major arcs, other curve kinds (B-spline), plane-angle units other than degrees for parameter trims.
+Drawing tool for arcs, major arcs, other curve kinds (B-spline), trims by parameter (needs plane-angle unit detection).
