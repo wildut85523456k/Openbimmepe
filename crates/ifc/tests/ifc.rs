@@ -163,6 +163,38 @@ fn occurrences_of_one_type_share_one_type_entity_and_one_map() {
     assert!(fewer.text.contains(&format!("IFCDOORTYPE('{b}'")));
 }
 
+/// The Uniclass codes the library families carry are written into the IFC export, one
+/// `Pset_OpenBIM_Family.Classification` label per family (docs/revit-style-ui/09-classification-standards.md).
+#[test]
+fn every_library_family_classifies_in_ifc_export() {
+    use openbim_family::{library, Request};
+    let fams = library::all().unwrap();
+    let mut items = Vec::new();
+    for (k, fam) in fams.iter().enumerate() {
+        let inst = fam.solve(&Request::default()).unwrap();
+        items.push(FamilyItem {
+            id: 10 + k as u64,
+            name: format!("F{k}"),
+            family: k,
+            type_name: None,
+            frame: Frame { origin: [k as f64, 0.0, 0.0], x: [1.0, 0.0] },
+            instance: inst,
+            host: None,
+        });
+    }
+    let mut s = scene(vec![wall(5)]);
+    s.families = fams
+        .iter()
+        .enumerate()
+        .map(|(i, f)| FamilyRef { id: i as u32 + 1, family: f.clone() })
+        .collect();
+    s.items = items;
+    let out = export(&s).unwrap();
+    for code in ["Pr_30_36_59", "Pr_30_59_24", "Pr_30_59_98", "Pr_70_65_04_88", "Pr_60_65_03", "Pr_70_65_04_02"] {
+        assert!(out.text.contains(&format!("Uniclass: {code}")), "IFC export missing classification {code}");
+    }
+}
+
 #[test]
 fn an_occurrence_with_another_shape_keeps_its_own_bodies() {
     use openbim_family::Request;

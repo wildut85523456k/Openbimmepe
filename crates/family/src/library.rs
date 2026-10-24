@@ -26,6 +26,7 @@ fn ty(name: &str, values: &[(&str, f64)]) -> TypeDef {
 pub fn handle() -> Family {
     Family {
         name: "Lever handle".into(),
+        classification: vec![("Uniclass".into(), "Pr_30_36_59".into())],
         values: vec![
             V::input("leaf_t", 0.04, 0.02, 0.1, Type),
             V::input("plate_w", 0.04, 0.02, 0.1, Type),
@@ -95,6 +96,7 @@ pub fn handle() -> Family {
 pub fn door() -> Family {
     Family {
         name: "Door, single flush".into(),
+        classification: vec![("Uniclass".into(), "Pr_30_59_24".into())],
         values: vec![
             V::input("width", 0.9, 0.5, 3.0, Type),
             V::input("height", 2.1, 1.5, 3.5, Type),
@@ -163,6 +165,7 @@ pub fn door() -> Family {
 pub fn arched_door() -> Family {
     Family {
         name: "Door, arched".into(),
+        classification: vec![("Uniclass".into(), "Pr_30_59_24".into())],
         values: vec![
             V::input("width", 1.0, 0.5, 3.0, Type),
             V::input("height", 2.4, 1.5, 4.0, Type),
@@ -238,6 +241,7 @@ pub fn window() -> Family {
     };
     Family {
         name: "Window, fixed with mullions".into(),
+        classification: vec![("Uniclass".into(), "Pr_30_59_98".into())],
         values: vec![
             V::input("width", 1.2, 0.3, 4.0, Type),
             V::input("height", 1.2, 0.3, 3.0, Type),
@@ -327,6 +331,7 @@ pub fn fan_coil() -> Family {
     use System::*;
     Family {
         name: "Fan coil unit, ducted".into(),
+        classification: vec![("Uniclass".into(), "Pr_70_65_04_88".into())],
         values: vec![
             V::input("length", 1.0, 0.4, 3.0, Instance),
             V::input("depth", 0.6, 0.3, 1.5, Instance),
@@ -461,6 +466,7 @@ pub fn ahu() -> Family {
     use System::*;
     Family {
         name: "Air handling unit".into(),
+        classification: vec![("Uniclass".into(), "Pr_60_65_03".into())],
         values: vec![
             V::input("length", 2.5, 1.0, 6.0, Instance),
             V::input("depth", 1.2, 0.6, 3.0, Instance),
@@ -615,6 +621,7 @@ pub fn ceiling_diffuser() -> Family {
     use System::*;
     Family {
         name: "Ceiling diffuser, square".into(),
+        classification: vec![("Uniclass".into(), "Pr_70_65_04_02".into())],
         values: vec![
             V::input("face", 0.6, 0.15, 1.2, Instance),
             V::input("neck_d", 0.2, 0.05, 0.6, Type),

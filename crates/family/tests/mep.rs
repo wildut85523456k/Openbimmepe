@@ -317,6 +317,37 @@ fn classification_rules() {
     assert!(f.compile().is_ok());
 }
 
+/// Every family in the shipped library carries a Uniclass 2015 product code, and it is the one
+/// decided for that family (docs/revit-style-ui/09-classification-standards.md). The IFC export
+/// test in crates/ifc checks the code is written out of the app.
+#[test]
+fn every_library_family_carries_its_uniclass_code() {
+    let expected: &[(&str, &str)] = &[
+        ("Lever handle", "Pr_30_36_59"),
+        ("Door, single flush", "Pr_30_59_24"),
+        ("Window, fixed with mullions", "Pr_30_59_98"),
+        ("Door, arched", "Pr_30_59_24"),
+        ("Fan coil unit, ducted", "Pr_70_65_04_88"),
+        ("Air handling unit", "Pr_60_65_03"),
+        ("Ceiling diffuser, square", "Pr_70_65_04_02"),
+    ];
+    let lib = library::all().expect("library compiles");
+    assert_eq!(lib.len(), expected.len(), "library family count changed");
+    for (fam, (name, code)) in lib.iter().zip(expected) {
+        let uniclass: Vec<&(String, String)> = fam
+            .classification()
+            .iter()
+            .filter(|(sys, _)| sys == "Uniclass")
+            .collect();
+        assert_eq!(uniclass.len(), 1, "{name}: expected exactly one Uniclass code");
+        assert_eq!(uniclass[0].1, *code, "{name}: wrong Uniclass code");
+        assert!(
+            code.starts_with("Pr_") || code.starts_with("Ss_") || code.starts_with("EF_"),
+            "{name}: Uniclass code should be a Pr_/Ss_/EF_ code"
+        );
+    }
+}
+
 fn with_conn(c: ConnectorDef) -> Family {
     let mut f = fan_coil();
     f.connectors = vec![c];
