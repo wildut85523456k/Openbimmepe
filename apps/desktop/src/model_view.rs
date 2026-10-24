@@ -66,7 +66,7 @@ fn plan_edges(doc: &openbim_document::Document, level: ElementId) -> Vec<crate::
                 line(start, end);
                 if let Some(r) = doc.wall_plan(el.id) { for i in 0..4 { line(r[i], r[(i + 1) % 4]); } }
             }
-            Some(Geometry::Grid { start, end }) => line(start, end),
+            Some(Geometry::Grid { start, end }) => { for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { line(w[0], w[1]); } }
             _ => {}
         }
     }
@@ -158,7 +158,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // Include datum extents so grid bubbles remain inside the viewport.
     for el in app.document.elements() {
         if let Some(Geometry::Grid { start, end }) = el.geometry {
-            for [x, y] in [start, end] { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
+            for [x, y] in openbim_document::grid_arc::points(start, end, el.bulge) { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
         }
     }
     let bounds = plan_bounds(bounds);
@@ -210,7 +210,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             Some(Geometry::Grid { start, end }) => {
                 let a = screen([start[0], start[1], level_z]);
                 let b = screen([end[0], end[1], level_z]);
-                dashed(&painter, a, b, stroke);
+                for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { dashed(&painter, screen([w[0][0], w[0][1], level_z]), screen([w[1][0], w[1][1], level_z]), stroke); }
                 for p in [a, b] {
                     painter.circle(p, bubble_r, ui.visuals().panel_fill, stroke);
                     painter.text(p, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(note_px), stroke.color);

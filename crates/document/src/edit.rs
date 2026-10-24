@@ -88,7 +88,11 @@ impl Document {
         let mut e = e.clone();
         let p = |q: P| xf.point(q);
         match e.geometry {
-            Some(Geometry::Grid { start, end }) => e.geometry = Some(Geometry::Grid { start: p(start), end: p(end) }),
+            Some(Geometry::Grid { start, end }) => {
+                e.geometry = Some(Geometry::Grid { start: p(start), end: p(end) });
+                // a mirror turns the arc the other way round
+                if xf.flips() { e.bulge = -e.bulge; }
+            }
             Some(Geometry::Linear { start, end, level }) => {
                 let (a, b) = (p(start), p(end));
                 // a mirrored wall is drawn the other way round, so that its exterior stays on the left
@@ -153,6 +157,7 @@ impl Document {
         for e in moved {
             let old = self.get(e.id).ok_or("an element is gone")?;
             if e.geometry != old.geometry { ops.push(Command::SetGeometry { id: e.id, geometry: e.geometry.ok_or("no geometry")? }); }
+            if e.bulge != old.bulge { ops.push(Command::SetBulge { id: e.id, bulge: e.bulge }); }
             if e.outline != old.outline { ops.push(Command::SetOutline { id: e.id, outline: e.outline.clone() }); }
             if e.slope_edges != old.slope_edges { ops.push(Command::SetRoof { id: e.id, slope_ratio: e.slope_ratio.unwrap_or(crate::roof::DEFAULT_SLOPE), edges: e.slope_edges.clone() }); }
             if e.angle_deg != old.angle_deg && e.category == Category::Family {

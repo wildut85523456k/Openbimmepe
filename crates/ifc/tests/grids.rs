@@ -3,7 +3,7 @@ use openbim_arch::{Level, Levels};
 use openbim_ifc::{export, export_ifc2x3, export_ifc4x3, GridItem, Scene};
 
 fn grid(id: u64, name: &str, start: [f64; 2], end: [f64; 2]) -> GridItem {
-    GridItem { id, name: name.into(), start, end }
+    GridItem { id, name: name.into(), start, end, bulge: 0.0 }
 }
 
 fn scene(grids: Vec<GridItem>) -> Scene {
@@ -197,4 +197,36 @@ mod assemblies {
         let b = export(&truss_scene(vec![5, 6])).unwrap();
         assert_eq!(a.text, b.text);
     }
+}
+
+fn curved(id: u64, name: &str, start: [f64; 2], end: [f64; 2], bulge: f64) -> GridItem {
+    GridItem { id, name: name.into(), start, end, bulge }
+}
+
+#[test]
+fn a_curved_line_is_a_trimmed_circle_that_reads_back_with_its_bulge_in_every_schema() {
+    let g = vec![curved(1, "A", [10.0, 0.0], [0.0, 10.0], (std::f64::consts::FRAC_PI_2 / 4.0).tan()), curved(2, "B", [0.0, 0.0], [8.0, 0.0], -0.3), grid(3, "1", [0.0, -2.0], [9.0, -2.0])];
+    for (name, e) in [("4", export(&scene(g.clone()))), ("4x3", export_ifc4x3(&scene(g.clone()))), ("2x3", export_ifc2x3(&scene(g.clone())))] {
+        let e = e.unwrap();
+        assert_eq!((count(&e.text, "IFCTRIMMEDCURVE"), count(&e.text, "IFCCIRCLE"), count(&e.text, "IFCPOLYLINE")), (2, 2, 1), "{name}");
+        let back = openbim_ifc::reader::read(&e.text).unwrap();
+        let by = |n: &str| back.grids.iter().find(|x| x.name == n).unwrap_or_else(|| panic!("{name}: {n}"));
+        for (n, want) in [("A", &g[0]), ("B", &g[1]), ("1", &g[2])] {
+            let got = by(n);
+            assert!((got.bulge - want.bulge).abs() < 1e-6, "{name} {n}: {} {}", got.bulge, want.bulge);
+            for k in 0..2 {
+                assert!((got.start[k] - want.start[k]).abs() < 1e-5 && (got.end[k] - want.end[k]).abs() < 1e-5, "{name} {n}");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_arc_over_half_a_circle_reads_as_a_straight_line_and_says_so() {
+    // three quarters of a circle of radius 5 about the origin, counter-clockwise from (5,0) to (0,-5)
+    let text = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');\nFILE_NAME('x','2026-10-24T00:00:00',(''),(''),'','','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n#1=IFCCARTESIANPOINT((0.,0.));\n#2=IFCAXIS2PLACEMENT2D(#1,$);\n#3=IFCCIRCLE(#2,5.);\n#4=IFCCARTESIANPOINT((5.,0.));\n#5=IFCCARTESIANPOINT((0.,-5.));\n#6=IFCTRIMMEDCURVE(#3,(#4),(#5),.T.,.CARTESIAN.);\n#7=IFCGRIDAXIS('Z',#6,.T.);\n#8=IFCGRID('0000000000000000000000',$,'Grid',$,$,$,(#7),$,$,$);\nENDSEC;\nEND-ISO-10303-21;\n";
+    let back = openbim_ifc::reader::read(text).unwrap();
+    assert_eq!(back.grids.len(), 1);
+    assert_eq!((back.grids[0].start, back.grids[0].bulge), ([5.0, 0.0], 0.0));
+    assert!(back.diagnostics.iter().any(|d| d.contains("half a circle")), "{:?}", back.diagnostics);
 }

@@ -875,6 +875,12 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         let (corners, area) = (el.outline.len().to_string(), format!("{area:.3}"));
                         read_only_group(ui, "Derived Geometry", &query, &[("Corners", &corners), ("Area (m²)", &area)]);
                     }
+                    if let (openbim_document::Category::Grid, Some(Geometry::Grid { start, end })) = (el.category, el.geometry) {
+                        if let Some(arc) = openbim_document::grid_arc::arc(start, end, el.bulge) {
+                            let (radius, sweep, len) = (format!("{:.3}", arc.radius), format!("{:.2}", arc.sweep.to_degrees()), format!("{:.3}", arc.length()));
+                            read_only_group(ui, "Arc", &query, &[("Radius (m)", &radius), ("Sweep (°, + counter-clockwise)", &sweep), ("Length (m)", &len)]);
+                        }
+                    }
                     if el.category == openbim_document::Category::Generic {
                         // what a file brought in: shown as it came, not edited here
                         let (height, base, area) = (format!("{:.3}", el.height_m), format!("{:.3}", el.elevation_m - el.height_m), format!("{:.3}", openbim_geom::profile::polygon_area(&el.outline).abs()));

@@ -24,6 +24,7 @@ pub use stair::{StairSpec, StairShape, StairFigures, layout as stair_layout, LAN
 pub use roof::{is_convex as roof_is_convex, RoofFigures, mesh as roof_mesh, RoofSpec, DEFAULT_SLOPE as DEFAULT_ROOF_SLOPE};
 pub use rooms::RoomShape;
 pub mod native;
+pub mod grid_arc;
 mod rebar;
 mod types;
 mod layers;
@@ -363,6 +364,8 @@ pub struct Element {
     pub join_ends: [bool; 2],
     /// Pinned in place (Revit's Pin): it cannot be moved, turned, mirrored, trimmed or deleted until it is unpinned.
     pub pinned: bool,
+    /// A grid: how far its chord bends into an arc (see `grid_arc`); 0 for a straight grid.
+    pub bulge: f64,
     /// Beam system: the distance between its beams, and the direction of the beams (degrees from the x axis).
     pub spacing_m: f64,
     pub angle_deg: f64,
@@ -441,6 +444,7 @@ impl Element {
             && (self.type_id.is_none() || (self.category != Category::Type && Self::can_have_type(self.category)))
             && !self.name.trim().is_empty()
             && self.name.len() <= 512
+            && (self.bulge == 0.0 || (self.category == Category::Grid && self.bulge.is_finite() && self.bulge.abs() <= 1.0))
             && self.width_m.is_finite()
             && self.height_m.is_finite()
             && self.elevation_m.is_finite()
@@ -519,6 +523,8 @@ pub enum Command {
     /// Allow or disallow the join of a beam's start and end with the columns they end in.
     SetJoins { id: ElementId, start: bool, end: bool },
     SetPinned { id: ElementId, pinned: bool },
+    /// Bends a grid into an arc (`grid_arc`); 0 straightens it.
+    SetBulge { id: ElementId, bulge: f64 },
     /// The spacing and direction of a beam system.
     SetBeamSystem { id: ElementId, spacing_m: f64, angle_deg: f64 },
     /// The beam system a beam belongs to.
@@ -745,6 +751,12 @@ impl Document {
             Command::Create { id, category: Category::Grid, name, width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
             Command::SetGeometry { id, geometry: Geometry::Grid { start, end } },
         ])?;
+        Ok(id)
+    }
+    /// Draws a curved grid line: the arc from `start` to `end` that `bulge` says (see `grid_arc`).
+    pub fn place_arc_grid(&mut self, start: [f64; 2], end: [f64; 2], bulge: f64, name: &str) -> Result<ElementId, EditError> {
+        let id = self.place_grid(start, end, name)?;
+        if let Err(e) = self.transact(self.revision, &[Command::SetBulge { id, bulge }]) { let _ = self.undo(); return Err(e); }
         Ok(id)
     }
     /// Adds a level at `elevation_m`; two levels cannot share an elevation.
@@ -1216,7 +1228,7 @@ impl Document {
                         elevation_m: *elevation_m, revision,
                         slope_ratio: category.supports_slope().then_some(0.0),
                         geometry: None, section: Section::Rectangle, usage: Usage::Girder, material: Material::Unspecified,
-                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], pinned: false, spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None, layers: Vec::new(), core: None,
+                        outline: Vec::new(), slab_kind: SlabKind::Floor, slope_edges: Vec::new(), join_ends: [true; 2], pinned: false, bulge: 0.0, spacing_m: 0.0, angle_deg: 0.0, parent: None, count: 0, family: String::new(), type_name: String::new(), overrides: Vec::new(), texts: Vec::new(), type_id: None, type_for: None, layers: Vec::new(), core: None,
                     };
                     // a type is made in steps: what it is a type of is set by the next command
                     if *category != Category::Type && !element.valid() { return Err(EditError::InvalidElement); }
@@ -1296,6 +1308,12 @@ impl Document {
                     let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
                     if !matches!(el.category, Category::Beam | Category::Stair | Category::Railing | Category::Opening | Category::Footing) { return Err(EditError::UnsupportedProperty(*id)); }
                     el.parent = *parent;
+                    el.revision = revision;
+                }
+                Command::SetBulge { id, bulge } => {
+                    let el = trial.get_mut(id).ok_or(EditError::NotFound(*id))?;
+                    if el.category != Category::Grid { return Err(EditError::UnsupportedProperty(*id)); }
+                    el.bulge = *bulge;
                     el.revision = revision;
                 }
                 Command::SetPinned { id, pinned } => {
