@@ -1617,7 +1617,10 @@ mod tests {
         assert!(report.skipped.keys().any(|k| k.contains("IFCSTAIR") && k.contains("NumberOfRiser")), "{:?}", report.skipped);
     }
 
-    fn family_instances(d: &Document) -> Vec<(String, String, [f64; 2], f64, f64, Vec<(String, f64)>)> {
+    /// family, type, place, turn, height, instance values
+    type Instance = (String, String, [f64; 2], f64, f64, Vec<(String, f64)>);
+
+    fn family_instances(d: &Document) -> Vec<Instance> {
         let mut v: Vec<_> = d.elements().filter(|e| e.category == Category::Family && !e.family.starts_with("Door") && !e.family.starts_with("Window")).filter_map(|e| match e.geometry {
             Some(Geometry::Placed { at, .. }) => Some((e.family.clone(), e.type_name.clone(), at, e.angle_deg, e.elevation_m, e.overrides.clone())),
             _ => None,
