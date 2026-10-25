@@ -1493,9 +1493,17 @@ mod tests {
     /// Refit before every click; never bypass the window's picking, snapping or global-key handlers.
     fn office_plan_click(ctx: &egui::Context, screen: Rect, app: &mut Desktop, point: [f64; 2]) {
         window_frame(ctx, screen, app, vec![]);
-        let at = plan_screen(app, point);
+        let mut at = plan_screen(app, point);
+        // The viewport refits to the window every frame, and a panel whose height changes (the status bar
+        // wrapping a new message) moves the transform one frame later, so the refit's transform can be stale
+        // by the time the click is taken. Re-aim the click at the transform the taking frame will use.
+        for _ in 0..3 {
+            window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+            let next = plan_screen(app, point);
+            if (next - at).length() < 0.05 { break; }
+            at = next;
+        }
         assert!(screen.contains(at), "office point {point:?} is outside the window: {at:?}");
-        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
         window_frame(ctx, screen, app, vec![button(at, true)]);
         window_frame(ctx, screen, app, vec![button(at, false)]);
     }
