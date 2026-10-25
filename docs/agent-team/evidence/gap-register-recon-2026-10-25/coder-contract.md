@@ -41,7 +41,7 @@ The gap register (`docs/gap-remediation-plan-2026-10-21.md`) + progress snapshot
 
 ## STOP conditions
 - Do NOT edit code, tests, or any doc other than the two named.
-- Do NOT touch the office-P0 worktree (`D:/Codex/Revit-alike-P0`).
+- Do NOT touch the office-P0 worktree (a parallel workstream, never touched).
 - Do NOT push or create a PR.
 - If a target row/section isn't found, note it in the log and skip — don't guess.
 

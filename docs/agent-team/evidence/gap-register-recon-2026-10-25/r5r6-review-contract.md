@@ -28,5 +28,5 @@ For each: confirm (a) the original statement is preserved (nothing deleted), (b)
 
 ## Gates
 1. **Docs-only gate:** diff is only markdown under `docs/` + `docs/reference/` + `README`-free; no `.rs`/`.toml`/`Cargo.lock`.
-2. **No office-P0 files:** no path under the office worktree; no `D:/Codex` paths committed.
+2. **No office-P0 files:** no path under the office worktree; no office-worktree paths committed.
 3. **Register/progress untouched this slice:** the register + progress deltas are NOT re-touched here (they were the prior slice on this branch) — this slice is only the R5 source docs + the R6 manifest + evidence.

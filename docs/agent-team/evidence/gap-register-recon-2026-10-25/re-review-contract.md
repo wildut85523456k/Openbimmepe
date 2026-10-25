@@ -29,5 +29,5 @@ Verify the three fixes, and re-confirm the prior PASS claims still hold at the n
 
 ## STOP conditions
 - Review only. Do NOT edit any file.
-- Do NOT touch the office-P0 worktree (`D:/Codex/Revit-alike-P0`).
+- Do NOT touch the office-P0 worktree (a parallel workstream, never touched).
 - Do NOT push or create a PR.
