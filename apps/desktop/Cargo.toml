@@ -11,6 +11,7 @@ egui = "0.36"
 egui_extras = { version = "0.36", default-features = false, features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 openbim-keymap = { path = "../../crates/keymap" }
+openbim-commands = { path = "../../crates/commands" }
 openbim-document = { path = "../../crates/document" }
 openbim-oplog = { path = "../../crates/oplog" }
 openbim-arch = { path = "../../crates/arch" }

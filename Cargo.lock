@@ -2527,6 +2527,7 @@ dependencies = [
  "openbim-arch",
  "openbim-automation",
  "openbim-calc",
+ "openbim-commands",
  "openbim-document",
  "openbim-family",
  "openbim-geom",

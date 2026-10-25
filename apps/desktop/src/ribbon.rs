@@ -18,6 +18,13 @@ const fn c(id: &'static str, label: &'static str) -> Cmd {
     Cmd { id, label }
 }
 
+/// The label a ribbon button shows. A command in the typed registry (`openbim-commands`, rule 9 of
+/// 04-visual-automation.md) takes its English label from there, so renaming it in the registry renames the
+/// button; a command not registered yet keeps the literal written in the groups below.
+pub fn label(cmd: &Cmd) -> &'static str {
+    openbim_commands::lookup(cmd.id).map_or(cmd.label, |def| def.en)
+}
+
 /// Ribbon tabs with the icon shown beside each name.
 pub const TABS: &[(&str, &str)] = &[
     ("Architecture", "wall"),
@@ -414,5 +421,61 @@ mod tests {
                 assert!(png_size(d).is_some(), "{} dark is not a PNG", i.id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// Every ribbon tab name, with the Systems tab shown whole.
+    fn shown(tab: &str) -> Vec<&'static Group> {
+        groups(tab, "All")
+    }
+
+    #[test]
+    fn a_registered_command_is_on_the_ribbon_tab_and_group_the_registry_names() {
+        let mut checked = 0;
+        for tab in TABS.iter().map(|(name, _)| *name) {
+            for def in openbim_commands::tab(tab) {
+                let group = shown(tab)
+                    .into_iter()
+                    .find(|g| g.title == def.group)
+                    .unwrap_or_else(|| panic!("{}: the ribbon tab {tab} has no group {:?}", def.id, def.group));
+                assert!(
+                    group.commands.iter().any(|c| c.id == def.id),
+                    "{} is registered on {tab} / {} but the ribbon group does not show it",
+                    def.id,
+                    def.group
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "the registry names at least one ribbon command");
+    }
+
+    #[test]
+    fn a_registered_command_shows_the_registry_label_and_matches_its_literal() {
+        for tab in TABS.iter().map(|(name, _)| *name) {
+            for group in shown(tab) {
+                for cmd in group.commands {
+                    if let Some(def) = openbim_commands::lookup(cmd.id) {
+                        assert_eq!(label(cmd), def.en, "{} takes its label from the registry", cmd.id);
+                        assert_eq!(
+                            cmd.label, def.en,
+                            "{}: the literal {:?} in the ribbon has drifted from the registry label {:?}",
+                            cmd.id, cmd.label, def.en
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_command_that_is_not_registered_keeps_its_literal_label() {
+        let cmd = c("not_in_the_registry", "Literal");
+        assert!(openbim_commands::lookup(cmd.id).is_none());
+        assert_eq!(label(&cmd), "Literal");
     }
 }
