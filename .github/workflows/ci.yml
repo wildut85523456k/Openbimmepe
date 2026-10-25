@@ -98,5 +98,6 @@ jobs:
       - name: Sheets, printing and Excel sheet sets (PDF/DXF read back independently)
         run: |
           pip install pypdf pypdfium2 ezdxf openpyxl reportlab pillow
+          sudo apt-get update
           sudo apt-get install -y qpdf poppler-utils
           python -I spikes/s13_sheets_check/check_sheets.py
