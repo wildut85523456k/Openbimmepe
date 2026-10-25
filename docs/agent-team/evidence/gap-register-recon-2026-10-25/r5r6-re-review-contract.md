@@ -9,7 +9,7 @@ Reviewer: `bim-review` profile. READ-ONLY. Verdict PASS/FAIL with findings. Do N
 
 ## Prior review (FAIL) — confirm each finding is now resolved
 1. **R5R6-03 (MEDIUM): register R5 row misclassifies MEP-002 as a stale claim.** Confirm `docs/gap-remediation-plan-2026-10-21.md` R5 row now states that five of the six are stale + marked, and that MEP-002 is **not** stale (mismatch still exists; `gap-review.md:17` discloses the label as gap-review.md's own assessment) — left unmarked.
-2. **Gate 2 (office path): an office-worktree path string was committed.** Confirm `git -C "C:/Users/wilfr/hermes-first-task/wt-gap-register-recon" grep -nI "Codex\|Revit-alike-P0" b50f93c..86baaff -- docs/` returns NOTHING.
+2. **Gate 2 (office path): an office-worktree path string was committed.** Confirm the candidate tree carries no office-worktree path string: grep `docs/` at the candidate for the office worktree's literal drive path and expect nothing.
 3. Prior review already PASSed: R5 claims 1,2,3,4,6 marks; claim 5 left unmarked; R6 manifest honesty (SHA-256/tool marked not-recorded, no fabrication). Spot-check they still hold at `86baaff`.
 
 ## Gates on the SLICE `b50f93c..86baaff`
