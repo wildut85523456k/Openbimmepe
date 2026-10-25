@@ -1548,6 +1548,12 @@ mod tests {
         office_plan_click(&ctx, screen, &mut app, [0.0, -3.0]);
         office_plan_click(&ctx, screen, &mut app, [0.0, 3.0]);
         assert_eq!(app.document.elements().filter(|e| e.category == Category::Section).count(), 1, "{}", app.message);
+        // Exercise the real quick-access actions, then require exact restoration of the model records.
+        let before_undo = openbim_document::native::records(&app.document);
+        assert!(ribbon_click(&ctx, screen, &mut app, "undo"));
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Section).count(), 0, "{}", app.message);
+        assert!(ribbon_click(&ctx, screen, &mut app, "redo"));
+        assert_eq!(openbim_document::native::records(&app.document), before_undo, "redo restores every native record");
         // save, reopen and export: every element comes back with its identity and its geometry, and the IFC carries
         // the four walls
         let path = std::env::temp_dir().join(format!("openbim-small-office-e2e-{}.obim", std::process::id()));
@@ -1562,6 +1568,7 @@ mod tests {
             assert_eq!(back.geometry, el.geometry, "element {} keeps its geometry", el.id.0);
             assert_eq!(back.name, el.name, "element {} keeps its name", el.id.0);
         }
+        assert_eq!(openbim_document::native::records(&reopened.document), openbim_document::native::records(&saved), "save/reopen preserves all records, including view and room metadata");
         let back_room = reopened.document.room_shape(room).expect("the reopened room is enclosed");
         assert!((back_room.area() - area).abs() < 1e-9, "the room keeps its area: {} against {area}", back_room.area());
         let out = crate::export::export_ifc_with(&reopened.document, "Office", reopened.document.project_key(), "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false)
