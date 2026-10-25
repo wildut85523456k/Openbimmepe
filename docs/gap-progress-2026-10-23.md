@@ -91,9 +91,9 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 |---|---|---|---|
 | C1 | No Load Family | **Closed (first slice)** | `ef92aaa`, `33a01e3`: a catalogue file becomes types in the project |
 | C2 | Type parameters not editable | **Closed (first slice)** | `719815d`: a type is edited through Properties; types carry texts and numbers |
-| C3 | One MEP family | **Closed** | library holds 19 families: `handle`, `door`, `window`, `arched_door`, `fan_coil`, `ahu`, `ceiling_diffuser`, `vav`, `pump`, `valve`, `wc`, `washbasin`, `sprinkler_head`, `luminaire`, `panel_board`, `hanger`, `pipe_elbow`, `pipe_reducer`, `pipe_tee` (`crates/family/src/library.rs:481-500`) |
+| C3 | One MEP family | **Closed** | library holds 19 families: `handle`, `door`, `window`, `arched_door`, `fan_coil`, `ahu`, `ceiling_diffuser`, `vav`, `pump`, `valve`, `wc`, `washbasin`, `sprinkler_head`, `luminaire`, `panel_board`, `hanger`, `pipe_elbow`, `pipe_reducer`, `pipe_tee` (`crates/family/src/library.rs:481-503`) |
 | C4 | No air terminals | **Partial** | ceiling diffuser exists; grille/register variants and the four direction flags not checked |
-| C5 | No hosting on ceiling/face | **Closed** (not re-checked) |
+| C5 | No hosting on ceiling/face | **Open** |
 | C6 | No spaces / zones | **Open** | no module in `crates/document/src` |
 | C7 | Systems of equipment only | **Partial** | "HVAC system end to end" added (`719815d`); whether runs are members was not checked |
 | C8-C11 | Layout types, duct/pipe types, vertical runs, snapping | **Open** (not re-checked; no commits target them) |

@@ -84,3 +84,10 @@ Skipped (target not found / instruction not applicable — per the contract STOP
 - **§C banner `§4.4`:** removed the cross-reference (no §4.4 exists in the doc).
 - **C3:** verified against code — the family registry holds **19 families** (not 7): handle, door, window, arched door, fan coil, ahu, ceiling diffuser, VAV, pump, valve, WC, washbasin, sprinkler head, luminaire, panel board, hanger, pipe elbow/reducer/tee (`crates/family/src/library.rs:481-500`). C3 is **Closed** (register §8 evidence row + progress §3.3 row updated). The earlier "19 members" finding was a mis-read of the family count.
 - **C28:** updated the line-127 mention — arc grids exist (`crates/document/src/grid_arc.rs`, `01ddf1f`).
+
+## Independent review (bim-review, 2026-10-25) — FAIL, then fixed
+The reviewer rejected the candidate; findings + resolutions:
+- **P1 — C5 wrongly closed.** `family_click` routes non-door/window families to `place_family(level, at, spec)` -> `Geometry::Placed { at, level }` (no ceiling/face host); `place_family_in_wall` is wall-only. Ceiling/face hosting is **not implemented**. **Fix:** C5 restored to `**Open**` (was wrongly `Closed (not re-checked)`).
+- **P3 — family citation omitted the 19th entry.** `pipe_tee()` is at `library.rs:501`; `:481-500` excluded it. **Fix:** both C3 citations -> `:481-503`.
+- **P3 — R4 missing-member list omitted `commands`.** **Fix:** added `commands` (20 members - 5 listed = 15 missing).
+Other reviewer notes (no doc change): the C28 statement is in §4 (not §3.4); `cargo fmt` FAIL + release-test BLOCKED are pre-existing Rust/environment, not docs-induced.
