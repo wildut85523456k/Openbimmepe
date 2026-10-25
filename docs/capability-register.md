@@ -45,7 +45,11 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
   room metadata and autosave/recovery have subsequent implementations. Its old scoreboard must not be reused.
 - `revit-book-review.md` has conflicting redo claims and obsolete family-loading/level-tab claims.
 - `apps/desktop/README.md` previously said edits disappear on exit and persistence/IFC were future work; corrected here.
-- PR #48's description says main has no sheets crate; main contains it. Review actual diffs before any merge.
+- PR #48's description says main has no sheets crate; main contains it. Its base is the branch `m1c-sheets-printing`, not `main` (20 files, mergeable): re-target or rebase onto main and review the actual diff before any merge.
+- `crates/sheets/src/model.rs` already defines revisions and revision clouds plus revision title-block fields. The Open item for ch13 is UI, title-block and PDF wiring, not the model (wiring not checked).
+- The 19 Oct CI failures (every run, zero steps executed) were GitHub refusing to start the jobs over failed account payments or a spending limit. They are not code failures and prove nothing about the build. Billing was reported fixed on 25 Oct; at that time a dispatched run was still queued with no jobs, so it is unverified.
+- Separately, `crates/document` pins two git dependencies from the private `edesign-alike` repo; `cargo metadata` returns HTTP 401 without credentials, so no hosted run can pass until `P0_DEPENDENCY_READ_TOKEN` (or equivalent) exists.
+- Free-tier note: `ci.yml` and `printing-regressions.yml` now run only on pull requests into `main` and on manual dispatch, not on every push.
 - The 23 October office fixture report's external-import limitations were partly superseded on 24 October.
 - The small-office UI test already clicked ribbon buttons, but used direct geometry handlers for walls/floor/room/section.
   The P0 candidate replaces these with window pointer events; this is an improvement awaiting execution, not a full-office PASS.
