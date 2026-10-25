@@ -12,6 +12,12 @@ Reference material: branch `docs/revit-book-references` at `6ac8addc9550fcbed3d2
 Scope set by the owner on 2026-10-21: **architecture and MEP first; structure only where MEP needs it
 (trusses, supports/hangers, equipment pads, sleeves); the rest of structure is a later stage.**
 
+> **Verification status (2026-10-25).** Re-verified against `main` @ `b6ef0ee`.
+> The §5.1 "Easy" tier (B2, B7–B11, B12–B16, B21–B24) is **closed**
+> (`b17a1ff`, `fccee7b`, `91eb050`, `f84104a`, `7afe07b`). This doc was last
+> verified at `dcf8382` (112 commits stale); rows updated below. Evidence:
+> `docs/agent-team/evidence/gap-p0-2026-10-25/`.
+
 ---
 
 ## 0. How to read this document
@@ -310,7 +316,7 @@ The register above is the seed for `bim-gap`. Its rules, which the role must enf
   adjacent spaces count once). The reference doc's own note that the pipe chapter's Network example
   shows five solutions while the duct chapter says up to six was confirmed as the book's, not the
   reference's, inconsistency.
-- The workspace has 19 members (18 crates plus `apps/desktop`); `README.md` lists 7.
+- The workspace has 20 members (19 crates plus `apps/desktop`); `README.md` lists 7.
 - The branch `docs/revit-book-references` is 7 commits ahead of `origin/main`, docs only, +4,304
   lines, and has no pull request.
 
