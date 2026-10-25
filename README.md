@@ -14,7 +14,7 @@ An open, native-multicore, Revit-style BIM authoring platform. Design decisions 
 | `crates/sketch` | sketch-and-lock: a small 2D geometric constraint solver (S2h) |
 | `crates/route` | MEP routing: a path drawn point by point becomes straight runs joined by fittings |
 | `crates/ifc` | IFC4 writer: takes the model as the app holds it (wall chains, slabs, openings, MEP networks) and writes a STEP file |
-| `crates/view` | plan views: looking down on a level with a horizontal cut — cut, projected and hidden elements |
+| `crates/view` | plan views: looking down on a level with a horizontal cut — cut, below-cut, overhead and beyond geometry |
 | `crates/viewport` | the logic of a 3D view with no window or GPU: camera, mouse-driven orbit, ViewCube, software renderer |
 | `crates/viewport-egui` | the 3D view as a widget for egui, drawn with wgpu |
 | `crates/photo` | photometric files as manufacturers publish them: IES (IESNA LM-63) and Eulumdat (.ldt) |
