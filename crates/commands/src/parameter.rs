@@ -145,15 +145,36 @@ impl<'a> Resolve<'a> {
     }
 }
 
-/// The name is not a parameter ID or a known label.
+/// The name does not identify exactly one parameter: it is not a parameter ID or a
+/// known label (`candidates` is empty), or it is a label shared by two or more
+/// parameters (`candidates` lists their stable IDs, so the caller can pick one).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolveError {
     pub given: String,
+    /// The stable IDs of the parameters the label names, when it names more than one.
+    pub candidates: Vec<&'static str>,
+}
+
+impl ResolveError {
+    /// True when the label named several parameters rather than none.
+    pub fn is_ambiguous(&self) -> bool {
+        !self.candidates.is_empty()
+    }
 }
 
 impl fmt::Display for ResolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "no parameter with ID or label {:?}", self.given)
+        if self.is_ambiguous() {
+            write!(
+                f,
+                "label {:?} names {} parameters ({}); use a stable ID",
+                self.given,
+                self.candidates.len(),
+                self.candidates.join(", ")
+            )
+        } else {
+            write!(f, "no parameter with ID or label {:?}", self.given)
+        }
     }
 }
 
@@ -181,26 +202,64 @@ impl ParameterRegistry {
     }
 
     /// The parameter named by an ID or by an English or French label. A label is
-    /// accepted with a [`Resolve::ByLabel`] result; an unknown name is an error.
+    /// accepted with a [`Resolve::ByLabel`] result only when it names exactly one
+    /// parameter. A label shared by two or more parameters is refused with the
+    /// candidates listed (never bound silently to the first registered), and an
+    /// unknown name is an error with no candidates.
     pub fn resolve(&self, given: &str) -> Result<Resolve<'static>, ResolveError> {
         if let Some(p) = self.find(given) {
             return Ok(Resolve::Id(p));
         }
-        if let Some(p) = self.params.iter().find(|p| p.en == given) {
-            return Ok(Resolve::ByLabel {
-                parameter: p,
-                label: p.en,
-            });
+        let by_en: Vec<&'static Parameter> = self.params.iter().filter(|p| p.en == given).collect();
+        match by_en.as_slice() {
+            [p] => {
+                return Ok(Resolve::ByLabel {
+                    parameter: p,
+                    label: p.en,
+                })
+            }
+            [_, _, ..] => return Err(Self::ambiguous(given, &by_en)),
+            [] => {}
         }
-        if let Some(p) = self.params.iter().find(|p| p.fr == given) {
-            return Ok(Resolve::ByLabel {
+        let by_fr: Vec<&'static Parameter> = self.params.iter().filter(|p| p.fr == given).collect();
+        match by_fr.as_slice() {
+            [p] => Ok(Resolve::ByLabel {
                 parameter: p,
                 label: p.fr,
-            });
+            }),
+            [_, _, ..] => Err(Self::ambiguous(given, &by_fr)),
+            [] => Err(ResolveError {
+                given: given.to_string(),
+                candidates: Vec::new(),
+            }),
         }
-        Err(ResolveError {
+    }
+
+    fn ambiguous(given: &str, matches: &[&'static Parameter]) -> ResolveError {
+        ResolveError {
             given: given.to_string(),
-        })
+            candidates: matches.iter().map(|p| p.id.as_str()).collect(),
+        }
+    }
+
+    /// The English and French labels shared by more than one parameter, sorted and
+    /// without repeats. A caller must use a stable ID for these.
+    pub fn ambiguous_labels(&self) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = Vec::new();
+        for p in self.params {
+            for label in [p.en, p.fr] {
+                let n = self
+                    .params
+                    .iter()
+                    .filter(|q| q.en == label || q.fr == label)
+                    .count();
+                if n > 1 && !out.contains(&label) {
+                    out.push(label);
+                }
+            }
+        }
+        out.sort_unstable();
+        out
     }
 
     /// Every registered parameter.
@@ -343,23 +402,60 @@ mod tests {
             Resolve::Id(p) => assert_eq!(p.id.as_str(), "duct.width"),
             other => panic!("expected an exact ID match, got {other:?}"),
         }
-        // by English label: accepted, with a warning
-        match r.resolve("Width").unwrap() {
+        // by English label that names one parameter: accepted, with a warning
+        match r.resolve("Elevation").unwrap() {
             Resolve::ByLabel { parameter, label } => {
-                assert_eq!(parameter.id.as_str(), "element.width");
-                assert_eq!(label, "Width");
+                assert_eq!(parameter.id.as_str(), "element.elevation");
+                assert_eq!(label, "Elevation");
             }
             other => panic!("expected a label match, got {other:?}"),
         }
-        // by French label: accepted, with a warning
-        match r.resolve("Largeur").unwrap() {
-            Resolve::ByLabel { parameter, .. } => {
-                assert_eq!(parameter.id.as_str(), "element.width")
+        // by French label that names one parameter: accepted, with a warning
+        match r.resolve("Pente").unwrap() {
+            Resolve::ByLabel { parameter, label } => {
+                assert_eq!(parameter.id.as_str(), "element.slope");
+                assert_eq!(label, "Pente");
             }
             other => panic!("expected a French label match, got {other:?}"),
         }
         // an unknown name is refused
         assert!(r.resolve("nope").is_err());
+    }
+
+    #[test]
+    fn a_label_shared_by_two_parameters_is_refused_with_its_candidates() {
+        let r = builtin();
+        // "Width" is on both the element and the duct: never bound to the first registered
+        let e = r.resolve("Width").unwrap_err();
+        assert!(e.is_ambiguous());
+        assert_eq!(e.candidates, vec!["element.width", "duct.width"]);
+        assert!(e.to_string().contains("use a stable ID"), "{e}");
+        // the French spelling is just as ambiguous
+        assert_eq!(
+            r.resolve("Largeur").unwrap_err().candidates,
+            vec!["element.width", "duct.width"]
+        );
+        // a duct diameter and a pipe diameter share a label too
+        assert_eq!(
+            r.resolve("Diameter").unwrap_err().candidates,
+            vec!["duct.diameter", "pipe.diameter"]
+        );
+        // the stable ID still names exactly one parameter
+        assert_eq!(r.resolve("duct.width").unwrap().parameter().id.as_str(), "duct.width");
+        // an unknown name is an error without candidates
+        let unknown = r.resolve("nope").unwrap_err();
+        assert!(!unknown.is_ambiguous());
+        assert!(unknown.candidates.is_empty());
+    }
+
+    #[test]
+    fn the_set_of_shared_labels_is_known_so_a_new_duplicate_is_a_decision() {
+        // Adding a parameter whose label already exists changes this list and fails here,
+        // so the author has to confirm the label is meant to be shared.
+        assert_eq!(
+            builtin().ambiguous_labels(),
+            vec!["Diameter", "Diamètre", "Hauteur", "Height", "Largeur", "Width"]
+        );
     }
 
     #[test]

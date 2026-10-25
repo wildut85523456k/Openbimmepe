@@ -243,12 +243,12 @@ pub static BUILTIN: &[CommandDef] = &[
     ),
     CommandDef::new(
         "slab",
-        "Floor",
+        "Slab",
         "Dalle",
         "slab",
-        "Architecture",
-        "Build",
-        "Lay a slab: thickness and top offset.",
+        "Structure",
+        "Foundation",
+        "Lay a foundation slab: thickness and top offset.",
         &[
             InputSpec::new(ParameterId::new("element.height"), ValueKind::Quantity),
             InputSpec::new(ParameterId::new("element.elevation"), ValueKind::Quantity),
@@ -277,8 +277,8 @@ pub static BUILTIN: &[CommandDef] = &[
         "Column",
         "Poteau",
         "column",
-        "Structure",
-        "Structure",
+        "Architecture",
+        "Build",
         "Place a column: width and depth.",
         &[
             InputSpec::new(ParameterId::new("element.width"), ValueKind::Quantity),

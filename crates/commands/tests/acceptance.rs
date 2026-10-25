@@ -40,35 +40,41 @@ fn a_label_looks_up_the_stable_id() {
     let exact = registry.resolve("duct.width").expect("the ID is known");
     assert!(matches!(exact, Resolve::Id(p) if p.id == ParameterId::new("duct.width")));
 
-    // An English label, accepted with a warning.
+    // An English label that names one parameter, accepted with a warning.
     let en = registry
-        .resolve("Width")
+        .resolve("Elevation")
         .expect("the English label is accepted");
     match en {
         Resolve::ByLabel { parameter, label } => {
-            assert_eq!(parameter.id.as_str(), "element.width");
-            assert_eq!(label, "Width");
+            assert_eq!(parameter.id.as_str(), "element.elevation");
+            assert_eq!(label, "Elevation");
         }
         Resolve::Id(_) => panic!("a label must be reported as a label, not as an ID"),
     }
 
-    // A French label, accepted with a warning.
+    // A French label that names one parameter, accepted with a warning.
     let fr = registry
-        .resolve("Largeur")
+        .resolve("Pente")
         .expect("the French label is accepted");
     match fr {
-        Resolve::ByLabel { parameter, .. } => assert_eq!(parameter.id.as_str(), "element.width"),
+        Resolve::ByLabel { parameter, .. } => assert_eq!(parameter.id.as_str(), "element.slope"),
         Resolve::Id(_) => panic!("a French label must be reported as a label"),
     }
 
-    // A renamed label keeps working: the ID is what is stored, the label is only a
-    // spelling. Both spellings name the same stable parameter.
+    // A label shared by an element and a duct is refused, not bound to either: the
+    // author must give the stable ID (issue #75).
+    let width = registry.resolve("Width").expect_err("Width is on two parameters");
+    assert!(width.is_ambiguous());
+    assert_eq!(width.candidates, vec!["element.width", "duct.width"]);
+    assert!(registry.resolve("Largeur").is_err());
+
+    // The stable ID is what is stored; it always names one parameter.
     assert_eq!(
-        registry.resolve("Width").unwrap().parameter().id,
-        ParameterId::new("element.width")
+        registry.resolve("duct.width").unwrap().parameter().id,
+        ParameterId::new("duct.width")
     );
     assert_eq!(
-        registry.resolve("Largeur").unwrap().parameter().id,
+        registry.resolve("element.width").unwrap().parameter().id,
         ParameterId::new("element.width")
     );
 
