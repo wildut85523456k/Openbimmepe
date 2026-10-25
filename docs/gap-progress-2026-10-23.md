@@ -48,7 +48,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 
 ### 3.1 Blockers and shell (class 2.1)
 
-> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11); see §4.4.
+> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11).
 
 | ID | Gap (21 Oct) | Status | Evidence |
 |---|---|---|---|
@@ -64,7 +64,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 
 ### 3.2 Exchange and persistence (class 2.2)
 
-> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11); see §4.4.
+> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11).
 
 | ID | Gap | Status | Evidence |
 |---|---|---|---|
@@ -85,13 +85,13 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 
 ### 3.3 MEP content (class 3.1)
 
-> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11); see §4.4.
+> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11).
 
 | ID | Gap | Status | Evidence |
 |---|---|---|---|
 | C1 | No Load Family | **Closed (first slice)** | `ef92aaa`, `33a01e3`: a catalogue file becomes types in the project |
 | C2 | Type parameters not editable | **Closed (first slice)** | `719815d`: a type is edited through Properties; types carry texts and numbers |
-| C3 | One MEP family | **Partial** | library is `fan_coil`, `ahu`, `ceiling_diffuser` (+ handle, door, window, arched door) = 7. Pump, valve, VAV, fixtures, sprinkler, luminaire, panel, hanger still missing |
+| C3 | One MEP family | **Closed** | library holds 19 families: `handle`, `door`, `window`, `arched_door`, `fan_coil`, `ahu`, `ceiling_diffuser`, `vav`, `pump`, `valve`, `wc`, `washbasin`, `sprinkler_head`, `luminaire`, `panel_board`, `hanger`, `pipe_elbow`, `pipe_reducer`, `pipe_tee` (`crates/family/src/library.rs:481-500`) |
 | C4 | No air terminals | **Partial** | ceiling diffuser exists; grille/register variants and the four direction flags not checked |
 | C5 | No hosting on ceiling/face | **Closed** (not re-checked) |
 | C6 | No spaces / zones | **Open** | no module in `crates/document/src` |
@@ -124,7 +124,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | Step | 21 Oct | 23 Oct |
 |---|---|---|
 | New project, add levels, rename, delete | Blocked | Works (code + team tests) |
-| Draw grids, walls, floors, doors, windows | Blocked on canvas | Reachable; grid rename/arcs, wall top constraint and wrapping still missing (C23, C28) |
+| Draw grids, walls, floors, doors, windows | Blocked on canvas | Reachable; grid rename + wall top constraint + wrapping still missing (C23); arc grids exist (`crates/document/src/grid_arc.rs`, `01ddf1f`) (C28) |
 | Place AHU / diffuser, edit type values | Not possible | Works |
 | Draw ducts and pipes, size, build an HVAC system | Partial | Works for ducts; vertical runs, types and routing preferences missing |
 | Plumbing, fire protection | Abstract nodes only | Unchanged |

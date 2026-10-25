@@ -78,3 +78,9 @@ Skipped (target not found / instruction not applicable — per the contract STOP
 - [ ] Confirm §B: update lines 63 & 70 `19` → `20` too, or accept the documented inconsistency.
 - [ ] Confirm §C banner target `§4.4` (does not exist) — fix or leave.
 - [ ] Decide C3 (contract text is corrupt) and C28 (no matching target) handling.
+
+## Resolved (orchestrator follow-up, 2026-10-25)
+- **§B lines 63/70:** updated `README.md lists 19 members` -> `20 members` (register R4 row + Class 1 acceptance). The §8.2.1 `19 workspace members` is a historical dcf8382 test-run result, left as-is.
+- **§C banner `§4.4`:** removed the cross-reference (no §4.4 exists in the doc).
+- **C3:** verified against code — the family registry holds **19 families** (not 7): handle, door, window, arched door, fan coil, ahu, ceiling diffuser, VAV, pump, valve, WC, washbasin, sprinkler head, luminaire, panel board, hanger, pipe elbow/reducer/tee (`crates/family/src/library.rs:481-500`). C3 is **Closed** (register §8 evidence row + progress §3.3 row updated). The earlier "19 members" finding was a mis-read of the family count.
+- **C28:** updated the line-127 mention — arc grids exist (`crates/document/src/grid_arc.rs`, `01ddf1f`).
