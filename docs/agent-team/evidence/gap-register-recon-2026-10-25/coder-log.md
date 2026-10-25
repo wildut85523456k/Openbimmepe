@@ -66,7 +66,7 @@ Skipped (target not found / instruction not applicable — per the contract STOP
 
 ## Constraints honored
 - Docs only: the two named docs + this log. No code/tests touched. Did **not** touch
-  `D:/Codex/Revit-alike-P0`.
+  the office-P0 worktree (a parallel workstream).
 - LF line endings preserved on both docs.
 - Minimal edits, no reformatting; banners inserted verbatim from the contract.
 
