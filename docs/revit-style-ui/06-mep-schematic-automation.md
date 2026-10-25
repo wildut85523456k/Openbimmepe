@@ -2,7 +2,7 @@
 
 Status: **proposed 20 Oct 2026; user decisions recorded below; not implemented.** Companion to 02 (workflows), 04 (automation) and 05 (backlog rows SCH-001–006).
 
-Implementation status of this proposal: nothing in this document is implemented or accepted. A first engine slice — the zone data model, the assignment rules and the extraction query with its JSON dump — exists on the separate local branch `feature/sch-001-schematic-zones` (commit `e37996c`); it is not part of this candidate, it is not reviewed here, and no SCH-001 acceptance is claimed for it.
+Implementation status of this proposal: nothing in this document is implemented or accepted. A first engine slice — the zone data model, the assignment rules and the extraction query with its JSON dump — exists on the separate local branch `feature/sch-001-schematic-zones` (commit `e37996c`); it is not part of this candidate, it is not reviewed here, and no SCH-001 acceptance is claimed for it. **[superseded 2026-10-21 — R5 register: the schematic engine is now in main — crates/schematic/ (SCH-002 layout engine, layout.rs), crates/document/src/schematic.rs (SchematicZone at :56 and the extraction query at :346) and crates/document/src/schematic_view.rs generate_schematic; "it is not part of this candidate" is stale]**
 
 ## Decisions (user, 20 Oct 2026)
 

@@ -1,6 +1,6 @@
 # Revit UX parity audit (2026-10-18, updated 2026-10-19)
 
-Standing rule: every tool mimics Revit's user experience. Verified by automated event tests (simulated mouse and keys) and by reading the code. Not verified side by side with Revit, and not clicked by hand.
+Standing rule: every tool mimics Revit's user experience. Verified by automated event tests (simulated mouse and keys) and by reading the code. Not verified side by side with Revit, and not clicked by hand. **[superseded 2026-10-21 — R5 register: the automated event tests now exercise the ribbon (ribbon_click, apps/desktop/src/model_view.rs:1406), the options bar (the_options_bar_and_the_window_show_the_lists_of_the_model, mep_settings_ui.rs) and the global keys (key_frame, model_view.rs:1416); the reading that they omit the ribbon, options bar or global keys is stale]**
 
 ## Working tools
 Wall, Wall Joins, Door, Window, Component, Column, Room, Roof, Ceiling, Stair, Shaft Opening, Wall Opening, Beam, Brace, Floor/Slab, Foundation, Wall Footing, Beam System, Truss, Rebar, Level, Grid, Tag, Aligned Dimension, Measure, Duct, Pipe, End Point, Electrical Node, Cable, Compute, Move, Copy, Rotate, Mirror, Align, Offset, Trim/Extend, Delete, IFC import/export, Select, Zoom in/out, Project Parameters, Automation items.
