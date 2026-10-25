@@ -1,6 +1,7 @@
 //! The app's own file: the document as the lines of `openbim_document::native`, one per element, in a `.obim` text
 //! file. Saving writes a temporary file beside the target and renames it, so a failed write never damages the file
 //! that was there.
+use crate::dialog::Ask;
 use crate::Desktop;
 use eframe::egui;
 use openbim_document::{native, Document};
@@ -65,7 +66,7 @@ impl Desktop {
             _ => {
                 let mut fd = rfd::FileDialog::new().set_title("Save model").add_filter("OpenBIM model", &["obim"]);
                 if let Some(name) = self.file.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).and_then(|n| n.to_str()) { fd = fd.set_file_name(name); } else { fd = fd.set_file_name("model.obim"); }
-                let Some(p) = fd.save_file() else { return };
+                let Some(p) = fd.ask_save() else { return };
                 let mut p = p.display().to_string();
                 if !p.to_lowercase().ends_with(".obim") { p.push_str(".obim"); }
                 p
@@ -213,7 +214,7 @@ impl Desktop {
 
     /// Asks which file to open, then opens it (after the question about unsaved changes, if there are any).
     pub(crate) fn open_file(&mut self) {
-        let Some(p) = rfd::FileDialog::new().set_title("Open model").add_filter("OpenBIM model", &["obim"]).pick_file() else { return };
+        let Some(p) = rfd::FileDialog::new().set_title("Open model").add_filter("OpenBIM model", &["obim"]).ask_open() else { return };
         self.open_path(&p.display().to_string());
     }
 
@@ -251,7 +252,9 @@ impl Desktop {
         // a level that is not there and the IFC export of the first wall would fail (A2).
         let _ = self.document.place_level("Level 1", 0.0);
         let _ = self.document.place_level("Level 2", 3.0);
-        self.file = FileState::default();
+        // the template levels are not the user's work: a new, untouched model has nothing to save, so opening a
+        // file over it asks nothing (as in Revit)
+        self.file = FileState { saved_revision: self.document.revision(), ..Default::default() };
         self.compute = Default::default();
         self.georef = Default::default();
         self.selected = None;

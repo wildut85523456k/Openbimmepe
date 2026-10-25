@@ -2,6 +2,18 @@
 //! no model persistence, IFC import, live routing, or central collaboration is implied.
 #![forbid(unsafe_code)]
 
+/// Records, in a test build, where a control was drawn this frame so a window test can click it by name:
+/// `test_hit!(app, response, "tab:{}", name)` keeps the part a pointer can reach (clipped by its scroll area) and the
+/// whole rectangle. It compiles to nothing in the program.
+macro_rules! test_hit {
+    ($app:expr, $response:expr, $($name:tt)+) => {
+        #[cfg(test)]
+        { let r = &$response; $app.widget_hits.push((format!($($name)+), r.interact_rect, r.rect)); }
+        #[cfg(not(test))]
+        { let _ = &$response; }
+    };
+}
+
 mod icons;
 mod ribbon;
 mod panels;
@@ -27,6 +39,7 @@ mod app_settings;
 mod georef_ui;
 mod journal;
 mod file;
+mod dialog;
 mod mep_tool;
 mod insulation_ui;
 mod systems_ui;
@@ -301,6 +314,10 @@ struct Desktop {
     /// where the last frame drew each ribbon and quick-access button: the whole-window test clicks them (A8)
     #[cfg(test)]
     ribbon_hits: Vec<(&'static str, egui::Rect)>,
+    /// where the last frame drew the other controls a window test operates (tabs, browser views, options-bar
+    /// fields, dialog fields and buttons), keyed by a readable name; see `test_hit!`
+    #[cfg(test)]
+    widget_hits: Vec<(String, egui::Rect, egui::Rect)>,
     /// the plan's own model-to-screen transform of the last frame: (centre + pan, pixels per metre, the centre of the
     /// fitted box), so a test can aim a click at a model point (A8)
     #[cfg(test)]
@@ -374,6 +391,8 @@ impl Desktop {
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(),
             #[cfg(test)]
             ribbon_hits: Vec::new(),
+            #[cfg(test)]
+            widget_hits: Vec::new(),
             #[cfg(test)]
             plan_transform: None,
         }
@@ -660,7 +679,9 @@ impl Desktop {
         ui.horizontal(|ui| {
             for (tab, icon) in ribbon::TABS {
                 let img = ribbon::icon_image(ui, icon, self.dark, Vec2::splat(16.0));
-                if ui.add(egui::Button::image_and_text(img, *tab).selected(self.ribbon == *tab).frame(false)).clicked() {
+                let response = ui.add(egui::Button::image_and_text(img, *tab).selected(self.ribbon == *tab).frame(false));
+                test_hit!(self, response, "tab:{tab}");
+                if response.clicked() {
                     self.ribbon = tab;
                 }
             }
@@ -828,7 +849,7 @@ impl Desktop {
     /// from the `eframe::App` entry point so that a test can drive the whole window without an `eframe::Frame` (A8).
     fn window(&mut self, ui: &mut egui::Ui) {
         #[cfg(test)]
-        self.ribbon_hits.clear();
+        { self.ribbon_hits.clear(); self.widget_hits.clear(); }
         let ctx = ui.ctx().clone();
         self.global_keys(&ctx);
         egui::Panel::top("header").show(ui, |ui| {

@@ -2,6 +2,7 @@
 //! Properties window (Fields, Filter, Sorting/Grouping, Formatting), the schedule view itself with a row for each
 //! element (or each kind of element), headers, footers and grand totals that follow the model as it changes, a click on
 //! a row selecting its elements, and export to CSV. The definitions are saved with the model.
+use crate::dialog::Ask;
 use crate::{Desktop, View};
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
@@ -228,7 +229,7 @@ impl Desktop {
             if ui.button("Export CSV…").clicked() {
                 let mut fd = rfd::FileDialog::new().set_title("Export schedule").add_filter("CSV", &["csv"]);
                 fd = fd.set_file_name(format!("{}.csv", def.name));
-                if let Some(p) = fd.save_file() { self.export_schedule_csv(id, &p); }
+                if let Some(p) = fd.ask_save() { self.export_schedule_csv(id, &p); }
             }
             if ui.button("Duplicate").clicked() { self.duplicate_schedule(id); }
             if ui.button("Rename…").clicked() { self.schedules.rename = Some((id, def.name.clone())); }

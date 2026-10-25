@@ -5,6 +5,9 @@ use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use openbim_document::{Category, Geometry, RangeClass};
 
+/// How near (screen pixels) to a room's label a Select click picks the room instead of the slab it lies on.
+const ROOM_LABEL_PICK_PX: f32 = 24.0;
+
 /// The span of the plan view on a model with nothing in it yet, in metres: enough room to place a
 /// level and a first wall, and close to what Revit shows for a new project.
 const EMPTY_PLAN_SPAN_M: f32 = 10.0;
@@ -1065,6 +1068,14 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             let hit = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id)
                 .or_else(|| datum_hits.iter().rev().find(|(_, a, b)| segment_distance(p, *a, *b) < 7.0
                     || p.distance(*a) < 12.0 || p.distance(*b) < 12.0).map(|(id, _, _)| *id));
+            // As in Revit, a floor, ceiling or roof is not picked by its inside in a plan while a room is: a click on
+            // a room's label (its name and area) selects the room rather than the slab it lies on. Walls, families
+            // and openings above it still win; Tab cycles to the slab.
+            let on_label = room_labels.iter().find(|(_, at, _, _)| p.distance(*at) < ROOM_LABEL_PICK_PX).map(|(id, ..)| *id);
+            let hit = match (hit, on_label) {
+                (Some(h), Some(room)) if app.document.get(h).is_some_and(|e| e.category == Category::Slab) => Some(room),
+                (hit, _) => hit,
+            };
             let mods = ui.input(|i| i.modifiers);
             match hit {
                 Some(id) if mods.command || mods.ctrl => app.change_selection(id, true),
@@ -1604,6 +1615,221 @@ mod tests {
         assert_eq!(out.text.matches("=IFCWINDOW(").count(), 1);
         assert_eq!(out.text.matches("=IFCRELFILLSELEMENT(").count(), 2, "both families fill their wall openings");
         std::fs::remove_file(&path).ok();
+    }
+
+    /// Where the last frame drew the control named `name` (see `test_hit!`), after drawing a fresh frame. A control
+    /// scrolled out of sight is scrolled to with the mouse wheel over its own scroll area, as a user would; only
+    /// the part a pointer reaches is returned.
+    fn widget(ctx: &egui::Context, screen: Rect, app: &mut Desktop, name: &str) -> Rect {
+        for _ in 0..40 {
+            window_frame(ctx, screen, app, vec![]);
+            let Some((_, reach, full)) = app.widget_hits.iter().rev().find(|(hit, ..)| hit == name).cloned() else { break };
+            if reach.height() >= full.height().min(8.0) && reach.width() > 1.0 { return reach; }
+            // the scroll area clips the control: wheel over a visible control of the same group (the same name
+            // before the colon, so the same scroll area) in the direction that reveals it
+            let group = name.split(':').next().unwrap_or(name);
+            let over = app.widget_hits.iter().rev().find(|(n, r, _)| n.split(':').next() == Some(group) && r.height() > 4.0).map(|(_, r, _)| r.center());
+            let Some(over) = over else { break };
+            let up = full.center().y < over.y;
+            window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(over), egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, if up { 40.0 } else { -40.0 }), phase: egui::TouchPhase::Move, modifiers: Default::default(),
+            }]);
+        }
+        panic!("the window shows no reachable control {name:?}; it shows {:?} ({})",
+            app.widget_hits.iter().map(|(n, r, _)| (n.as_str(), *r)).collect::<Vec<_>>(), app.message)
+    }
+
+    /// One click of the primary button at the middle of `rect`.
+    fn click_at(ctx: &egui::Context, screen: Rect, app: &mut Desktop, rect: Rect) {
+        let at = rect.center();
+        assert!(screen.contains(at), "the control at {rect:?} is outside the window");
+        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+        window_frame(ctx, screen, app, vec![button(at, true)]);
+        window_frame(ctx, screen, app, vec![button(at, false)]);
+    }
+
+    fn click_widget(ctx: &egui::Context, screen: Rect, app: &mut Desktop, name: &str) {
+        let rect = widget(ctx, screen, app, name);
+        click_at(ctx, screen, app, rect);
+    }
+
+    /// Two clicks in quick succession, as a user opens a view from the Project Browser.
+    fn double_click_widget(ctx: &egui::Context, screen: Rect, app: &mut Desktop, name: &str) {
+        let at = widget(ctx, screen, app, name).center();
+        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+        // egui tells a double click by the time between the clicks, so these frames carry their own clock; it starts
+        // a second after the last frame so the clicks before it do not make this a triple click
+        let start = ctx.input(|i| i.time) + 1.0;
+        for (k, pressed) in [true, false, true, false].into_iter().enumerate() {
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(start + 0.05 * (k + 1) as f64), events: vec![button(at, pressed)], ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| app.window(ui));
+            out.textures_delta.clear();
+        }
+    }
+
+    /// Click a text field, select what it holds and type `text` over it, as a user does.
+    fn type_into(ctx: &egui::Context, screen: Rect, app: &mut Desktop, name: &str, text: &str) {
+        click_widget(ctx, screen, app, name);
+        window_frame(ctx, screen, app, vec![key_with(egui::Key::A, egui::Modifiers::COMMAND)]);
+        window_frame(ctx, screen, app, vec![egui::Event::Text(text.into())]);
+    }
+
+    fn ribbon_button(ctx: &egui::Context, screen: Rect, app: &mut Desktop, tab: &str, id: &str) {
+        click_widget(ctx, screen, app, &format!("tab:{tab}"));
+        assert_eq!(app.ribbon, tab, "the {tab} tab opens");
+        window_frame(ctx, screen, app, vec![]);
+        assert!(ribbon_click(ctx, screen, app, id), "the {tab} tab shows the {id} button");
+    }
+
+    /// The axis of each wall on `level`, in the order they were drawn.
+    fn wall_axes(app: &Desktop, level: ElementId) -> Vec<(ElementId, [f64; 2], [f64; 2])> {
+        app.document.elements().filter(|e| e.category == Category::Wall).filter_map(|e| match e.geometry {
+            Some(Geometry::Linear { start, end, level: l }) if l == level => Some((e.id, start, end)),
+            _ => None,
+        }).collect()
+    }
+
+    /// P0-4, first slice: a two-storey office through the window's own controls. Every step below is a click or
+    /// typing on a control the window drew, located from that frame: ribbon tabs and buttons, the options bar, the
+    /// Project Browser, the Properties palette, the Export IFC dialog and the plan itself. The one substitution is
+    /// the platform file dialog behind Save and Open, answered through `dialog::answer` (disclosed there).
+    /// Annotation, schedules, sheets, PDF, host edits and recovery are later slices of the journey.
+    #[test]
+    fn the_two_storey_office_is_drawn_saved_reopened_and_exported_through_the_window() {
+        // a wide, tall window: the ribbon scrolls sideways and the Properties palette scrolls down, and a control
+        // scrolled out of sight cannot be clicked
+        let (ctx, screen) = (egui::Context::default(), Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0)));
+        let mut app = Desktop::sample();
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "new"));
+        assert_eq!(app.levels().len(), 2, "{}", app.message);
+
+        // Datums: rename both levels from the Level tool's options bar, and add a roof level
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "level");
+        assert!(app.tool == crate::Tool::Level, "{}", app.message);
+        for (old, new) in [("Level 1", "Ground Floor"), ("Level 2", "First Floor")] {
+            click_widget(&ctx, screen, &mut app, &format!("level:rename:{old}"));
+            type_into(&ctx, screen, &mut app, "level:rename_field", new);
+            click_widget(&ctx, screen, &mut app, "level:rename_ok");
+            assert!(app.levels().iter().any(|l| l.1 == new), "{old} is renamed {new}: {}", app.message);
+        }
+        type_into(&ctx, screen, &mut app, "level:name", "Roof");
+        click_widget(&ctx, screen, &mut app, "level:place");
+        let levels = app.levels();
+        assert_eq!(levels.iter().map(|l| (l.1.as_str(), l.2)).collect::<Vec<_>>(), vec![("Ground Floor", 0.0), ("First Floor", 3.0), ("Roof", 6.0)], "{}", app.message);
+        let (ground, first) = (levels[0].0, levels[1].0);
+
+        // the browser names the plans after their levels; opening one is a double click
+        double_click_widget(&ctx, screen, &mut app, "view:Ground Floor");
+        assert_eq!(app.view, View::Plan, "{}", app.message);
+
+        // two grids frame the building; the plan fits its view to what the model holds, so they also give the
+        // empty plan its extent before the walls exist
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "grid");
+        for p in [[-4.0, -3.0], [4.0, -3.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        // one grid fills the plan edge to edge, so zoom out from the View tab before drawing the next (the Grid
+        // tool stays active, as in Revit)
+        for _ in 0..4 { ribbon_button(&ctx, screen, &mut app, "View", "zoom_out"); }
+        assert!(app.tool == crate::Tool::Grid, "{}", app.message);
+        for p in [[-4.0, -3.0], [-4.0, 3.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Grid).count(), 2, "{}", app.message);
+
+        // Envelope on the ground floor: walls on their exterior face, chosen in the options bar
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "wall");
+        click_widget(&ctx, screen, &mut app, "wall_loc");
+        click_widget(&ctx, screen, &mut app, "wall_loc:Finish Face: Exterior");
+        assert_eq!(Desktop::WALL_LOCATIONS[app.wall_loc], "Finish Face: Exterior");
+        for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0], [-3.0, -2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        assert_eq!(wall_axes(&app, ground).len(), 4, "{}", app.message);
+        let outer = wall_axes(&app, ground);
+        // a door and a window a quarter of the way along two outer walls, clear of the partition to come
+        for (command, (host, a, b)) in ["door", "window"].into_iter().zip(outer.iter().take(2)) {
+            ribbon_button(&ctx, screen, &mut app, "Architecture", command);
+            let at = [a[0] + (b[0] - a[0]) * 0.25, a[1] + (b[1] - a[1]) * 0.25];
+            office_plan_click(&ctx, screen, &mut app, at);
+            assert!(app.document.elements().any(|e| matches!(e.geometry, Some(Geometry::InWall { host: h, .. }) if h == *host)), "the {command} is in its wall: {}", app.message);
+        }
+        // a partition on its centreline divides the plan in two
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "wall");
+        click_widget(&ctx, screen, &mut app, "wall_loc");
+        click_widget(&ctx, screen, &mut app, "wall_loc:Wall Centerline");
+        for p in [[0.0, -2.0], [0.0, 2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert_eq!(wall_axes(&app, ground).len(), 5, "{}", app.message);
+        // the floor under them
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "floor");
+        for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(app.document.elements().filter(|e| e.category == Category::Slab).count(), 1, "{}", app.message);
+
+        // Rooms: one each side of the partition, numbered and named in the Properties palette
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "room");
+        for p in [[-1.5, 0.0], [1.5, 0.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        let rooms: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Room).map(|e| e.id).collect();
+        assert_eq!(rooms.len(), 2, "{}", app.message);
+        for room in &rooms {
+            let area = app.document.room_shape(*room).expect("each room is enclosed").area();
+            // drawn counter-clockwise on the exterior face, the walls stand outside the 6 x 4 m line (as in the
+            // small-office regression), so each side of the 200 mm partition is 2.9 x 4 m
+            assert!((area - 2.9 * 4.0).abs() < 0.05, "room area {area}");
+        }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.tool == crate::Tool::Select, "{}", app.message);
+        for (at, number, name) in [([-1.5, 0.0], "101", "Office"), ([1.5, 0.0], "102", "Meeting")] {
+            office_plan_click(&ctx, screen, &mut app, at);
+            let picked = app.selected_id().expect("a click in the room selects it");
+            assert!(rooms.contains(&picked), "the click selects a room, not {:?}: {}", app.document.get(picked).map(|e| e.category), app.message);
+            type_into(&ctx, screen, &mut app, "room:Number", number);
+            type_into(&ctx, screen, &mut app, "room:Name", name);
+            click_widget(&ctx, screen, &mut app, "room:Apply");
+            assert_eq!((app.document.room_text(picked, "Number"), app.document.get(picked).unwrap().name.clone()), (number.to_string(), name.to_string()), "{}", app.message);
+        }
+
+        // the first floor, opened from the browser: its own four walls
+        double_click_widget(&ctx, screen, &mut app, "view:First Floor");
+        assert_eq!(app.view, View::UpperPlan, "{}", app.message);
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "wall");
+        click_widget(&ctx, screen, &mut app, "wall_loc");
+        click_widget(&ctx, screen, &mut app, "wall_loc:Finish Face: Exterior");
+        for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0], [-3.0, -2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        assert_eq!(wall_axes(&app, first).len(), 4, "the first floor has its own walls: {}", app.message);
+        assert_eq!(wall_axes(&app, ground).len(), 5, "the ground floor is unchanged");
+
+        // Save through the quick-access Save; the platform dialog's answer is the one substitution
+        let dir = std::env::temp_dir().join(format!("openbim-two-storey-office-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Bureau d'étude.obim");
+        let asked = crate::dialog::asked();
+        crate::dialog::answer(Some(file.clone()));
+        assert!(ribbon_click(&ctx, screen, &mut app, "save"));
+        assert_eq!(crate::dialog::asked(), asked + 1, "Save of an unnamed model asks where");
+        assert!(file.exists() && !app.is_dirty(), "{}", app.message);
+        let saved = openbim_document::native::records(&app.document);
+
+        // New, then Open the file again
+        assert!(ribbon_click(&ctx, screen, &mut app, "new"));
+        assert!(app.document.elements().all(|e| e.category == Category::Level), "New leaves only its two levels");
+        crate::dialog::answer(Some(file.clone()));
+        assert!(ribbon_click(&ctx, screen, &mut app, "open"));
+        assert_eq!(openbim_document::native::records(&app.document), saved, "the reopened file holds every record: {}", app.message);
+        assert_eq!(app.levels().iter().map(|l| l.1.as_str()).collect::<Vec<_>>(), vec!["Ground Floor", "First Floor", "Roof"]);
+
+        // Export IFC from the Insert tab, typing the file name in the dialog
+        let ifc = dir.join("office.ifc");
+        ribbon_button(&ctx, screen, &mut app, "Insert", "ifc_export");
+        type_into(&ctx, screen, &mut app, "export:path", ifc.to_str().unwrap());
+        click_widget(&ctx, screen, &mut app, "export:go");
+        let text = std::fs::read_to_string(&ifc).unwrap_or_else(|e| panic!("the export wrote {}: {e} ({})", ifc.display(), app.message));
+        // the IFC carries what was drawn: 9 walls on their storeys, both rooms, the door and window in their openings
+        assert_eq!(text.matches("=IFCBUILDINGSTOREY(").count(), 3);
+        assert_eq!(text.matches("=IFCWALL(").count() + text.matches("=IFCWALLSTANDARDCASE(").count(), 9);
+        assert_eq!(text.matches("=IFCSPACE(").count(), 2);
+        assert_eq!(text.matches("=IFCDOOR(").count(), 1);
+        assert_eq!(text.matches("=IFCWINDOW(").count(), 1);
+        assert_eq!(text.matches("=IFCRELFILLSELEMENT(").count(), 2);
+        assert!(text.contains("'101 Office'") && text.contains("'102 Meeting'"), "the room numbers and names reach the IFC spaces");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

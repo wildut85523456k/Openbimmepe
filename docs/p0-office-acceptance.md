@@ -9,7 +9,17 @@ Reference: Architecture 2026 chapters 2-8 and 11-13. This is an original test fi
 2. Window event regression: `model_view.rs::tests::the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported`.
    The P0 candidate clicks New and tool buttons and places grid/walls/floor/room/section with pointer events through
    `Desktop::window`. Tabs and wall location are still fixture setup. Save/Open/IFC still use direct methods.
-3. Complete office interaction: OPEN. Level/parameter fields, tabs, dialogs and documentation actions must be operated.
+3. Complete office interaction: IN PROGRESS. First slice (26 Oct):
+   `model_view.rs::tests::the_two_storey_office_is_drawn_saved_reopened_and_exported_through_the_window` operates
+   only controls the window drew, located from that frame by name (`test_hit!`): ribbon tabs and buttons, the
+   options-bar level rename fields and Location Line list, the Project Browser (double click), the Properties room
+   fields and Apply, the Export IFC dialog's path field and button, and the plan. It renames both levels, places a
+   roof level, draws two grids, ground-floor walls with a door, a window and a partition, a floor, two rooms numbered
+   and named in Properties, and first-floor walls, then saves (quick access), starts New, opens (quick access) and
+   exports IFC. The one substitution is the platform file dialog behind Save and Open (`dialog.rs`, `dialog::answer`).
+   A scroll-clipped control is reached with the mouse wheel; a control out of sight fails the test.
+   Still OPEN in this level: level elevation editing (no control exists), stair/roof/ceiling, host edits with
+   undo/redo, annotation, schedules, sheets, PDF and recovery.
 4. Native window/file dialogs and visual output: OPEN. Headless shape counts do not close this gate.
 
 ## Complete journey

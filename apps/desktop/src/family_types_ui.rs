@@ -3,6 +3,7 @@
 //! material). Rows are edited in place, added (a copy of the last row) and deleted (while no element uses the type);
 //! nothing changes in the model until Apply, and then the whole table is one undoable step, or refused whole with the
 //! row that the family does not accept.
+use crate::dialog::Ask;
 use crate::Desktop;
 use eframe::egui;
 use openbim_document::{Category, Document, ElementId, TypeRow};
@@ -207,7 +208,7 @@ impl Desktop {
                 ui.label("CSV");
                 ui.add(egui::TextEdit::singleline(&mut d.csv_path).desired_width(260.0));
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Import types from CSV").add_filter("CSV or tab separated", &["csv", "tsv", "txt"]).pick_file() { d.csv_path = p.display().to_string(); }
+                    if let Some(p) = rfd::FileDialog::new().set_title("Import types from CSV").add_filter("CSV or tab separated", &["csv", "tsv", "txt"]).ask_open() { d.csv_path = p.display().to_string(); }
                 }
                 import = ui.add_enabled(!d.csv_path.trim().is_empty(), egui::Button::new("Import CSV")).clicked();
             });

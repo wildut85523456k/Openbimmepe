@@ -1,6 +1,7 @@
 //! Sheets, as Revit's View > Sheet Composition has them: New Sheet with a paper size and a title block, Place View
 //! (plans, elevations, sections, the 3D view and schedules go on a sheet at the scale of the view, and a view is on
 //! one sheet only), moving the views on the paper, Sheet Properties for the title block texts, and Print to PDF.
+use crate::dialog::Ask;
 use crate::pdf::Pdf;
 use crate::sheet_draw::{self, Drawing, Placed, Prim};
 use crate::{Desktop, View};
@@ -417,7 +418,7 @@ impl Desktop {
             let ids: Vec<u64> = d.sheets.iter().filter(|s| s.1).map(|s| s.0).collect();
             let name = if let [one] = ids.as_slice() { self.document.sheet(*one).map_or("sheets".to_string(), |s| s.label()) } else { "Sheets".into() };
             let fd = rfd::FileDialog::new().set_title("Print to PDF").add_filter("PDF", &["pdf"]).set_file_name(format!("{name}.pdf"));
-            if let Some(path) = fd.save_file() {
+            if let Some(path) = fd.ask_save() {
                 if let Err(e) = self.print_sheets(&ids, d.black_and_white, &path) { self.message = format!("Print failed: {e}"); } else { keep = false; }
             }
         }
