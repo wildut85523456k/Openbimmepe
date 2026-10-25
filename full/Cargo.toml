@@ -1,0 +1,15 @@
+# The full build: the open workspace plus the edesign-alike electrical solver.
+#
+# This is a separate workspace with its own Cargo.lock so the main workspace never resolves the
+# private repository. Building here needs read access to github.com/wildut85523456k/edesign-alike.
+#   cargo run --locked -p openbim-desktop-full
+#   cargo test --locked
+[workspace]
+resolver = "2"
+members = ["electrical-adapter", "desktop-full"]
+
+[workspace.dependencies]
+openbim-document = { path = "../crates/document" }
+openbim-desktop = { path = "../apps/desktop" }
+openbim-electrical-model = { git = "https://github.com/wildut85523456k/edesign-alike", rev = "57ef01848860771d29960dcf2e8af2f831fe1e6c" }
+openbim-electrical-solver = { git = "https://github.com/wildut85523456k/edesign-alike", rev = "57ef01848860771d29960dcf2e8af2f831fe1e6c" }

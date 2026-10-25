@@ -14,17 +14,17 @@ the printed HEAD is authoritative. This is not an installer or native-window sta
 Existing CI, independent IFC checks and printing-regressions remain in place. The new matrix does not silently
 replace those gates. macOS Intel, native startup, rendering, file dialogs and performance are separate pending checks.
 
-## Private dependency prerequisite
+## Private dependency (full build only)
 
-The workspace pins edesign-alike at 57ef01848860771d29960dcf2e8af2f831fe1e6c.
-Configure repository Actions secret `P0_DEPENDENCY_READ_TOKEN` with **read-only contents** access to that dependency
-if the runner has no other authorized access. Never put a token in code or a report.
-The job uses an environment-reading credential helper and removes it at job end; checkout credentials are not persisted.
-No new secret is created by this change. Fork PRs do not receive secrets and may fail this prerequisite.
+Since 25 October 2026 the main workspace does not depend on edesign-alike: `openbim-document` defines the
+`ElectricalCalc` interface and the open build installs no engine. The solver is plugged in by `full/`
+(`openbim-electrical-adapter`, pinned at 57ef01848860771d29960dcf2e8af2f831fe1e6c), a separate workspace
+excluded from the main one, so the open workflows need no secret and fork PRs build.
+
+Only the manual `full-build.yml` workflow needs the repository Actions secret `P0_DEPENDENCY_READ_TOKEN` with
+**read-only contents** access to edesign-alike. Never put a token in code or a report. The job uses an
+environment-reading credential helper and removes it at job end; checkout credentials are not persisted.
 Do not use pull_request_target to expose credentials to untrusted PR code.
-
-A lockfile is not an authentication mechanism. An existing local dependency cache can conceal missing clean-runner access.
-The access preflight deliberately fails with an actionable error before the build when access is missing.
 
 ## Evidence at preparation
 

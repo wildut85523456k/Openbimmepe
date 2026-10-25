@@ -34,6 +34,7 @@ pub use layers::{centre_shift, check as check_layers, core_faces, core_range, th
 pub mod compute;
 pub mod compute_elec;
 pub mod electrical_exchange;
+pub mod electrical_calc;
 pub mod mep;
 mod mepsys;
 pub mod schematic;

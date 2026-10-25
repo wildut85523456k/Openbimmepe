@@ -404,6 +404,7 @@ mod tests {
 
     #[test]
     fn generate_schematic_stamps_electrical_current_and_marks_not_approved() {
+        crate::schematic_electrical::test_engine::install();
         use crate::elec::NODE_BASE;
         use crate::{Command, ElecCable, ElecKind, ElecNode, ElementId, MepData};
         let mut d = Document::spatial_sample();
@@ -434,28 +435,24 @@ mod tests {
         assert_eq!(view.symbols.len(), 1, "only the MSB board is a symbol");
         let msb = view.symbols.iter().find(|s| s.element == b).unwrap();
         assert_eq!(msb.label, "MSB");
-        // the feeder current is the chiller load current: Ib = P / (sqrt(3) * V * pf)
+        // the MSB feeder carries the chiller's 45 kW (marker engine: watts / 1000)
         let a_slot = &msb.annotations[0];
         assert!(a_slot.starts_with("A "), "{a_slot}");
         let value: f64 = a_slot.strip_prefix("A ").unwrap().parse().unwrap();
-        let expected = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
+        // the test marker engine stamps the watts a feeder carries / 1000 (see `test_engine`)
+        let expected = 45.0;
         assert!(
             (value - expected).abs() < 1e-2,
             "stamped {value} vs expected {expected}"
         );
-        // MEP-002 stamps voltage drop (V, %); with the prototype impedance the drop is ~0, but the
-        // slots are computed, not placeholders.
+        // the V/% slots carry the engine's drop for the 10 m TX1-MSB cable (marker: length / 100)
         let v_val = assert_vdrop(&msb.annotations[1], "V ");
-        assert!(v_val.abs() < 1e-3, "stiff-source drop ~0 V, got {v_val}");
+        assert!((v_val - 0.1).abs() < 1e-9, "got {v_val}");
         let pct_val = assert_vdrop(&msb.annotations[2], "% ");
-        assert!(
-            pct_val.abs() < 1e-3,
-            "stiff-source drop ~0 %, got {pct_val}"
-        );
-        // every imported value is preliminary
+        assert!((pct_val - 0.1).abs() < 1e-9, "got {pct_val}");
+        // every imported value is preliminary, and the engine's warnings reach the view
         assert!(view.not_approved);
-        assert!(view.warnings.iter().any(|w| w.contains("MEP-010")));
-        assert!(view.warnings.iter().any(|w| w.contains("MEP-002")));
+        assert!(view.warnings.iter().any(|w| w.contains("test marker")));
         assert!(view.warnings.iter().any(|w| w.contains("not_approved")));
         // undo drops the view; redo regenerates it from the model with the stamped values
         assert!(d.undo().unwrap());
@@ -479,6 +476,7 @@ mod tests {
 
     #[test]
     fn redo_regenerates_the_electrical_stamp_from_the_model() {
+        crate::schematic_electrical::test_engine::install();
         use crate::elec::NODE_BASE;
         use crate::{Command, ElecCable, ElecKind, ElecNode, ElementId, MepData};
         let mut d = Document::spatial_sample();
@@ -514,7 +512,8 @@ mod tests {
             diagram.symbols[0].annotations[0] = "A snapshot-marker".into();
         }
         d.transact(d.revision(), &cmds).unwrap();
-        let expected = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
+        // the test marker engine stamps the watts a feeder carries / 1000 (see `test_engine`)
+        let expected = 45.0;
         // Apply regenerates the stamp, ignoring the corrupted annotation on the command.
         assert_ne!(
             d.schematic_views()[0].symbols[0].annotations[0],
@@ -548,40 +547,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn electrical_stamp_handles_board_local_load_phase_and_rejections() {
-        let three = 45000.0 / (3f64.sqrt() * 400.0 * 0.85);
-        let one = 45000.0 / ((400.0 / 3f64.sqrt()) * 0.85);
-        // downstream 45 kW load on a 3-phase feeder (golden)
-        let v = elec_doc(0.0, 45000.0, true, true, "Chiller")
-            .generate_schematic(Discipline::Electrical)
-            .unwrap();
-        assert_current(&v.symbols[0].annotations[0], three);
-        assert!(v.not_approved);
-        // board's own local 45 kW load (downstream load zero) is still stamped from the board's load
-        let v = elec_doc(45000.0, 0.0, true, true, "Chiller")
-            .generate_schematic(Discipline::Electrical)
-            .unwrap();
-        assert_current(&v.symbols[0].annotations[0], three);
-        // all single-phase: phase voltage is 400/sqrt(3) line-to-neutral, not 400 line-to-line
-        let v = elec_doc(0.0, 45000.0, false, false, "Chiller")
-            .generate_schematic(Discipline::Electrical)
-            .unwrap();
-        assert_current(&v.symbols[0].annotations[0], one);
-        // mixed-phase (3-phase feeder into 1-phase load) is rejected, not silently stamped 0 A
-        let v = elec_doc(0.0, 45000.0, true, false, "Chiller")
-            .generate_schematic(Discipline::Electrical)
-            .unwrap();
-        assert_eq!(v.symbols[0].annotations[0], "A —");
-        assert!(v.warnings.iter().any(|w| w.contains("mixed-phase")));
-        // an empty load name is rejected by the solver graph, not silently stamped 0 A
-        let v = elec_doc(0.0, 45000.0, true, true, "")
-            .generate_schematic(Discipline::Electrical)
-            .unwrap();
-        assert_eq!(v.symbols[0].annotations[0], "A —");
-        assert!(v.warnings.iter().any(|w| w.contains("rejected")));
-    }
-
     fn elec_doc(
         board_w: f64,
         load_w: f64,
@@ -589,6 +554,7 @@ mod tests {
         branch_three: bool,
         name: &str,
     ) -> Document {
+        crate::schematic_electrical::test_engine::install();
         use crate::{Command, ElecCable, ElecKind, ElecNode, MepData};
         let a = crate::elec::NODE_BASE;
         let b = a + 1;
@@ -656,7 +622,7 @@ mod tests {
         .unwrap();
         assert_current(
             &d.schematic_views()[0].symbols[0].annotations[0],
-            90000.0 / (3f64.sqrt() * 400.0 * 0.85),
+            90.0,
         );
     }
 
@@ -694,7 +660,7 @@ mod tests {
         d.redo().unwrap();
         let annotations = &d.schematic_views()[0].symbols[0].annotations[0];
         assert_ne!(annotations, "A stale-marker");
-        assert_current(annotations, 45000.0 / (3f64.sqrt() * 400.0 * 0.85));
+        assert_current(annotations, 45.0);
     }
 
     #[test]
@@ -719,7 +685,7 @@ mod tests {
         // were deliberately cleared before apply.
         assert!(assert_vdrop(&msb.annotations[1], "V ").is_finite());
         assert!(assert_vdrop(&msb.annotations[2], "% ").is_finite());
-        assert_current(&msb.annotations[0], 45000.0 / (3f64.sqrt() * 400.0 * 0.85));
+        assert_current(&msb.annotations[0], 45.0);
     }
 
     #[test]

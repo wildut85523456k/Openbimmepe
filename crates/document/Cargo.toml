@@ -20,7 +20,5 @@ openbim-schematic = { path = "../schematic" }
 i_overlay = "4"
 earcutr = "0.5.0"
 rayon = "1.10"
-# SCH-006: read the calculated single-line currents from edesign-alike (pinned at 57ef018), not a
-# duplicate calculation engine (clean-room rule). Voltage drop (V, %) is deferred to MEP-002.
-openbim-electrical-model = { git = "https://github.com/wildut85523456k/edesign-alike", rev = "57ef01848860771d29960dcf2e8af2f831fe1e6c" }
-openbim-electrical-solver = { git = "https://github.com/wildut85523456k/edesign-alike", rev = "57ef01848860771d29960dcf2e8af2f831fe1e6c" }
+# The electrical solver (edesign-alike) is not a dependency: `electrical_calc` defines the interface
+# and the full build in `full/` plugs the solver in. This crate builds without that private repository.
