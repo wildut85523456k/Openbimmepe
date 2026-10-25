@@ -1,3 +1,5 @@
+> Historical evidence: this report describes its stated baseline and contains superseded status claims. See [Current capability register](capability-register.md) for the 25 October 2026 source review and explicitly pending validation. Do not use this report's scoreboard as current completion status.
+
 # Revit UX parity audit (2026-10-18, updated 2026-10-19)
 
 Standing rule: every tool mimics Revit's user experience. Verified by automated event tests (simulated mouse and keys) and by reading the code. Not verified side by side with Revit, and not clicked by hand.

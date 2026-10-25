@@ -1,18 +1,45 @@
-# Open BIM platform (working name)
+# OpenBIM / Revit-alike
 
-An open, native-multicore, Revit-style BIM authoring platform. Design decisions live in the project Doc
-"Open BIM Platform: Design and Decisions"; this repository holds the code spikes and their independent checks.
+Rust desktop BIM authoring with egui/wgpu, a native project format and IFC exchange.
+The application is under development. Implemented subsets are not full Revit parity.
 
-| Crate | What it is |
+Start with the [current capability register](docs/capability-register.md), which records the inspected commit,
+implementation evidence, limitations and P0 validation gates. The [UI specification](docs/revit-style-ui/README.md)
+defines the intended behaviour; historical audits describe their own pinned baselines.
+
+## Run and validate
+
+```sh
+cargo run --locked -p openbim-desktop
+cargo test --locked -p openbim-desktop
+cargo test --locked --workspace --release
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo audit
+```
+
+Windows requires MSVC Build Tools and the Windows SDK; Linux needs X11/Wayland/graphics development libraries.
+The workspace depends on pinned private `edesign-alike` crates: contributors and clean runners need read access.
+A lockfile pins versions; it does not provide credentials or cached source.
+See [P0 validation](docs/p0-validation.md) for native CI and evidence limits.
+
+## Implementation map
+
+| Area | Location |
 |---|---|
-| `crates/geom` | wall chains, mitres, openings, exact volumes, meshes (S1) |
-| `crates/family` | parametric family engine: formulas, typed values, nested families, turns (S2) |
-| `crates/place` | placing families in walls and cutting openings |
-| `crates/keymap` | keyboard shortcut presets and user overrides |
-| `crates/arch` | levels, grids, rooms, layered assemblies, envelope, windows, ceilings, shafts |
-| `spikes/*` | Python scripts that write the Rust output to IFC4 and check it against hand-calculated figures |
+| Desktop, ribbons, properties, browser and tools | `apps/desktop` |
+| Document transactions, native records, editing, schedules, sheets | `crates/document` |
+| Geometry, sketching, parametric families and placement | `crates/geom`, `sketch`, `family`, `place` |
+| Architecture and envelope primitives | `crates/arch` |
+| MEP routing, calculations and schematics | `crates/route`, `calc`, `schematic` |
+| IFC reading/writing | `crates/ifc` |
+| Drawing generation and 3D viewport | `crates/view`, `viewport`, `viewport-egui` |
+| Sheet rendering, print profiles, PDF/DXF | `crates/sheets` |
+| Recovery operation log and shortcuts | `crates/oplog`, `keymap` |
+| Command API and automation integration | `crates/commands`, `automation` |
+| Photo/report utilities and independent checks | `crates/photo`, `spikes` |
 
-Run everything: `cargo test --workspace --release`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo audit`.
-The IFC scripts need `pip install ifcopenshell numpy`; see `.github/workflows/ci.yml` for the exact commands.
+Save/Open, autosave recovery, architectural placement, MEP routing, schedules, sheets and IFC exchange have
+implementations. Associative dimensions, complete documentation workflows, a graphical family editor and
+shared-folder collaboration remain incomplete. See the register before planning new work.
 
-No standard values (material properties, U-values, sizes) are built into the program; test values are illustrative.
+Example/test sizes and engineering values are illustrative, not project design recommendations.

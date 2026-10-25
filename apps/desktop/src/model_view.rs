@@ -1490,52 +1490,51 @@ mod tests {
         assert!(app.tool == crate::Tool::Wall, "a disabled button changes nothing: {}", app.message);
     }
 
+    /// Refit before every click; never bypass the window's picking, snapping or global-key handlers.
+    fn office_plan_click(ctx: &egui::Context, screen: Rect, app: &mut Desktop, point: [f64; 2]) {
+        window_frame(ctx, screen, app, vec![]);
+        let at = plan_screen(app, point);
+        assert!(screen.contains(at), "office point {point:?} is outside the window: {at:?}");
+        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
+        window_frame(ctx, screen, app, vec![button(at, true)]);
+        window_frame(ctx, screen, app, vec![button(at, false)]);
+    }
+
     #[test]
     fn the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported() {
         // wide enough for the whole Architecture and View tabs: the ribbon scrolls sideways, and a button off screen
         // cannot be clicked
         let (ctx, screen) = (egui::Context::default(), Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 800.0)));
         let mut app = Desktop::sample();
-        app.reset_model();
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "new"));
+        assert_eq!(app.levels().len(), 2);
         app.view = View::Plan;
         app.ribbon = "Architecture";
-        let level = app.plan_level();
-        // the tools are chosen from the ribbon, and every frame runs the whole window (R5)
-        window_frame(&ctx, screen, &mut app, vec![]);
-        assert!(ribbon_click(&ctx, screen, &mut app, "level"), "the ribbon shows the Level button");
-        assert!(app.tool == crate::Tool::Level, "the Level button starts the tool: {}", app.message);
-        app.level_elev_mm = 6000.0;
-        app.level_name = "Roof".into();
-        app.level_click();
-        assert_eq!(app.levels().len(), 3, "{}", app.message);
+        // Parameters and active tabs are fixture setup; geometry must pass through window pointer events.
         // a grid, by two clicks on the empty canvas, where the transform is still the default box
         window_frame(&ctx, screen, &mut app, vec![]);
         assert!(ribbon_click(&ctx, screen, &mut app, "grid"), "the ribbon shows the Grid button");
         assert!(app.tool == crate::Tool::Grid, "the Grid button starts the tool: {}", app.message);
         window_frame(&ctx, screen, &mut app, vec![]);
-        for at in [plan_screen(&app, [1.0, 1.0]), plan_screen(&app, [7.0, 1.0])] {
-            window_frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(at)]);
-            window_frame(&ctx, screen, &mut app, vec![button(at, true)]);
-            window_frame(&ctx, screen, &mut app, vec![button(at, false)]);
-        }
+        for p in [[-4.0, -4.0], [4.0, 4.0]] { office_plan_click(&ctx, screen, &mut app, p); }
         assert_eq!(app.document.elements().filter(|e| e.category == Category::Grid).count(), 1, "{}", app.message);
-        // four walls round a room, by the chain the viewport calls with the picked point; the plan re-fits itself
-        // after each element, so these steps are in model coordinates
+        // Four walls through pointer events. Recompute the screen position after every frame because the plan refits.
         window_frame(&ctx, screen, &mut app, vec![]);
         assert!(ribbon_click(&ctx, screen, &mut app, "wall"), "the ribbon shows the Wall button");
         assert!(app.tool == crate::Tool::Wall, "{}", app.message);
         app.wall_loc = 2;
-        for p in [[2.0, 2.0], [8.0, 2.0], [8.0, 6.0], [2.0, 6.0], [2.0, 2.0]] { app.wall_click(level, p); }
+        for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0], [-3.0, -2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
         assert_eq!(walls(&app), 4, "{}", app.message);
         // a floor over them, and the room they enclose
         window_frame(&ctx, screen, &mut app, vec![]);
         assert!(ribbon_click(&ctx, screen, &mut app, "floor"), "the ribbon shows the Floor button");
-        for p in [[2.0, 2.0], [8.0, 2.0], [8.0, 6.0], [2.0, 6.0]] { app.slab_click(level, p, false); }
-        app.slab_click(level, [2.0, 2.0], true);
+        for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
         assert_eq!(app.document.elements().filter(|e| e.category == Category::Slab).count(), 1, "{}", app.message);
         window_frame(&ctx, screen, &mut app, vec![]);
         assert!(ribbon_click(&ctx, screen, &mut app, "room"), "the ribbon shows the Room button");
-        app.room_click(level, [5.0, 4.0]);
+        office_plan_click(&ctx, screen, &mut app, [0.0, 0.0]);
         let room = app.document.elements().find(|e| e.category == Category::Room).expect("the room the walls enclose").id;
         let area = app.document.room_shape(room).expect("the walls enclose the room").area();
         // the walls were drawn on their exterior face round a 6 x 4 m rectangle, so the room between their inner
@@ -1546,12 +1545,12 @@ mod tests {
         window_frame(&ctx, screen, &mut app, vec![]);
         assert!(ribbon_click(&ctx, screen, &mut app, "section"), "the View tab shows the Section button");
         assert!(app.tool == crate::Tool::Section, "the Section button starts the tool: {}", app.message);
-        app.section_click(level, [4.0, 1.0]);
-        app.section_click(level, [4.0, 7.0]);
+        office_plan_click(&ctx, screen, &mut app, [0.0, -3.0]);
+        office_plan_click(&ctx, screen, &mut app, [0.0, 3.0]);
         assert_eq!(app.document.elements().filter(|e| e.category == Category::Section).count(), 1, "{}", app.message);
         // save, reopen and export: every element comes back with its identity and its geometry, and the IFC carries
         // the four walls
-        let path = std::env::temp_dir().join("openbim-small-office-e2e.obim");
+        let path = std::env::temp_dir().join(format!("openbim-small-office-e2e-{}.obim", std::process::id()));
         let path = path.to_str().unwrap().to_string();
         app.write_model(&path);
         let saved = app.document.clone();
@@ -1565,7 +1564,7 @@ mod tests {
         }
         let back_room = reopened.document.room_shape(room).expect("the reopened room is enclosed");
         assert!((back_room.area() - area).abs() < 1e-9, "the room keeps its area: {} against {area}", back_room.area());
-        let out = crate::export::export_ifc_with(&reopened.document, "Office", 1, "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false)
+        let out = crate::export::export_ifc_with(&reopened.document, "Office", reopened.document.project_key(), "2026-10-21T00:00:00", crate::export::Schema::Ifc4, false)
             .expect("the model exports");
         assert_eq!(out.walls, 4, "{}", out.warnings.join("; "));
         assert!(out.text.contains("IFCWALL("), "the file carries walls");

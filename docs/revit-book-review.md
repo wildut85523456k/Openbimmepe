@@ -1,3 +1,5 @@
+> Historical evidence: this report describes its stated baseline and contains superseded status claims. See [Current capability register](capability-register.md) for the 25 October 2026 source review and explicitly pending validation. Do not use this report's scoreboard as current completion status.
+
 # Review of the app against the Revit books (2026-10-19)
 
 References (owner's copies, `D:\Miscellaneous`):
