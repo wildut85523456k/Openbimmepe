@@ -51,8 +51,10 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 - Separately, `crates/document` pins two git dependencies from the private `edesign-alike` repo; `cargo metadata` returns HTTP 401 without credentials, so no hosted run can pass until `P0_DEPENDENCY_READ_TOKEN` (or equivalent) exists.
 - Free-tier note: `ci.yml` and `printing-regressions.yml` now run only on pull requests into `main` and on manual dispatch, not on every push.
 - The 23 October office fixture report's external-import limitations were partly superseded on 24 October.
-- The small-office UI test already clicked ribbon buttons, but used direct geometry handlers for walls/floor/room/section.
-  The P0 candidate replaces these with window pointer events; this is an improvement awaiting execution, not a full-office PASS.
+- The P0 candidate places walls, floor, room and section through window pointer events; the small-office regression now
+  PASSES on the candidate (1,349/1,349, room 24.0 m²). The remaining gap is that the app still does not draw the room
+  outline to the model as a pickable curve between its wall corners (the room lives in document metadata), matching Revit's
+  behaviour where picking the room in the plan is not itself modelled.
 - New projects create two levels and tools guard missing levels in `choose_tool`; the internal
   `plan_level()` fallback to zero alone is not proof that normal user placement accepts a missing level.
 
@@ -62,7 +64,7 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 |---|---|---|
 | P0-1 status | This register, refreshed entry points, historical notices | Source review complete |
 | P0-2 native build | `.github/workflows/desktop-p0.yml`: Linux, Windows, Apple Silicon macOS debug/release tests and release executable | Configured, NOT runtime validated |
-| P0-3 geometry UI | Existing small-office regression converted to pointer geometry placement | Candidate, NOT runtime validated |
+| P0-3 geometry UI | Existing small-office regression converted to pointer geometry placement | Candidate `56d7717` (Windows 11, rustc 1.99.1, cargo 1.99.1): `cargo test --workspace` 1,344 ran + 5 ignored = 1,349 total, 0 failed, incl. the small-office pointer regression (room 24.0 m²); `cargo clippy --workspace --all-targets -- -D warnings` clean |
 | P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | OPEN; see `p0-office-acceptance.md` |
 
 Native startup, visual parity and performance are separate gates; compilation and headless egui tests do not close them.
