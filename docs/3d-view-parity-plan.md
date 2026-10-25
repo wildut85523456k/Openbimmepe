@@ -18,7 +18,7 @@ Opened 2026-10-19 at the owner's request ("a point to clear at a later stage in 
 | Section Box | On or off from a tick box; six sliders (min and max on X, Y, Z) and a button per level that boxes that storey. Not draggable in the view |
 | Selection | A click selects the front face under the cursor (ray against every triangle, in parallel); Ctrl or Shift adds or removes. It is the same selection as in the plan: Properties edits the selected element, Delete removes it |
 | Datums | Levels and grids drawn over the picture |
-| Not available in 3D | Every drawing and modify tool (Wall, Move, Rotate, Mirror, Copy, Align, Trim, Offset, Dimension, Tag, Room, Stair, Shaft...) is plan-only; picking in 3D selects but cannot move |
+| Not available in 3D | Every drawing and modify tool (Wall, Move, Rotate, Mirror, Copy, Align, Trim, Offset, Dimension, Tag, Room, Stair, Shaft...) is plan-only; picking in 3D selects but cannot move **[partly superseded 2026-10-21 — R5 register: a 3D Family placement now exists (apps/desktop/src/view3d.rs:251) and a Beam path (place_beam_from_controls, model_edit.rs:495), so "every drawing tool is plan-only" is no longer wholly true; the modify tools remain plan-only and a 3D pick still selects but cannot move]** |
 
 ## 2. Point 1: editing of elements in the 3D view
 
@@ -33,7 +33,7 @@ Revit lets you place and modify in a 3D view: most Modify tools work on what you
 | Drag controls on a selected element (wall ends, beam ends, flip arrows), temporary dimensions | in plan only for walls | Controls drawn as screen-space handles on the selected element, dragging constrained to the work plane or to the element's own axis |
 | Hide Element / Hide Category / Isolate Element or Category (temporary, then Reset), Reveal Hidden Elements | none | Hidden set kept in the view, not the document; the batch skips those elements |
 | Per-view Visibility/Graphics: category on/off, transparency, line weights, halftone; View Properties: detail level, discipline, shadows, depth cue, crop region | styles only, a fixed colour per category | Start with category visibility and transparency; the rest after view templates exist (also missing in plans) |
-| Undo / Redo | The document's undo works from 3D; there is no redo (known) | Redo is a separate missing item for the whole app |
+| Undo / Redo | The document's undo works from 3D; there is no redo (known) | Redo is a separate missing item for the whole app **[superseded 2026-10-21 — R5 register: redo is now implemented (apps/desktop/src/main.rs:647, main.rs:714 redo_document, ribbon.rs:52, crates/oplog/src/lib.rs:520 redo, tested in crates/oplog/tests/oplog.rs); the "no redo" note and its proposed step are stale]** |
 
 Remark: because the document layer already applies edits as atomic commands and checks them, 3D editing is mostly **picking and gizmo work in the viewport**, not new model rules. The risk is not the model; it is picking precision and snapping in a perspective view.
 
