@@ -49,7 +49,7 @@ Neither gap doc was touched in the 15-commit window, but the code moved under th
 | C16 | sprinkler heads open | closed (`library.rs:495,1182`) |
 | C18 | hangers open | closed (`library.rs:498,1363`) |
 | C28 | grids cannot be arcs | arc grids exist (`crates/document/src/grid_arc.rs`, `01ddf1f`) |
-| R4 count | "19 members (18 crates + desktop)" | **21** (`Cargo.toml:3`) |
+| R4 count | "19 members (18 crates + desktop)" | **20** (`Cargo.toml:3`) |
 | R5-1 | catch-all at `main.rs:499` | now `main.rs:653` |
 | R5-2 | Esc = `choose_tool(Select)` | B3 closed |
 | R5-3 | "main has no desktop app" | `apps/desktop` is on main |
@@ -58,8 +58,8 @@ Neither gap doc was touched in the 15-commit window, but the code moved under th
 ### 2.2 Docs rows R4 / R5 / R6 — genuinely open
 
 - **R4 (WRONG / MISSING).** The crate table the row points at (`docs/reference/README.md`) is the
-  reference-material index, not the crate table. The real table is `README.md:6-13` and lists **6 of
-  21** members — 15 missing (`oplog`, `sketch`, `route`, `ifc`, `view`, `viewport`, `viewport-egui`,
+  reference-material index, not the crate table. The real table is `README.md:6-13` and lists **5 of
+  20** members — 15 missing (`oplog`, `sketch`, `route`, `ifc`, `view`, `viewport`, `viewport-egui`,
   `photo`, `sheets`, `automation`, `calc`, `document`, `schematic`, `commands`, `apps/desktop`), plus a
   non-member `spikes/*` row. No crate was deleted.
 - **R5 (WRONG, partial).** Three app-capability claims are contradicted by code (R5-1/2/3 above);
@@ -101,8 +101,8 @@ docs edits. They carry **no new gap ID** — each references an existing registe
 
 | ID | Item | Files |
 |---|---|---|
-| S-D1 | R4 crate table → all 21 members; drop/mark the `spikes/*` row | `README.md:6-13` |
-| S-D2 | R4 count "19" → "21" | `docs/gap-remediation-plan-2026-10-21.md:63,70` |
+| S-D1 | R4 crate table → all 20 members; drop/mark the `spikes/*` row | `README.md:6-13` |
+| S-D2 | R4 count "19" → "20" | `docs/gap-remediation-plan-2026-10-21.md:63,70` |
 | S-D3 | R5-1 `main.rs:499` → `:653` | `docs/revit-style-ui/08-gap-closure-plan-2026-10-21.md:56` |
 | S-D4 | R5-2 Esc superseded by two-stage Esc | `docs/revit-style-ui/08-gap-closure-plan-2026-10-21.md:51` |
 | S-D5 | R5-3 "main has no desktop app" → history | `docs/agent-team/gap-review.md:26` |
