@@ -14,6 +14,12 @@ after `271c774`; and the proposed acceptance test did not exist. Section 2's sta
 `edesign-alike`) **does reproduce in this sandbox**: `cargo metadata --offline` fails with 'can't checkout from edesign-alike' (git db present but incomplete); it may work on a machine with a full checkout. Details inline, and in §5.1 and §6.
 > **Re-check 16:36, 23 Oct:** `main` is now `4f24b00`. B7, B8, B10, B14, B15 and `crates/ifc` are unchanged there; the library still holds 7 families. Two of the corrections below were re-verified and one is reversed: `plan_level()` still returns `ElementId(0)`, and `cargo metadata --offline` still fails here on `edesign-alike`.
 
+> **Verification status (2026-10-25).** Re-verified against `main` @ `b6ef0ee`.
+> The §5.1 "Easy" tier (B2, B7–B11, B12–B16, B21–B24) is **closed**
+> (`b17a1ff`, `fccee7b`, `91eb050`, `f84104a`, `7afe07b`). This doc was last
+> verified at `dcf8382` (112 commits stale); rows updated below. Evidence:
+> `docs/agent-team/evidence/gap-p0-2026-10-25/`.
+
 ## 1. Answer in brief
 
 - **The app can now be started from a blank project.** The blocker that stopped everything on 21 Oct (A1: no input on an empty canvas) is closed, as are the wrong level tabs, the Esc behaviour, the missing keyboard shortcuts and the dishonest ribbon.
@@ -44,6 +50,8 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 
 ### 3.1 Blockers and shell (class 2.1)
 
+> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11).
+
 | ID | Gap (21 Oct) | Status | Evidence |
 |---|---|---|---|
 | A1 / B1 | Plan canvas dead on an empty project | **Closed** | `model_view.rs:17` fallback bounds; test asserts finite fallback |
@@ -57,6 +65,8 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | - | Test harness never ran `Desktop::ui` | **Closed** | window body is now a method a test can drive (`6979485`) |
 
 ### 3.2 Exchange and persistence (class 2.2)
+
+> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11).
 
 | ID | Gap | Status | Evidence |
 |---|---|---|---|
@@ -77,13 +87,15 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 
 ### 3.3 MEP content (class 3.1)
 
+> **SUPERSEDED (2026-10-25):** these tables predate the model-from-scratch (B11).
+
 | ID | Gap | Status | Evidence |
 |---|---|---|---|
 | C1 | No Load Family | **Closed (first slice)** | `ef92aaa`, `33a01e3`: a catalogue file becomes types in the project |
 | C2 | Type parameters not editable | **Closed (first slice)** | `719815d`: a type is edited through Properties; types carry texts and numbers |
-| C3 | One MEP family | **Partial** | library is `fan_coil`, `ahu`, `ceiling_diffuser` (+ handle, door, window, arched door) = 7. Pump, valve, VAV, fixtures, sprinkler, luminaire, panel, hanger still missing |
+| C3 | One MEP family | **Closed** | library holds 19 families: `handle`, `door`, `window`, `arched_door`, `fan_coil`, `ahu`, `ceiling_diffuser`, `vav`, `pump`, `valve`, `wc`, `washbasin`, `sprinkler_head`, `luminaire`, `panel_board`, `hanger`, `pipe_elbow`, `pipe_reducer`, `pipe_tee` (`crates/family/src/library.rs:481-503`) |
 | C4 | No air terminals | **Partial** | ceiling diffuser exists; grille/register variants and the four direction flags not checked |
-| C5 | No hosting on ceiling/face | **Open** (not re-checked) |
+| C5 | No hosting on ceiling/face | **Open** |
 | C6 | No spaces / zones | **Open** | no module in `crates/document/src` |
 | C7 | Systems of equipment only | **Partial** | "HVAC system end to end" added (`719815d`); whether runs are members was not checked |
 | C8-C11 | Layout types, duct/pipe types, vertical runs, snapping | **Open** (not re-checked; no commits target them) |
@@ -91,9 +103,9 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | C13 | System inspector, checks, legend | **Open** |
 | C14 | Moving equipment drags runs | **Open** |
 | C15 | Plumbing fixtures, fall check | **Open**: `Route::check_fall` still has only its own tests as callers |
-| C16 | Sprinkler heads | **Open** |
+| C16 | Sprinkler heads | **Closed** |
 | C17 | Electrical as elements and circuits | **Open**, but SCH-006/MEP-002 now stamp feeder current, phase voltage and cumulative voltage drop on the single-line schematic (`2103246`, `678ee01`, `0248cd9`, `eb67000`) |
-| C18 | Hangers and supports | **Open** |
+| C18 | Hangers and supports | **Closed** |
 
 ### 3.4 Automation and documentation (new since baseline)
 
@@ -114,7 +126,7 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 | Step | 21 Oct | 23 Oct |
 |---|---|---|
 | New project, add levels, rename, delete | Blocked | Works (code + team tests) |
-| Draw grids, walls, floors, doors, windows | Blocked on canvas | Reachable; grid rename/arcs, wall top constraint and wrapping still missing (C23, C28) |
+| Draw grids, walls, floors, doors, windows | Blocked on canvas | Reachable; grid rename + wall top constraint + wrapping still missing (C23); arc grids exist (`crates/document/src/grid_arc.rs`, `01ddf1f`) (C28) |
 | Place AHU / diffuser, edit type values | Not possible | Works |
 | Draw ducts and pipes, size, build an HVAC system | Partial | Works for ducts; vertical runs, types and routing preferences missing |
 | Plumbing, fire protection | Abstract nodes only | Unchanged |
@@ -124,6 +136,8 @@ Status: **Closed** = fix present in code on main; **Partial**; **Open**; **New**
 ## 5. Remediation, tiered
 
 ### 5.1 Easy (days, mostly wiring, existing code is waiting)
+
+> **CLOSED (2026-10-25).** The §5.1 Easy tier (B2, B7–B11, B12–B16, B21–B24) is **closed** (`b17a1ff`, `fccee7b`, `91eb050`, `f84104a`, `7afe07b`).
 
 1. **IFC honesty bundle (B7, B8, B9, B10, B14, B15, B19, B11) — split, not one step.** The premise that "the IFC crate already writes spaces, boundaries, systems and openings; the app just passes empty lists" holds for **spaces, boundaries and openings**, and is wrong for grids and misleading for systems:
    - **Easy (wiring, days).** B7: read `MepData.run_systems`, which the tools already set, instead of hard-coding `System::Other`. B10: call `openbim_place::penetrations::find` / `floors::find_floor` and pass the result. B9-name: the crate **already** writes `IFCDISTRIBUTIONSYSTEM` + `IFCRELASSIGNSTOGROUP` (`ifc/src/lib.rs:1833-1837`) but names the group from the enum as `"<System name> 1"`; pass `MepSystemDef.name` instead.

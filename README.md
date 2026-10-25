@@ -22,21 +22,31 @@ The workspace depends on pinned private `edesign-alike` crates: contributors and
 A lockfile pins versions; it does not provide credentials or cached source.
 See [P0 validation](docs/p0-validation.md) for native CI and evidence limits.
 
-## Implementation map
+## Crates
 
-| Area | Location |
+| Crate | What it is |
 |---|---|
-| Desktop, ribbons, properties, browser and tools | `apps/desktop` |
-| Document transactions, native records, editing, schedules, sheets | `crates/document` |
-| Geometry, sketching, parametric families and placement | `crates/geom`, `sketch`, `family`, `place` |
-| Architecture and envelope primitives | `crates/arch` |
-| MEP routing, calculations and schematics | `crates/route`, `calc`, `schematic` |
-| IFC reading/writing | `crates/ifc` |
-| Drawing generation and 3D viewport | `crates/view`, `viewport`, `viewport-egui` |
-| Sheet rendering, print profiles, PDF/DXF | `crates/sheets` |
-| Recovery operation log and shortcuts | `crates/oplog`, `keymap` |
-| Command API and automation integration | `crates/commands`, `automation` |
-| Photo/report utilities and independent checks | `crates/photo`, `spikes` |
+| `crates/geom` | wall chains, mitres, openings, exact volumes, meshes (S1) |
+| `crates/family` | parametric family engine: formulas, typed values, nested families, turns (S2) |
+| `crates/place` | placing families in walls and cutting openings |
+| `crates/keymap` | keyboard shortcut presets and user overrides |
+| `crates/arch` | levels, grids, rooms, layered assemblies, envelope, windows, ceilings, shafts |
+| `crates/oplog` | operation log spike (S8): a small binary format with a CRC-32 per record, so a torn tail is detected and dropped |
+| `crates/sketch` | sketch-and-lock: a small 2D geometric constraint solver (S2h) |
+| `crates/route` | MEP routing: a path drawn point by point becomes straight runs joined by fittings |
+| `crates/ifc` | IFC4 writer: takes the model as the app holds it (wall chains, slabs, openings, MEP networks) and writes a STEP file |
+| `crates/view` | plan views: looking down on a level with a horizontal cut — cut, below-cut, overhead and beyond geometry |
+| `crates/viewport` | the logic of a 3D view with no window or GPU: camera, mouse-driven orbit, ViewCube, software renderer |
+| `crates/viewport-egui` | the 3D view as a widget for egui, drawn with wgpu |
+| `crates/photo` | photometric files as manufacturers publish them: IES (IESNA LM-63) and Eulumdat (.ldt) |
+| `crates/sheets` | sheets, title blocks and printing, the Revit way |
+| `crates/automation` | independent typed automation: evaluation is read-only; only a validated plan can modify the document |
+| `crates/calc` | sizing and losses of a branched network of pipes or ducts |
+| `crates/document` | sprint 1 BIM document foundation |
+| `crates/schematic` | openbim-schematic: the pure grid layout engine behind `MEP: Generate Schematic` |
+| `crates/commands` | typed command and query API (AUTO-001) |
+| `apps/desktop` | the desktop application |
+| `spikes/*` | Python scripts that write the Rust output to IFC4 and check it against hand-calculated figures |
 
 Save/Open, autosave recovery, architectural placement, MEP routing, schedules, sheets and IFC exchange have
 implementations. Associative dimensions, complete documentation workflows, a graphical family editor and
