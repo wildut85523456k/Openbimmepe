@@ -1532,6 +1532,23 @@ mod tests {
         for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
         window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
         assert_eq!(app.document.elements().filter(|e| e.category == Category::Slab).count(), 1, "{}", app.message);
+        // Hosted families use the ribbon and the actual wall axes to aim pointer events.
+        let host_axes: Vec<(ElementId, [f64; 2])> = app.document.elements().filter_map(|e| {
+            if e.category != Category::Wall { return None; }
+            match e.geometry {
+                Some(Geometry::Linear { start, end, .. }) => Some((e.id, [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0])),
+                _ => None,
+            }
+        }).collect();
+        for (command, (host, at)) in ["door", "window"].into_iter().zip(host_axes.iter().take(2)) {
+            window_frame(&ctx, screen, &mut app, vec![]);
+            assert!(ribbon_click(&ctx, screen, &mut app, command));
+            let before = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::InWall { .. }))).count();
+            office_plan_click(&ctx, screen, &mut app, *at);
+            let hosted: Vec<_> = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::InWall { .. }))).collect();
+            assert_eq!(hosted.len(), before + 1, "{command} places one hosted instance: {}", app.message);
+            assert!(hosted.iter().any(|e| matches!(e.geometry, Some(Geometry::InWall { host: picked, .. }) if picked == *host)), "{command} keeps its picked host");
+        }
         window_frame(&ctx, screen, &mut app, vec![]);
         assert!(ribbon_click(&ctx, screen, &mut app, "room"), "the ribbon shows the Room button");
         office_plan_click(&ctx, screen, &mut app, [0.0, 0.0]);
@@ -1575,6 +1592,9 @@ mod tests {
             .expect("the model exports");
         assert_eq!(out.walls, 4, "{}", out.warnings.join("; "));
         assert!(out.text.contains("IFCWALL("), "the file carries walls");
+        assert_eq!(out.text.matches("=IFCDOOR(").count(), 1);
+        assert_eq!(out.text.matches("=IFCWINDOW(").count(), 1);
+        assert_eq!(out.text.matches("=IFCRELFILLSELEMENT(").count(), 2, "both families fill their wall openings");
         std::fs::remove_file(&path).ok();
     }
 
