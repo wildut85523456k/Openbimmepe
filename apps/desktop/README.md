@@ -1,42 +1,27 @@
-# OpenBIM desktop (Rust / egui)
-
-The desktop uses Rust, egui and wgpu. There is no Qt or web shell.
-
-## Run
+# OpenBIM desktop (Rust / egui / wgpu)
 
 ```sh
 cargo run --locked -p openbim-desktop
 ```
 
-On Windows the MSVC build tools and Windows SDK are required. Retain the tested
-local Cargo.lock correction to windows 0.62.0; this change does not modify it.
-On Linux install the usual X11/Wayland and graphics libraries.
+Windows needs MSVC Build Tools and the Windows SDK. Linux needs X11/Wayland and graphics libraries.
+Use the committed Cargo.lock. The pinned private edesign-alike dependencies require repository read access.
 
-## Current features
+## Current implementation
 
-- Reviewed 3D icon artwork, DPI-aware filtering, quick-access bar, 14 ribbon tabs,
-  Systems discipline sub-tabs, contextual parameter controls and Light/Dark themes.
-- Compact Properties palette and searchable Project Browser with adjustable widths
-  and split, close/restore, and double-click view opening.
-- Document-driven Level 1, Level 2 and Mechanical plan footprints and orbitable
-  orthographic 3D views of actual in-memory walls, grids, levels, ducts and pipes.
-- Geometry picking, category-specific parameters, endpoint editing, finite signed
-  slope, Apply/Reset and atomic Undo. Level changes move dependent geometry.
-- Wheel zoom, middle-drag pan, right-drag 3D orbit and Fit.
+The desktop contains a ribbon, contextual controls, searchable Properties/Project Browser, light/dark themes,
+level-derived plan views, sections/elevations and a 3D viewport. Tools cover basic architectural placement and
+editing, MEP runs/systems, family catalogue/type editing, schedules, sheets and PDF/IFC exchange.
 
-The initial sample is created through document transactions and excluded from
-user Undo history. Changes are in memory and disappear when the app closes.
+Save/Open persists the model in its native format. Unsaved work is journaled for recovery according to Options;
+normal Save clears that recovery journal. The initial sample is a starting scene, not a persistence limitation.
 
-## Scope and review
+These are partial workflows. The [capability register](../../docs/capability-register.md) records remaining work,
+including associative dimensions, crop/templates, graphical family authoring and collaboration.
+Old renderer/UI milestone reports are historical evidence, not an up-to-date missing-feature list.
 
-See `docs/spatial-model-rendering.md` for controls, geometry contracts, review
-steps and renderer limitations. `docs/palettes-contextual-editing.md` records the
-previous UI milestone, whose illustrative-renderer limits are now superseded.
+## Validation
 
-The renderer is a small-model, depth-sorted orthographic projection. Full view
-ranges/cut planes, hidden-surface handling, joined/layered walls, openings, slabs,
-placement tools, grips, on-canvas dimensions, full Revit shortcuts, docking,
-persistence, IFC integration and collaboration remain future work.
-
-`crates/document` is still separate from `crates/oplog` (issue #24). The interfaces
-are kept transaction-based so subsequent integration can use the same edits.
+See [P0 validation](../../docs/p0-validation.md). Headless event tests run the egui window body; they do not launch
+a native window or validate OS file dialogs. Native builds, native startup, visual review and performance must
+each have their own evidence. The [full office acceptance contract](../../docs/p0-office-acceptance.md) stays open.

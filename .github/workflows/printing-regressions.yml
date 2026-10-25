@@ -1,12 +1,30 @@
 name: printing-regressions
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  GIT_TERMINAL_PROMPT: '0'
+  P0_DEPENDENCY_READ_TOKEN: ${{ secrets.P0_DEPENDENCY_READ_TOKEN }}
 jobs:
   sheets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Authenticate private dependency
+        shell: bash
+        run: |
+          if [ -z "$P0_DEPENDENCY_READ_TOKEN" ]; then
+            echo "::error::Set the repository Actions secret P0_DEPENDENCY_READ_TOKEN with read-only access to edesign-alike."
+            exit 1
+          fi
+          git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$P0_DEPENDENCY_READ_TOKEN"; }; f'
+          git ls-remote https://github.com/wildut85523456k/edesign-alike HEAD >/dev/null
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

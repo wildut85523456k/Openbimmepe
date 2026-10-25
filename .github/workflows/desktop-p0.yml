@@ -1,0 +1,85 @@
+name: desktop-p0
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'crates/**'
+      - 'assets/**'
+      - 'Cargo.*'
+      - '.github/workflows/desktop-p0.yml'
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: desktop-p0-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    name: Native desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      GIT_TERMINAL_PROMPT: '0'
+      P0_DEPENDENCY_READ_TOKEN: ${{ secrets.P0_DEPENDENCY_READ_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Record exact candidate and toolchain
+        run: |
+          git rev-parse HEAD
+          rustc -vV
+          cargo --version
+      - name: Private dependency access
+        run: |
+          # The helper reads the environment; the token is never embedded in git config.
+          if [ -n "$P0_DEPENDENCY_READ_TOKEN" ]; then
+            git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$P0_DEPENDENCY_READ_TOKEN"; }; f'
+          fi
+          if ! git ls-remote https://github.com/wildut85523456k/edesign-alike HEAD >/dev/null; then
+            echo "::error::Cannot read pinned private dependency edesign-alike. Configure P0_DEPENDENCY_READ_TOKEN with read-only access to that repository. A lockfile does not grant access."
+            exit 1
+          fi
+      - name: Linux desktop development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-p0
+      - name: Resolve the committed dependency graph
+        run: cargo fetch --locked
+      - name: Office pointer regression (debug assertions enabled)
+        run: cargo test --locked -p openbim-desktop the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported -- --nocapture
+      - name: Desktop debug tests
+        run: cargo test --locked -p openbim-desktop
+      - name: Workspace release tests
+        run: cargo test --locked --workspace --release
+      - name: Workspace lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Native release executable
+        run: cargo build --locked -p openbim-desktop --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            target/release/openbim-desktop
+            target/release/openbim-desktop.exe
+          if-no-files-found: error
+      - name: Remove temporary credential helper
+        if: always()
+        run: git config --global --unset-all credential.helper || true
