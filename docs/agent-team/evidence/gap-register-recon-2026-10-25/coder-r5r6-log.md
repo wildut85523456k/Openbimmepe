@@ -5,7 +5,7 @@
 **Authoritative source:** `docs/agent-team/evidence/gap-register-recon-2026-10-25/research-r5r6.md`
 (read-only researcher report, verified against `main` @ `b6ef0ee`).
 
-Do **not** push. Do **not** touch the office P0 worktree `D:/Codex/Revit-alike-P0`.
+Do **not** push. Do **not** touch the office P0 worktree (a parallel workstream, never touched).
 
 ## What was done
 
