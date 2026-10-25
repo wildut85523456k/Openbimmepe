@@ -5,7 +5,8 @@ No native build/test PASS is claimed for this candidate until the checks execute
 
 ## Native matrix
 
-`.github/workflows/desktop-p0.yml` runs on Ubuntu 24.04, Windows Server 2022 and macOS 14.
+`.github/workflows/desktop-p0.yml` runs on Ubuntu 24.04 and Windows Server 2022 for pull requests, and additionally on macOS 14
+when dispatched manually (`include_macos`, default on). It does not run on push to main: the PR run already tests the merged tree.
 Each job records git HEAD and rustc host/version, resolves Cargo.lock with --locked, runs the office pointer
 regression in debug, desktop debug tests, workspace release tests and Clippy, then builds/uploads the executable.
 Artifacts are named by OS and event SHA. On pull_request the tested checkout is GitHub's merge candidate;
