@@ -64,7 +64,7 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 |---|---|---|
 | P0-1 status | This register, refreshed entry points, historical notices | Source review complete |
 | P0-2 native build | `.github/workflows/desktop-p0.yml`: Linux, Windows, Apple Silicon macOS debug/release tests and release executable | Configured, NOT runtime validated |
-| P0-3 geometry UI | Existing small-office regression converted to pointer geometry placement | Candidate `56d7717` (Windows 11, rustc 1.99.1, cargo 1.99.1): `cargo test --workspace` 1,344 ran + 5 ignored = 1,349 total, 0 failed, incl. the small-office pointer regression (room 24.0 m²); `cargo clippy --workspace --all-targets -- -D warnings` clean |
+| P0-3 geometry UI | Existing small-office regression converted to pointer geometry placement | Candidate `56d7717` (Windows 11, rustc 1.99.1, cargo 1.99.1): `cargo test --workspace` (debug) 1,349/1,349 pass (0 failed) incl. the small-office pointer regression (room 24.0 m²); `cargo clippy --workspace --all-targets -- -D warnings` clean. Gated by PR #98 pre-push hook: `cargo test --workspace --release` + clippy + audit passed on ad1d493. |
 | P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | OPEN; see `p0-office-acceptance.md` |
 
 Native startup, visual parity and performance are separate gates; compilation and headless egui tests do not close them.
