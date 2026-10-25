@@ -627,6 +627,9 @@ impl Document {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()).hash(&mut h);
             std::process::id().hash(&mut h);
             self.elements.len().hash(&mut h);
+            // the clock alone can repeat (macOS ticks in microseconds): a counter keeps two keys made in one process apart
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed).hash(&mut h);
             self.project_key = (h.finish() & 0xFFFF_FFFF_FFFF).max(1);
         }
         self.project_key

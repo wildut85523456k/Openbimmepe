@@ -1,3 +1,5 @@
+> Historical evidence: this report describes its stated baseline and contains superseded status claims. See [Current capability register](capability-register.md) for the 25 October 2026 source review and explicitly pending validation. Do not use this report's scoreboard as current completion status.
+
 # Gap progress report, 2026-10-23 (vs. baseline 2026-10-21, `dcf8382`)
 
 Scope: from-scratch BIM authoring with the mouse, architecture then MEP, IFC as the exchange format.

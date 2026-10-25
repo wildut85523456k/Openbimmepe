@@ -1,3 +1,5 @@
+> Historical evidence: this report describes its stated baseline and contains superseded status claims. See [Current capability register](capability-register.md) for the 25 October 2026 source review and explicitly pending validation. Do not use this report's scoreboard as current completion status.
+
 # Review of the app against the Revit books (2026-10-19)
 
 References (owner's copies, `D:\Miscellaneous`):
@@ -77,7 +79,7 @@ The Project Browser lists *Schedules/Quantities*, *Sheets* and *Legends* as empt
 - The wall options bar in the book includes **Offset**, **Radius**, and the **Height/Depth** direction (a wall can hang down from the level). The audit lists Offset as missing; Radius and Depth were not tracked.
 - The book confirms the audit on temporary dimensions: the conversion symbol turns one into a permanent dimension (the audit already lists "convert to permanent" as missing; it belongs with the associative dimension work, D3).
 - The 2026 edition adds **wall finishes placed by room or by segment**. These need rooms to expose their bounding faces, which the app already computes.
-- The audit's "Redo" status line ("undo exists, no redo") is still correct; the ribbon button gives the impression it works.
+- ~~The audit's "Redo" status line ("undo exists, no redo") is still correct~~ **Stale:** Redo was done 2026-10-19 (see A1); `Document::redo` is in `crates/document/src/lib.rs`.
 
 ## 6. Proposed order
 

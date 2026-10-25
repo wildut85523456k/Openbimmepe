@@ -3,7 +3,7 @@ name = "openbim-desktop"
 version = "0.0.1"
 edition = "2021"
 publish = false
-description = "Revit-style desktop UI in egui (sample scene only)"
+description = "Revit-style BIM desktop authoring in egui"
 
 [dependencies]
 eframe = "0.36"
