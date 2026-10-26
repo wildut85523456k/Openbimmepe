@@ -453,7 +453,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let ink = ui.visuals().text_color();
         let dims: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Dimension && !vis.hidden(e)).map(|e| e.id).collect();
         for id in dims {
-            let Some(Geometry::Dimension { a, b, at, level }) = app.document.get(id).and_then(|d| d.geometry) else { continue };
+            let Some(Geometry::Dimension { a, b, at, level, .. }) = app.document.get(id).and_then(|d| d.geometry) else { continue };
             if level != level_id { continue; }
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let l = dx.hypot(dy);
@@ -1906,17 +1906,36 @@ mod tests {
         assert!(matches!(tags[0].geometry, Some(Geometry::Tag { host: h, .. }) if h == door), "the tag is on the door: {}", app.message);
         assert!(app.message.contains("Type B"), "the tag reads the door's type: {}", app.message);
         window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        // an aligned dimension across the office, from the inner face of the (moved) bottom wall to the top wall's
         ribbon_button(&ctx, screen, &mut app, "Annotate", "dimension");
-        for p in [a, b, [0.0, a[1] - 1.0]] { office_plan_click(&ctx, screen, &mut app, p); }
-        let dims: Vec<_> = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Dimension { .. }))).collect();
+        let top = outer.iter().copied().find(|w| w.1[1] > 1.0 && w.2[1] > 1.0).expect("the top wall");
+        let (inner_bottom, inner_top) = (a[1] + 0.1, top.1[1] - 0.1);
+        for p in [[-1.5, inner_bottom], [-1.5, inner_top], [-0.8, 0.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        let dims: Vec<ElementId> = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Dimension { .. }))).map(|e| e.id).collect();
         assert_eq!(dims.len(), 1, "{}", app.message);
-        let Some(Geometry::Dimension { a: da, b: db, level: dl, .. }) = dims[0].geometry else { unreachable!() };
-        assert_eq!(dl, ground, "the dimension belongs to the ground-floor plan");
-        assert!(((db[0] - da[0]).hypot(db[1] - da[1]) - 6.2).abs() < 0.01, "it measures the 6.2 m wall axis: {da:?} {db:?}");
-        // known limitation (capability register D-DIM): the dimension keeps two points, not references to the wall,
-        // so a later edit of the wall does not update it; this pins that it stores coordinates only
-        assert!(matches!(dims[0].geometry, Some(Geometry::Dimension { .. })) && dims[0].parent.is_none(), "a dimension has no element reference yet");
+        let dimension = dims[0];
+        let measured = |app: &Desktop| match app.document.get(dimension).unwrap().geometry {
+            Some(Geometry::Dimension { a, b, level, refs, .. }) => { assert_eq!(level, ground); ((b[0] - a[0]).hypot(b[1] - a[1]), refs) }
+            _ => unreachable!(),
+        };
+        let (depth, refs) = measured(&app);
+        assert!((depth - (inner_top - inner_bottom)).abs() < 1e-6, "it measures the room's depth: {depth}");
+        assert_eq!(refs.map(|r| r.map(|r| r.element)), [Some(host), Some(top.0)], "each end refers to the wall face it was picked on");
         window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        // the dimension is associative: moving the top wall 300 mm out with the Move tool lengthens it, and undo and
+        // redo take both back and forth together
+        let top_grip = [top.1[0] + (top.2[0] - top.1[0]) * 0.75, top.1[1]];
+        office_plan_click(&ctx, screen, &mut app, top_grip);
+        assert_eq!(app.selected_id(), Some(top.0), "a click on the top wall selects it: {}", app.message);
+        ribbon_button(&ctx, screen, &mut app, "Modify", "move");
+        for p in [top_grip, [top_grip[0], top_grip[1] + 0.3]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert!((measured(&app).0 - (depth + 0.3)).abs() < 1e-5, "the dimension follows the wall: {}", measured(&app).0);
+        assert!(ribbon_click(&ctx, screen, &mut app, "undo"));
+        assert!((measured(&app).0 - depth).abs() < 1e-9, "undo restores the dimension with the wall");
+        assert!(ribbon_click(&ctx, screen, &mut app, "redo"));
+        assert!((measured(&app).0 - (depth + 0.3)).abs() < 1e-5);
 
         // Schedules from the View tab: rooms and doors, with the fields Revit starts with
         let schedule_of = |app: &mut Desktop, kind: &str| -> u64 {
@@ -1970,6 +1989,10 @@ mod tests {
         click_widget(&ctx, screen, &mut app, "sheet:print");
         crate::dialog::answer(Some(pdf.clone()));
         click_widget(&ctx, screen, &mut app, "print:go");
+        let q = crate::dialog::last_question().unwrap();
+        assert_eq!((q.save, q.title.as_str()), (true, "Print to PDF"));
+        assert_eq!(q.filters, vec![("PDF".to_string(), vec!["pdf".to_string()])]);
+        assert!(q.file_name.as_deref().is_some_and(|n| n.starts_with("A-101") && n.ends_with(".pdf")), "{:?}", q.file_name);
         let bytes = std::fs::read(&pdf).unwrap_or_else(|e| panic!("the PDF is written: {e} ({})", app.message));
         assert!(bytes.starts_with(b"%PDF-"), "a PDF file");
         // checked by an independent reader when one is installed: one page, the paper of the sheet
@@ -1988,6 +2011,10 @@ mod tests {
         crate::dialog::answer(Some(file.clone()));
         assert!(ribbon_click(&ctx, screen, &mut app, "save"));
         assert_eq!(crate::dialog::asked(), asked + 1, "Save of an unnamed model asks where");
+        // what the platform dialog is asked: checked here, shown natively in the program (gate 4)
+        let q = crate::dialog::last_question().unwrap();
+        assert_eq!((q.save, q.title.as_str(), q.file_name.as_deref()), (true, "Save model", Some("model.obim")));
+        assert_eq!(q.filters, vec![("OpenBIM model".to_string(), vec!["obim".to_string()])]);
         assert!(file.exists() && !app.is_dirty(), "{}", app.message);
         let saved = openbim_document::native::records(&app.document);
 
@@ -1996,6 +2023,9 @@ mod tests {
         assert!(app.document.elements().all(|e| e.category == Category::Level), "New leaves only its two levels");
         crate::dialog::answer(Some(file.clone()));
         assert!(ribbon_click(&ctx, screen, &mut app, "open"));
+        let q = crate::dialog::last_question().unwrap();
+        assert_eq!((q.save, q.title.as_str()), (false, "Open model"));
+        assert_eq!(q.filters, vec![("OpenBIM model".to_string(), vec!["obim".to_string()])]);
         assert_eq!(openbim_document::native::records(&app.document), saved, "the reopened file holds every record: {}", app.message);
         assert_eq!(app.levels().iter().map(|l| l.1.as_str()).collect::<Vec<_>>(), vec!["Ground Floor", "First Floor", "Roof"]);
 
@@ -2017,24 +2047,55 @@ mod tests {
         assert_eq!(text.matches("=IFCDOOR(").count(), 1);
         assert_eq!(text.matches("=IFCWINDOW(").count(), 1);
         assert_eq!(text.matches("=IFCRELFILLSELEMENT(").count(), 2);
-        // known limitation (capability register X-IFC): the U stair leaves as one straight IfcStair per run, not one
-        // IfcStair aggregating IfcStairFlight and landing parts; this pins what is written today
-        assert_eq!(text.matches("=IFCSTAIR(").count(), 2, "each run of the U stair");
-        assert_eq!(text.matches(".STRAIGHT_RUN_STAIR.").count(), 2);
+        // the U stair is one IfcStair (a half-turn stair) that aggregates its two flights and its landing, and only
+        // the stair is in the storey's list
+        let entity = |line: &str| line.split('=').next().unwrap().trim().to_string();
+        let stairs: Vec<&str> = text.lines().filter(|l| l.contains("=IFCSTAIR(")).collect();
+        assert_eq!(stairs.len(), 1, "one stair: {stairs:?}");
+        assert!(stairs[0].contains(".HALF_TURN_STAIR."), "{}", stairs[0]);
+        let flights: Vec<String> = text.lines().filter(|l| l.contains("=IFCSTAIRFLIGHT(")).map(entity).collect();
+        let landing: Vec<String> = text.lines().filter(|l| l.contains("=IFCSLAB(") && l.contains(".LANDING.")).map(entity).collect();
+        assert_eq!((flights.len(), landing.len()), (2, 1));
+        let stair_id = entity(stairs[0]);
+        let parts = text.lines().find(|l| l.contains("=IFCRELAGGREGATES(") && l.contains(&format!(",{stair_id},("))).expect("the stair aggregates its parts");
+        for part in flights.iter().chain(&landing) {
+            assert!(parts.contains(&format!("{part},")) || parts.contains(&format!("{part})")), "{part} is a part of the stair: {parts}");
+            assert!(!text.lines().any(|l| l.contains("IFCRELCONTAINEDINSPATIALSTRUCTURE") && (l.contains(&format!("{part},")) || l.contains(&format!("{part})")))), "{part} is not also contained in a storey");
+        }
+        assert!(text.lines().any(|l| l.contains("IFCRELCONTAINEDINSPATIALSTRUCTURE") && (l.contains(&format!("{stair_id},")) || l.contains(&format!("{stair_id})")))), "the stair is in its storey");
         assert!(text.contains("=IFCROOF(") || text.contains(".ROOF."), "the roof");
         assert!(text.contains(".CEILING."), "the ceiling");
         assert!(text.contains("'101 Office'") && text.contains("'102 Meeting'"), "the room numbers and names reach the IFC spaces");
+        // OPENBIM_JOURNEY_OUT keeps the files of the run for an independent reader or a review
+        if let Ok(out) = std::env::var("OPENBIM_JOURNEY_OUT") {
+            std::fs::create_dir_all(&out).unwrap();
+            for f in [&ifc, &pdf, &file] { std::fs::copy(f, std::path::Path::new(&out).join(f.file_name().unwrap())).unwrap(); }
+        }
 
-        // Recovery: an edit after the save is written to the journal by the autosave timer (called directly: the
-        // window's 30 s timer does not run in a test), then the program stops without saving
+        // Recovery: automatic save switched on in Options; the window's own timer writes the journal (the test moves
+        // the app's clock on instead of waiting a minute), then the program stops without saving
         let saved_text = std::fs::read_to_string(&file).unwrap();
+        let journal = Desktop::recovery_path(file.to_str());
+        click_widget(&ctx, screen, &mut app, "toolbar:options");
+        click_widget(&ctx, screen, &mut app, "options:autosave");
+        assert_eq!(app.settings.autosave_minutes, 1, "{}", app.message);
+        click_widget(&ctx, screen, &mut app, "toolbar:options");
         double_click_widget(&ctx, screen, &mut app, "view:Ground Floor");
         ribbon_button(&ctx, screen, &mut app, "Architecture", "wall");
         for p in [[-1.5, -1.0], [-1.5, 1.0]] { office_plan_click(&ctx, screen, &mut app, p); }
         window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
-        let walls_now = wall_axes(&app, ground).len();
-        assert_eq!(walls_now, 6, "{}", app.message);
-        assert!(app.autosave_tick(std::time::Duration::ZERO), "the journal is written");
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(journal.exists(), "the first unsaved change is written to the journal at once");
+        let first = app.file.journal.as_ref().map(|j| j.transactions).expect("the journal is kept");
+        // a second change waits for the interval: nothing is written until the clock passes a minute
+        for p in [[1.5, -1.0], [1.5, 1.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert_eq!(app.file.journal.as_ref().unwrap().transactions, first, "within the minute nothing more is written");
+        crate::clock::advance(std::time::Duration::from_secs(61));
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert_eq!(app.file.journal.as_ref().unwrap().transactions, first + 1, "after a minute the timer writes the second change");
+        assert_eq!(wall_axes(&app, ground).len(), 7, "{}", app.message);
         let unsaved = openbim_document::native::records(&app.document);
         drop(app);
         // a new session opens the file and is offered the unsaved work
@@ -2044,6 +2105,7 @@ mod tests {
         crate::dialog::answer(Some(file.clone()));
         assert!(ribbon_click(&ctx, screen, &mut app, "open"));
         assert_eq!(wall_axes(&app, app.levels()[0].0).len(), 5, "the file holds what was saved");
+        assert!(app.file.recovery.is_some(), "the unsaved work is offered: {}", app.message);
         click_widget(&ctx, screen, &mut app, "recovery:recover");
         assert_eq!(openbim_document::native::records(&app.document), unsaved, "the recovered model is the unsaved one: {}", app.message);
         assert!(app.is_dirty(), "recovered work stays unsaved until it is saved");

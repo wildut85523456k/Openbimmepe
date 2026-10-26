@@ -414,6 +414,24 @@ pub struct StairItem {
     pub risers: u32,
     pub riser_height: f64,
     pub tread_length: f64,
+    /// a run of a stair of several runs: the stair it is a flight of (None: a stair of one run, written as an IfcStair
+    /// with its own shape)
+    pub group: Option<StairGroup>,
+}
+
+/// A stair of several runs and landings. It leaves as one IfcStair that aggregates an IfcStairFlight for each run
+/// and its landings (IfcSlab LANDING), as the IFC 4 stair is modelled; the parts then leave the storey's list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StairGroup {
+    /// the element number the stair is known by in the model (its first run)
+    pub id: u64,
+    pub name: String,
+    /// IfcStairTypeEnum: STRAIGHT_RUN_STAIR, QUARTER_TURN_STAIR (L), HALF_TURN_STAIR (U), ...
+    pub shape: &'static str,
+    /// element numbers of its landings, written as slabs
+    pub landings: Vec<u64>,
+    /// risers of the whole stair
+    pub risers: u32,
 }
 
 pub struct Scene {
@@ -1074,6 +1092,7 @@ fn export_as(scene: &Scene, v2: bool, x43: bool) -> Result<Exported, ExportError
     write_columns(&mut o)?;
     write_beams(&mut o)?;
     write_assemblies(&mut o);
+    write_stair_groups(&mut o);
     write_member_materials(&mut o);
     write_spaces(&mut o)?;
     write_grids(&mut o);
@@ -1289,6 +1308,28 @@ fn write_columns(o: &mut Out) -> Result<(), ExportError> {
         o.member_entities.push((c.id, e));
     }
     Ok(())
+}
+
+/// A stair of several runs: one IfcStair, contained in the storey of its first flight, aggregating its flights and
+/// landings, which leave the storey's list (IFC: an element is either contained or a part, not both).
+fn write_stair_groups(o: &mut Out) {
+    let scene = o.scene;
+    let mut groups: Vec<&StairGroup> = Vec::new();
+    for g in scene.stairs.iter().filter_map(|s| s.group.as_ref()) { if !groups.iter().any(|x| x.id == g.id) { groups.push(g); } }
+    for group in groups {
+        let parts: Vec<u64> = scene.stairs.iter().filter(|s| s.group.as_ref().is_some_and(|g| g.id == group.id)).map(|s| s.id).chain(group.landings.iter().copied()).collect();
+        let ents: Vec<u32> = parts.iter().filter_map(|m| o.member_entities.iter().find(|(id, _)| id == m).map(|(_, e)| *e)).collect();
+        let st = o.contained.iter().find(|(_, v)| ents.first().is_some_and(|e| v.contains(e))).map(|(k, _)| *k).unwrap_or(0);
+        for v in o.contained.values_mut() { v.retain(|e| !ents.contains(e)); }
+        let pl = o.place(Some(o.storeys[st].1), [0.0; 3], None, None);
+        let g = o.gid(group.id, 0x5A1);
+        let stair = o.s.add(format!("IFCSTAIR({g},$,{},$,$,#{pl},$,$,.{}.)", string(&group.name), group.shape));
+        o.contain(st, stair);
+        let g = o.gid(group.id, 0x5A2);
+        o.s.add(format!("IFCRELAGGREGATES({g},$,$,$,#{stair},({}))", ents.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")));
+        o.pset(stair, "Pset_StairCommon", vec![("NumberOfRiser", Val::Int(i64::from(group.risers)))]);
+        o.report.stairs += 1;
+    }
 }
 
 /// A truss or beam system becomes an `IfcElementAssembly` that aggregates its members; the members then leave the
@@ -1650,6 +1691,20 @@ fn write_stairs(o: &mut Out) -> Result<(), ExportError> {
         let solid = o.extrusion(prof, origin, Some(right), Some([s.dir[0], s.dir[1], 0.0]), s.width);
         let shape = o.shape(&[solid]);
         let g = o.gid(s.id, 0);
+        if s.group.is_some() {
+            // a flight of a stair of several runs: the stair is written by `write_stair_groups`
+            let (risers, treads) = (i64::from(s.risers), i64::from(s.risers - 1));
+            let (rh, tl) = (o.r(s.riser_height, "riser height"), o.r(s.tread_length, "tread length"));
+            let tail = if o.v2 { String::new() } else { ",.STRAIGHT.".into() };
+            let flight = o.s.add(format!("IFCSTAIRFLIGHT({g},$,{},$,$,#{pl},#{shape},$,{risers},{treads},{rh},{tl}{tail})", string(&s.name)));
+            o.contain(st, flight);
+            o.member_entities.push((s.id, flight));
+            o.pset(flight, "Pset_StairFlightCommon", vec![
+                ("NumberOfRiser", Val::Int(risers)), ("NumberOfTreads", Val::Int(treads)),
+                ("RiserHeight", Val::Len(s.riser_height)), ("TreadLength", Val::Len(s.tread_length)),
+            ]);
+            continue;
+        }
         let stair = o.s.add(format!("IFCSTAIR({g},$,{},$,$,#{pl},#{shape},$,.STRAIGHT_RUN_STAIR.)", string(&s.name)));
         o.contain(st, stair);
         o.member_entities.push((s.id, stair));

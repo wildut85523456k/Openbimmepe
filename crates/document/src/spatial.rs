@@ -51,7 +51,8 @@ pub enum Geometry {
     /// a tag: its label at `at` in the plan, with a leader to `anchor`, on the element `host`
     Tag { host: ElementId, at: [f64; 2], anchor: [f64; 2] },
     /// an aligned dimension on `level`: the distance between the points `a` and `b`, its line through `at`
-    Dimension { a: [f64; 2], b: [f64; 2], at: [f64; 2], level: ElementId },
+    /// `refs`: what each end refers to, so it follows that wall or grid (see `dimension`); None for a free end
+    Dimension { a: [f64; 2], b: [f64; 2], at: [f64; 2], level: ElementId, refs: [Option<crate::dimension::DimRef>; 2] },
     /// a tag in an elevation or section view: the label of `host`, at `at` and with a leader to `anchor`, both as
     /// (along the view, height) in metres
     ViewTag { host: ElementId, view: ViewRef, at: [f64; 2], anchor: [f64; 2] },
@@ -228,9 +229,10 @@ pub(super) fn validate(elements: &BTreeMap<ElementId, Element>) -> Result<(), Ed
                 el.category == Category::Tag && at.iter().chain(anchor.iter()).all(|v| v.is_finite() && v.abs() <= 1e6)
                     && elements.get(host).is_some_and(|h| !matches!(h.category, Category::Tag | Category::Level | Category::Grid | Category::Type))
             }
-            Some(Geometry::Dimension { a, b, at, level }) => {
+            Some(Geometry::Dimension { a, b, at, level, refs }) => {
                 el.category == Category::Dimension && valid_axis(*a, *b) && at.iter().all(|v| v.is_finite() && v.abs() <= 1e6)
                     && elements.get(level).is_some_and(|l| l.category == Category::Level && l.geometry == Some(Geometry::Level))
+                    && refs.iter().flatten().all(|r| r.t.is_finite() && r.offset.is_finite() && elements.contains_key(&r.element))
             }
             Some(Geometry::ViewTag { host, view, at, anchor }) => {
                 el.category == Category::Tag && view.valid(elements) && at.iter().chain(anchor.iter()).all(|v| v.is_finite() && v.abs() <= 1e6)

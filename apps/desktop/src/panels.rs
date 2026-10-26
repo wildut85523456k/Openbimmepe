@@ -1071,7 +1071,8 @@ const TREE: &[Node] = &[
 fn node_matches(app: &Desktop, node: &Node, query: &str) -> bool {
     // a level view is searched by the name it shows, which is the level's own (A2/R1)
     let shown = node.view.map_or_else(|| node.name.to_string(), |view| level_view_name(app, node.name, view));
-    matches(query, node.name) || matches(query, &shown) || node.children.iter().any(|child| node_matches(app, child, query))
+    let added_level = node.name == "Floor Plans" && app.levels().iter().skip(2).any(|l| matches(query, &l.1));
+    matches(query, node.name) || matches(query, &shown) || added_level || node.children.iter().any(|child| node_matches(app, child, query))
 }
 
 fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, query: &str) {
@@ -1090,7 +1091,7 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
         if response.double_clicked() {
             app.view = view;
             app.selected = None;
-            app.message = format!("Opened sample view: {}", node.name);
+            app.message = format!("Opened {}", level_view_name(app, node.name, view));
         }
     } else {
         egui::CollapsingHeader::new(RichText::new(node.name).strong())
@@ -1107,6 +1108,8 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
                     // A matching parent reveals its entire subtree.
                     let child_query = if matches(query, node.name) { "" } else { query };
                     for child in node.children { tree_node(app, ui, child, &path, child_query); }
+                    // the plans of the levels after the first two belong with the other floor plans (A2/R1)
+                    if node.name == "Floor Plans" { level_plans(app, ui, child_query); }
                 }
             });
     }
@@ -1121,16 +1124,6 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().id_salt("project_tree").auto_shrink([false, false])
         .show(ui, |ui| {
             for node in TREE { tree_node(app, ui, node, "project", &query); }
-            // the Floor Plans folder holds the document's first two levels, whatever their ids are, so only the
-            // levels after them are added here (A2/R1)
-            let added: Vec<(ElementId, String)> = app.levels().into_iter().skip(2).map(|l| (l.0, l.1)).collect();
-            for (id, name) in added {
-                if !matches(&query, &name) { continue; }
-                let active = app.view == View::Level(id.0);
-                let r = ui.selectable_label(active, RichText::new(format!("{name} (plan)"))).on_hover_text("Open the plan of this level");
-                test_hit!(app, r, "view:{name}");
-                if r.clicked() { app.view = View::Level(id.0); app.selected = None; }
-            }
             // the section lines of the model, each opening its view
             let sections: Vec<(ElementId, String)> = app.document.elements().filter(|e| e.category == openbim_document::Category::Section).map(|e| (e.id, e.name.clone())).collect();
             for (id, name) in sections {
@@ -1152,6 +1145,25 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
             }
             if !TREE.iter().any(|node| node_matches(app, node, &query)) { ui.weak("No matching items"); }
         });
+}
+
+/// The plans of the levels after the first two (whose plans are the fixed Level 1 and Level 2 entries): listed in
+/// the Floor Plans folder like the others, and opened by a double click as they are (A2/R1).
+fn level_plans(app: &mut Desktop, ui: &mut egui::Ui, query: &str) {
+    let added: Vec<(ElementId, String)> = app.levels().into_iter().skip(2).map(|l| (l.0, l.1)).collect();
+    for (id, name) in added {
+        if !matches(query, &name) { continue; }
+        let view = View::Level(id.0);
+        let active = app.view == view;
+        let color = if active { ui.visuals().hyperlink_color } else { ui.visuals().text_color() };
+        let label = RichText::new(&name).color(color);
+        let path = format!("project/Views (all)/Floor Plans/{name}");
+        let r = ui.selectable_label(app.browser_selected == path, if active { label.strong() } else { label }).on_hover_text("Double-click to open view");
+        test_hit!(app, r, "view:{name}");
+        if r.clicked() { app.browser_selected = path; }
+        r.context_menu(|ui| app.add_to_sheet_menu(ui, crate::view_ui::view_key(view)));
+        if r.double_clicked() { app.view = view; app.selected = None; app.message = format!("Opened {name}"); }
+    }
 }
 
 /// Number, Name and Department of the selected room, editable in place and applied as one undoable step (B21). The

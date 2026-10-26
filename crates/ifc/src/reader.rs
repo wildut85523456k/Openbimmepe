@@ -160,7 +160,7 @@ pub struct GridLine {
 }
 
 /// The classes that become members.
-const MEMBERS: [&str; 17] = [
+const MEMBERS: [&str; 18] = [
     "IFCBEAM",
     "IFCMEMBER",
     "IFCCOLUMN",
@@ -168,6 +168,7 @@ const MEMBERS: [&str; 17] = [
     "IFCROOF",
     "IFCCOVERING",
     "IFCSTAIR",
+    "IFCSTAIRFLIGHT",
     "IFCFOOTING",
     "IFCWALL",
     "IFCWALLSTANDARDCASE",

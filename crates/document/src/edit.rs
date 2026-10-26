@@ -117,7 +117,12 @@ impl Document {
                 e.geometry = Some(Geometry::Area { level });
             }
             Some(Geometry::Tag { host, at, anchor }) => e.geometry = Some(Geometry::Tag { host, at: p(at), anchor: p(anchor) }),
-            Some(Geometry::Dimension { a, b, at, level }) => e.geometry = Some(Geometry::Dimension { a: p(a), b: p(b), at: p(at), level }),
+            // as in Revit, moving a dimension moves its line; an end that refers to a wall or grid stays on it (if the
+            // wall moves too, the regeneration after the change puts the end there), a free end moves with the line
+            Some(Geometry::Dimension { a, b, at, level, refs }) => {
+                let end = |q: [f64; 2], r: Option<crate::dimension::DimRef>| if r.is_some() { q } else { p(q) };
+                e.geometry = Some(Geometry::Dimension { a: end(a, refs[0]), b: end(b, refs[1]), at: p(at), level, refs });
+            }
             Some(Geometry::Room { at, level }) => e.geometry = Some(Geometry::Room { at: p(at), level }),
             Some(Geometry::Shaft { .. }) => {
                 e.outline = e.outline.iter().map(|q| p(*q)).collect();
@@ -800,11 +805,16 @@ mod tests {
         d.transact(d.revision(), &ops).unwrap();
         assert!(near(line(&d, ElementId(20)).0, [0.0, 1.0]) && near(line(&d, ElementId(20)).1, [5.5, 1.0]));
         assert!(d.set_wall_length_commands(ElementId(20), 0.01).is_err() && d.set_wall_length_commands(grid, 3.0).is_err());
-        // a dimension between two points is saved and moves with the move command
-        let dim = d.place_dimension(level, [0.0, 0.0], [3.0, 0.0], [1.5, 1.0]).unwrap();
+        // a dimension between two points on nothing is saved and moves whole with the move command
+        let dim = d.place_dimension(level, [0.0, 20.0], [3.0, 20.0], [1.5, 21.0]).unwrap();
         let ops = d.transform_commands(&[dim], Xf::Move([1.0, 1.0])).unwrap();
         d.transact(d.revision(), &ops).unwrap();
-        assert!(matches!(d.get(dim).unwrap().geometry, Some(Geometry::Dimension { a, b, at, .. }) if near(a, [1.0, 1.0]) && near(b, [4.0, 1.0]) && near(at, [2.5, 2.0])));
+        assert!(matches!(d.get(dim).unwrap().geometry, Some(Geometry::Dimension { a, b, at, .. }) if near(a, [1.0, 21.0]) && near(b, [4.0, 21.0]) && near(at, [2.5, 22.0])));
+        // one whose ends are on a wall keeps them there and only its line moves, as in Revit
+        let on_wall = d.place_dimension(level, [2.0, 1.0], [4.0, 1.0], [3.0, 2.0]).unwrap();
+        let ops = d.transform_commands(&[on_wall], Xf::Move([0.5, 1.0])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(matches!(d.get(on_wall).unwrap().geometry, Some(Geometry::Dimension { a, b, at, refs, .. }) if refs[0].is_some() && near(a, [2.0, 1.0]) && near(b, [4.0, 1.0]) && near(at, [3.5, 3.0])), "{:?}", d.get(on_wall).unwrap().geometry);
         assert!(d.place_dimension(level, [0.0, 0.0], [0.0, 0.0], [1.0, 1.0]).is_err());
         let (els, _) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
         assert_eq!(els.iter().find(|e| e.id == dim).unwrap().geometry, d.get(dim).unwrap().geometry);

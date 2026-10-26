@@ -287,7 +287,8 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
             "IFCSLAB" => Category::Slab,
             "IFCCOVERING" if m.predefined == "CEILING" => Category::Slab,
             "IFCCOVERING" => { skip(&mut report, "IFCCOVERING that is not a ceiling (no such element in the app)"); continue }
-            "IFCSTAIR" => Category::Stair,
+            // a flight of a stair of several runs is a run of its own here (the landing is not read yet)
+            "IFCSTAIR" | "IFCSTAIRFLIGHT" => Category::Stair,
             "IFCROOF" => { skip(&mut report, "IFCROOF (a roof written by another program is not read yet)"); continue }
             "IFCFOOTING" => if m.predefined == "STRIP_FOOTING" { Category::WallFooting } else { Category::Footing },
             "IFCWALL" | "IFCWALLSTANDARDCASE" => Category::Wall,
@@ -527,7 +528,7 @@ fn read_stair(body: &openbim_ifc::reader::Body, psets: &openbim_ifc::reader::Pse
     if n < 2 { return Err("has fewer than two steps in its body".into()); }
     let riser = (z_hi - z_lo) / n as f64;
     if levels.iter().enumerate().any(|(i, z)| (z - z_lo - riser * (i + 1) as f64).abs() > 1e-3) { return Err("has steps that are not of equal height".into()); }
-    if let Some(r) = psets.get("Pset_StairCommon").and_then(|p| p.get("NumberOfRiser")).and_then(|p| p.num()) {
+    if let Some(r) = ["Pset_StairCommon", "Pset_StairFlightCommon"].iter().find_map(|s| psets.get(*s).and_then(|p| p.get("NumberOfRiser")).and_then(|p| p.num())) {
         if (r - (n + 1) as f64).abs() > 1e-9 { return Err("has a NumberOfRiser that does not match the steps of its body".into()); }
     }
     let (t_lo, t_hi) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
@@ -1247,8 +1248,9 @@ mod tests {
             let out = crate::export::export_ifc_as(&d, "P", 1, "2026-10-18T00:00:00", schema).unwrap();
             assert_eq!(out.text.matches("IFCCOVERING(").count(), 1, "{schema:?}: the ceiling");
             assert!(out.text.contains(".CEILING."), "{schema:?}");
-            // the straight stair, and the two runs of the U stair with their landing slab
-            assert_eq!(out.text.matches("IFCSTAIR(").count(), 3, "{schema:?}: the stairs");
+            // the straight stair, and the U stair: one IfcStair of two flights and its landing slab
+            assert_eq!(out.text.matches("IFCSTAIR(").count(), 2, "{schema:?}: the stairs");
+            assert_eq!(out.text.matches("IFCSTAIRFLIGHT(").count(), 2, "{schema:?}: the flights of the U stair");
             assert_eq!(out.text.matches(".LANDING.").count(), 1, "{schema:?}: the landing");
             // the free railing and the two of the U stair, which follow its runs and landing
             assert_eq!(out.text.matches("IFCRAILING(").count(), 3, "{schema:?}: the railings");
@@ -1612,6 +1614,24 @@ mod tests {
             if let (Some(Geometry::Linear { end: a, .. }), Some(Geometry::Linear { end: b, .. })) = (e.geometry, got.geometry) { assert!(close2(a, b), "{a:?} {b:?}"); }
         }
         assert_eq!(back.elements().filter(|e| e.category == Category::Stair).count(), 4);
+    }
+
+    #[test]
+    fn the_flights_of_a_u_stair_from_another_program_come_back_as_its_runs() {
+        let mut d = Document::spatial_sample();
+        let spec = openbim_document::StairSpec { start: [200.0, 0.0], toward: [200.0, 1.0], width_m: 1.0, rise_m: 3.0, risers: 18, tread_m: 0.28, base_offset_m: 0.0 };
+        let first = d.place_stair_with_railing(ElementId(10), &spec, openbim_document::StairShape::U { left: false }, openbim_document::RailingSides::None).unwrap();
+        let runs: Vec<openbim_document::Element> = d.stair_parts(first).into_iter().filter_map(|p| d.get(p).cloned()).filter(|e| matches!(e.geometry, Some(Geometry::Linear { .. }))).collect();
+        assert_eq!(runs.len(), 2);
+        // written without this app's own data, as another program's file is read
+        let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-26T00:00:00", crate::export::Schema::Ifc4, false).unwrap();
+        let mut back = Document::new();
+        let report = import_ifc(&mut back, &out.text).unwrap();
+        for e in &runs {
+            let got = back.elements().find(|g| g.category == Category::Stair && matches!((e.geometry, g.geometry), (Some(Geometry::Linear { start: a, .. }), Some(Geometry::Linear { start: b, .. })) if close2(a, b))).unwrap_or_else(|| panic!("{}: {}", e.name, report.text()));
+            assert_eq!(got.count, e.count, "{}: the risers of the run", e.name);
+        }
+        assert_eq!(report.skipped.get("IFCSLAB LANDING (the landing of a stair written by another program is not read yet)"), Some(&1), "{}", report.text());
     }
 
     #[test]

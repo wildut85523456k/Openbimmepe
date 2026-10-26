@@ -1,4 +1,3 @@
-use crate::dialog::Ask;
 use crate::{Desktop, ElementId, SampleElement, TempDim, Tool};
 use eframe::egui;
 use openbim_document::{Xf, FamilySpec, RebarSpec, TrussSpec, BeamSpec, BeamSystemSpec, Category, ColumnSpec, Command, FootingSpec, WallFootingSpec, Geometry, Section, SlabSpec, Usage};
@@ -254,7 +253,7 @@ impl Desktop {
                 test_hit!(self, r, "export:path");
                 if ui.button("Browse...").clicked() {
                     let start = std::path::Path::new(&dialog.path);
-                    let mut fd = rfd::FileDialog::new().set_title("Export IFC").add_filter("IFC", &["ifc"]);
+                    let mut fd = crate::dialog::Question::new().set_title("Export IFC").add_filter("IFC", &["ifc"]);
                     if let Some(name) = start.file_name().and_then(|n| n.to_str()) { fd = fd.set_file_name(name); }
                     if let Some(dir) = start.parent().filter(|d| d.is_dir() && !d.as_os_str().is_empty()) { fd = fd.set_directory(dir); }
                     if let Some(p) = fd.ask_save() { dialog.path = p.display().to_string(); }
@@ -290,17 +289,17 @@ impl Desktop {
                 ui.label("File");
                 ui.text_edit_singleline(&mut dialog.path);
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Import IFC").add_filter("IFC (IFC2X3, IFC4, IFC 4.3)", &["ifc"]).ask_open() { dialog.path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("Import IFC").add_filter("IFC (IFC2X3, IFC4, IFC 4.3)", &["ifc"]).ask_open() { dialog.path = p.display().to_string(); }
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Class map");
                 ui.text_edit_singleline(&mut dialog.map_path);
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("IFC class map").add_filter("Class map (tab separated)", &["txt", "tsv", "tab"]).ask_open() { dialog.map_path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("IFC class map").add_filter("Class map (tab separated)", &["txt", "tsv", "tab"]).ask_open() { dialog.map_path = p.display().to_string(); }
                 }
                 if ui.button("Save example...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Save an example class map").set_file_name("ifc-class-map.txt").ask_save() {
+                    if let Some(p) = crate::dialog::Question::new().set_title("Save an example class map").set_file_name("ifc-class-map.txt").ask_save() {
                         self.message = match std::fs::write(&p, crate::class_map::EXAMPLE) { Ok(()) => format!("Saved an example class map to {}", p.display()), Err(e) => format!("Could not save {}: {e}", p.display()) };
                     }
                 }
@@ -329,7 +328,7 @@ impl Desktop {
                 ui.label("Catalogue");
                 ui.text_edit_singleline(&mut dialog.path);
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Load Family").add_filter("Family catalogue (tab separated)", &["tsv", "txt", "csv", "tab"]).ask_open() { dialog.path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("Load Family").add_filter("Family catalogue (tab separated)", &["tsv", "txt", "csv", "tab"]).ask_open() { dialog.path = p.display().to_string(); }
                 }
             });
             ui.small("A tab-separated catalogue: a 'family' line naming a family in the library, then a 'type' line naming its inputs, then one line per type. Every row becomes a type of that family in this project.");
@@ -1806,9 +1805,10 @@ mod tests {
         assert_eq!((stairs(&app), railings(&app)), (before, 0), "{}", app.message);
         app.document.undo().unwrap();
         assert_eq!((stairs(&app), railings(&app)), (before + 3, 2));
-        // exported: two flights and a landing slab
+        // exported: one stair of two flights and a landing slab
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
-        assert_eq!(out.text.matches("IFCSTAIR(").count(), before + 2);
+        assert_eq!(out.text.matches("IFCSTAIR(").count(), before + 1);
+        assert_eq!(out.text.matches("IFCSTAIRFLIGHT(").count(), 2);
         assert_eq!(out.text.matches(".LANDING.").count(), 1);
         assert_eq!(out.text.matches("IFCRAILING(").count(), 2, "the railings of the stair");
         // a U stair, turning right, is placed the same way; too little climb for two runs is refused

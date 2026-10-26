@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 mod spatial;
+pub mod dimension;
 mod edit;
 mod viewedit;
 pub use viewedit::{ViewEdge, ViewFrame};
@@ -846,12 +847,15 @@ impl Document {
         Ok(id)
     }
     /// Draws an aligned dimension from `a` to `b` on `level`, its line through `at`.
+    /// Places an aligned dimension from `a` to `b` with its line through `at`. An end picked on a wall (its face, axis
+    /// or end) or on a straight grid refers to it and follows it when it moves (D-DIM); an end on nothing stays put.
     pub fn place_dimension(&mut self, level: ElementId, a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Result<ElementId, EditError> {
         let id = self.next_id();
+        let refs = [dimension::reference_at(&self.elements, level, a), dimension::reference_at(&self.elements, level, b)];
         let n = self.elements.values().filter(|e| e.category == Category::Dimension).count() + 1;
         self.transact(self.revision, &[
             Command::Create { id, category: Category::Dimension, name: format!("Dimension {n}"), width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
-            Command::SetGeometry { id, geometry: Geometry::Dimension { a, b, at, level } },
+            Command::SetGeometry { id, geometry: Geometry::Dimension { a, b, at, level, refs } },
         ])?;
         Ok(id)
     }
@@ -1437,6 +1441,8 @@ impl Document {
                 }
             }
         }
+        // associative dimensions follow what they refer to, in this same change (D-DIM)
+        dimension::regenerate(&mut trial, revision);
         if trial.values().any(|e| !e.valid()) { return Err(EditError::InvalidElement); }
         spatial::validate(&trial)?;
         // what was joined to a run that is gone is no longer joined

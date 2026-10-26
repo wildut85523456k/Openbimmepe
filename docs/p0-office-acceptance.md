@@ -12,12 +12,15 @@ Reference: Architecture 2026 chapters 2-8 and 11-13. This is an original test fi
 3. Complete office interaction: PASS headless (26 Oct, candidate branch `p0/office-journey-ui`).
    `model_view.rs::tests::the_two_storey_office_is_drawn_saved_reopened_and_exported_through_the_window` operates only
    controls the window drew, located from that frame by name (`test_hit!`), and covers every step of the journey
-   below. The disclosed substitutions are: the platform file dialog behind Save, Open and Print (`dialog::answer`),
-   and the autosave timer, called directly once (`autosave_tick`) because the window's 30 s timer does not run in a
-   test. A scroll-clipped control is reached with the mouse wheel; a control out of sight fails the test.
-   Known limitations the test pins rather than hides: a dimension stores two points and does not follow the wall
-   (D-DIM), and a U stair exports as one straight IfcStair per run (X-IFC).
-4. Native window/file dialogs and visual output: OPEN. Headless shape counts do not close this gate.
+   below. The one substitution is at the platform boundary: the native file dialog is replaced by `dialog::Question`,
+   which records what the user would be asked (title, file types, offered name; the test checks them for Save, Open
+   and Print) and gives the queued answer. The autosave runs from the window's own timer, switched on in Options;
+   the test moves the app's clock on (`clock::advance`) instead of waiting a minute. A scroll-clipped control is
+   reached with the mouse wheel; a control out of sight fails the test. The native dialog and the real window are
+   gate 4.
+4. Native window/file dialogs and visual output: PARTIAL. Linux real-window review done 26 Oct
+   (`docs/audits/2026-10-26-visual-review.md`): the journey's model opened in the release build and reviewed by eye,
+   two findings fixed, six open (V3-V8). Windows and macOS windows and native dialogs are still to be reviewed.
 
 ## Complete journey
 
@@ -44,15 +47,15 @@ Reference: Architecture 2026 chapters 2-8 and 11-13. This is an original test fi
 | Envelope | Location Line list; Wall, Door, Window, Floor, Stair (U shape list), Ceiling, Roof; browser double clicks | walls per storey, hosts, slab kinds, roof level, 21 risers |
 | Rooms | Room tool; Select click on the label; Properties Number/Name/Apply | 2 x 11.6 m²; 101 Office, 102 Meeting |
 | Change | Properties Type list + Apply (Type B); Move tool on the host wall; quick-access Undo/Redo | joined walls stretch, door stays hosted, rooms grow by 1.45 m²; exact records after undo and redo |
-| Annotation | Annotate > Tag on the door; Annotate > Dimension | tag host and type; 6.2 m; coordinates only (limitation) |
+| Annotation | Annotate > Tag on the door; Annotate > Dimension across the office; Move the top wall; Undo/Redo | tag host and type; the dimension refers to both walls and follows the move, undo and redo |
 | Schedule | View > Schedule, category, OK, Properties OK | room numbers and areas equal the model; one Type B door, 1200 mm |
 | Sheet | View > Sheet: number, name, OK; Place View x2 | A-101 with the plan and the room schedule |
-| Output | Print (PDF); Insert > Export IFC with a typed path | pdfinfo: 1 page at the sheet's paper; IFC storeys, 9 walls, 2 spaces, door/window fillings, stair, roof, ceiling |
+| Output | Print (PDF); Insert > Export IFC with a typed path | pdfinfo: 1 page at the sheet's paper; IFC storeys, 9 walls, 2 spaces, door/window fillings, one half-turn IfcStair aggregating 2 flights and its landing, roof, ceiling |
 | Persistence | quick-access Save, New, Open | every native record equal after reopen |
-| Recovery | Wall after the save; journal written; new session Open; Recover | recovered records equal the unsaved ones; the file on disk is unchanged |
+| Recovery | Options > Save automatically; two walls after the save; the clock moved a minute; new session Open; Recover | the first change is journalled at once, the second only after the minute; recovered records equal the unsaved ones; the file on disk is unchanged |
 
 Mutation checks (each made the journey fail, then was reverted): room-label pick, level Rename, Recover button,
-Print button.
+Print button, dimension regeneration, the window's autosave timer.
 
 Do not mark the journey complete if it calls geometry creation methods instead of driving the corresponding controls.
 File paths can be injected at the platform-dialog boundary in automated tests, but that substitution must be disclosed.

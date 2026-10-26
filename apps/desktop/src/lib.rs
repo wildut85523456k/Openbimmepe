@@ -40,6 +40,7 @@ mod georef_ui;
 mod journal;
 mod file;
 mod dialog;
+mod clock;
 mod mep_tool;
 mod insulation_ui;
 mod systems_ui;
@@ -352,7 +353,11 @@ impl Desktop {
         if let Some(rs) = cc.wgpu_render_state.as_ref() { openbim_viewport_egui::Viewport3d::init(rs); }
         let mut app = Self::sample();
         app.settings = app_settings::AppSettings::load();
-        app.check_recovery(None);
+        // a model file named on the command line (or by the system, when a .obim file is opened) is opened at start
+        match std::env::args_os().nth(1).map(|a| a.to_string_lossy().into_owned()).filter(|a| !a.starts_with('-')) {
+            Some(path) => { app.new_model(); app.load_model(&path); }
+            None => app.check_recovery(None),
+        }
         app
     }
 
@@ -389,7 +394,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: Default::default(), show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -565,7 +570,9 @@ impl Desktop {
                     ui.ctx().set_visuals(if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
                 }
                 if ui.button("Help").clicked() { self.show_help = !self.show_help; }
-                if ui.button("Options").clicked() { self.show_options = !self.show_options; }
+                let r = ui.button("Options");
+                test_hit!(self, r, "toolbar:options");
+                if r.clicked() { self.show_options = !self.show_options; }
                 if ui.button("Georeferencing").clicked() { self.show_georef = !self.show_georef; }
             });
         });
@@ -902,7 +909,7 @@ impl Desktop {
         self.compute_window(&ctx);
         self.elec_window(&ctx);
         self.file_window(&ctx);
-        #[cfg(not(test))]
+        // the timer of the automatic save; a test drives it by moving the app's clock on (`clock::advance`)
         self.autosave();
         ctx.request_repaint_after(std::time::Duration::from_secs(30));
         self.options_window(&ctx);

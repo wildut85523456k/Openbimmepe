@@ -29,14 +29,14 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 | A-STAIR / ch8 | Stairs and railings | Partial | document stair/railing modules | Ramps, winders, sketched stairs, richer railing/host and curtain-system support |
 | A-SITE / ch9 | Site modelling | Open (georeference subset exists) | `georef_ui.rs`, IFC georef module | Toposolid, grading, contours and property lines |
 | A-FAM / ch10 | Family authoring | Partial | `family_types_ui.rs`, family crate, Load Family in `model_edit.rs` | Graphical editor, constraints and flex/host acceptance; massing |
-| D-DIM / ch11 | Dimensions and tags | Partial | `view_notes.rs`: view dimensions store coordinate pairs | Persistent geometry references, update/undo tests, other dimension kinds, text/keynotes |
+| D-DIM / ch11 | Dimensions and tags | Partial | `view_notes.rs` (view dimensions: coordinates); plan dimensions associative on candidate `p0/office-journey-ui`: `crates/document/src/dimension.rs`, `tests/dimensions.rs`, journey move/undo/redo | Section/elevation dimensions, EQ and locks, other dimension kinds, text/keynotes |
 | D-SCHED / ch12 | Schedules and detailing | Partial | `schedule_ui.rs`, document schedule module | Calculated fields, takeoffs, keys, drafting/callout views and regions |
 | D-SHEET / ch13 | Sheets and export | Partial | `sheet_ui.rs`, `sheet_draw.rs`, `print_dialog.rs`, sheets crate | Revisions, title-block families, drawing fidelity and actual company standards |
 | A-3D / ch14-15 | Model viewing and presentation | Partial | `view3d.rs`, viewport and viewport-egui crates | Full navigation/camera workflows, rendering and walkthrough acceptance |
 | C-COLLAB / ch16 | Shared-folder collaboration | Open | UI specification and COLLAB-001..003 | Two writers, ownership, conflicts, linked read-only models and crash recovery |
 | D-PURGE / ch16 | Purge unused | Open | `docs/agent-team/purge-unused.md` | Scan/apply/undo with reference-chain and stale-scan validation |
-| X-IFC | IFC export | Partial, advanced since 23 Oct | `export.rs`, `model_edit.rs`: rooms, grids, named systems, penetrations, georef and persisted project key | Independent external reader and supported-entity coverage; no full interoperability claim |
-| X-IMPORT | External IFC import | Partial | `import.rs`: rooms, hosted fillers, grids, selected families, limited stairs and generic carriers | External roof/flight/landing/brep coverage; ports and connections; diagnostics |
+| X-IFC | IFC export | Partial, advanced since 23 Oct | `export.rs`, `model_edit.rs`: rooms, grids, named systems, penetrations, georef and persisted project key; L/U stairs as one IfcStair aggregating IfcStairFlight and the landing (candidate; IfcOpenShell 0.9 validation clean in IFC2X3/4/4X3) | Independent external reader and supported-entity coverage; no full interoperability claim |
+| X-IMPORT | External IFC import | Partial | `import.rs`: rooms, hosted fillers, grids, selected families, straight stairs and IfcStairFlight runs (candidate), generic carriers | External roof/landing/brep coverage; flight grouping; ports and connections; diagnostics |
 | API-CMD | Common UI/API execution | Partial | commands crate; issues #75/#76 | Registry consumers and unambiguous stable parameter IDs |
 
 ## Corrections to historical reports
@@ -68,3 +68,4 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 | P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | PASS headless on candidate branch `p0/office-journey-ui` (Linux, rustc 1.97.0): every journey step through window controls; substitutions and pinned limitations listed in `p0-office-acceptance.md`. Native-window and visual review remain gate 4 |
 
 Native startup, visual parity and performance are separate gates; compilation and headless egui tests do not close them.
+Linux visual review (26 Oct, candidate): `docs/audits/2026-10-26-visual-review.md`; Windows/macOS review open.
