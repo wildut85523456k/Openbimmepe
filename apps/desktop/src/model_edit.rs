@@ -452,6 +452,28 @@ impl Desktop {
         self.message = "Rename cancelled".into();
     }
 
+    /// Opens the elevation field of a level, holding its elevation in mm as the user will edit it (A6).
+    pub(crate) fn start_level_elevation(&mut self, id: ElementId) {
+        let Some(level) = self.document.get(id) else { return };
+        self.level_elev_edit = Some((id, format!("{:.0}", level.elevation_m * 1000.0)));
+        self.message = "Type the level's elevation in mm and press Enter or OK; what stands on it moves with it".into();
+    }
+
+    /// Commits the typed elevation as one undoable step. A value that is not a number, that passes another level or
+    /// comes too close to one is refused and the field stays open to be corrected.
+    pub(crate) fn commit_level_elevation(&mut self) {
+        let Some((id, text)) = self.level_elev_edit.clone() else { return };
+        let Ok(mm) = text.trim().replace(',', ".").parse::<f64>() else {
+            self.message = format!("Elevation not changed: {text:?} is not a number of mm");
+            return;
+        };
+        let name = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
+        match self.document.set_level_elevation(id, mm / 1000.0) {
+            Ok(()) => { self.level_elev_edit = None; self.message = format!("{name} moved to {mm:.0} mm; what stands on it moved with it; undo restores it"); }
+            Err(_) => self.message = format!("Elevation not changed: {name} cannot pass another level or come within {:.0} mm of one", openbim_document::MIN_LEVEL_GAP_M * 1000.0),
+        }
+    }
+
     /// Renames a level of the project, refusing a name another level has (A6).
     pub(crate) fn rename_level(&mut self, id: ElementId, name: &str) {
         match self.document.rename_level(id, name) {
@@ -920,6 +942,7 @@ impl Desktop {
         let mut moved_notes: Vec<String> = Vec::new();
         let made = if copying { self.document.copy_commands(&ids, xf).map(|(ops, firsts)| (ops, Some(firsts))) }
             else if self.tool == Tool::Move && self.move_disjoin { self.document.transform_commands_disjoined(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) }
+            else if self.tool == Tool::Move { self.document.transform_commands_keeping_joins(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) }
             else { self.document.transform_commands_noted(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) };
         let result = made.and_then(|(ops, new)| self.document.transact(self.document.revision(), &ops).map(|_| new).map_err(|e| format!("{e:?}")));
         match result {

@@ -103,6 +103,15 @@ pub fn instance_values(family: &str, type_name: &str, overrides: &[(String, f64)
     instance_values_with(family, type_name, overrides, &[])
 }
 
+/// The width of the wall opening a door or window instance cuts, as its family solves for it (its type of a family,
+/// its catalogue type and its own values); None when it is not a family that cuts an opening.
+pub fn opening_width_of(doc: &openbim_document::Document, el: &openbim_document::Element) -> Option<f64> {
+    let f = library().iter().find(|f| f.name() == el.family)?;
+    let parts = openbim_document::request_parts(doc, el, f);
+    let type_name = (!el.type_name.is_empty()).then_some(el.type_name.as_str());
+    f.solve(&parts.request(type_name)).ok()?.opening.map(|o| o[0])
+}
+
 /// `instance_values` with choices and texts set as well.
 pub fn instance_values_with(family: &str, type_name: &str, overrides: &[(String, f64)], texts: &[(String, String)]) -> Option<Vec<(String, f64)>> {
     let f = library().iter().find(|f| f.name() == family)?;

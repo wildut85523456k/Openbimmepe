@@ -794,6 +794,20 @@ impl Document {
         }
         self.transact(self.revision, &[Command::Rename { id, name: name.to_string() }]).map(|_| ())
     }
+    /// Moves a level to `elevation_m`, as one undoable step. What stands on the level moves with it, because an
+    /// element's height is measured from its level. A level cannot pass another one (the storeys keep their order,
+    /// so a column's top level stays above its base) nor come within `MIN_LEVEL_GAP_M` of one (A6).
+    pub fn set_level_elevation(&mut self, id: ElementId, elevation_m: f64) -> Result<(), EditError> {
+        let Some(level) = self.get(id).filter(|e| e.geometry == Some(Geometry::Level)) else { return Err(EditError::InvalidElement) };
+        if !elevation_m.is_finite() { return Err(EditError::InvalidGeometry(id)); }
+        let from = level.elevation_m;
+        for other in self.elements.values().filter(|e| e.id != id && e.geometry == Some(Geometry::Level)) {
+            let z = other.elevation_m;
+            let crosses = (z - from).signum() != (z - elevation_m).signum();
+            if crosses || (z - elevation_m).abs() < MIN_LEVEL_GAP_M { return Err(EditError::InvalidGeometry(id)); }
+        }
+        self.transact(self.revision, &[Command::MoveElevation { id, elevation_m }]).map(|_| ())
+    }
     /// Deletes a level that nothing stands on. A level with elements on it is refused, as in Revit, rather than
     /// taking the elements with it (A6).
     pub fn delete_level(&mut self, id: ElementId) -> Result<(), EditError> {

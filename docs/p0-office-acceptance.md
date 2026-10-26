@@ -9,17 +9,14 @@ Reference: Architecture 2026 chapters 2-8 and 11-13. This is an original test fi
 2. Window event regression: `model_view.rs::tests::the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported`.
    The P0 candidate clicks New and tool buttons and places grid/walls/floor/room/section with pointer events through
    `Desktop::window`. Tabs and wall location are still fixture setup. Save/Open/IFC still use direct methods.
-3. Complete office interaction: IN PROGRESS. First slice (26 Oct):
-   `model_view.rs::tests::the_two_storey_office_is_drawn_saved_reopened_and_exported_through_the_window` operates
-   only controls the window drew, located from that frame by name (`test_hit!`): ribbon tabs and buttons, the
-   options-bar level rename fields and Location Line list, the Project Browser (double click), the Properties room
-   fields and Apply, the Export IFC dialog's path field and button, and the plan. It renames both levels, places a
-   roof level, draws two grids, ground-floor walls with a door, a window and a partition, a floor, two rooms numbered
-   and named in Properties, and first-floor walls, then saves (quick access), starts New, opens (quick access) and
-   exports IFC. The one substitution is the platform file dialog behind Save and Open (`dialog.rs`, `dialog::answer`).
-   A scroll-clipped control is reached with the mouse wheel; a control out of sight fails the test.
-   Still OPEN in this level: level elevation editing (no control exists), stair/roof/ceiling, host edits with
-   undo/redo, annotation, schedules, sheets, PDF and recovery.
+3. Complete office interaction: PASS headless (26 Oct, candidate branch `p0/office-journey-ui`).
+   `model_view.rs::tests::the_two_storey_office_is_drawn_saved_reopened_and_exported_through_the_window` operates only
+   controls the window drew, located from that frame by name (`test_hit!`), and covers every step of the journey
+   below. The disclosed substitutions are: the platform file dialog behind Save, Open and Print (`dialog::answer`),
+   and the autosave timer, called directly once (`autosave_tick`) because the window's 30 s timer does not run in a
+   test. A scroll-clipped control is reached with the mouse wheel; a control out of sight fails the test.
+   Known limitations the test pins rather than hides: a dimension stores two points and does not follow the wall
+   (D-DIM), and a U stair exports as one straight IfcStair per run (X-IFC).
 4. Native window/file dialogs and visual output: OPEN. Headless shape counts do not close this gate.
 
 ## Complete journey
@@ -37,6 +34,25 @@ Reference: Architecture 2026 chapters 2-8 and 11-13. This is an original test fi
 | Persistence | Save, close and reopen through controls | Full native records and stable IDs match |
 | Output | Export PDF and IFC through dialogs | Independent PDF page/scale check and IFC entities/host relationships |
 | Recovery | Edit, allow journal write, terminate/restart | Committed recovery state offered; saved project preserved |
+
+## Journey evidence (26 Oct)
+
+| Step | Controls operated | Checked independently |
+|---|---|---|
+| New | quick-access New | two levels; an untouched new model is clean |
+| Datums | Level options bar: Rename x2, elevation x2, Place Level; Grid; View > Zoom Out | names; 0 / 3.6 / 7.2 m; IFC storey elevations |
+| Envelope | Location Line list; Wall, Door, Window, Floor, Stair (U shape list), Ceiling, Roof; browser double clicks | walls per storey, hosts, slab kinds, roof level, 21 risers |
+| Rooms | Room tool; Select click on the label; Properties Number/Name/Apply | 2 x 11.6 m²; 101 Office, 102 Meeting |
+| Change | Properties Type list + Apply (Type B); Move tool on the host wall; quick-access Undo/Redo | joined walls stretch, door stays hosted, rooms grow by 1.45 m²; exact records after undo and redo |
+| Annotation | Annotate > Tag on the door; Annotate > Dimension | tag host and type; 6.2 m; coordinates only (limitation) |
+| Schedule | View > Schedule, category, OK, Properties OK | room numbers and areas equal the model; one Type B door, 1200 mm |
+| Sheet | View > Sheet: number, name, OK; Place View x2 | A-101 with the plan and the room schedule |
+| Output | Print (PDF); Insert > Export IFC with a typed path | pdfinfo: 1 page at the sheet's paper; IFC storeys, 9 walls, 2 spaces, door/window fillings, stair, roof, ceiling |
+| Persistence | quick-access Save, New, Open | every native record equal after reopen |
+| Recovery | Wall after the save; journal written; new session Open; Recover | recovered records equal the unsaved ones; the file on disk is unchanged |
+
+Mutation checks (each made the journey fail, then was reverted): room-label pick, level Rename, Recover button,
+Print button.
 
 Do not mark the journey complete if it calls geometry creation methods instead of driving the corresponding controls.
 File paths can be injected at the platform-dialog boundary in automated tests, but that substitution must be disclosed.

@@ -269,7 +269,12 @@ impl Desktop {
             let (mut recover, mut discard) = (false, false);
             egui::Window::new("Recover unsaved work").collapsible(false).resizable(false).show(ctx, |ui| {
                 ui.label("The program stopped before this work was saved, and a recovery copy was kept.");
-                ui.horizontal(|ui| { recover = ui.button("Recover").clicked(); discard = ui.button("Discard").clicked(); });
+                ui.horizontal(|ui| {
+                    let r = ui.button("Recover");
+                    test_hit!(self, r, "recovery:recover");
+                    recover = r.clicked();
+                    discard = ui.button("Discard").clicked();
+                });
             });
             if recover { self.recover(); } else if discard { self.discard_recovery(); }
             return;

@@ -39,3 +39,32 @@ fn a_level_is_renamed_and_deleted_only_when_nothing_stands_on_it() {
     assert!(d.delete_level(wall).is_err(), "a wall is not a level");
     assert!(d.rename_level(wall, "Nope").is_err(), "a wall is not renamed");
 }
+
+#[test]
+fn a_level_moves_up_or_down_without_passing_another_and_what_stands_on_it_follows() {
+    let mut d = Document::new();
+    let l1 = d.place_level("Ground", 0.0).unwrap();
+    let l2 = d.place_level("First", 3.0).unwrap();
+    let l3 = d.place_level("Roof", 6.0).unwrap();
+    let wall = d.place_wall(l2, [0.0, 0.0], [4.0, 0.0], 0.2, 3.0, 0.0).unwrap();
+    d.set_level_elevation(l3, 7.2).unwrap();
+    d.set_level_elevation(l2, 3.6).unwrap();
+    assert_eq!((d.get(l2).unwrap().elevation_m, d.get(l3).unwrap().elevation_m), (3.6, 7.2));
+    // the wall keeps its level and its offset from it, so it now starts at 3.6 m
+    assert_eq!(d.level_of(wall), Some(l2));
+    assert_eq!(d.get(wall).unwrap().elevation_m, 0.0, "the wall's own offset from its level is unchanged");
+    // a level may not pass another, come too close to one, or take a non-finite elevation
+    assert!(d.set_level_elevation(l2, 8.0).is_err(), "First cannot go above Roof");
+    assert!(d.set_level_elevation(l2, -1.0).is_err(), "First cannot go below Ground");
+    assert!(d.set_level_elevation(l2, 7.2 - MIN_LEVEL_GAP_M / 2.0).is_err(), "too close to Roof");
+    assert!(d.set_level_elevation(l2, f64::INFINITY).is_err());
+    assert!(d.set_level_elevation(wall, 1.0).is_err(), "a wall is not a level");
+    assert!(d.set_level_elevation(l1, -0.5).is_ok(), "the lowest level can go down");
+    // each move is one undoable step
+    d.undo().unwrap();
+    assert_eq!(d.get(l1).unwrap().elevation_m, 0.0);
+    d.undo().unwrap();
+    assert_eq!(d.get(l2).unwrap().elevation_m, 3.0);
+    d.redo().unwrap();
+    assert_eq!(d.get(l2).unwrap().elevation_m, 3.6);
+}

@@ -8,6 +8,27 @@ use openbim_document::{Category, Geometry, RangeClass};
 /// How near (screen pixels) to a room's label a Select click picks the room instead of the slab it lies on.
 const ROOM_LABEL_PICK_PX: f32 = 24.0;
 
+/// The door or window of the wall `wall` whose opening holds the screen point `p`. A plan is cut below the head of a
+/// door or window, so a pick there is the door or window, not the wall over it (as in Revit). None when `wall` is not
+/// a wall or `p` is in none of its openings.
+fn filler_in_opening(app: &Desktop, wall: ElementId, p: Pos2, screen: &dyn Fn([f64; 3]) -> Pos2, level_z: f64) -> Option<ElementId> {
+    let w = app.document.get(wall).filter(|w| w.category == Category::Wall)?;
+    let Some(Geometry::Linear { start, end, .. }) = w.geometry else { return None };
+    let len = (end[0] - start[0]).hypot(end[1] - start[1]);
+    if len < 1e-9 { return None; }
+    let (d, n) = ([(end[0] - start[0]) / len, (end[1] - start[1]) / len], [-(end[1] - start[1]) / len, (end[0] - start[0]) / len]);
+    let t = w.width_m;
+    app.document.elements().filter(|e| e.category == Category::Family).find_map(|e| match e.geometry {
+        Some(Geometry::InWall { host, along_m }) if host == wall => {
+            let half = crate::export::opening_width_of(&app.document, e)? / 2.0;
+            let at = |a: f64, side: f64| screen([start[0] + d[0] * a + n[0] * side * t / 2.0, start[1] + d[1] * a + n[1] * side * t / 2.0, level_z]);
+            let quad = [at(along_m - half, -1.0), at(along_m + half, -1.0), at(along_m + half, 1.0), at(along_m - half, 1.0)];
+            contains(&quad, p).then_some(e.id)
+        }
+        _ => None,
+    })
+}
+
 /// The span of the plan view on a model with nothing in it yet, in metres: enough room to place a
 /// level and a first wall, and close to what Revit shows for a new project.
 const EMPTY_PLAN_SPAN_M: f32 = 10.0;
@@ -861,6 +882,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { app.choose_tool(crate::Tool::Select); }
         else if let Some(p) = pick {
             let hit = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some()).map(|(_, id, _, _)| *id);
+            // a door or window is tagged by a click in its opening, as it is selected
+            let hit = hit.map(|h| filler_in_opening(app, h, p, &screen, level_z).unwrap_or(h));
             match hit { Some(id) => app.tag_click(id, to_model(p)), None => app.message = "Tag: click an element".into() }
         }
     } else if app.tool == crate::Tool::Grid && !three_d {
@@ -1076,6 +1099,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 (Some(h), Some(room)) if app.document.get(h).is_some_and(|e| e.category == Category::Slab) => Some(room),
                 (hit, _) => hit,
             };
+            // A plan is cut below the head of a door or window, so a click in its opening picks it (see
+            // `filler_in_opening`), as in Revit, rather than the wall above it.
+            let hit = hit.map(|h| filler_in_opening(app, h, p, &screen, level_z).unwrap_or(h));
             let mods = ui.input(|i| i.modifiers);
             match hit {
                 Some(id) if mods.command || mods.ctrl => app.change_selection(id, true),
@@ -1715,8 +1741,15 @@ mod tests {
         }
         type_into(&ctx, screen, &mut app, "level:name", "Roof");
         click_widget(&ctx, screen, &mut app, "level:place");
+        assert_eq!(app.levels().iter().map(|l| (l.1.as_str(), l.2)).collect::<Vec<_>>(), vec![("Ground Floor", 0.0), ("First Floor", 3.0), ("Roof", 6.0)], "{}", app.message);
+        // storeys of 3.6 m: the roof goes up first, so the first floor never has to pass it
+        for (level, mm) in [("Roof", "7200"), ("First Floor", "3600")] {
+            click_widget(&ctx, screen, &mut app, &format!("level:elevation:{level}"));
+            type_into(&ctx, screen, &mut app, "level:elevation_field", mm);
+            click_widget(&ctx, screen, &mut app, "level:elevation_ok");
+        }
         let levels = app.levels();
-        assert_eq!(levels.iter().map(|l| (l.1.as_str(), l.2)).collect::<Vec<_>>(), vec![("Ground Floor", 0.0), ("First Floor", 3.0), ("Roof", 6.0)], "{}", app.message);
+        assert_eq!(levels.iter().map(|l| (l.1.as_str(), l.2)).collect::<Vec<_>>(), vec![("Ground Floor", 0.0), ("First Floor", 3.6), ("Roof", 7.2)], "{}", app.message);
         let (ground, first) = (levels[0].0, levels[1].0);
 
         // the browser names the plans after their levels; opening one is a double click
@@ -1786,6 +1819,62 @@ mod tests {
             assert_eq!((app.document.room_text(picked, "Number"), app.document.get(picked).unwrap().name.clone()), (number.to_string(), name.to_string()), "{}", app.message);
         }
 
+        // Change: a bigger door, picked from its types in Properties, then undone and redone
+        let (host, a, b) = outer[0];
+        let door_at = [a[0] + (b[0] - a[0]) * 0.25, a[1] + (b[1] - a[1]) * 0.25];
+        // the plan is cut below the door head, so a click in the door's opening picks the door, not its wall
+        office_plan_click(&ctx, screen, &mut app, door_at);
+        let door = app.selected_id().expect("a click on the door selects it");
+        assert!(app.document.get(door).is_some_and(|e| e.category == Category::Family && matches!(e.geometry, Some(Geometry::InWall { host: h, .. }) if h == host)), "the door is selected, not {:?}: {}", app.document.get(door).map(|e| (e.category, e.geometry)), app.message);
+        click_widget(&ctx, screen, &mut app, "family_type");
+        click_widget(&ctx, screen, &mut app, "family_type:Type B");
+        click_widget(&ctx, screen, &mut app, "props:Apply");
+        assert_eq!(app.document.get(door).unwrap().type_name, "Type B", "{}", app.message);
+        assert!(ribbon_click(&ctx, screen, &mut app, "undo"));
+        assert_eq!(app.document.get(door).unwrap().type_name, "", "undo restores the default type");
+        assert!(ribbon_click(&ctx, screen, &mut app, "redo"));
+        assert_eq!(app.document.get(door).unwrap().type_name, "Type B");
+        // Change: move the wall that hosts the door 500 mm out; its joined walls, its door and both rooms follow
+        let areas = |app: &Desktop| rooms.iter().map(|r| app.document.room_shape(*r).unwrap().area()).collect::<Vec<_>>();
+        let (before_records, before_areas) = (openbim_document::native::records(&app.document), areas(&app));
+        let grip = [a[0] + (b[0] - a[0]) * 0.75, a[1] + (b[1] - a[1]) * 0.75];
+        office_plan_click(&ctx, screen, &mut app, grip);
+        assert_eq!(app.selected_id(), Some(host), "a click on the wall selects it: {}", app.message);
+        ribbon_button(&ctx, screen, &mut app, "Modify", "move");
+        assert!(app.tool == crate::Tool::Move, "{}", app.message);
+        for p in [grip, [grip[0], grip[1] - 0.5]] { office_plan_click(&ctx, screen, &mut app, p); }
+        let moved = wall_axes(&app, ground).into_iter().find(|w| w.0 == host).unwrap();
+        assert!((moved.1[1] - (a[1] - 0.5)).abs() < 1e-6 && (moved.2[1] - (b[1] - 0.5)).abs() < 1e-6, "the wall moved 500 mm: {moved:?} ({})", app.message);
+        assert!(matches!(app.document.get(door).unwrap().geometry, Some(Geometry::InWall { host: h, .. }) if h == host), "the door stays in its wall");
+        for (now, was) in areas(&app).iter().zip(&before_areas) {
+            assert!((now - was - 2.9 * 0.5).abs() < 0.05, "each room grows by 2.9 x 0.5 m: {was} -> {now}");
+        }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        let after_records = openbim_document::native::records(&app.document);
+        assert!(ribbon_click(&ctx, screen, &mut app, "undo"));
+        assert_eq!(openbim_document::native::records(&app.document), before_records, "undo restores every record");
+        assert!(ribbon_click(&ctx, screen, &mut app, "redo"));
+        assert_eq!(openbim_document::native::records(&app.document), after_records, "redo repeats the move exactly");
+        let outer = wall_axes(&app, ground);
+
+        // a U-shaped stair beside the building, from the ground floor up to the first; it takes its rise from the
+        // levels, so the 3.6 m storey sets its risers
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "stair");
+        click_widget(&ctx, screen, &mut app, "stair_shape");
+        click_widget(&ctx, screen, &mut app, "stair_shape:U-shaped, turning right");
+        for p in [[3.8, -1.8], [3.8, 0.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        let stairs: Vec<_> = app.document.elements().filter(|e| e.category == Category::Stair).collect();
+        assert!(!stairs.is_empty(), "{}", app.message);
+        assert!(app.message.contains("21 risers") && app.message.contains("landing"), "3.6 m at 175 mm or less is 21 risers in two runs: {}", app.message);
+        assert!(stairs.iter().all(|e| app.document.level_of(e.id) == Some(ground)), "the stair stands on the ground floor");
+        // an automatic ceiling in the office, from a click in the space
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "ceiling");
+        assert!(app.ceiling_auto, "Automatic Ceiling is the default, as in Revit");
+        office_plan_click(&ctx, screen, &mut app, [-1.5, 0.0]);
+        let ceilings: Vec<_> = app.document.elements().filter(|e| e.category == Category::Slab && e.slab_kind == openbim_document::SlabKind::Ceiling).collect();
+        assert_eq!(ceilings.len(), 1, "{}", app.message);
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+
         // the first floor, opened from the browser: its own four walls
         double_click_widget(&ctx, screen, &mut app, "view:First Floor");
         assert_eq!(app.view, View::UpperPlan, "{}", app.message);
@@ -1795,10 +1884,105 @@ mod tests {
         for p in [[-3.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-3.0, 2.0], [-3.0, -2.0]] { office_plan_click(&ctx, screen, &mut app, p); }
         assert_eq!(wall_axes(&app, first).len(), 4, "the first floor has its own walls: {}", app.message);
         assert_eq!(wall_axes(&app, ground).len(), 5, "the ground floor is unchanged");
+        // a roof on the roof level, by its footprint at the outer face of the first-floor walls
+        double_click_widget(&ctx, screen, &mut app, "view:Roof");
+        assert!(matches!(app.view, View::Level(_)), "{:?}", app.view);
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "roof");
+        for p in [[-3.2, -2.2], [3.2, -2.2], [3.2, 2.2], [-3.2, 2.2]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Enter)]);
+        let roofs: Vec<_> = app.document.elements().filter(|e| e.is_roof()).collect();
+        assert_eq!(roofs.len(), 1, "{}", app.message);
+        assert_eq!(app.document.level_of(roofs[0].id), Some(levels[2].0), "the roof is on the roof level");
 
-        // Save through the quick-access Save; the platform dialog's answer is the one substitution
+        // Annotation on the ground-floor plan: a tag on the door, and an aligned dimension along the moved wall
+        double_click_widget(&ctx, screen, &mut app, "view:Ground Floor");
+        assert_eq!(app.view, View::Plan, "{}", app.message);
+        ribbon_button(&ctx, screen, &mut app, "Annotate", "tag");
+        let (_, a, b) = outer.iter().copied().find(|w| w.0 == host).unwrap();
+        let door_at = [a[0] + (b[0] - a[0]) * 0.25, a[1] + (b[1] - a[1]) * 0.25];
+        office_plan_click(&ctx, screen, &mut app, door_at);
+        let tags: Vec<_> = app.document.elements().filter(|e| e.category == Category::Tag).collect();
+        assert_eq!(tags.len(), 1, "{}", app.message);
+        assert!(matches!(tags[0].geometry, Some(Geometry::Tag { host: h, .. }) if h == door), "the tag is on the door: {}", app.message);
+        assert!(app.message.contains("Type B"), "the tag reads the door's type: {}", app.message);
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        ribbon_button(&ctx, screen, &mut app, "Annotate", "dimension");
+        for p in [a, b, [0.0, a[1] - 1.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        let dims: Vec<_> = app.document.elements().filter(|e| matches!(e.geometry, Some(Geometry::Dimension { .. }))).collect();
+        assert_eq!(dims.len(), 1, "{}", app.message);
+        let Some(Geometry::Dimension { a: da, b: db, level: dl, .. }) = dims[0].geometry else { unreachable!() };
+        assert_eq!(dl, ground, "the dimension belongs to the ground-floor plan");
+        assert!(((db[0] - da[0]).hypot(db[1] - da[1]) - 6.2).abs() < 0.01, "it measures the 6.2 m wall axis: {da:?} {db:?}");
+        // known limitation (capability register D-DIM): the dimension keeps two points, not references to the wall,
+        // so a later edit of the wall does not update it; this pins that it stores coordinates only
+        assert!(matches!(dims[0].geometry, Some(Geometry::Dimension { .. })) && dims[0].parent.is_none(), "a dimension has no element reference yet");
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+
+        // Schedules from the View tab: rooms and doors, with the fields Revit starts with
+        let schedule_of = |app: &mut Desktop, kind: &str| -> u64 {
+            let before: Vec<u64> = app.document.mep().schedules.iter().map(|s| s.id).collect();
+            ribbon_button(&ctx, screen, app, "View", "schedule");
+            click_widget(&ctx, screen, app, &format!("schedule_new:{kind}"));
+            click_widget(&ctx, screen, app, "schedule_new:ok");
+            click_widget(&ctx, screen, app, "schedule_props:ok");
+            let id = app.document.mep().schedules.iter().map(|s| s.id).find(|id| !before.contains(id)).unwrap_or_else(|| panic!("a {kind} schedule is made: {}", app.message));
+            assert_eq!(app.view, View::Schedule(id), "the new schedule opens");
+            id
+        };
+        let room_schedule = schedule_of(&mut app, "Rooms");
+        let table = app.document.schedule_table(app.document.schedule(room_schedule).unwrap());
+        let col = |t: &openbim_document::ScheduleTable, label: &str| t.headings.iter().position(|h| h.starts_with(label)).unwrap_or_else(|| panic!("a {label} column in {:?}", t.headings));
+        let data: Vec<_> = table.rows.iter().filter(|r| r.kind == openbim_document::RowKind::Data).collect();
+        assert_eq!(data.len(), 2, "one row per room");
+        let (number, area) = (col(&table, "Number"), col(&table, "Area"));
+        for row in &data {
+            let room = row.ids[0];
+            assert_eq!(table.text(row, number), app.document.room_text(room, "Number"));
+            let shown: f64 = table.text(row, area).split_whitespace().next().unwrap().parse().unwrap();
+            assert!((shown - app.document.room_shape(room).unwrap().area()).abs() < 0.01, "the schedule's area is the room's: {shown}");
+        }
+        let door_schedule = schedule_of(&mut app, "Doors");
+        let table = app.document.schedule_table(app.document.schedule(door_schedule).unwrap());
+        let data: Vec<_> = table.rows.iter().filter(|r| r.kind == openbim_document::RowKind::Data).collect();
+        assert_eq!((data.len(), data[0].ids.clone()), (1, vec![door]), "one door");
+        assert!(table.text(data[0], col(&table, "Type")).contains("Type B"), "the door's type: {:?}", table.text(data[0], col(&table, "Type")));
+        assert!(table.text(data[0], col(&table, "Width")).starts_with("1200"), "Type B is 1200 mm wide: {}", table.text(data[0], col(&table, "Width")));
+
+        // A sheet with the ground-floor plan and the room schedule, printed to PDF
+        ribbon_button(&ctx, screen, &mut app, "View", "sheet");
+        type_into(&ctx, screen, &mut app, "sheet_new:number", "A-101");
+        type_into(&ctx, screen, &mut app, "sheet_new:name", "Ground Floor Plan");
+        click_widget(&ctx, screen, &mut app, "sheet_new:ok");
+        let sheet = match app.view { View::Sheet(id) => id, v => panic!("the new sheet opens, not {v:?}: {}", app.message) };
+        let room_schedule_name = app.document.schedule(room_schedule).unwrap().name.clone();
+        for view in ["Ground Floor", room_schedule_name.as_str()] {
+            click_widget(&ctx, screen, &mut app, "sheet:place_view");
+            click_widget(&ctx, screen, &mut app, "add_view:view");
+            click_widget(&ctx, screen, &mut app, &format!("add_view:view:{view}"));
+            click_widget(&ctx, screen, &mut app, "add_view:add");
+        }
+        let def = app.document.sheet(sheet).unwrap().clone();
+        assert_eq!((def.number.as_str(), def.name.as_str()), ("A-101", "Ground Floor Plan"));
+        assert_eq!(def.viewports.iter().map(|v| v.view.clone()).collect::<Vec<_>>(), vec![format!("p{}", ground.0), openbim_document::schedule_view(room_schedule)], "{}", app.message);
         let dir = std::env::temp_dir().join(format!("openbim-two-storey-office-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        let pdf = dir.join("A-101.pdf");
+        click_widget(&ctx, screen, &mut app, "sheet:print");
+        crate::dialog::answer(Some(pdf.clone()));
+        click_widget(&ctx, screen, &mut app, "print:go");
+        let bytes = std::fs::read(&pdf).unwrap_or_else(|e| panic!("the PDF is written: {e} ({})", app.message));
+        assert!(bytes.starts_with(b"%PDF-"), "a PDF file");
+        // checked by an independent reader when one is installed: one page, the paper of the sheet
+        if let Ok(out) = std::process::Command::new("pdfinfo").arg(&pdf).output() {
+            let info = String::from_utf8_lossy(&out.stdout);
+            assert!(info.lines().any(|l| l.starts_with("Pages:") && l.trim_end().ends_with(" 1")), "{info}");
+            let (w, h) = def.dims_mm();
+            let size = info.lines().find(|l| l.starts_with("Page size:")).unwrap_or_default().to_string();
+            let pts: Vec<f64> = size.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+            assert!(pts.len() >= 2 && (pts[0] - w / 25.4 * 72.0).abs() < 1.0 && (pts[1] - h / 25.4 * 72.0).abs() < 1.0, "the page is the sheet's paper {w} x {h} mm: {size}");
+        }
+
+        // Save through the quick-access Save; the platform dialog's answer is the one substitution
         let file = dir.join("Bureau d'étude.obim");
         let asked = crate::dialog::asked();
         crate::dialog::answer(Some(file.clone()));
@@ -1821,6 +2005,11 @@ mod tests {
         type_into(&ctx, screen, &mut app, "export:path", ifc.to_str().unwrap());
         click_widget(&ctx, screen, &mut app, "export:go");
         let text = std::fs::read_to_string(&ifc).unwrap_or_else(|e| panic!("the export wrote {}: {e} ({})", ifc.display(), app.message));
+        let storey = |name: &str| -> f64 {
+            let line = text.lines().find(|l| l.contains("=IFCBUILDINGSTOREY(") && l.contains(&format!("'{name}'"))).unwrap_or_else(|| panic!("a storey {name}"));
+            line.trim_end_matches(';').trim_end_matches(')').rsplit(',').next().unwrap().parse().unwrap()
+        };
+        assert_eq!((storey("Ground Floor"), storey("First Floor"), storey("Roof")), (0.0, 3.6, 7.2), "the storeys keep the edited elevations");
         // the IFC carries what was drawn: 9 walls on their storeys, both rooms, the door and window in their openings
         assert_eq!(text.matches("=IFCBUILDINGSTOREY(").count(), 3);
         assert_eq!(text.matches("=IFCWALL(").count() + text.matches("=IFCWALLSTANDARDCASE(").count(), 9);
@@ -1828,7 +2017,37 @@ mod tests {
         assert_eq!(text.matches("=IFCDOOR(").count(), 1);
         assert_eq!(text.matches("=IFCWINDOW(").count(), 1);
         assert_eq!(text.matches("=IFCRELFILLSELEMENT(").count(), 2);
+        // known limitation (capability register X-IFC): the U stair leaves as one straight IfcStair per run, not one
+        // IfcStair aggregating IfcStairFlight and landing parts; this pins what is written today
+        assert_eq!(text.matches("=IFCSTAIR(").count(), 2, "each run of the U stair");
+        assert_eq!(text.matches(".STRAIGHT_RUN_STAIR.").count(), 2);
+        assert!(text.contains("=IFCROOF(") || text.contains(".ROOF."), "the roof");
+        assert!(text.contains(".CEILING."), "the ceiling");
         assert!(text.contains("'101 Office'") && text.contains("'102 Meeting'"), "the room numbers and names reach the IFC spaces");
+
+        // Recovery: an edit after the save is written to the journal by the autosave timer (called directly: the
+        // window's 30 s timer does not run in a test), then the program stops without saving
+        let saved_text = std::fs::read_to_string(&file).unwrap();
+        double_click_widget(&ctx, screen, &mut app, "view:Ground Floor");
+        ribbon_button(&ctx, screen, &mut app, "Architecture", "wall");
+        for p in [[-1.5, -1.0], [-1.5, 1.0]] { office_plan_click(&ctx, screen, &mut app, p); }
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        let walls_now = wall_axes(&app, ground).len();
+        assert_eq!(walls_now, 6, "{}", app.message);
+        assert!(app.autosave_tick(std::time::Duration::ZERO), "the journal is written");
+        let unsaved = openbim_document::native::records(&app.document);
+        drop(app);
+        // a new session opens the file and is offered the unsaved work
+        let mut app = Desktop::sample();
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(ribbon_click(&ctx, screen, &mut app, "new"));
+        crate::dialog::answer(Some(file.clone()));
+        assert!(ribbon_click(&ctx, screen, &mut app, "open"));
+        assert_eq!(wall_axes(&app, app.levels()[0].0).len(), 5, "the file holds what was saved");
+        click_widget(&ctx, screen, &mut app, "recovery:recover");
+        assert_eq!(openbim_document::native::records(&app.document), unsaved, "the recovered model is the unsaved one: {}", app.message);
+        assert!(app.is_dirty(), "recovered work stays unsaved until it is saved");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), saved_text, "the saved file is untouched");
         std::fs::remove_dir_all(&dir).ok();
     }
 

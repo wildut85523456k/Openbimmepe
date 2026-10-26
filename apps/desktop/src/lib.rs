@@ -311,6 +311,8 @@ struct Desktop {
     /// survives the frames between keystrokes (A6)
     level_rename_id: Option<ElementId>,
     level_rename_name: String,
+    /// the level whose elevation is being typed, and the text in mm (A6)
+    level_elev_edit: Option<(ElementId, String)>,
     /// where the last frame drew each ribbon and quick-access button: the whole-window test clicks them (A8)
     #[cfg(test)]
     ribbon_hits: Vec<(&'static str, egui::Rect)>,
@@ -388,7 +390,7 @@ impl Desktop {
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
             show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: Default::default(), show_options: false, georef: Default::default(), show_georef: false, dark: false,
-            zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(),
+            zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
             #[cfg(test)]

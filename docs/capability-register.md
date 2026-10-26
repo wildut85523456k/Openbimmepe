@@ -19,12 +19,12 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 
 | ID / book | Workflow | Status | Source / existing test evidence | Remaining acceptance |
 |---|---|---|---|---|
-| P0-UI / ch1-2 | New project, tools, shortcuts, level views | Partial | `apps/desktop/src/main.rs`, `model_view.rs`; empty-canvas and global-key tests | Complete office journey through real controls, including narrow-window behaviour |
+| P0-UI / ch1-2 | New project, tools, shortcuts, level views | Partial | `apps/desktop/src/lib.rs`, `model_view.rs`; empty-canvas and global-key tests; the two-storey office window journey (candidate) | Narrow-window behaviour; native-window review |
 | P0-SAVE / ch2 | Save, reopen, crash recovery | Implemented (source) | `file.rs`, `journal.rs`; saved-model, recovery and torn-write tests | Native OS execution and abrupt-process recovery evidence |
 | A-WALL / ch3 | Sketch and edit typed walls | Partial | `model_edit.rs`, `wall_shapes.rs`, `crates/document/src/layers.rs` | Level/top constraints, attach, wrapping/priority joins, non-faceted curves, advanced wall kinds |
 | A-HOST / ch4 | Doors/windows and openings | Partial | `model_edit.rs`, `crates/document/src/opening.rs` | Wider hosts, placement controls, face/dormer openings |
-| A-MOD / ch5 | Modify and clipboard | Partial | `modify_tools.rs`, `crates/document/src/modify.rs` | Split, arrays, groups, selection filters and broader trim workflows |
-| A-VIEW / ch6 | Levels, grids, plans, sections | Partial | `view_ui.rs`, `section_ui.rs`, `crates/document/src/grid_arc.rs` | Work/reference planes, crop/scope, templates/filters, dependent and reflected-ceiling views |
+| A-MOD / ch5 | Modify and clipboard | Partial | `modify_tools.rs`, `crates/document/src/modify.rs`; Move keeps joined walls joined (candidate: `edit.rs::transform_commands_keeping_joins`, `tests/wall_joins_follow.rs`) | Split, arrays, groups, selection filters and broader trim workflows |
+| A-VIEW / ch6 | Levels, grids, plans, sections | Partial | `view_ui.rs`, `section_ui.rs`, `crates/document/src/grid_arc.rs`; level elevation edit (candidate: `set_level_elevation`, `tests/levels.rs`) | Work/reference planes, crop/scope, templates/filters, dependent and reflected-ceiling views |
 | A-ENV / ch7 | Floors, roofs, ceilings, rooms | Partial | `model_edit.rs`, document roof/rooms modules | Shape editing, richer roof tools, associative boundaries |
 | A-STAIR / ch8 | Stairs and railings | Partial | document stair/railing modules | Ramps, winders, sketched stairs, richer railing/host and curtain-system support |
 | A-SITE / ch9 | Site modelling | Open (georeference subset exists) | `georef_ui.rs`, IFC georef module | Toposolid, grading, contours and property lines |
@@ -65,6 +65,6 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 | P0-1 status | This register, refreshed entry points, historical notices | Source review complete |
 | P0-2 native build | `.github/workflows/desktop-p0.yml`: Linux, Windows, Apple Silicon macOS debug/release tests and release executable | Configured, NOT runtime validated |
 | P0-3 geometry UI | Existing small-office regression converted to pointer geometry placement | Candidate `56d7717` (Windows 11, rustc 1.99.1, cargo 1.99.1): `cargo test --workspace` (debug) 1,349/1,349 pass (0 failed) incl. the small-office pointer regression (room 24.0 m²); `cargo clippy --workspace --all-targets -- -D warnings` clean. Gated by PR #98 pre-push hook: `cargo test --workspace --release` + clippy + audit passed on ad1d493. |
-| P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | IN PROGRESS. Slice 1 (candidate branch `p0/office-journey-ui`): two storeys, levels, grids, walls, door, window, partition, floor, two named rooms, Save/New/Open and IFC export through window controls only; see `p0-office-acceptance.md` level 3 for evidence and what is still open |
+| P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | PASS headless on candidate branch `p0/office-journey-ui` (Linux, rustc 1.97.0): every journey step through window controls; substitutions and pinned limitations listed in `p0-office-acceptance.md`. Native-window and visual review remain gate 4 |
 
 Native startup, visual parity and performance are separate gates; compilation and headless egui tests do not close them.

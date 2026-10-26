@@ -276,10 +276,14 @@ fn family_type_combo(app: &mut Desktop, ui: &mut egui::Ui, family: &str) {
     let names = f.type_names();
     if names.is_empty() { return; }
     ui.label("Type");
-    egui::ComboBox::from_id_salt("family_type").selected_text(if app.family_type.is_empty() { "Default" } else { app.family_type.as_str() }).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt("family_type").selected_text(if app.family_type.is_empty() { "Default" } else { app.family_type.as_str() }).show_ui(ui, |ui| {
         ui.selectable_value(&mut app.family_type, String::new(), "Default");
-        for n in names { ui.selectable_value(&mut app.family_type, n.to_string(), n); }
+        for n in names {
+            let r = ui.selectable_value(&mut app.family_type, n.to_string(), n);
+            test_hit!(app, r, "family_type:{n}");
+        }
     });
+    test_hit!(app, combo.response, "family_type");
 }
 
 /// The kind and the material of a slab.
@@ -389,7 +393,22 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
                     test_hit!(app, r, "level:rename:{name}");
                     if r.clicked() { app.start_level_rename(id); }
                 }
-                ui.weak(format!("{elevation:.3} m"));
+                let editing = app.level_elev_edit.as_ref().is_some_and(|(e, _)| *e == id);
+                if editing {
+                    let mut text = app.level_elev_edit.as_ref().map(|(_, t)| t.clone()).unwrap_or_default();
+                    let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(70.0));
+                    test_hit!(app, field, "level:elevation_field");
+                    ui.weak("mm");
+                    if let Some((_, t)) = app.level_elev_edit.as_mut() { *t = text; }
+                    let ok = ui.small_button("OK");
+                    test_hit!(app, ok, "level:elevation_ok");
+                    if (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ok.clicked() { app.commit_level_elevation(); }
+                    if ui.small_button("Cancel").clicked() { app.level_elev_edit = None; }
+                } else {
+                    let r = ui.small_button(format!("{elevation:.3} m")).on_hover_text("Change the elevation; what stands on the level moves with it");
+                    test_hit!(app, r, "level:elevation:{name}");
+                    if r.clicked() { app.start_level_elevation(id); }
+                }
                 if ui.small_button("Delete").on_hover_text("A level that elements stand on cannot be deleted").clicked() {
                     app.delete_level(id);
                 }
@@ -627,9 +646,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.separator();
             ui.label("Shape");
             let shown = openbim_document::StairShape::ALL.iter().find(|(s, _)| *s == app.stair_shape).map_or("Straight", |(_, n)| *n);
-            egui::ComboBox::from_id_salt("stair_shape").selected_text(shown).show_ui(ui, |ui| {
-                for (shape, name) in openbim_document::StairShape::ALL { ui.selectable_value(&mut app.stair_shape, shape, name); }
+            let combo = egui::ComboBox::from_id_salt("stair_shape").selected_text(shown).show_ui(ui, |ui| {
+                for (shape, name) in openbim_document::StairShape::ALL {
+                    let r = ui.selectable_value(&mut app.stair_shape, shape, name);
+                    test_hit!(app, r, "stair_shape:{name}");
+                }
             });
+            test_hit!(app, combo.response, "stair_shape");
             ui.label("Railing");
             let shown = openbim_document::RailingSides::ALL.iter().find(|(s, _)| *s == app.stair_railing).map_or("Both sides", |(_, n)| *n);
             egui::ComboBox::from_id_salt("stair_railing").selected_text(shown).show_ui(ui, |ui| {
@@ -742,7 +765,9 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         } else if matches!(el.geometry, Some(openbim_document::Geometry::Shaft { .. })) || openbim_document::Document::is_vertical_opening(&el) { &[][..] } else { dimensions(el.category, app.section_pick) };
         for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
         let pending = app.has_pending_edit();
-        if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() {
+        let apply = ui.add_enabled(pending, egui::Button::new("Apply"));
+        test_hit!(app, apply, "props:Apply");
+        if apply.clicked() {
             if el.id == crate::ElementId(1) { app.apply_duct_edit(); } else { app.apply_selected_edit(); }
         }
         if ui.add_enabled(pending, egui::Button::new("Reset")).clicked() { app.sync_duct_controls(); }
