@@ -249,13 +249,14 @@ impl Desktop {
         egui::Window::new("Export IFC").open(&mut open).collapsible(false).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("File");
-                ui.text_edit_singleline(&mut dialog.path);
+                let r = ui.text_edit_singleline(&mut dialog.path);
+                test_hit!(self, r, "export:path");
                 if ui.button("Browse...").clicked() {
                     let start = std::path::Path::new(&dialog.path);
-                    let mut fd = rfd::FileDialog::new().set_title("Export IFC").add_filter("IFC", &["ifc"]);
+                    let mut fd = crate::dialog::Question::new().set_title("Export IFC").add_filter("IFC", &["ifc"]);
                     if let Some(name) = start.file_name().and_then(|n| n.to_str()) { fd = fd.set_file_name(name); }
                     if let Some(dir) = start.parent().filter(|d| d.is_dir() && !d.as_os_str().is_empty()) { fd = fd.set_directory(dir); }
-                    if let Some(p) = fd.save_file() { dialog.path = p.display().to_string(); }
+                    if let Some(p) = fd.ask_save() { dialog.path = p.display().to_string(); }
                 }
             });
             ui.horizontal(|ui| {
@@ -267,7 +268,9 @@ impl Desktop {
             ui.checkbox(&mut dialog.own_data, "Include this app's own data (this app reads the file back with nothing lost)");
             if !dialog.own_data { ui.small("Without it a re-import reads only what IFC can hold."); }
             if dialog.schema == crate::export::Schema::Ifc2x3 { ui.small("IFC2X3 leaves out types, joins and service networks."); }
-            go = ui.button("Export").clicked();
+            let r = ui.button("Export");
+            test_hit!(self, r, "export:go");
+            go = r.clicked();
         });
         if go { self.write_ifc(&dialog.path, dialog.schema, dialog.own_data); } else if open { self.export_dialog = Some(dialog); }
     }
@@ -286,17 +289,17 @@ impl Desktop {
                 ui.label("File");
                 ui.text_edit_singleline(&mut dialog.path);
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Import IFC").add_filter("IFC (IFC2X3, IFC4, IFC 4.3)", &["ifc"]).pick_file() { dialog.path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("Import IFC").add_filter("IFC (IFC2X3, IFC4, IFC 4.3)", &["ifc"]).ask_open() { dialog.path = p.display().to_string(); }
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Class map");
                 ui.text_edit_singleline(&mut dialog.map_path);
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("IFC class map").add_filter("Class map (tab separated)", &["txt", "tsv", "tab"]).pick_file() { dialog.map_path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("IFC class map").add_filter("Class map (tab separated)", &["txt", "tsv", "tab"]).ask_open() { dialog.map_path = p.display().to_string(); }
                 }
                 if ui.button("Save example...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Save an example class map").set_file_name("ifc-class-map.txt").save_file() {
+                    if let Some(p) = crate::dialog::Question::new().set_title("Save an example class map").set_file_name("ifc-class-map.txt").ask_save() {
                         self.message = match std::fs::write(&p, crate::class_map::EXAMPLE) { Ok(()) => format!("Saved an example class map to {}", p.display()), Err(e) => format!("Could not save {}: {e}", p.display()) };
                     }
                 }
@@ -325,7 +328,7 @@ impl Desktop {
                 ui.label("Catalogue");
                 ui.text_edit_singleline(&mut dialog.path);
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Load Family").add_filter("Family catalogue (tab separated)", &["tsv", "txt", "csv", "tab"]).pick_file() { dialog.path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("Load Family").add_filter("Family catalogue (tab separated)", &["tsv", "txt", "csv", "tab"]).ask_open() { dialog.path = p.display().to_string(); }
                 }
             });
             ui.small("A tab-separated catalogue: a 'family' line naming a family in the library, then a 'type' line naming its inputs, then one line per type. Every row becomes a type of that family in this project.");
@@ -446,6 +449,28 @@ impl Desktop {
         self.level_rename_id = None;
         self.level_rename_name.clear();
         self.message = "Rename cancelled".into();
+    }
+
+    /// Opens the elevation field of a level, holding its elevation in mm as the user will edit it (A6).
+    pub(crate) fn start_level_elevation(&mut self, id: ElementId) {
+        let Some(level) = self.document.get(id) else { return };
+        self.level_elev_edit = Some((id, format!("{:.0}", level.elevation_m * 1000.0)));
+        self.message = "Type the level's elevation in mm and press Enter or OK; what stands on it moves with it".into();
+    }
+
+    /// Commits the typed elevation as one undoable step. A value that is not a number, that passes another level or
+    /// comes too close to one is refused and the field stays open to be corrected.
+    pub(crate) fn commit_level_elevation(&mut self) {
+        let Some((id, text)) = self.level_elev_edit.clone() else { return };
+        let Ok(mm) = text.trim().replace(',', ".").parse::<f64>() else {
+            self.message = format!("Elevation not changed: {text:?} is not a number of mm");
+            return;
+        };
+        let name = self.document.get(id).map(|e| e.name.clone()).unwrap_or_default();
+        match self.document.set_level_elevation(id, mm / 1000.0) {
+            Ok(()) => { self.level_elev_edit = None; self.message = format!("{name} moved to {mm:.0} mm; what stands on it moved with it; undo restores it"); }
+            Err(_) => self.message = format!("Elevation not changed: {name} cannot pass another level or come within {:.0} mm of one", openbim_document::MIN_LEVEL_GAP_M * 1000.0),
+        }
     }
 
     /// Renames a level of the project, refusing a name another level has (A6).
@@ -916,6 +941,7 @@ impl Desktop {
         let mut moved_notes: Vec<String> = Vec::new();
         let made = if copying { self.document.copy_commands(&ids, xf).map(|(ops, firsts)| (ops, Some(firsts))) }
             else if self.tool == Tool::Move && self.move_disjoin { self.document.transform_commands_disjoined(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) }
+            else if self.tool == Tool::Move { self.document.transform_commands_keeping_joins(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) }
             else { self.document.transform_commands_noted(&ids, xf).map(|(ops, notes)| { moved_notes = notes; (ops, None) }) };
         let result = made.and_then(|(ops, new)| self.document.transact(self.document.revision(), &ops).map(|_| new).map_err(|e| format!("{e:?}")));
         match result {
@@ -1779,9 +1805,10 @@ mod tests {
         assert_eq!((stairs(&app), railings(&app)), (before, 0), "{}", app.message);
         app.document.undo().unwrap();
         assert_eq!((stairs(&app), railings(&app)), (before + 3, 2));
-        // exported: two flights and a landing slab
+        // exported: one stair of two flights and a landing slab
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-19T00:00:00").unwrap();
-        assert_eq!(out.text.matches("IFCSTAIR(").count(), before + 2);
+        assert_eq!(out.text.matches("IFCSTAIR(").count(), before + 1);
+        assert_eq!(out.text.matches("IFCSTAIRFLIGHT(").count(), 2);
         assert_eq!(out.text.matches(".LANDING.").count(), 1);
         assert_eq!(out.text.matches("IFCRAILING(").count(), 2, "the railings of the stair");
         // a U stair, turning right, is placed the same way; too little climb for two runs is refused

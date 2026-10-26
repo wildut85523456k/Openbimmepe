@@ -107,10 +107,12 @@ fn geometry_text(g: Option<Geometry>) -> String {
             "H,{},{},{:?},{:?}",
             level.0, top.0, base_offset_m, top_offset_m
         ),
-        Some(Geometry::Dimension { a, b, at, level }) => format!(
-            "N,{},{:?},{:?},{:?},{:?},{:?},{:?}",
-            level.0, a[0], a[1], b[0], b[1], at[0], at[1]
-        ),
+        // the references follow the points when there are any; a record written before them has none
+        Some(Geometry::Dimension { a, b, at, level, refs }) => {
+            let mut t = format!("N,{},{:?},{:?},{:?},{:?},{:?},{:?}", level.0, a[0], a[1], b[0], b[1], at[0], at[1]);
+            if refs.iter().any(Option::is_some) { t.push_str(&format!(",{},{}", crate::dimension::ref_text(&refs[0]), crate::dimension::ref_text(&refs[1]))); }
+            t
+        }
         Some(Geometry::Tag { host, at, anchor }) => format!(
             "K,{},{:?},{:?},{:?},{:?}",
             host.0, at[0], at[1], anchor[0], anchor[1]
@@ -258,12 +260,14 @@ fn parse_geometry(s: &str) -> Result<Option<Geometry>, String> {
             }
         }
         "N" => {
-            need(8)?;
+            // 8 fields, or 10 with the two references of an associative dimension
+            if p.len() != 10 { need(8)?; }
             Geometry::Dimension {
                 level: ElementId(int(p[1])?),
                 a: [num(p[2])?, num(p[3])?],
                 b: [num(p[4])?, num(p[5])?],
                 at: [num(p[6])?, num(p[7])?],
+                refs: if p.len() >= 10 { [crate::dimension::ref_parse(p[8])?, crate::dimension::ref_parse(p[9])?] } else { [None, None] },
             }
         }
         "K" => {

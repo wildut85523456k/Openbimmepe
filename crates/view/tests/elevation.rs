@@ -421,7 +421,7 @@ fn a_roof_is_seen_in_an_elevation_from_the_side_it_slopes_to_and_cut_by_a_sectio
 #[test]
 fn a_stair_is_cut_in_steps_by_a_section_along_it() {
     let mut s = scene(vec![]);
-    s.stairs = vec![openbim_ifc::StairItem { id: 600, name: "S".into(), start: [0.0, 0.0, 0.0], dir: [0.0, 1.0], width: 1.0, risers: 3, riser_height: 0.2, tread_length: 0.3 }];
+    s.stairs = vec![openbim_ifc::StairItem { id: 600, name: "S".into(), start: [0.0, 0.0, 0.0], dir: [0.0, 1.0], width: 1.0, risers: 3, riser_height: 0.2, tread_length: 0.3, group: None }];
     // along the run, through the middle of it
     let v = section_view(&s, Section { a: [0.0, -1.0], b: [0.0, 2.0], bottom: -0.5, top: 3.0, depth: 5.0 }).unwrap();
     let c: Vec<_> = v.items.iter().filter(|i| i.element.kind == Kind::Stair && i.class == Class::Cut).filter_map(|i| if let Shape::Region { outer, .. } = &i.shape { Some(outer.clone()) } else { None }).collect();

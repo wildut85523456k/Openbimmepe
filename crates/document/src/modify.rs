@@ -45,7 +45,8 @@ fn on_level(mut e: Element, level: ElementId) -> Element {
         Geometry::Pad { at, thickness_m, .. } => Geometry::Pad { at, level, thickness_m },
         Geometry::Area { .. } => Geometry::Area { level },
         Geometry::Room { at, .. } => Geometry::Room { at, level },
-        Geometry::Dimension { a, b, at, .. } => Geometry::Dimension { a, b, at, level },
+        // on another level the walls it measured are not there: the copy is not associative
+        Geometry::Dimension { a, b, at, .. } => Geometry::Dimension { a, b, at, level, refs: [None, None] },
         other => other,
     });
     e
@@ -111,6 +112,12 @@ impl Document {
                 Some(Geometry::OnMember { host }) => Some(Geometry::OnMember { host: exists_or_new(host)? }),
                 Some(Geometry::Tag { host, at, anchor }) => Some(Geometry::Tag { host: exists_or_new(host)?, at, anchor }),
                 Some(Geometry::ViewTag { host, view, at, anchor }) => Some(Geometry::ViewTag { host: exists_or_new(host)?, view, at, anchor }),
+                // a pasted dimension refers to the pasted copies of what it measured; an end on something left behind
+                // is free, so it stays where it was pasted instead of going back to the original
+                Some(Geometry::Dimension { a, b, at, level, refs }) => {
+                    let follow = |r: Option<crate::dimension::DimRef>| r.and_then(|r| map.get(&r.element).map(|n| crate::dimension::DimRef { element: *n, ..r }));
+                    Some(Geometry::Dimension { a, b, at, level, refs: [follow(refs[0]), follow(refs[1])] })
+                }
                 other => other,
             };
             e.pinned = false;

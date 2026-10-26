@@ -207,7 +207,7 @@ impl Desktop {
                 ui.label("CSV");
                 ui.add(egui::TextEdit::singleline(&mut d.csv_path).desired_width(260.0));
                 if ui.button("Browse...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Import types from CSV").add_filter("CSV or tab separated", &["csv", "tsv", "txt"]).pick_file() { d.csv_path = p.display().to_string(); }
+                    if let Some(p) = crate::dialog::Question::new().set_title("Import types from CSV").add_filter("CSV or tab separated", &["csv", "tsv", "txt"]).ask_open() { d.csv_path = p.display().to_string(); }
                 }
                 import = ui.add_enabled(!d.csv_path.trim().is_empty(), egui::Button::new("Import CSV")).clicked();
             });

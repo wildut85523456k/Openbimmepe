@@ -37,6 +37,8 @@ impl AppSettings {
 
     /// The settings file of this user, when the system says where the configuration folder is.
     pub(crate) fn path() -> Option<std::path::PathBuf> {
+        // a test never reads or writes the settings of the user who runs it
+        if cfg!(test) { return None; }
         let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
         let base = if cfg!(windows) { var("APPDATA") }
             else if cfg!(target_os = "macos") { var("HOME").map(|h| h.join("Library/Application Support")) }

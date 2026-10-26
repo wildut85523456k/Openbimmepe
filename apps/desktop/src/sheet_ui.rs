@@ -297,14 +297,18 @@ impl Desktop {
                 ui.horizontal(|ui| { ui.selectable_value(&mut d.portrait, false, "Landscape"); ui.selectable_value(&mut d.portrait, true, "Portrait"); });
                 ui.end_row();
                 ui.label("Sheet number");
-                ui.text_edit_singleline(&mut d.number);
+                let r = ui.text_edit_singleline(&mut d.number);
+                test_hit!(self, r, "sheet_new:number");
                 ui.end_row();
                 ui.label("Sheet name");
-                ui.text_edit_singleline(&mut d.name);
+                let r = ui.text_edit_singleline(&mut d.name);
+                test_hit!(self, r, "sheet_new:name");
                 ui.end_row();
             });
             ui.horizontal(|ui| {
-                if ui.button("OK").clicked() { ok = true; }
+                let r = ui.button("OK");
+                test_hit!(self, r, "sheet_new:ok");
+                if r.clicked() { ok = true; }
                 if ui.button("Cancel").clicked() { cancel = true; }
             });
         });
@@ -362,21 +366,25 @@ impl Desktop {
         egui::Window::new("Place View").id(egui::Id::new("add_view_window")).open(&mut open).collapsible(false).default_width(340.0).show(ctx, |ui| {
             egui::Grid::new("add_view_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Sheet");
-                egui::ComboBox::from_id_salt("add_view_sheet").selected_text(a.sheet.and_then(|id| sheets.iter().find(|s| s.0 == id)).map_or("choose a sheet".to_string(), |s| s.1.clone())).show_ui(ui, |ui| {
-                    for (id, label) in &sheets { ui.selectable_value(&mut a.sheet, Some(*id), label); }
+                let combo = egui::ComboBox::from_id_salt("add_view_sheet").selected_text(a.sheet.and_then(|id| sheets.iter().find(|s| s.0 == id)).map_or("choose a sheet".to_string(), |s| s.1.clone())).show_ui(ui, |ui| {
+                    for (id, label) in &sheets { let r = ui.selectable_value(&mut a.sheet, Some(*id), label); test_hit!(self, r, "add_view:sheet:{label}"); }
                 });
+                test_hit!(self, combo.response, "add_view:sheet");
                 ui.end_row();
                 ui.label("View");
                 let shown = a.view.as_ref().map_or("choose a view".to_string(), |k| views.iter().find(|v| &v.0 == k).map_or_else(|| format!("{} (already on a sheet)", sheet_draw::view_title(&self.document, k)), |v| v.1.clone()));
-                egui::ComboBox::from_id_salt("add_view_view").selected_text(shown).width(220.0).show_ui(ui, |ui| {
-                    for (k, n) in &views { ui.selectable_value(&mut a.view, Some(k.clone()), n); }
+                let combo = egui::ComboBox::from_id_salt("add_view_view").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+                    for (k, n) in &views { let r = ui.selectable_value(&mut a.view, Some(k.clone()), n); test_hit!(self, r, "add_view:view:{n}"); }
                 });
+                test_hit!(self, combo.response, "add_view:view");
                 ui.end_row();
             });
             if views.is_empty() { ui.weak("Every view is on a sheet already."); }
             ui.weak("A view is on one sheet only. It goes on at the scale set in its View Control Bar.");
             ui.horizontal(|ui| {
-                if ui.add_enabled(a.sheet.is_some() && a.view.is_some(), egui::Button::new("Add View to Sheet")).clicked() { add = true; }
+                let r = ui.add_enabled(a.sheet.is_some() && a.view.is_some(), egui::Button::new("Add View to Sheet"));
+                test_hit!(self, r, "add_view:add");
+                if r.clicked() { add = true; }
                 if ui.button("Cancel").clicked() { cancel = true; }
             });
         });
@@ -408,7 +416,9 @@ impl Desktop {
                 ui.selectable_value(&mut d.black_and_white, true, "Black Lines");
             });
             ui.horizontal(|ui| {
-                if ui.add_enabled(d.sheets.iter().any(|s| s.1), egui::Button::new("Print…")).clicked() { go = true; }
+                let r = ui.add_enabled(d.sheets.iter().any(|s| s.1), egui::Button::new("Print…"));
+                test_hit!(self, r, "print:go");
+                if r.clicked() { go = true; }
                 if ui.button("Cancel").clicked() { cancel = true; }
             });
         });
@@ -416,8 +426,8 @@ impl Desktop {
         if go {
             let ids: Vec<u64> = d.sheets.iter().filter(|s| s.1).map(|s| s.0).collect();
             let name = if let [one] = ids.as_slice() { self.document.sheet(*one).map_or("sheets".to_string(), |s| s.label()) } else { "Sheets".into() };
-            let fd = rfd::FileDialog::new().set_title("Print to PDF").add_filter("PDF", &["pdf"]).set_file_name(format!("{name}.pdf"));
-            if let Some(path) = fd.save_file() {
+            let fd = crate::dialog::Question::new().set_title("Print to PDF").add_filter("PDF", &["pdf"]).set_file_name(format!("{name}.pdf"));
+            if let Some(path) = fd.ask_save() {
                 if let Err(e) = self.print_sheets(&ids, d.black_and_white, &path) { self.message = format!("Print failed: {e}"); } else { keep = false; }
             }
         }
@@ -437,9 +447,13 @@ impl Desktop {
         ui.horizontal_wrapped(|ui| {
             ui.strong(def.label());
             ui.weak(format!("{} {w:.0} x {h:.0} mm, {} view(s)", def.size.name(), def.viewports.len()));
-            if ui.button("Place View…").clicked() { self.open_add_view(Some(id), None); }
+            let r = ui.button("Place View…");
+            test_hit!(self, r, "sheet:place_view");
+            if r.clicked() { self.open_add_view(Some(id), None); }
             if ui.button("Sheet Properties…").clicked() { self.open_sheet_properties(id); }
-            if ui.button("Print…").clicked() { self.open_print(); }
+            let r = ui.button("Print…");
+            test_hit!(self, r, "sheet:print");
+            if r.clicked() { self.open_print(); }
             let sel = self.sheets.selected.filter(|s| def.viewport(*s).is_some());
             if ui.add_enabled(sel.is_some(), egui::Button::new("Activate View")).on_hover_text("Open the view of the selected viewport").clicked() { if let Some(s) = sel { self.open_viewport_view(id, s); } }
             if ui.add_enabled(sel.is_some(), egui::Button::new("Remove From Sheet")).clicked() { self.remove_selected_viewport(id); }

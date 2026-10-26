@@ -117,7 +117,12 @@ impl Document {
                 e.geometry = Some(Geometry::Area { level });
             }
             Some(Geometry::Tag { host, at, anchor }) => e.geometry = Some(Geometry::Tag { host, at: p(at), anchor: p(anchor) }),
-            Some(Geometry::Dimension { a, b, at, level }) => e.geometry = Some(Geometry::Dimension { a: p(a), b: p(b), at: p(at), level }),
+            // as in Revit, moving a dimension moves its line; an end that refers to a wall or grid stays on it (if the
+            // wall moves too, the regeneration after the change puts the end there), a free end moves with the line
+            Some(Geometry::Dimension { a, b, at, level, refs }) => {
+                let end = |q: [f64; 2], r: Option<crate::dimension::DimRef>| if r.is_some() { q } else { p(q) };
+                e.geometry = Some(Geometry::Dimension { a: end(a, refs[0]), b: end(b, refs[1]), at: p(at), level, refs });
+            }
             Some(Geometry::Room { at, level }) => e.geometry = Some(Geometry::Room { at: p(at), level }),
             Some(Geometry::Shaft { .. }) => {
                 e.outline = e.outline.iter().map(|q| p(*q)).collect();
@@ -160,6 +165,16 @@ impl Document {
     /// length under 20 mm - stays where it is and is unjoined from the equipment, and the note says so.
     pub fn transform_commands_noted(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<String>), String> { self.transform_commands_with(ids, xf, false) }
 
+    /// The Move tool's move: as `transform_commands_noted`, and the walls joined to a moved wall stay joined to it
+    /// (see `joined_walls_follow`), as with Revit's Move. Align, Offset and the other edits keep using
+    /// `transform_commands`, which moves only what it is given.
+    pub fn transform_commands_keeping_joins(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<String>), String> {
+        let (mut ops, notes) = self.transform_commands_with(ids, xf, false)?;
+        let moved: Vec<ElementId> = self.transformed_set(ids, xf, false, false)?.iter().map(|e| e.id).collect();
+        self.joined_walls_follow(&moved, xf, &mut ops)?;
+        Ok((ops, notes))
+    }
+
     /// Move with Revit's Disjoin option: the elements move alone. Every join between a moved duct, pipe or family
     /// element and something that stays is broken first (nothing follows, nothing is rebuilt), and the notes say which.
     pub fn transform_commands_disjoined(&self, ids: &[ElementId], xf: Xf) -> Result<(Vec<Command>, Vec<String>), String> { self.transform_commands_with(ids, xf, true) }
@@ -181,6 +196,57 @@ impl Document {
         let notes = if disjoin { self.disjoin_commands(&moved_ids, &mut ops)? } else { self.follow_commands(&moved_ids, xf, &mut ops) };
         if ops.is_empty() { return Err("nothing changes".into()); }
         Ok((ops, notes))
+    }
+
+    /// Walls that stay but are joined to a moved wall keep the join, as in Revit: an end of theirs that meets a moved
+    /// wall (at its corner or against its side) slides along its own line to where the moved wall now is, so the
+    /// wall stretches or shortens instead of being left apart. Only a move does this; a pinned wall that would have to
+    /// change refuses the move. Disjoin moves the walls alone.
+    fn joined_walls_follow(&self, moved: &[ElementId], xf: Xf, ops: &mut Vec<Command>) -> Result<(), String> {
+        let Xf::Move(d) = xf else { return Ok(()) };
+        let moved_walls: Vec<(P, P, f64, ElementId)> = moved.iter().filter_map(|id| self.get(*id)).filter(|e| e.category == Category::Wall)
+            .filter_map(|e| match e.geometry { Some(Geometry::Linear { start, end, level }) => Some((start, end, e.width_m, level)), _ => None }).collect();
+        if moved_walls.is_empty() { return Ok(()); }
+        for e in self.elements().filter(|e| e.category == Category::Wall && !moved.contains(&e.id)) {
+            let Some(Geometry::Linear { start, end, level }) = e.geometry else { continue };
+            let (ux, uy) = (end[0] - start[0], end[1] - start[1]);
+            let len = ux.hypot(uy);
+            if len < 1e-9 { continue; }
+            let u = [ux / len, uy / len];
+            // the slide of an end at `p` that meets a moved wall, along this wall's own line
+            let slide = |p: P| -> Option<P> {
+                moved_walls.iter().filter(|w| w.3 == level).find_map(|&(a, b, t, _)| {
+                    let (wx, wy) = (b[0] - a[0], b[1] - a[1]);
+                    let wl = wx.hypot(wy);
+                    if wl < 1e-9 { return None; }
+                    let (w, n) = ([wx / wl, wy / wl], [-wy / wl, wx / wl]);
+                    let along = (p[0] - a[0]) * w[0] + (p[1] - a[1]) * w[1];
+                    let across = ((p[0] - a[0]) * n[0] + (p[1] - a[1]) * n[1]).abs();
+                    let reach = t / 2.0 + 1e-3;
+                    if along < -reach || along > wl + reach || across > reach { return None; }
+                    let un = u[0] * n[0] + u[1] * n[1];
+                    // a wall running alongside the moved one is not joined to it end-on
+                    if un.abs() < 0.1 { return None; }
+                    let k = (d[0] * n[0] + d[1] * n[1]) / un;
+                    Some([p[0] + u[0] * k, p[1] + u[1] * k])
+                })
+            };
+            let (ns, nt) = (slide(start).unwrap_or(start), slide(end).unwrap_or(end));
+            if (ns, nt) == (start, end) { continue; }
+            if e.pinned { return Err(format!("{} is pinned and joined to a moved wall: unpin it, or move with Disjoin", e.name)); }
+            if (nt[0] - ns[0]).hypot(nt[1] - ns[1]) < 0.01 { return Err(format!("{} would be left with no length", e.name)); }
+            ops.push(Command::SetGeometry { id: e.id, geometry: Geometry::Linear { start: ns, end: nt, level } });
+            // what is in the wall is measured from its start: when the start slides, it keeps its place in the world
+            let ks = (ns[0] - start[0]) * u[0] + (ns[1] - start[1]) * u[1];
+            if ks.abs() > 1e-12 {
+                for h in self.elements() {
+                    if let Some(Geometry::InWall { host, along_m }) = h.geometry {
+                        if host == e.id { ops.push(Command::SetGeometry { id: h.id, geometry: Geometry::InWall { host, along_m: along_m - ks } }); }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Breaks the joins of `moved` with what stays (see `transform_commands_disjoined`).
@@ -739,11 +805,16 @@ mod tests {
         d.transact(d.revision(), &ops).unwrap();
         assert!(near(line(&d, ElementId(20)).0, [0.0, 1.0]) && near(line(&d, ElementId(20)).1, [5.5, 1.0]));
         assert!(d.set_wall_length_commands(ElementId(20), 0.01).is_err() && d.set_wall_length_commands(grid, 3.0).is_err());
-        // a dimension between two points is saved and moves with the move command
-        let dim = d.place_dimension(level, [0.0, 0.0], [3.0, 0.0], [1.5, 1.0]).unwrap();
+        // a dimension between two points on nothing is saved and moves whole with the move command
+        let dim = d.place_dimension(level, [0.0, 20.0], [3.0, 20.0], [1.5, 21.0]).unwrap();
         let ops = d.transform_commands(&[dim], Xf::Move([1.0, 1.0])).unwrap();
         d.transact(d.revision(), &ops).unwrap();
-        assert!(matches!(d.get(dim).unwrap().geometry, Some(Geometry::Dimension { a, b, at, .. }) if near(a, [1.0, 1.0]) && near(b, [4.0, 1.0]) && near(at, [2.5, 2.0])));
+        assert!(matches!(d.get(dim).unwrap().geometry, Some(Geometry::Dimension { a, b, at, .. }) if near(a, [1.0, 21.0]) && near(b, [4.0, 21.0]) && near(at, [2.5, 22.0])));
+        // one whose ends are on a wall keeps them there and only its line moves, as in Revit
+        let on_wall = d.place_dimension(level, [2.0, 1.0], [4.0, 1.0], [3.0, 2.0]).unwrap();
+        let ops = d.transform_commands(&[on_wall], Xf::Move([0.5, 1.0])).unwrap();
+        d.transact(d.revision(), &ops).unwrap();
+        assert!(matches!(d.get(on_wall).unwrap().geometry, Some(Geometry::Dimension { a, b, at, refs, .. }) if refs[0].is_some() && near(a, [2.0, 1.0]) && near(b, [4.0, 1.0]) && near(at, [3.5, 3.0])), "{:?}", d.get(on_wall).unwrap().geometry);
         assert!(d.place_dimension(level, [0.0, 0.0], [0.0, 0.0], [1.0, 1.0]).is_err());
         let (els, _) = crate::native::parse_records(&crate::native::records(&d)).unwrap();
         assert_eq!(els.iter().find(|e| e.id == dim).unwrap().geometry, d.get(dim).unwrap().geometry);

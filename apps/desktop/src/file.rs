@@ -63,9 +63,9 @@ impl Desktop {
         let path = match (&self.file.path, ask) {
             (Some(p), false) => p.clone(),
             _ => {
-                let mut fd = rfd::FileDialog::new().set_title("Save model").add_filter("OpenBIM model", &["obim"]);
+                let mut fd = crate::dialog::Question::new().set_title("Save model").add_filter("OpenBIM model", &["obim"]);
                 if let Some(name) = self.file.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).and_then(|n| n.to_str()) { fd = fd.set_file_name(name); } else { fd = fd.set_file_name("model.obim"); }
-                let Some(p) = fd.save_file() else { return };
+                let Some(p) = fd.ask_save() else { return };
                 let mut p = p.display().to_string();
                 if !p.to_lowercase().ends_with(".obim") { p.push_str(".obim"); }
                 p
@@ -103,9 +103,9 @@ impl Desktop {
         if minutes == 0 { return; }
         let interval = std::time::Duration::from_secs(u64::from(minutes) * 60);
         if let (true, Some(path)) = (self.settings.autosave_to_file, self.file.path.clone()) {
-            if self.is_dirty() && self.file.last_autosave.is_none_or(|t| t.elapsed() >= interval) {
+            if self.is_dirty() && self.file.last_autosave.is_none_or(|t| crate::clock::now() - t >= interval) {
                 self.write_model(&path);
-                self.file.last_autosave = Some(std::time::Instant::now());
+                self.file.last_autosave = Some(crate::clock::now());
                 if self.message.starts_with("Saved") { self.message = format!("Autosaved {path}"); }
             }
             return;
@@ -120,7 +120,8 @@ impl Desktop {
         let mut open = true;
         egui::Window::new("Options").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
             let mut on = self.settings.autosave_minutes > 0;
-            ui.checkbox(&mut on, "Save automatically");
+            let r = ui.checkbox(&mut on, "Save automatically");
+            test_hit!(self, r, "options:autosave");
             if on && self.settings.autosave_minutes == 0 { self.settings.autosave_minutes = 1; }
             if !on { self.settings.autosave_minutes = 0; }
             ui.add_enabled_ui(on, |ui| {
@@ -145,12 +146,12 @@ impl Desktop {
         use std::io::Write;
         let revision = self.document.revision();
         if !self.is_dirty() || self.file.autosaved_revision == Some(revision) { return false; }
-        if self.file.last_autosave.is_some_and(|t| t.elapsed() < interval) { return false; }
+        if self.file.last_autosave.is_some_and(|t| crate::clock::now() - t < interval) { return false; }
         self.document.ensure_project_key();
         self.sync_app_records();
         let now = crate::journal::state_of(&native::records(&self.document));
         let path = Self::recovery_path(self.file.path.as_deref());
-        self.file.last_autosave = Some(std::time::Instant::now());
+        self.file.last_autosave = Some(crate::clock::now());
         let ops = self.file.journal.as_ref().map(|j| crate::journal::diff(&j.state, &now));
         let wrote = match (&self.file.journal, ops) {
             (Some(j), Some(ops)) if j.transactions < COMPACT_TRANSACTIONS && j.bytes < COMPACT_BYTES => {
@@ -213,7 +214,7 @@ impl Desktop {
 
     /// Asks which file to open, then opens it (after the question about unsaved changes, if there are any).
     pub(crate) fn open_file(&mut self) {
-        let Some(p) = rfd::FileDialog::new().set_title("Open model").add_filter("OpenBIM model", &["obim"]).pick_file() else { return };
+        let Some(p) = crate::dialog::Question::new().set_title("Open model").add_filter("OpenBIM model", &["obim"]).ask_open() else { return };
         self.open_path(&p.display().to_string());
     }
 
@@ -251,7 +252,9 @@ impl Desktop {
         // a level that is not there and the IFC export of the first wall would fail (A2).
         let _ = self.document.place_level("Level 1", 0.0);
         let _ = self.document.place_level("Level 2", 3.0);
-        self.file = FileState::default();
+        // the template levels are not the user's work: a new, untouched model has nothing to save, so opening a
+        // file over it asks nothing (as in Revit)
+        self.file = FileState { saved_revision: self.document.revision(), ..Default::default() };
         self.compute = Default::default();
         self.georef = Default::default();
         self.selected = None;
@@ -266,7 +269,12 @@ impl Desktop {
             let (mut recover, mut discard) = (false, false);
             egui::Window::new("Recover unsaved work").collapsible(false).resizable(false).show(ctx, |ui| {
                 ui.label("The program stopped before this work was saved, and a recovery copy was kept.");
-                ui.horizontal(|ui| { recover = ui.button("Recover").clicked(); discard = ui.button("Discard").clicked(); });
+                ui.horizontal(|ui| {
+                    let r = ui.button("Recover");
+                    test_hit!(self, r, "recovery:recover");
+                    recover = r.clicked();
+                    discard = ui.button("Discard").clicked();
+                });
             });
             if recover { self.recover(); } else if discard { self.discard_recovery(); }
             return;

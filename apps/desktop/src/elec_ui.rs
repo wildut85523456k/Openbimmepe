@@ -382,7 +382,7 @@ impl Desktop {
     }
 
     fn export_exchange(&mut self) {
-        let Some(p) = rfd::FileDialog::new().set_title("Export for edesign").add_filter("Electrical exchange", &["json"]).set_file_name("electrical-exchange.json").save_file() else { return };
+        let Some(p) = crate::dialog::Question::new().set_title("Export for edesign").add_filter("Electrical exchange", &["json"]).set_file_name("electrical-exchange.json").ask_save() else { return };
         let text = self.exchange_text();
         self.message = match std::fs::write(&p, &text) { Ok(()) => format!("Exported {} for edesign", p.display()), Err(e) => format!("Could not write {}: {e}", p.display()) };
     }
@@ -450,7 +450,7 @@ impl Desktop {
                     ui.add(egui::TextEdit::multiline(text).desired_rows(if hint { 4 } else { 2 }).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
                 }
                 if ui.small_button("Load the cable table from a CSV file...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Cable table").add_filter("CSV", &["csv", "txt"]).pick_file() {
+                    if let Some(p) = crate::dialog::Question::new().set_title("Cable table").add_filter("CSV", &["csv", "txt"]).ask_open() {
                         match std::fs::read_to_string(&p) { Ok(t) => d.table = t, Err(e) => d.error = format!("{}: {e}", p.display()) }
                     }
                 }

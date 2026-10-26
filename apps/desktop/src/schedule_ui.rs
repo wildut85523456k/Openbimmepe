@@ -78,14 +78,20 @@ impl Desktop {
         egui::Window::new("New Schedule/Quantities").id(egui::Id::new("new_schedule_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
             ui.label("Category");
             egui::ScrollArea::vertical().id_salt("new_schedule_kinds").max_height(220.0).show(ui, |ui| {
-                for k in ScheduleKind::ALL { if ui.selectable_label(d.kind == k, k.name()).clicked() { d.kind = k; } }
+                for k in ScheduleKind::ALL {
+                    let r = ui.selectable_label(d.kind == k, k.name());
+                    test_hit!(self, r, "schedule_new:{}", k.name());
+                    if r.clicked() { d.kind = k; }
+                }
             });
             ui.horizontal(|ui| {
                 ui.label("Name");
                 ui.add(egui::TextEdit::singleline(&mut d.name).hint_text(hint.as_str()).desired_width(220.0));
             });
             ui.horizontal(|ui| {
-                if ui.button("OK").clicked() { ok = true; }
+                let r = ui.button("OK");
+                test_hit!(self, r, "schedule_new:ok");
+                if r.clicked() { ok = true; }
                 if ui.button("Cancel").clicked() { cancel = true; }
             });
         });
@@ -180,7 +186,7 @@ impl Desktop {
                 Err(e) => { ui.colored_label(ui.visuals().warn_fg_color, e); }
             }
             ui.horizontal(|ui| {
-                if ui.button("OK").clicked() { ok = true; }
+                let r = ui.button("OK"); test_hit!(self, r, "schedule_props:ok"); if r.clicked() { ok = true; }
                 if ui.button("Cancel").clicked() { cancel = true; }
                 if ui.button("Apply").clicked() { apply = true; }
             });
@@ -226,9 +232,9 @@ impl Desktop {
             }
             if ui.button("Show in model").on_hover_text("Open the plan of the level of the selected row").clicked() { self.show_schedule_selection_in_model(); }
             if ui.button("Export CSV…").clicked() {
-                let mut fd = rfd::FileDialog::new().set_title("Export schedule").add_filter("CSV", &["csv"]);
+                let mut fd = crate::dialog::Question::new().set_title("Export schedule").add_filter("CSV", &["csv"]);
                 fd = fd.set_file_name(format!("{}.csv", def.name));
-                if let Some(p) = fd.save_file() { self.export_schedule_csv(id, &p); }
+                if let Some(p) = fd.ask_save() { self.export_schedule_csv(id, &p); }
             }
             if ui.button("Duplicate").clicked() { self.duplicate_schedule(id); }
             if ui.button("Rename…").clicked() { self.schedules.rename = Some((id, def.name.clone())); }

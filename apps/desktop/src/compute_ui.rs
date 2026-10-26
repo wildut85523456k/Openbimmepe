@@ -341,7 +341,7 @@ impl Desktop {
                 ui.label(if is_duct(d.system) { "Size catalogue (empty = the sizes of Manage > MEP Settings): label, width mm, height mm (inside dimensions), one per line" } else { "Size catalogue (empty = the sizes of Manage > MEP Settings): label, inside diameter mm, one per line" });
                 ui.add(egui::TextEdit::multiline(&mut d.catalogue).desired_rows(4).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
                 if ui.small_button("Load a CSV file...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().set_title("Size catalogue").add_filter("CSV", &["csv", "txt"]).pick_file() {
+                    if let Some(p) = crate::dialog::Question::new().set_title("Size catalogue").add_filter("CSV", &["csv", "txt"]).ask_open() {
                         match std::fs::read_to_string(&p) { Ok(t) => d.catalogue = t, Err(e) => d.error = format!("{}: {e}", p.display()) }
                     }
                 }

@@ -335,7 +335,7 @@ fn annotations(out: &mut Vec<Prim>, doc: &Document, level_id: ElementId, p: &dyn
                     out.push(Prim::Poly { rings: vec![vec![[base[0] + side[0], base[1] + side[1]], [base[0] - side[0], base[1] - side[1]], tip]], fill: Some(GRAY), stroke: None });
                 }
             }
-            Some(Geometry::Dimension { a, b, at, level }) if el.category == Category::Dimension && level == level_id => {
+            Some(Geometry::Dimension { a, b, at, level, .. }) if el.category == Category::Dimension && level == level_id => {
                 let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
                 let l = dx.hypot(dy);
                 if l < 1e-9 { continue; }

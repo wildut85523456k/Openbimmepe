@@ -19,24 +19,24 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 
 | ID / book | Workflow | Status | Source / existing test evidence | Remaining acceptance |
 |---|---|---|---|---|
-| P0-UI / ch1-2 | New project, tools, shortcuts, level views | Partial | `apps/desktop/src/main.rs`, `model_view.rs`; empty-canvas and global-key tests | Complete office journey through real controls, including narrow-window behaviour |
+| P0-UI / ch1-2 | New project, tools, shortcuts, level views | Partial | `apps/desktop/src/lib.rs`, `model_view.rs`; empty-canvas and global-key tests; the two-storey office window journey (candidate) | Narrow-window behaviour; native-window review |
 | P0-SAVE / ch2 | Save, reopen, crash recovery | Implemented (source) | `file.rs`, `journal.rs`; saved-model, recovery and torn-write tests | Native OS execution and abrupt-process recovery evidence |
 | A-WALL / ch3 | Sketch and edit typed walls | Partial | `model_edit.rs`, `wall_shapes.rs`, `crates/document/src/layers.rs` | Level/top constraints, attach, wrapping/priority joins, non-faceted curves, advanced wall kinds |
 | A-HOST / ch4 | Doors/windows and openings | Partial | `model_edit.rs`, `crates/document/src/opening.rs` | Wider hosts, placement controls, face/dormer openings |
-| A-MOD / ch5 | Modify and clipboard | Partial | `modify_tools.rs`, `crates/document/src/modify.rs` | Split, arrays, groups, selection filters and broader trim workflows |
-| A-VIEW / ch6 | Levels, grids, plans, sections | Partial | `view_ui.rs`, `section_ui.rs`, `crates/document/src/grid_arc.rs` | Work/reference planes, crop/scope, templates/filters, dependent and reflected-ceiling views |
+| A-MOD / ch5 | Modify and clipboard | Partial | `modify_tools.rs`, `crates/document/src/modify.rs`; Move keeps joined walls joined (candidate: `edit.rs::transform_commands_keeping_joins`, `tests/wall_joins_follow.rs`) | Split, arrays, groups, selection filters and broader trim workflows |
+| A-VIEW / ch6 | Levels, grids, plans, sections | Partial | `view_ui.rs`, `section_ui.rs`, `crates/document/src/grid_arc.rs`; level elevation edit (candidate: `set_level_elevation`, `tests/levels.rs`) | Work/reference planes, crop/scope, templates/filters, dependent and reflected-ceiling views |
 | A-ENV / ch7 | Floors, roofs, ceilings, rooms | Partial | `model_edit.rs`, document roof/rooms modules | Shape editing, richer roof tools, associative boundaries |
 | A-STAIR / ch8 | Stairs and railings | Partial | document stair/railing modules | Ramps, winders, sketched stairs, richer railing/host and curtain-system support |
 | A-SITE / ch9 | Site modelling | Open (georeference subset exists) | `georef_ui.rs`, IFC georef module | Toposolid, grading, contours and property lines |
 | A-FAM / ch10 | Family authoring | Partial | `family_types_ui.rs`, family crate, Load Family in `model_edit.rs` | Graphical editor, constraints and flex/host acceptance; massing |
-| D-DIM / ch11 | Dimensions and tags | Partial | `view_notes.rs`: view dimensions store coordinate pairs | Persistent geometry references, update/undo tests, other dimension kinds, text/keynotes |
+| D-DIM / ch11 | Dimensions and tags | Partial | `view_notes.rs` (view dimensions: coordinates); plan dimensions associative on candidate `p0/office-journey-ui`: `crates/document/src/dimension.rs`, `tests/dimensions.rs`, journey move/undo/redo | Section/elevation dimensions, EQ and locks, other dimension kinds, text/keynotes |
 | D-SCHED / ch12 | Schedules and detailing | Partial | `schedule_ui.rs`, document schedule module | Calculated fields, takeoffs, keys, drafting/callout views and regions |
 | D-SHEET / ch13 | Sheets and export | Partial | `sheet_ui.rs`, `sheet_draw.rs`, `print_dialog.rs`, sheets crate | Revisions, title-block families, drawing fidelity and actual company standards |
 | A-3D / ch14-15 | Model viewing and presentation | Partial | `view3d.rs`, viewport and viewport-egui crates | Full navigation/camera workflows, rendering and walkthrough acceptance |
 | C-COLLAB / ch16 | Shared-folder collaboration | Open | UI specification and COLLAB-001..003 | Two writers, ownership, conflicts, linked read-only models and crash recovery |
 | D-PURGE / ch16 | Purge unused | Open | `docs/agent-team/purge-unused.md` | Scan/apply/undo with reference-chain and stale-scan validation |
-| X-IFC | IFC export | Partial, advanced since 23 Oct | `export.rs`, `model_edit.rs`: rooms, grids, named systems, penetrations, georef and persisted project key | Independent external reader and supported-entity coverage; no full interoperability claim |
-| X-IMPORT | External IFC import | Partial | `import.rs`: rooms, hosted fillers, grids, selected families, limited stairs and generic carriers | External roof/flight/landing/brep coverage; ports and connections; diagnostics |
+| X-IFC | IFC export | Partial, advanced since 23 Oct | `export.rs`, `model_edit.rs`: rooms, grids, named systems, penetrations, georef and persisted project key; L/U stairs as one IfcStair aggregating IfcStairFlight and the landing (candidate; IfcOpenShell 0.9 validation clean in IFC2X3/4/4X3) | Independent external reader and supported-entity coverage; no full interoperability claim |
+| X-IMPORT | External IFC import | Partial | `import.rs`: rooms, hosted fillers, grids, selected families, straight stairs and IfcStairFlight runs (candidate), generic carriers | External roof/landing/brep coverage; flight grouping; ports and connections; diagnostics |
 | API-CMD | Common UI/API execution | Partial | commands crate; issues #75/#76 | Registry consumers and unambiguous stable parameter IDs |
 
 ## Corrections to historical reports
@@ -66,6 +66,7 @@ Paths below refer to the baseline unless marked candidate. No tests were rerun d
 | P0-1 status | This register, refreshed entry points, historical notices | Source review complete |
 | P0-2 native build | `.github/workflows/desktop-p0.yml`: Linux, Windows, Apple Silicon macOS debug/release tests and release executable | PASS on GitHub-hosted runners: [run 40193462682](https://github.com/wildut85523456k/revit-alike/actions/runs/40193462682) (pull_request, PR #101 head `8ff4b30`, 25 Oct). Ubuntu 24.04, Windows Server 2022 and macOS 14 each passed the office pointer regression, desktop debug tests, workspace release tests, Clippy `-D warnings` and the release build. `8ff4b30` already contained main (`2ce7c0e`), and its tree (`ccef302`) is identical to merged main `930fb12`. Per-test counts and toolchain versions are in the job logs, not copied here. Not a native-window startup, file-dialog or performance check. |
 | P0-3 geometry UI | Existing small-office regression converted to pointer geometry placement | Candidate `56d7717` (Windows 11, rustc 1.99.1, cargo 1.99.1): `cargo test --workspace` (debug) 1,349/1,349 pass (0 failed) incl. the small-office pointer regression (room 24.0 m²); `cargo clippy --workspace --all-targets -- -D warnings` clean. Gated by PR #98 pre-push hook: `cargo test --workspace --release` + clippy + audit passed on ad1d493. |
-| P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | OPEN; see `p0-office-acceptance.md` |
+| P0-4 full office | Two-storey authoring, hosted edits, annotation, schedule, sheet, PDF/IFC through real controls | PASS headless on candidate branch `p0/office-journey-ui` (Linux, rustc 1.97.0): every journey step through window controls; substitutions and pinned limitations listed in `p0-office-acceptance.md`. Native-window and visual review remain gate 4 |
 
 Native startup, visual parity and performance are separate gates; compilation and headless egui tests do not close them.
+Linux visual review (26 Oct, candidate): `docs/audits/2026-10-26-visual-review.md`; Windows/macOS review open.

@@ -103,6 +103,35 @@ pub fn instance_values(family: &str, type_name: &str, overrides: &[(String, f64)
     instance_values_with(family, type_name, overrides, &[])
 }
 
+/// The stair a run belongs to when the stair has several runs (an L or U stair): its first run and the runs and
+/// landing that name it as their parent. None for a stair of one run.
+fn stair_group(doc: &Document, run: &openbim_document::Element) -> Option<openbim_ifc::StairGroup> {
+    let first = run.parent.and_then(|p| doc.get(p)).unwrap_or(run);
+    let parts: Vec<&openbim_document::Element> = doc.elements().filter(|e| e.category == Category::Stair && e.parent == Some(first.id)).collect();
+    if parts.is_empty() { return None; }
+    let runs: Vec<&openbim_document::Element> = std::iter::once(first).chain(parts.iter().copied().filter(|e| matches!(e.geometry, Some(Geometry::Linear { .. })))).collect();
+    let dir = |e: &openbim_document::Element| match e.geometry { Some(Geometry::Linear { start, end, .. }) => { let l = (end[0] - start[0]).hypot(end[1] - start[1]).max(1e-9); [(end[0] - start[0]) / l, (end[1] - start[1]) / l] } _ => [0.0, 0.0] };
+    // two runs at right angles turn a quarter, two that go back the way they came turn a half
+    let shape = match runs.as_slice() {
+        [a, b] => { let (u, v) = (dir(a), dir(b)); let dot = u[0] * v[0] + u[1] * v[1]; if dot < -0.9 { "HALF_TURN_STAIR" } else if dot.abs() < 0.1 { "QUARTER_TURN_STAIR" } else { "STRAIGHT_RUN_STAIR" } }
+        _ => "NOTDEFINED",
+    };
+    Some(openbim_ifc::StairGroup {
+        id: first.id.0, name: first.name.clone(), shape,
+        landings: parts.iter().filter(|e| matches!(e.geometry, Some(Geometry::Area { .. }))).map(|e| e.id.0).collect(),
+        risers: runs.iter().map(|r| r.count).sum(),
+    })
+}
+
+/// The width of the wall opening a door or window instance cuts, as its family solves for it (its type of a family,
+/// its catalogue type and its own values); None when it is not a family that cuts an opening.
+pub fn opening_width_of(doc: &openbim_document::Document, el: &openbim_document::Element) -> Option<f64> {
+    let f = library().iter().find(|f| f.name() == el.family)?;
+    let parts = openbim_document::request_parts(doc, el, f);
+    let type_name = (!el.type_name.is_empty()).then_some(el.type_name.as_str());
+    f.solve(&parts.request(type_name)).ok()?.opening.map(|o| o[0])
+}
+
 /// `instance_values` with choices and texts set as well.
 pub fn instance_values_with(family: &str, type_name: &str, overrides: &[(String, f64)], texts: &[(String, String)]) -> Option<Vec<(String, f64)>> {
     let f = library().iter().find(|f| f.name() == family)?;
@@ -198,6 +227,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
                 stairs.push(openbim_ifc::StairItem {
                     id: el.id.0, name: el.name.clone(), start: [start[0], start[1], z], dir: [(end[0] - start[0]) / run, (end[1] - start[1]) / run], width: el.width_m,
                     risers: el.count, riser_height: el.height_m / f64::from(el.count), tread_length: run / f64::from(el.count - 1),
+                    group: stair_group(doc, el),
                 });
             }
             (Category::Railing, Some(Geometry::Area { level })) => {
@@ -592,6 +622,45 @@ mod tests {
         let site_line = out.text.lines().find(|l| l.contains("IFCSITE(")).unwrap();
         assert!(!site_line.contains(",$,$,$,$,$)") && site_line.contains("(11,33,") , "{site_line}");
         assert!(!out.warnings.iter().any(|w| w.contains("site is not exported")), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn an_l_or_u_stair_leaves_as_one_stair_of_flights_and_a_landing_in_every_schema_and_a_straight_one_as_before() {
+        use openbim_document::{RailingSides, StairShape, StairSpec};
+        let spec = |start: [f64; 2]| StairSpec { start, toward: [start[0], start[1] + 1.0], width_m: 1.0, rise_m: 3.0, risers: 18, tread_m: 0.28, base_offset_m: 0.0 };
+        for (shape, kind) in [(StairShape::U { left: false }, "HALF_TURN_STAIR"), (StairShape::L { left: true }, "QUARTER_TURN_STAIR")] {
+            let mut d = Document::spatial_sample();
+            d.place_stair_with_railing(ElementId(10), &spec([200.0, 0.0]), shape, RailingSides::None).unwrap();
+            for schema in Schema::ALL {
+                let out = export_ifc_with(&d, "P", 7, "2026-10-26T00:00:00", schema, false).unwrap();
+                let stairs: Vec<&str> = out.text.lines().filter(|l| l.contains("=IFCSTAIR(")).collect();
+                assert_eq!(stairs.len(), 1, "{schema:?}: {stairs:?}");
+                assert!(stairs[0].contains(&format!(".{kind}.")), "{schema:?}: {}", stairs[0]);
+                let flights: Vec<&str> = out.text.lines().filter(|l| l.contains("=IFCSTAIRFLIGHT(")).collect();
+                assert_eq!(flights.len(), 2, "{schema:?}");
+                // IFC2X3 has no predefined type on a flight; IFC4 and 4.3 end with STRAIGHT
+                assert_eq!(flights.iter().all(|f| f.ends_with(",.STRAIGHT.);")), schema != Schema::Ifc2x3, "{schema:?}: {flights:?}");
+                assert_eq!(out.text.lines().filter(|l| l.contains("=IFCSLAB(") && l.contains(".LANDING.")).count(), 1, "{schema:?}");
+                let id = stairs[0].split('=').next().unwrap().trim();
+                assert!(out.text.lines().any(|l| l.contains("=IFCRELAGGREGATES(") && l.contains(&format!(",{id},("))), "{schema:?}: the stair aggregates its parts");
+            }
+        }
+        // a straight stair is still one IfcStair with its own shape and no flights
+        let mut d = Document::spatial_sample();
+        d.place_stair_with_railing(ElementId(10), &spec([300.0, 0.0]), StairShape::Straight, RailingSides::None).unwrap();
+        let out = export_ifc_with(&d, "P", 7, "2026-10-26T00:00:00", Schema::Ifc4, false).unwrap();
+        assert_eq!((out.text.matches("=IFCSTAIR(").count(), out.text.matches("=IFCSTAIRFLIGHT(").count()), (1, 0));
+        assert!(out.text.contains(".STRAIGHT_RUN_STAIR."));
+        if let Ok(dir) = std::env::var("OPENBIM_STAIR_OUT") {
+            for (shape, name) in [(StairShape::U { left: false }, "u"), (StairShape::L { left: true }, "l")] {
+                let mut d = Document::spatial_sample();
+                d.place_stair_with_railing(ElementId(10), &spec([200.0, 0.0]), shape, RailingSides::Both).unwrap();
+                for schema in Schema::ALL {
+                    let out = export_ifc_with(&d, "P", 7, "2026-10-26T00:00:00", schema, false).unwrap();
+                    std::fs::write(std::path::Path::new(&dir).join(format!("stair-{name}-{schema:?}.ifc")), out.text).unwrap();
+                }
+            }
+        }
     }
 
     #[test]

@@ -276,10 +276,14 @@ fn family_type_combo(app: &mut Desktop, ui: &mut egui::Ui, family: &str) {
     let names = f.type_names();
     if names.is_empty() { return; }
     ui.label("Type");
-    egui::ComboBox::from_id_salt("family_type").selected_text(if app.family_type.is_empty() { "Default" } else { app.family_type.as_str() }).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt("family_type").selected_text(if app.family_type.is_empty() { "Default" } else { app.family_type.as_str() }).show_ui(ui, |ui| {
         ui.selectable_value(&mut app.family_type, String::new(), "Default");
-        for n in names { ui.selectable_value(&mut app.family_type, n.to_string(), n); }
+        for n in names {
+            let r = ui.selectable_value(&mut app.family_type, n.to_string(), n);
+            test_hit!(app, r, "family_type:{n}");
+        }
     });
+    test_hit!(app, combo.response, "family_type");
 }
 
 /// The kind and the material of a slab.
@@ -359,10 +363,14 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.strong("Place Level");
             ui.separator();
             ui.label("Elevation (mm)");
-            ui.add(egui::DragValue::new(&mut app.level_elev_mm).speed(10.0));
+            let r = ui.add(egui::DragValue::new(&mut app.level_elev_mm).speed(10.0));
+            test_hit!(app, r, "level:elevation");
             ui.label("Name");
-            ui.add(egui::TextEdit::singleline(&mut app.level_name).hint_text("Level N").desired_width(110.0));
-            if ui.button("Place Level").clicked() { app.level_click(); }
+            let r = ui.add(egui::TextEdit::singleline(&mut app.level_name).hint_text("Level N").desired_width(110.0));
+            test_hit!(app, r, "level:name");
+            let r = ui.button("Place Level");
+            test_hit!(app, r, "level:place");
+            if r.clicked() { app.level_click(); }
         });
         // the levels of the project, lowest first: renaming and deleting them is here, beside placing one (A6). The
         // draft of a name being typed is held by the app, so it is not rebuilt from the document every frame (R4).
@@ -372,15 +380,35 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             for (id, name, elevation) in levels {
                 if app.level_rename_id == Some(id) {
                     let field = ui.add(egui::TextEdit::singleline(&mut app.level_rename_name).desired_width(110.0));
-                    if (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ui.small_button("OK").clicked() {
+                    test_hit!(app, field, "level:rename_field");
+                    let ok = ui.small_button("OK");
+                    test_hit!(app, ok, "level:rename_ok");
+                    if (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ok.clicked() {
                         app.commit_level_rename();
                     }
                     if ui.small_button("Cancel").clicked() { app.cancel_level_rename(); }
                 } else {
                     ui.label(&name);
-                    if ui.small_button("Rename").clicked() { app.start_level_rename(id); }
+                    let r = ui.small_button("Rename");
+                    test_hit!(app, r, "level:rename:{name}");
+                    if r.clicked() { app.start_level_rename(id); }
                 }
-                ui.weak(format!("{elevation:.3} m"));
+                let editing = app.level_elev_edit.as_ref().is_some_and(|(e, _)| *e == id);
+                if editing {
+                    let mut text = app.level_elev_edit.as_ref().map(|(_, t)| t.clone()).unwrap_or_default();
+                    let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(70.0));
+                    test_hit!(app, field, "level:elevation_field");
+                    ui.weak("mm");
+                    if let Some((_, t)) = app.level_elev_edit.as_mut() { *t = text; }
+                    let ok = ui.small_button("OK");
+                    test_hit!(app, ok, "level:elevation_ok");
+                    if (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ok.clicked() { app.commit_level_elevation(); }
+                    if ui.small_button("Cancel").clicked() { app.level_elev_edit = None; }
+                } else {
+                    let r = ui.small_button(format!("{elevation:.3} m")).on_hover_text("Change the elevation; what stands on the level moves with it");
+                    test_hit!(app, r, "level:elevation:{name}");
+                    if r.clicked() { app.start_level_elevation(id); }
+                }
                 if ui.small_button("Delete").on_hover_text("A level that elements stand on cannot be deleted").clicked() {
                     app.delete_level(id);
                 }
@@ -426,9 +454,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.strong("Place Wall");
             ui.separator();
             ui.label("Location Line");
-            egui::ComboBox::from_id_salt("wall_loc").selected_text(Desktop::WALL_LOCATIONS[app.wall_loc]).show_ui(ui, |ui| {
-                for (i, name) in Desktop::WALL_LOCATIONS.iter().enumerate() { ui.selectable_value(&mut app.wall_loc, i, *name); }
+            let combo = egui::ComboBox::from_id_salt("wall_loc").selected_text(Desktop::WALL_LOCATIONS[app.wall_loc]).show_ui(ui, |ui| {
+                for (i, name) in Desktop::WALL_LOCATIONS.iter().enumerate() {
+                    let r = ui.selectable_value(&mut app.wall_loc, i, *name);
+                    test_hit!(app, r, "wall_loc:{name}");
+                }
             });
+            test_hit!(app, combo.response, "wall_loc");
             ui.label("Draw");
             egui::ComboBox::from_id_salt("wall_mode").selected_text(Desktop::WALL_MODES[app.wall_mode]).show_ui(ui, |ui| {
                 for (i, name) in Desktop::WALL_MODES.iter().enumerate() { if ui.selectable_value(&mut app.wall_mode, i, *name).clicked() { app.wall_pts.clear(); app.wall_ids.clear(); } }
@@ -614,9 +646,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.separator();
             ui.label("Shape");
             let shown = openbim_document::StairShape::ALL.iter().find(|(s, _)| *s == app.stair_shape).map_or("Straight", |(_, n)| *n);
-            egui::ComboBox::from_id_salt("stair_shape").selected_text(shown).show_ui(ui, |ui| {
-                for (shape, name) in openbim_document::StairShape::ALL { ui.selectable_value(&mut app.stair_shape, shape, name); }
+            let combo = egui::ComboBox::from_id_salt("stair_shape").selected_text(shown).show_ui(ui, |ui| {
+                for (shape, name) in openbim_document::StairShape::ALL {
+                    let r = ui.selectable_value(&mut app.stair_shape, shape, name);
+                    test_hit!(app, r, "stair_shape:{name}");
+                }
             });
+            test_hit!(app, combo.response, "stair_shape");
             ui.label("Railing");
             let shown = openbim_document::RailingSides::ALL.iter().find(|(s, _)| *s == app.stair_railing).map_or("Both sides", |(_, n)| *n);
             egui::ComboBox::from_id_salt("stair_railing").selected_text(shown).show_ui(ui, |ui| {
@@ -729,7 +765,9 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         } else if matches!(el.geometry, Some(openbim_document::Geometry::Shaft { .. })) || openbim_document::Document::is_vertical_opening(&el) { &[][..] } else { dimensions(el.category, app.section_pick) };
         for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
         let pending = app.has_pending_edit();
-        if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() {
+        let apply = ui.add_enabled(pending, egui::Button::new("Apply"));
+        test_hit!(app, apply, "props:Apply");
+        if apply.clicked() {
             if el.id == crate::ElementId(1) { app.apply_duct_edit(); } else { app.apply_selected_edit(); }
         }
         if ui.add_enabled(pending, egui::Button::new("Reset")).clicked() { app.sync_duct_controls(); }
@@ -1033,7 +1071,8 @@ const TREE: &[Node] = &[
 fn node_matches(app: &Desktop, node: &Node, query: &str) -> bool {
     // a level view is searched by the name it shows, which is the level's own (A2/R1)
     let shown = node.view.map_or_else(|| node.name.to_string(), |view| level_view_name(app, node.name, view));
-    matches(query, node.name) || matches(query, &shown) || node.children.iter().any(|child| node_matches(app, child, query))
+    let added_level = node.name == "Floor Plans" && app.levels().iter().skip(2).any(|l| matches(query, &l.1));
+    matches(query, node.name) || matches(query, &shown) || added_level || node.children.iter().any(|child| node_matches(app, child, query))
 }
 
 fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, query: &str) {
@@ -1046,12 +1085,13 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
         let label = if active { label.strong() } else { label };
         let response = ui.selectable_label(app.browser_selected == path, label)
             .on_hover_text("Double-click to open view");
+        test_hit!(app, response, "view:{}", level_view_name(app, node.name, view));
         if response.clicked() { app.browser_selected = path; }
         response.context_menu(|ui| app.add_to_sheet_menu(ui, crate::view_ui::view_key(view)));
         if response.double_clicked() {
             app.view = view;
             app.selected = None;
-            app.message = format!("Opened sample view: {}", node.name);
+            app.message = format!("Opened {}", level_view_name(app, node.name, view));
         }
     } else {
         egui::CollapsingHeader::new(RichText::new(node.name).strong())
@@ -1068,6 +1108,8 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
                     // A matching parent reveals its entire subtree.
                     let child_query = if matches(query, node.name) { "" } else { query };
                     for child in node.children { tree_node(app, ui, child, &path, child_query); }
+                    // the plans of the levels after the first two belong with the other floor plans (A2/R1)
+                    if node.name == "Floor Plans" { level_plans(app, ui, child_query); }
                 }
             });
     }
@@ -1082,20 +1124,14 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().id_salt("project_tree").auto_shrink([false, false])
         .show(ui, |ui| {
             for node in TREE { tree_node(app, ui, node, "project", &query); }
-            // the Floor Plans folder holds the document's first two levels, whatever their ids are, so only the
-            // levels after them are added here (A2/R1)
-            let added: Vec<(ElementId, String)> = app.levels().into_iter().skip(2).map(|l| (l.0, l.1)).collect();
-            for (id, name) in added {
-                if !matches(&query, &name) { continue; }
-                let active = app.view == View::Level(id.0);
-                if ui.selectable_label(active, RichText::new(format!("{name} (plan)"))).on_hover_text("Open the plan of this level").clicked() { app.view = View::Level(id.0); app.selected = None; }
-            }
             // the section lines of the model, each opening its view
             let sections: Vec<(ElementId, String)> = app.document.elements().filter(|e| e.category == openbim_document::Category::Section).map(|e| (e.id, e.name.clone())).collect();
             for (id, name) in sections {
                 if !matches(&query, &name) { continue; }
                 let active = app.view == View::Section(id.0);
-                if ui.selectable_label(active, RichText::new(format!("{name} (section)"))).on_hover_text("Open the view of this section line").clicked() { app.view = View::Section(id.0); app.selected = None; }
+                let r = ui.selectable_label(active, RichText::new(format!("{name} (section)"))).on_hover_text("Open the view of this section line");
+                test_hit!(app, r, "view:{name}");
+                if r.clicked() { app.view = View::Section(id.0); app.selected = None; }
             }
             // the views of the elevation markers placed in plans
             let marked: Vec<(ElementId, String, u32)> = app.document.elements().filter(|e| e.category == openbim_document::Category::Elevation).map(|e| (e.id, e.name.clone(), e.count)).collect();
@@ -1111,6 +1147,25 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
         });
 }
 
+/// The plans of the levels after the first two (whose plans are the fixed Level 1 and Level 2 entries): listed in
+/// the Floor Plans folder like the others, and opened by a double click as they are (A2/R1).
+fn level_plans(app: &mut Desktop, ui: &mut egui::Ui, query: &str) {
+    let added: Vec<(ElementId, String)> = app.levels().into_iter().skip(2).map(|l| (l.0, l.1)).collect();
+    for (id, name) in added {
+        if !matches(query, &name) { continue; }
+        let view = View::Level(id.0);
+        let active = app.view == view;
+        let color = if active { ui.visuals().hyperlink_color } else { ui.visuals().text_color() };
+        let label = RichText::new(&name).color(color);
+        let path = format!("project/Views (all)/Floor Plans/{name}");
+        let r = ui.selectable_label(app.browser_selected == path, if active { label.strong() } else { label }).on_hover_text("Double-click to open view");
+        test_hit!(app, r, "view:{name}");
+        if r.clicked() { app.browser_selected = path; }
+        r.context_menu(|ui| app.add_to_sheet_menu(ui, crate::view_ui::view_key(view)));
+        if r.double_clicked() { app.view = view; app.selected = None; app.message = format!("Opened {name}"); }
+    }
+}
+
 /// Number, Name and Department of the selected room, editable in place and applied as one undoable step (B21). The
 /// draft is held in the UI memory keyed by the room and its revision, so it is re-read after an undo or another edit.
 fn room_identity(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
@@ -1119,11 +1174,13 @@ fn room_identity(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::El
     let mut draft = ui.data_mut(|d| d.get_temp::<(String, String, String)>(key)).unwrap_or(seed);
     egui::CollapsingHeader::new(RichText::new("Identity Data").strong()).id_salt("room_identity").default_open(true).show(ui, |ui| {
         egui::Grid::new("room_identity_rows").num_columns(2).striped(true).show(ui, |ui| {
-            ui.label("Number"); ui.add(egui::TextEdit::singleline(&mut draft.0).desired_width(120.0)); ui.end_row();
-            ui.label("Name"); ui.add(egui::TextEdit::singleline(&mut draft.1).desired_width(120.0)); ui.end_row();
-            ui.label("Department"); ui.add(egui::TextEdit::singleline(&mut draft.2).desired_width(120.0)); ui.end_row();
+            ui.label("Number"); let r = ui.add(egui::TextEdit::singleline(&mut draft.0).desired_width(120.0)); test_hit!(app, r, "room:Number"); ui.end_row();
+            ui.label("Name"); let r = ui.add(egui::TextEdit::singleline(&mut draft.1).desired_width(120.0)); test_hit!(app, r, "room:Name"); ui.end_row();
+            ui.label("Department"); let r = ui.add(egui::TextEdit::singleline(&mut draft.2).desired_width(120.0)); test_hit!(app, r, "room:Department"); ui.end_row();
         });
-        if ui.small_button("Apply").on_hover_text("Sets Number, Name and Department in one undoable step").clicked() {
+        let apply = ui.small_button("Apply").on_hover_text("Sets Number, Name and Department in one undoable step");
+        test_hit!(app, apply, "room:Apply");
+        if apply.clicked() {
             app.message = match app.document.set_room_data(el.id, &draft.0, &draft.1, &draft.2) {
                 Ok(()) => "Room updated; undo restores it".into(),
                 Err(_) => "Room not changed: it needs a name, and its number must be new on its level".into(),
