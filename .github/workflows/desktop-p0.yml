@@ -30,9 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
       GIT_TERMINAL_PROMPT: '0'
-      P0_DEPENDENCY_READ_TOKEN: ${{ secrets.P0_DEPENDENCY_READ_TOKEN }}
     defaults:
       run:
         shell: bash
@@ -48,16 +46,6 @@ jobs:
           git rev-parse HEAD
           rustc -vV
           cargo --version
-      - name: Private dependency access
-        run: |
-          # The helper reads the environment; the token is never embedded in git config.
-          if [ -n "$P0_DEPENDENCY_READ_TOKEN" ]; then
-            git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$P0_DEPENDENCY_READ_TOKEN"; }; f'
-          fi
-          if ! git ls-remote https://github.com/wildut85523456k/edesign-alike HEAD >/dev/null; then
-            echo "::error::Cannot read pinned private dependency edesign-alike. Configure P0_DEPENDENCY_READ_TOKEN with read-only access to that repository. A lockfile does not grant access."
-            exit 1
-          fi
       - name: Linux desktop development libraries
         if: runner.os == 'Linux'
         run: |
@@ -89,3 +77,4 @@ jobs:
       - name: Remove temporary credential helper
         if: always()
         run: git config --global --unset-all credential.helper || true
+        main

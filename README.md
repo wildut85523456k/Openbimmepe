@@ -18,8 +18,9 @@ cargo audit
 ```
 
 Windows requires MSVC Build Tools and the Windows SDK; Linux needs X11/Wayland/graphics development libraries.
-The workspace depends on pinned private `edesign-alike` crates: contributors and clean runners need read access.
-A lockfile pins versions; it does not provide credentials or cached source.
+The workspace builds with no private access. The electrical solver (single-line feeder currents and voltage
+drops) is the private `edesign-alike` repository and is plugged in only by the separate [full build](full/README.md);
+without it, schematics keep their placeholders and say the currents were not calculated.
 See [P0 validation](docs/p0-validation.md) for native CI and evidence limits.
 
 ## Crates

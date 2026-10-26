@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/geom", "crates/family", "crates/place", "crates/keymap", "crates/arch", "crates/oplog", "crates/sketch", "crates/route", "crates/ifc", "crates/view", "crates/viewport", "crates/viewport-egui", "crates/photo", "crates/sheets", "crates/automation", "crates/calc", "crates/document", "crates/schematic", "crates/commands", "apps/desktop"]
+# `full/` is its own workspace: it adds the private edesign-alike electrical solver. Excluding it keeps
+# this workspace (and its Cargo.lock) buildable without access to that repository.
+exclude = ["full"]

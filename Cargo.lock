@@ -2551,8 +2551,6 @@ dependencies = [
  "earcutr",
  "i_overlay",
  "openbim-calc",
- "openbim-electrical-model",
- "openbim-electrical-solver",
  "openbim-family",
  "openbim-geom",
  "openbim-place",
@@ -2561,21 +2559,6 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "openbim-electrical-model"
-version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/edesign-alike?rev=57ef01848860771d29960dcf2e8af2f831fe1e6c#57ef01848860771d29960dcf2e8af2f831fe1e6c"
-
-[[package]]
-name = "openbim-electrical-solver"
-version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/edesign-alike?rev=57ef01848860771d29960dcf2e8af2f831fe1e6c#57ef01848860771d29960dcf2e8af2f831fe1e6c"
-dependencies = [
- "openbim-electrical-model",
- "serde",
- "thiserror 2.0.21",
 ]
 
 [[package]]

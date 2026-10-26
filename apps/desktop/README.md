@@ -5,7 +5,8 @@ cargo run --locked -p openbim-desktop
 ```
 
 Windows needs MSVC Build Tools and the Windows SDK. Linux needs X11/Wayland and graphics libraries.
-Use the committed Cargo.lock. The pinned private edesign-alike dependencies require repository read access.
+Use the committed Cargo.lock. No private repository access is needed: this binary has no electrical solver, so
+single-line schematics show placeholders. `full/desktop-full` is the same app with the edesign-alike solver installed.
 
 ## Current implementation
 

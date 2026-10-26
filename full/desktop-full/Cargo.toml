@@ -1,0 +1,15 @@
+[package]
+name = "openbim-desktop-full"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "The desktop with the edesign-alike electrical solver installed"
+
+[dependencies]
+eframe = "0.36"
+openbim-desktop.workspace = true
+openbim-document.workspace = true
+openbim-electrical-adapter = { path = "../electrical-adapter" }
+
+[lints.rust]
+unsafe_code = "forbid"

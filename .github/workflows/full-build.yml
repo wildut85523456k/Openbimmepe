@@ -1,0 +1,52 @@
+name: full-build
+# The full build (`full/`): the open workspace plus the private edesign-alike electrical solver.
+# Manual only: it needs the repository secret P0_DEPENDENCY_READ_TOKEN with read-only access to
+# edesign-alike. The open workflows (ci, desktop-p0, printing-regressions) need no secret.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      GIT_TERMINAL_PROMPT: '0'
+      P0_DEPENDENCY_READ_TOKEN: ${{ secrets.P0_DEPENDENCY_READ_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: full
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Private dependency access
+        run: |
+          if [ -z "$P0_DEPENDENCY_READ_TOKEN" ]; then
+            echo "::error::Set the repository Actions secret P0_DEPENDENCY_READ_TOKEN with read-only access to edesign-alike."
+            exit 1
+          fi
+          # The helper reads the environment; the token is never embedded in git config.
+          git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$P0_DEPENDENCY_READ_TOKEN"; }; f'
+          git ls-remote https://github.com/wildut85523456k/edesign-alike HEAD >/dev/null
+      - name: Linux desktop development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: full
+      - name: Solver adapter tests
+        run: cargo test --locked
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Full desktop executable
+        run: cargo build --locked -p openbim-desktop-full --release
+      - name: Remove temporary credential helper
+        if: always()
+        run: git config --global --unset-all credential.helper || true
