@@ -36,6 +36,12 @@ still to be reviewed (see the end). This is a review of what is drawn, not a per
 Nothing in the review contradicted the headless journey: the counts, names, areas, the dimension value and the
 schedule values on screen and on paper match what the test asserts.
 
+## Files of the reviewed run
+
+`visual-2026-10-26/office-journey.obim` is the model the journey saved (open it with
+`cargo run --release -p openbim-desktop -- docs/audits/visual-2026-10-26/office-journey.obim`), and
+`office-journey.ifc` its IFC 4.3 export. Use them to repeat this review on another OS.
+
 ## Still to review on Windows and macOS
 
 The same model and steps, on each OS: start-up, the native Save/Open/Print dialogs (titles, file types, offered
