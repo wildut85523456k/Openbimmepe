@@ -1,6 +1,13 @@
 name: desktop-p0
+# Actions minutes: a PR run already tests the tree that a merge puts on main, so there is no push run.
+# macOS bills at 10x and Windows at 2x the Linux rate; macOS runs only on manual dispatch (release candidates).
 on:
   workflow_dispatch:
+    inputs:
+      include_macos:
+        description: 'Also run the macOS job (billed at 10x)'
+        type: boolean
+        default: true
   pull_request:
     paths:
       - 'apps/**'
@@ -8,8 +15,6 @@ on:
       - 'assets/**'
       - 'Cargo.*'
       - '.github/workflows/desktop-p0.yml'
-  push:
-    branches: [main]
 permissions:
   contents: read
 concurrency:
@@ -21,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022, macos-14]
+        os: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.include_macos) && '["ubuntu-24.04","windows-2022","macos-14"]' || '["ubuntu-24.04","windows-2022"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -68,3 +73,8 @@ jobs:
             target/release/openbim-desktop
             target/release/openbim-desktop.exe
           if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary credential helper
+        if: always()
+        run: git config --global --unset-all credential.helper || true
+        main
