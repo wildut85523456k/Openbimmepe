@@ -431,7 +431,8 @@ impl Element {
                 || (self.category == Category::Type && self.type_for == Some(Category::Family) && self.type_name.is_empty())
                 || (self.category == Category::Room && self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.iter().all(|(n, _)| matches!(n.as_str(), "Number" | "Department")))
                 || (self.category == Category::Generic && self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty())
-                || (self.family.is_empty() && self.type_name.is_empty() && self.overrides.is_empty() && self.texts.is_empty()))
+                || (self.family.is_empty() && self.type_name.is_empty() && self.texts.is_empty()
+        && self.overrides.iter().all(|(k, _)| k.starts_with("edesign."))))
             && self.texts.len() <= 64 && self.texts.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.len() <= 256)
             && self.family.len() <= 256 && self.type_name.len() <= 256 && self.overrides.len() <= 64
             && self.overrides.iter().all(|(n, v)| !n.is_empty() && n.len() <= 64 && v.is_finite())
@@ -486,6 +487,24 @@ impl Site {
             && self.angle_to_true_north_deg.is_finite() && (-360.0..=360.0).contains(&self.angle_to_true_north_deg)
             && self.utc_offset_hours.is_finite() && (-12.0..=14.0).contains(&self.utc_offset_hours)
     }
+}
+
+/// A result computed by edesign-alike for one BIM element, to be stamped back onto
+/// the element as a reviewed, undoable transaction (the integration gate). `revision`
+/// is the element's revision when edesign computed the result, so a stale result is
+/// refused per element (`RevisionConflict`) instead of overwriting a changed element.
+/// edesign-alike is read-only; this command is the host's reviewed write-back step
+/// (Decision 0003, "Results coming back (write-back)", now implemented).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StampedResult {
+    pub id: ElementId,
+    pub revision: u64,
+    pub design_current_a: Option<f64>,
+    pub branch_voltage_drop_pct: Option<f64>,
+    pub path_voltage_drop_pct: Option<f64>,
+    pub fault_max_a: Option<f64>,
+    pub fault_min_a: Option<f64>,
+    pub fault_peak_a: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -557,7 +576,36 @@ pub enum Command {
     /// symbols, wires and warnings, carried so the step is undoable and the sheet can read it. The view
     /// is regenerated from the model on every generation; it is not source data, so it is session-only.
     GenerateSchematic { diagram: Box<SchematicView> },
+    /// Stamp edesign-alike-computed results (design current, voltage drops, fault levels) onto the
+    /// BIM elements as parameter overrides, undoably. Each entry carries the element's revision when
+    /// edesign computed the result; a mismatch (the element changed since export) aborts the whole
+    /// transaction with `RevisionConflict` — the reviewed write-back gate (Decision 0003, now
+    /// implemented). edesign-alike is read-only and never mutates the model; this command is the
+    /// host's reviewed step. Results land in the element's `overrides` keyed `edesign.*`.
+    StampEdesignResults { elements: Vec<StampedResult> },
     Delete { id: ElementId },
+}
+
+/// Stamp edesign-alike-computed results onto an element as parameter overrides.
+/// Results land in `overrides` keyed `edesign.*`, so they round-trip through the
+/// existing family-instance parameter mechanism without changing the Element schema.
+fn stamp_edesign_result(el: &mut Element, r: &StampedResult) {
+    let pairs: [(Option<f64>, &str); 6] = [
+        (r.design_current_a, "edesign.design_current_a"),
+        (r.branch_voltage_drop_pct, "edesign.branch_voltage_drop_pct"),
+        (r.path_voltage_drop_pct, "edesign.path_voltage_drop_pct"),
+        (r.fault_max_a, "edesign.fault_max_a"),
+        (r.fault_min_a, "edesign.fault_min_a"),
+        (r.fault_peak_a, "edesign.fault_peak_a"),
+    ];
+    for (val, key) in pairs {
+        let Some(v) = val.filter(|x| x.is_finite()) else { continue; };
+        if let Some(existing) = el.overrides.iter_mut().find(|(k, _)| k == key) {
+            existing.1 = v;
+        } else {
+            el.overrides.push((key.to_string(), v));
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1433,6 +1481,23 @@ impl Document {
                     if !site.valid() { return Err(EditError::InvalidSite); }
                     trial_site = Some(*site);
                 }
+                Command::StampEdesignResults { elements } => {
+                    // Each element must still be at the revision edesign computed from,
+                    // otherwise the result is stale and overwriting it would be unsound.
+                    // A single stale element aborts the whole transaction (atomic), so the
+                    // host re-exports, re-computes, and retries — the reviewed gate.
+                    for r in elements {
+                        let el = trial.get_mut(&r.id).ok_or(EditError::NotFound(r.id))?;
+                        if el.revision != r.revision {
+                            return Err(EditError::RevisionConflict { expected: r.revision, actual: el.revision });
+                        }
+                    }
+                    for r in elements {
+                        let el = trial.get_mut(&r.id).unwrap();
+                        stamp_edesign_result(el, r);
+                        el.revision = revision;
+                    }
+                }
                 Command::Delete { id } => {
                     if trial.remove(id).is_none() { return Err(EditError::NotFound(*id)); }
                     // the tags of an element go with it
@@ -1639,5 +1704,49 @@ mod tests {
             assert_eq!(d.transact(1, &[Command::SetSlope { id: ElementId(1), slope_ratio: 0.02 }]),
                 Err(EditError::UnsupportedProperty(ElementId(1))));
         }
+    }
+
+    #[test]
+    fn stamp_edesign_results_stamps_overrides_and_bumps_revision() {
+        let mut d = Document::new();
+        d.transact(0, &[create(1)]).unwrap(); // element at revision 1
+        let sr = StampedResult {
+            id: ElementId(1),
+            revision: 1,
+            design_current_a: Some(76.4),
+            branch_voltage_drop_pct: Some(2.5),
+            path_voltage_drop_pct: None,
+            fault_max_a: Some(25000.0),
+            fault_min_a: None,
+            fault_peak_a: Some(52000.0),
+        };
+        assert_eq!(d.transact(1, &[Command::StampEdesignResults { elements: vec![sr] }]), Ok(2));
+        let el = d.get(ElementId(1)).unwrap();
+        assert_eq!(el.revision, 2);
+        assert!(el.overrides.iter().any(|(k, v)| k == "edesign.design_current_a" && (*v - 76.4).abs() < 1e-9));
+        assert!(el.overrides.iter().any(|(k, v)| k == "edesign.fault_max_a" && (*v - 25000.0).abs() < 1e-9));
+        assert!(el.overrides.iter().any(|(k, v)| k == "edesign.fault_peak_a" && (*v - 52000.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn stamp_edesign_results_refuses_stale_element() {
+        let mut d = Document::new();
+        d.transact(0, &[create(1)]).unwrap(); // revision 1
+        // edit the element so its revision becomes 2 (stale relative to the supplied 1)
+        d.transact(1, &[Command::Resize { id: ElementId(1), width_m: 0.4, height_m: 0.5 }]).unwrap();
+        let sr = StampedResult {
+            id: ElementId(1),
+            revision: 1, // stale
+            design_current_a: Some(76.4),
+            branch_voltage_drop_pct: None,
+            path_voltage_drop_pct: None,
+            fault_max_a: None,
+            fault_min_a: None,
+            fault_peak_a: None,
+        };
+        assert_eq!(d.transact(2, &[Command::StampEdesignResults { elements: vec![sr] }]),
+            Err(EditError::RevisionConflict { expected: 1, actual: 2 }));
+        // nothing stamped
+        assert!(!d.get(ElementId(1)).unwrap().overrides.iter().any(|(k, _)| k.starts_with("edesign.")));
     }
 }

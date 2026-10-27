@@ -30,6 +30,9 @@ pub fn build(doc: &Document, project_name: &str, project_key: u64, design_basis:
     let nodes: Vec<Value> = mep.elec_nodes.iter().map(|n| {
         let element = n.element.and_then(|e| doc.get(e)).map(|e| json!({
             "id": e.id.0, "ifc_global_id": global_id(e.id), "family": e.family, "type": e.type_name, "name": e.name, "connector": n.connector,
+            // The element's revision at export, so edesign can echo it back and the host can
+            // resolve each IFC element to a live revision before stamping results (integration gate).
+            "revision": e.revision,
         }));
         json!({
             "id": n.id, "label": n.name, "kind": kind_name(n.kind),
