@@ -1,6 +1,18 @@
 [workspace]
 resolver = "2"
-members = ["crates/geom", "crates/family", "crates/place", "crates/keymap", "crates/arch", "crates/oplog", "crates/sketch", "crates/route", "crates/ifc", "crates/view", "crates/viewport", "crates/viewport-egui", "crates/photo", "crates/sheets", "crates/automation", "crates/calc", "crates/document", "crates/schematic", "crates/commands", "apps/desktop"]
-# `full/` is its own workspace: it adds the private edesign-alike electrical solver. Excluding it keeps
-# this workspace (and its Cargo.lock) buildable without access to that repository.
+members = ["apps/desktop"]
+
+# Shared library crates now live in the openbim-core monorepo workspace.
+# They are consumed as git-SHA-pinned dependencies from:
+#   https://github.com/wildut85523456k/openbim-core
+#
+# Migration date: 2026-10-27  Core SHA: 50f634efffdd9dff63aad96b14baa0ac89f3e382
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+# `full/` was its own workspace that pulled in the private edesign-alike
+# electrical solver. With electrical crates now in openbim-core, this
+# exclusion is no longer needed but kept for backward compatibility.
 exclude = ["full"]

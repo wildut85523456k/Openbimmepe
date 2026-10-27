@@ -1,0 +1,2754 @@
+log=docs/agent-team/evidence/auto-008-rebase-2026-10-26/cargo-team/push-forcewithlease.log
+=== git push --force-with-lease origin feat/auto-008-obg-ds ===
+fa9f0237eb8581e19f50cd074cebc092cfd2d41c
+587918099f5fedafd87fe8ca3824dda09492c791
+=== pre-push gate: refs/heads/feat/auto-008-obg-ds fa9f0237eb8581e19f50cd074cebc092cfd2d41c ===
+--- [1a/3] cargo test --workspace --release --no-run --jobs=1 --no-fail-fast (build) ---
+   Compiling cfg-if v1.0.5
+   Compiling libm v0.2.16
+   Compiling autocfg v1.5.1
+   Compiling num-traits v0.2.19
+   Compiling foldhash v0.2.0
+   Compiling log v0.4.34
+   Compiling equivalent v1.0.3
+   Compiling hashbrown v0.17.1
+   Compiling memchr v2.8.3
+   Compiling simd-adler32 v0.3.10
+   Compiling indexmap v2.14.2
+   Compiling crc32fast v1.5.2
+   Compiling adler2 v2.0.1
+   Compiling miniz_oxide v0.9.1
+   Compiling zlib-rs v0.6.8
+   Compiling flate2 v1.1.10
+   Compiling bumpalo v3.20.3
+   Compiling either v1.19.0
+   Compiling zopfli v0.8.4
+   Compiling windows-link v0.2.1
+   Compiling rand_core v0.10.1
+   Compiling typed-path v0.12.3
+   Compiling zip v9.0.4
+   Compiling proc-macro2 v1.0.107
+   Compiling getrandom v0.4.3
+   Compiling crossbeam-utils v0.8.23
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling crossbeam-epoch v0.9.21
+   Compiling crossbeam-deque v0.8.8
+   Compiling rayon-core v1.13.0
+   Compiling rayon v1.12.0
+   Compiling itertools v0.14.0
+   Compiling bitflags v2.13.2
+   Compiling earcutr v0.5.0
+   Compiling once_cell v1.21.4
+   Compiling openbim-geom v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\geom)
+   Compiling openbim-photo v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\photo)
+   Compiling syn v3.0.9
+   Compiling openbim-arch v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\arch)
+   Compiling openbim-sketch v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\sketch)
+   Compiling core_detect v1.0.0
+   Compiling openbim-family v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\family)
+   Compiling windows-sys v0.61.2
+   Compiling fastrand v2.5.0
+   Compiling tempfile v3.27.0
+   Compiling fnv v1.0.7
+   Compiling cpufeatures v0.3.1
+   Compiling wait-timeout v0.2.1
+   Compiling quick-error v1.2.3
+   Compiling bit-vec v0.10.1
+   Compiling bit-set v0.11.1
+   Compiling rusty-fork v0.3.1
+   Compiling chacha20 v0.10.2
+   Compiling rand v0.10.3
+   Compiling rand_xorshift v0.5.0
+   Compiling unarray v0.1.4
+   Compiling regex-syntax v0.8.11
+   Compiling proptest v1.12.0
+   Compiling openbim-place v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\place)
+   Compiling openbim-route v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\route)
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling serde_derive v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.154
+   Compiling itoa v1.0.18
+   Compiling thiserror v2.0.21
+   Compiling thiserror-impl v2.0.21
+   Compiling scopeguard v1.2.0
+   Compiling syn v2.0.119
+   Compiling bytemuck_derive v1.12.1
+   Compiling bytemuck v1.25.2
+   Compiling openbim-ifc v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\ifc)
+   Compiling uuid v1.28.0
+   Compiling smallvec v1.16.3
+   Compiling cfg_aliases v0.2.2
+   Compiling rustversion v1.0.23
+   Compiling i_float v1.16.0
+   Compiling i_shape v1.18.0
+   Compiling openbim-schematic v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\schematic)
+   Compiling openbim-calc v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\calc)
+   Compiling openbim-electrical-model v0.0.1 (https://github.com/wildut85523456k/edesign-alike?rev=57ef01848860771d29960dcf2e8af2f831fe1e6c#57ef0184)
+   Compiling i_tree v0.18.0
+   Compiling i_key_sort v0.10.3
+   Compiling arrayvec v0.7.8
+   Compiling i_overlay v4.5.2
+   Compiling openbim-electrical-solver v0.0.1 (https://github.com/wildut85523456k/edesign-alike?rev=57ef01848860771d29960dcf2e8af2f831fe1e6c#57ef0184)
+   Compiling encoding_rs v0.8.42
+   Compiling zerocopy v0.8.63
+   Compiling zerocopy-derive v0.8.63
+   Compiling windows-implement v0.60.2
+   Compiling windows-interface v0.59.3
+   Compiling windows-result v0.4.1
+   Compiling windows-strings v0.5.1
+   Compiling multiversion_no_op v1.0.0
+   Compiling simdutf8 v0.1.5
+   Compiling windows-core v0.62.2
+   Compiling openbim-document v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\document)
+   Compiling synstructure v0.14.0
+   Compiling debug_unsafe v0.1.4
+   Compiling parking_lot_core v0.9.12
+   Compiling atoi_simd v0.18.1
+   Compiling zerofrom-derive v0.1.8
+   Compiling quick-xml v0.42.0
+   Compiling codepage v0.1.3
+   Compiling windows-threading v0.2.1
+   Compiling raw-window-handle v0.6.2
+   Compiling fast-float2 v0.2.4
+   Compiling byteorder v1.5.0
+   Compiling khronos_api v3.1.0
+   Compiling allocator-api2 v0.2.21
+   Compiling hashbrown v0.16.1
+   Compiling calamine v0.36.1 (https://github.com/tafia/calamine.git?rev=39ebf5d851543e4f3dc5964baeadd383eb17a3ae#39ebf5d8)
+   Compiling windows-future v0.3.2
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling windows-numerics v0.3.1
+   Compiling windows-collections v0.3.2
+   Compiling openbim-view v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\view)
+   Compiling lock_api v0.4.14
+   Compiling stable_deref_trait v1.2.1
+   Compiling static_assertions v1.1.0
+   Compiling yoke v0.8.3
+   Compiling parking_lot v0.12.5
+   Compiling windows v0.62.2
+   Compiling polycool v0.4.0
+   Compiling xml-rs v0.8.29
+   Compiling profiling v1.0.18
+   Compiling rustc-hash v1.1.0
+   Compiling naga-types v30.0.1
+   Compiling gl_generator v0.14.0
+   Compiling kurbo v0.13.1
+   Compiling openbim-sheets v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\sheets)
+   Compiling naga v30.0.1
+   Compiling color v0.3.3
+   Compiling font-types v0.12.6
+   Compiling zerovec-derive v0.11.6
+   Compiling libloading v0.8.9
+   Compiling euclid v0.22.14
+   Compiling version_check v0.9.5
+   Compiling bit-vec v0.9.1
+   Compiling linebender_resource_handle v0.1.1
+   Compiling ash v0.38.0+1.3.281
+   Compiling windows_x86_64_msvc v0.52.6
+   Compiling libc v0.2.190
+   Compiling unicode-width v0.1.14
+   Compiling codespan-reporting v0.13.1
+   Compiling peniko v0.6.1
+   Compiling bit-set v0.10.0
+   Compiling ahash v0.8.12
+   Compiling guillotiere v0.7.0
+   Compiling zerovec v0.11.8
+   Compiling read-fonts v0.41.0
+   Compiling glutin_wgl_sys v0.6.1
+   Compiling half v2.7.1
+   Compiling accesskit v0.24.1
+   Compiling displaydoc v0.2.7
+   Compiling spirv v0.4.0+sdk-1.4.341.0
+   Compiling fearless_simd v0.4.1
+   Compiling unicode-general-category v1.1.0
+   Compiling khronos-egl v6.0.0
+   Compiling unicode-segmentation v1.13.3
+   Compiling vello_common v0.1.0
+   Compiling wgpu-types v30.0.1
+   Compiling openbim-automation v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\automation)
+   Compiling wgpu-hal v30.0.1
+   Compiling emath v0.36.2
+   Compiling presser v0.3.1
+   Compiling gpu-allocator v0.28.0
+   Compiling ecolor v0.36.2
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling windows-targets v0.52.6
+   Compiling vello_cpu v0.1.0
+   Compiling harfrust v0.12.0
+   Compiling skrifa v0.44.0
+   Compiling winit v0.30.13
+   Compiling ordered-float v4.6.0
+   Compiling pin-project-lite v0.2.17
+   Compiling epaint_default_fonts v0.36.2
+   Compiling renderdoc-sys v1.1.0
+   Compiling range-alloc v0.1.5
+   Compiling tracing-core v0.1.36
+   Compiling glow v0.17.0
+   Compiling self_cell v1.3.0
+   Compiling nohash-hasher v0.2.0
+   Compiling epaint v0.36.2
+   Compiling tracing v0.1.44
+   Compiling windows-sys v0.52.0
+   Compiling tinystr v0.8.4
+   Compiling wgpu-core v30.0.1
+   Compiling itertools v0.15.0
+   Compiling cursor-icon v1.2.0
+   Compiling smol_str v0.2.2
+   Compiling writeable v0.6.4
+   Compiling dpi v0.1.2
+   Compiling litemap v0.8.3
+   Compiling litrs v1.0.1
+   Compiling document-features v0.2.12
+   Compiling icu_locale_core v2.3.0
+   Compiling egui v0.36.2
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling wgpu v30.0.1
+   Compiling icu_normalizer_data v2.3.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_properties_data v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling openbim-viewport v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\viewport)
+   Compiling web-time v1.1.0
+   Compiling rustc-hash v2.1.3
+   Compiling type-map v0.5.1
+   Compiling windows_x86_64_msvc v0.53.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling egui-wgpu v0.36.2
+   Compiling miniz_oxide v0.8.9
+   Compiling fdeflate v0.3.7
+   Compiling pxfm v0.1.30
+   Compiling moxcms v0.8.1
+   Compiling png v0.18.1
+   Compiling idna_adapter v1.2.2
+   Compiling byteorder-lite v0.1.0
+   Compiling percent-encoding v2.3.2
+   Compiling pollster v1.0.1
+   Compiling form_urlencoded v1.2.2
+   Compiling image v0.25.10
+   Compiling windows-targets v0.53.5
+   Compiling idna v1.1.0
+   Compiling accesskit_consumer v0.35.0
+   Compiling openbim-oplog v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\oplog)
+   Compiling error-code v3.4.0
+   Compiling clipboard-win v5.4.1
+   Compiling accesskit_windows v0.32.1
+   Compiling url v2.5.8
+   Compiling windows-sys v0.60.2
+   Compiling openbim-viewport-egui v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\viewport-egui)
+   Compiling arboard v3.6.1
+   Compiling webbrowser v1.2.4
+   Compiling accesskit_winit v0.32.2
+   Compiling enum-map-derive v0.17.0
+   Compiling obg-ds v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\obg-ds)
+   Compiling openbim-commands v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\commands)
+   Compiling rfd v0.17.2
+   Compiling openbim-keymap v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\keymap)
+   Compiling enum-map v2.7.3
+   Compiling egui-winit v0.36.2
+   Compiling eframe v0.36.2
+   Compiling egui_extras v0.36.2
+   Compiling openbim-desktop v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\apps\desktop)
+    Finished `release` profile [optimized] target(s) in 41m 47s
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\obg_ds-6d632caff7799e35.exe)
+  Executable tests\dynamo_manifest.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\dynamo_manifest-2b81f26e6fe88b5a.exe)
+  Executable tests\replication_fixtures.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\replication_fixtures-ef7aec177db41800.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_arch-a047815d3c089680.exe)
+  Executable tests\arch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\arch-fd519e4bc01ef242.exe)
+  Executable tests\layers.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\layers-eb4e64307b5cd719.exe)
+  Executable tests\windows_spaces.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\windows_spaces-3f3836a4e1b62029.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_automation-3ab55fc6d962e2ad.exe)
+  Executable unittests src\bin\openbim-automation.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_automation-2fed29a679635380.exe)
+  Executable unittests src\bin\openbim-mcp-server.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_mcp_server-ce16d89787c2d343.exe)
+  Executable tests\04b_acceptance.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\04b_acceptance-b19a3133cc18011a.exe)
+  Executable tests\mcp.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mcp-5beef6e390e81557.exe)
+  Executable tests\mcp_model.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mcp_model-bf6ffbbaa8dbc861.exe)
+  Executable tests\mcp_stdio.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mcp_stdio-8cf1886305949b9c.exe)
+  Executable tests\protocol.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\protocol-95844e55f143dff4.exe)
+  Executable tests\python.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\python-07a985758ff747fc.exe)
+  Executable tests\workflow.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\workflow-07feed0e2ab821b1.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_calc-2cc510df3708d84d.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_commands-bfc4247633cd8f3c.exe)
+  Executable tests\acceptance.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\acceptance-af52bc8f25984e5a.exe)
+  Executable unittests src\main.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_desktop-bd18206477f7f360.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_document-796e1e33bce10aba.exe)
+  Executable tests\app_records.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\app_records-fa7d2624c1d1d727.exe)
+  Executable tests\curved_grids.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\curved_grids-ec8deba2b5566991.exe)
+  Executable tests\generic.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\generic-84a641e738832137.exe)
+  Executable tests\levels.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\levels-49d4bb749226b7a8.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_family-09a6e82e4a1ea6c0.exe)
+  Executable tests\arch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\arch-571502bd1dfd108a.exe)
+  Executable tests\catalogue.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\catalogue-9bc0c9018cf3a236.exe)
+  Executable tests\display.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\display-867239c51bb647f7.exe)
+  Executable tests\forms.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\forms-04ca1310c68bd152.exe)
+  Executable tests\lighting.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\lighting-4a4f14c20ae1204a.exe)
+  Executable tests\mep.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mep-805674924e15c3cf.exe)
+  Executable tests\meshing.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\meshing-fdb3a5e2d3b71582.exe)
+  Executable tests\names_ops.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\names_ops-fa9263b28644315f.exe)
+  Executable tests\plan_arc.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\plan_arc-52fe81897f5590b7.exe)
+  Executable tests\rotate.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\rotate-477f0f8fbb98efb1.exe)
+  Executable tests\s2.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\s2-046a66632d118376.exe)
+  Executable tests\shared.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\shared-7fbe5f16deb2b97b.exe)
+  Executable tests\sketch_forms.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\sketch_forms-5f5605aa29f0ddc9.exe)
+  Executable tests\thermal.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\thermal-1a4eb6066c91a1df.exe)
+  Executable tests\trig.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\trig-cd19cb4bb98068be.exe)
+  Executable tests\typed.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\typed-efeab28717fbe3aa.exe)
+  Executable tests\units.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\units-c67c58ad93ba93de.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_geom-8e3a0ea50b235027.exe)
+  Executable tests\s1.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\s1-d506634edeb4320c.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_ifc-ca17ae9512fabacd.exe)
+  Executable tests\boundaries.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\boundaries-965f513b4b0ad45c.exe)
+  Executable tests\georef.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\georef-cf04d8ba842048db.exe)
+  Executable tests\grids.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\grids-a549bcecb78583c8.exe)
+  Executable tests\ifc.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\ifc-3c014f53019d9fda.exe)
+  Executable tests\lighting.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\lighting-6e0a1ba64b07ae47.exe)
+  Executable tests\quantities.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\quantities-b68cb09432b2c0c8.exe)
+  Executable tests\reader.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\reader-f4b8887a9e09ebef.exe)
+  Executable tests\stable_ids.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\stable_ids-69730c4c1a132a62.exe)
+  Executable tests\walls.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\walls-d8c858f1791c6ea2.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_keymap-d04e8c7e70170f06.exe)
+  Executable tests\keymap.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\keymap-468a9255667149bb.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_oplog-159d2159d5823220.exe)
+  Executable tests\assets.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\assets-74063d4f6d588013.exe)
+  Executable tests\oplog.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\oplog-61c785884f8b4d67.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_photo-898cbdd925b1fa17.exe)
+  Executable tests\photo.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\photo-52fa149d7557a909.exe)
+  Executable tests\photo_more.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\photo_more-9c4b3265d347f73e.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_place-dc0b94a5d7adac10.exe)
+  Executable tests\arch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\arch-deab5779e02240cc.exe)
+  Executable tests\floors.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\floors-b39bf1c8c329cbe7.exe)
+  Executable tests\incremental.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\incremental-869b8331de4b20d0.exe)
+  Executable tests\penetrations.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\penetrations-cf5ad74dd4fd5e20.exe)
+  Executable tests\place.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\place-3b474cc7b605328e.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_route-0df8b83de2519186.exe)
+  Executable tests\auto.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\auto-40767aaec5c47acb.exe)
+  Executable tests\catalogue.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\catalogue-cacb60b181063405.exe)
+  Executable tests\grade.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\grade-d21881841a15d32b.exe)
+  Executable tests\graph.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\graph-c047e34a4f556395.exe)
+  Executable tests\reroute.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\reroute-7ab33ef338d4e3b5.exe)
+  Executable tests\route.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\route-84009bbb9d12089a.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_schematic-5e87952f27366509.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_sheets-20cef3773e14fe79.exe)
+  Executable tests\export.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\export-590db669e0353e6e.exe)
+  Executable tests\import.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\import-508e0d693045c445.exe)
+  Executable tests\model.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\model-0f62f06c76f85e8a.exe)
+  Executable tests\paper_titleblock.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\paper_titleblock-057f81e94241face.exe)
+  Executable tests\print_files.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\print_files-13f33d2c4f0935b6.exe)
+  Executable tests\print_modes.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\print_modes-5804e53bf69acf68.exe)
+  Executable tests\profile.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\profile-a2d65919a235c0d9.exe)
+  Executable tests\render_print.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\render_print-8b7ab6cad4fdee35.exe)
+  Executable tests\visibility.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\visibility-2cbb209a2acd408b.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_sketch-12916c1d6c64f3f0.exe)
+  Executable tests\sketch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\sketch-acdcde8ffe29c83c.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_view-12f4c67270576923.exe)
+  Executable tests\elevation.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\elevation-0802314a4d4565f4.exe)
+  Executable tests\mesh.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mesh-3f22751879aec244.exe)
+  Executable tests\plan.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\plan-7b8a99c9c9646614.exe)
+  Executable tests\section.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\section-bdf2df390cd67746.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_viewport-92cb65885ee0a8f2.exe)
+  Executable tests\viewport.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\viewport-2b774112abaca6b7.exe)
+  Executable unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_viewport_egui-0e922929576e7a61.exe)
+  Executable tests\gpu.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\gpu-b758145e77028ff0.exe)
+  Executable tests\widget.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\widget-604bbfd25d46b767.exe)
+--- [1b/3] cargo test --workspace --release --jobs=1 --no-fail-fast (run, spawn-only) ---
+    Finished `release` profile [optimized] target(s) in 0.61s
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\obg_ds-6d632caff7799e35.exe)
+
+running 9 tests
+test operations::tests::binary_ops_on_scalars_and_broadcast ... ok
+test operations::tests::sum_of_list ... ok
+test replication::tests::combinations_fall_back_to_provided_when_fully_controlled ... ok
+test replication::tests::combinations_generate_residual_trials_for_auto ... ok
+test replication::tests::reduced_params_flat_and_ordered ... ok
+test replication::tests::reduction_to_instructions_zip_first ... ok
+test replication::tests::reductions_enumerate_all_depths ... ok
+test value::value_tests::depth_and_lists ... ok
+test replication::tests::zip_empty_forces_zero_length ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\dynamo_manifest.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\dynamo_manifest-2b81f26e6fe88b5a.exe)
+
+running 1 test
+test dynamo_manifest_conformance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\replication_fixtures.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\replication_fixtures-ef7aec177db41800.exe)
+
+running 2 tests
+test gated_cases_refuse_with_unresolved ... ok
+test non_gated_cases_byte_equal ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_arch-a047815d3c089680.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\arch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\arch-fd519e4bc01ef242.exe)
+
+running 13 tests
+test a_rectangular_room_has_the_hand_calculated_figures ... ok
+test a_rectangular_room_shrinks_by_the_wall_thickness_whatever_the_position_and_turn ... ok
+test a_thin_inner_chain_may_not_cut_across_a_corner_of_the_room ... ok
+test an_l_shaped_room_and_a_core_inside ... ok
+test bad_rooms_are_refused ... ok
+test cores_meeting_corner_to_corner_are_refused ... ok
+test cores_touching_the_wall_or_each_other_from_inside_are_refused ... ok
+test grid_thresholds ... ok
+test grids_cross_where_the_hand_calculation_says ... ok
+test limits_and_edges ... ok
+test drawing_direction_does_not_matter ... ok
+test levels_are_sorted_and_checked ... ok
+test perimeter_counts_the_inner_walls_too ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\layers.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\layers-eb4e64307b5cd719.exe)
+
+running 11 tests
+test an_arched_opening_counts_with_its_polygon_area ... ok
+test drawing_direction_and_side_choices ... ok
+test counts_limits_and_orientation_of_polygon_openings ... ok
+test bad_assemblies_and_libraries_are_refused ... ok
+test openings_that_do_not_fit_and_sloped_tops_are_refused ... ok
+test sectors_cover_the_compass ... ok
+test the_wall_chain_takes_the_assembly_thickness ... ok
+test u_value_and_thickness_match_the_hand_calculation ... ok
+test the_office_envelope_has_the_hand_calculated_areas_and_directions ... ok
+test the_four_sides_of_a_rectangle_face_four_directions_for_any_north ... ok
+test splitting_a_layer_in_two_does_not_change_u ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\windows_spaces.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\windows_spaces-3f3836a4e1b62029.exe)
+
+running 15 tests
+test a_resistance_layer_cannot_be_solved_for ... ok
+test a_riser_shaft_cuts_the_floors_between_and_has_a_height ... ok
+test a_bad_list_file_names_the_line ... ok
+test bad_glazing_frames_and_windows_are_refused ... ok
+test glazing_edges ... ok
+test bad_shafts_are_refused ... ok
+test glazing_u_and_window_u_match_the_hand_calculation ... ok
+test material_limits_and_target_edges ... ok
+test no_bars_and_a_bigger_window_lose_less_through_the_frame ... ok
+test the_ceiling_void_has_the_hand_calculated_depth ... ok
+test the_editor_breakdown_follows_each_change ... ok
+test the_material_list_round_trips_through_text ... ok
+test ceiling_and_shaft_edges ... ok
+test void_depth_plus_stack_equals_the_level_height ... ok
+test window_u_lies_between_glass_and_frame_values_when_psi_is_zero ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_automation-3ab55fc6d962e2ad.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\openbim-automation.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_automation-2fed29a679635380.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\openbim-mcp-server.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_mcp_server-ce16d89787c2d343.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\04b_acceptance.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\04b_acceptance-b19a3133cc18011a.exe)
+
+running 16 tests
+test apply_again_is_refused ... ok
+test apply_valid_group_commits_and_advances ... ok
+test cancel_twice_is_refused ... ok
+test commit_failure_leaves_proposal_open ... ok
+test locked_member_refuses_whole_group ... ok
+test op_group_keeps_independent_creations_separate ... ok
+test op_group_merges_overlapping_dependencies_transitively ... ok
+test unknown_handle_is_refused ... ok
+test wrong_proposal_handle_is_refused ... ok
+test wrong_run_handle_is_refused ... ok
+test cancel_makes_the_proposal_uncommittable ... ok
+test op_group_ignores_dependencies_on_absent_ids ... ok
+test partial_application_then_completion ... ok
+test stale_prerequisite_refuses_whole_group ... ok
+test wrong_type_handle_is_refused ... ok
+test independent_500_case_applies_499_and_refuses_the_locked_one ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\mcp.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mcp-5beef6e390e81557.exe)
+
+running 5 tests
+test client_config_requires_absolute_paths ... ok
+test lifecycle_and_protocol_errors ... ok
+test native_preview_does_not_write_model ... ok
+test stdio_framing_parse_errors_and_size_limit ... ok
+test tool_schemas_and_queries ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\mcp_model.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mcp_model-bf6ffbbaa8dbc861.exe)
+
+running 4 tests
+test identities_limits_and_invalid_properties_are_rejected ... ok
+test read_only_graph_workflow_preserves_source ... ok
+test pagination_is_stable_and_filters_compose ... ok
+test slope_graph_uses_ratio_type_and_python_is_unavailable ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\mcp_stdio.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mcp_stdio-8cf1886305949b9c.exe)
+
+running 1 test
+test external_binary_initializes_and_returns_snapshot_context ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests\protocol.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\protocol-95844e55f143dff4.exe)
+
+running 6 tests
+test bad_snapshot_and_protocol_are_rejected ... ok
+test request_json_roundtrip ... ok
+test report_exports_all_named_port_values ... ok
+test snapshot_report_preserves_source_identity_and_revision ... ok
+test spatial_snapshot_preserves_meshes_levels_and_host_constraints ... ok
+test snapshots_carry_sections_usages_materials_and_columns_through_json ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\python.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\python-07a985758ff747fc.exe)
+
+running 3 tests
+test python_process_expression_and_failure ... ignored, Set OPENBIM_TEST_PYTHON to Python 3, then run with --ignored
+test python_requires_host_enable_and_cannot_claim_element_types ... ok
+test invalid_inputs_fail_before_process_spawn ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\workflow.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\workflow-07feed0e2ab821b1.exe)
+
+running 14 tests
+test cycles_and_unsupported_properties_fail ... ok
+test duplicate_writers_and_invalid_layout_are_rejected ... ok
+test graph_roundtrip_and_version_checks ... ok
+test groups_are_visual_only_and_slider_drives_a_real_input ... ok
+test independent_width_and_height_writes_compose ... ok
+test invalid_dimensions_fail_in_preview ... ok
+test invalid_slider_settings_and_duplicate_group_members_are_rejected ... ok
+test legacy_wires_default_to_first_output ... ok
+test named_outputs_deliver_distinct_values_and_apply_atomically ... ok
+test preview_apply_undo_and_idempotent_rerun ... ok
+test stale_preview_is_rejected_without_partial_changes ... ok
+test malformed_connections_and_units_are_rejected ... ok
+test visual_wire_routes_roundtrip_without_changing_execution ... ok
+test scheduler_handles_reverse_order_dependencies ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_calc-2cc510df3708d84d.exe)
+
+running 44 tests
+test electrical::tests::the_far_end_is_the_critical_path_and_every_end_reports_its_margin ... ok
+test electrical::tests::the_source_reports_its_loading_and_a_transformer_gives_its_fault_level ... ok
+test electrical::tests::a_single_phase_branch_uses_twice_the_length_and_the_phase_voltage ... ok
+test electrical::tests::parallel_cables_carry_what_no_single_cable_does_and_halve_the_impedance ... ok
+test electrical::tests::motor_starting_drops_are_computed_and_limit_the_cable ... ok
+test electrical::tests::a_device_that_cannot_break_the_fault_is_reported ... ok
+test electrical::tests::a_long_run_grows_until_the_total_drop_is_met_and_no_smaller_cable_would_do ... ok
+test electrical::tests::a_three_phase_load_gets_its_current_device_cable_and_drop_by_hand_calculation ... ok
+test electrical::tests::loads_with_different_power_factors_add_as_complex_power ... ok
+test electrical::tests::correction_factors_are_looked_up_in_the_tables_and_multiply ... ok
+test electrical::tests::the_protective_conductor_follows_the_rule_and_never_less_than_the_adiabatic_minimum ... ok
+test electrical::tests::a_long_branch_whose_smallest_fault_would_not_trip_the_device_gets_a_bigger_cable ... ok
+test electrical::tests::tables_ratings_and_trees_that_cannot_be_used_are_refused_and_named ... ok
+test electrical::tests::tt_needs_a_residual_current_device_and_it_uses_the_second_fault_loop ... ok
+test electrical::tests::many_systems_at_once_give_what_one_at_a_time_gives ... ok
+test electrical::tests::short_circuit_withstand_the_smallest_fault_and_the_protective_conductor_by_hand_calculation ... ok
+test fluid::tests::a_hundred_kilowatts_across_five_kelvin_of_water_is_about_four_point_eight_litres_a_second ... ok
+test fluid::tests::values_that_make_no_sense_give_nothing ... ok
+test fluid::tests::a_kilowatt_across_ten_kelvin_of_air_is_about_eighty_three_litres_a_second ... ok
+test friction::tests::a_pipe_loses_what_darcy_weisbach_says ... ok
+test friction::tests::a_square_duct_and_a_flat_duct_have_the_equivalent_diameters_of_huebscher ... ok
+test friction::tests::colebrook_solves_its_own_equation_and_swamee_jain_agrees_within_its_published_accuracy ... ok
+test friction::tests::hazen_williams_matches_a_hand_calculation ... ok
+test friction::tests::laminar_flow_is_sixty_four_over_reynolds ... ok
+test friction::tests::the_friction_factor_of_a_smooth_turbulent_pipe_matches_the_moody_chart ... ok
+test plumbing::tests::a_table_is_read_and_a_power_law_is_followed_between_rows ... ok
+test plumbing::tests::above_the_table_or_nonsense_gives_nothing ... ok
+test plumbing::tests::bad_tables_are_refused_with_the_line ... ok
+test sprinkler::tests::k_factor_and_density_units ... ok
+test sprinkler::tests::a_minimum_flow_above_what_k_gives_at_the_minimum_pressure_raises_the_pressure_needed ... ok
+test tree::tests::a_continuous_flow_is_added_after_the_curve_and_a_missing_curve_is_named ... ok
+test sprinkler::tests::the_sprinklers_flow_by_the_pressure_they_get_and_the_source_gives_the_worst_one_its_minimum ... ok
+test sprinkler::tests::the_extra_flow_at_the_near_sprinklers_loads_the_pipes_so_the_sizes_come_from_the_converged_flows ... ok
+test tree::tests::a_friction_limit_can_size_a_rectangular_duct ... ok
+test tree::tests::a_locked_size_is_kept_and_reported_when_it_breaks_a_limit ... ok
+test tree::tests::each_branch_gets_the_smallest_size_that_keeps_the_velocity_and_the_losses_are_darcy_weisbach ... ok
+test tree::tests::flows_add_up_from_the_end_points_to_the_source ... ok
+test tree::tests::height_counts_as_pressure_only_when_asked ... ok
+test tree::tests::loading_units_are_summed_and_then_turned_into_a_flow_so_simultaneity_is_respected ... ok
+test tree::tests::more_units_than_the_table_covers_are_refused_and_the_node_is_named ... ok
+test tree::tests::the_most_resistant_path_sets_the_duty_and_the_other_end_has_the_difference_to_spare ... ok
+test tree::tests::things_that_cannot_be_computed_are_refused_and_named ... ok
+test sprinkler::tests::bad_input_is_named_and_systems_run_together ... ok
+test tree::tests::many_networks_at_once_give_what_one_at_a_time_gives ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_commands-bfc4247633cd8f3c.exe)
+
+running 14 tests
+test command::tests::a_command_declares_whether_it_writes_the_model ... ok
+test command::tests::the_registry_has_unique_ids_and_known_parameters ... ok
+test quantity::tests::the_wire_form_is_value_and_unit ... ok
+test command::tests::commands_are_found_by_id_and_listed_by_tab ... ok
+test parameter::tests::a_label_shared_by_two_parameters_is_refused_with_its_candidates ... ok
+test parameter::tests::an_ifc_group_resolves_through_the_project_map ... ok
+test parameter::tests::ids_are_stable_and_unique_and_dimensions_are_set ... ok
+test parameter::tests::the_set_of_shared_labels_is_known_so_a_new_duplicate_is_a_decision ... ok
+test quantity::tests::a_dimension_mismatch_is_an_error ... ok
+test quantity::tests::text_is_read_and_written_in_the_canonical_unit ... ok
+test parameter::tests::a_label_resolves_to_the_stable_id_with_a_warning ... ok
+test unit::tests::every_dimension_names_a_unit_and_the_symbol_round_trips ... ok
+test quantity::tests::units_convert_to_si_and_back ... ok
+test unit::tests::temperature_units_convert_through_kelvin ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\acceptance.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\acceptance-af52bc8f25984e5a.exe)
+
+running 4 tests
+test a_dimension_mismatch_is_an_error ... ok
+test a_label_looks_up_the_stable_id ... ok
+test the_ribbon_commands_are_registered ... ok
+test a_quantity_travels_as_a_value_and_a_unit ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_desktop-bd18206477f7f360.exe)
+
+running 272 tests
+test about::tests::licence_text_is_the_apache_2_0_text ... ok
+test about::tests::third_party_notices_carry_the_autodesk_credits ... ok
+test app_settings::tests::settings_round_trip_default_when_unreadable_and_are_bounded ... ok
+test automation_canvas::tests::dragging_and_releasing_a_wire_preserves_its_connection ... ok
+test automation_canvas::tests::escape_restores_selection_and_empty_click_clears_it ... ok
+test automation_canvas::tests::dragging_an_output_and_releasing_on_input_creates_a_real_wire ... ok
+test automation_canvas::tests::marquee_selects_two_blocks_and_header_drag_moves_both ... ok
+test automation_canvas::tests::ctrl_click_toggles_selection_and_double_click_opens_python_editor ... ok
+test automation_canvas::tests::releasing_on_an_incompatible_input_preserves_the_existing_link ... ok
+test automation_canvas::tests::second_output_socket_connects_and_preserves_other_outputs ... ok
+test automation_canvas::tests::socket_edge_drag_in_one_motion_keeps_output_fanout ... ok
+test automation_groups::tests::dragging_group_moves_members_together_and_keeps_wires ... ok
+test automation_slider::tests::caret_expands_range_without_changing_the_input ... ok
+test automation_slider::tests::pointer_changes_slider_value ... ok
+test class_map::tests::a_bad_row_refuses_the_map_and_names_its_line ... ok
+test about::tests::notices_mention_the_closed_source_exclusion ... ok
+test class_map::tests::a_map_is_read_from_tabs_or_spaces_with_comments_and_the_predefined_type_wins_over_any ... ok
+test class_map::tests::a_map_written_out_reads_back_the_same_and_the_example_reads ... ok
+test compute_ui::tests::the_air_preset_brings_air_limits_and_the_water_preset_takes_them_back ... ok
+test compute_ui::tests::a_loaded_families_airflow_drives_the_sized_duct ... ok
+test data_hall::tests::the_data_hall_is_generated_with_its_equipment_where_the_test_put_it ... ok
+test compute_ui::tests::end_points_are_placed_on_open_ends_and_compute_sizes_the_drawn_duct ... ok
+test elec_ui::tests::a_node_and_a_cable_are_changed_after_placing_and_undone ... ok
+test elec_ui::tests::a_run_drawn_from_a_connector_leaves_it_straight_with_a_reducer_and_elbows_and_is_joined ... ok
+test elec_ui::tests::the_exchange_carries_only_the_basis_the_user_gave ... ok
+test export::tests::a_run_carries_its_system_and_cuts_its_wall_and_the_rooms_and_systems_reach_the_file ... ok
+test export::tests::a_sloping_pipe_and_a_duct_are_exported_with_their_height_size_and_element_set ... ok
+test export::tests::the_site_leaves_with_its_map_once_the_map_has_a_name ... ok
+test export::tests::the_clock_is_written_as_iso ... ok
+test export::tests::a_room_leaves_as_a_space_with_its_number_name_and_department ... ok
+test family_types_ui::tests::a_csv_fills_the_table_in_one_go_and_a_bad_file_changes_nothing ... ok
+test family_types_ui::tests::a_table_of_pipe_sizes_gives_the_elbow_a_type_and_a_model_for_each_size ... ok
+test export::tests::types_and_the_element_set_are_in_the_file_and_the_file_is_repeatable ... ok
+test family_types_ui::tests::the_table_gives_the_45_degree_elbow_with_its_outlet_aimed_along_the_bend ... ok
+test georef_ui::tests::syncing_the_apps_own_lines_keeps_the_kinds_it_does_not_own ... ok
+test elec_ui::tests::nodes_and_cables_are_drawn_by_clicks_computed_in_the_window_and_undone ... ok
+test family_types_ui::tests::a_row_the_family_does_not_accept_refuses_the_table_and_a_used_type_is_kept ... ok
+test georef_ui::tests::the_map_survives_the_file_and_needs_a_name_and_a_site ... ok
+test export::tests::the_document_exports_its_walls_and_beams_and_names_what_it_leaves_out ... ok
+test elec_ui::tests::a_load_takes_its_place_and_power_from_the_equipment_and_follows_it_and_a_duct_end_takes_the_airflow ... ok
+test family_types_ui::tests::a_csv_gives_the_tee_and_the_reducer_a_type_for_each_pair_of_sizes_and_the_elbow_its_turn ... ok
+test file::tests::the_compute_inputs_come_back_from_the_file_and_a_new_model_starts_clean ... ok
+test import::tests::a_class_map_row_that_says_ignore_leaves_the_class_out_and_the_log_says_the_map_did ... ok
+test file::tests::a_saved_model_opens_equal_with_no_undo_and_a_bad_file_changes_nothing ... ok
+test import::tests::a_class_map_row_reads_a_class_as_a_library_family_and_a_family_that_is_not_there_keeps_the_generic_model ... ok
+test import::tests::a_curved_grid_line_comes_back_curved_and_is_not_doubled ... ok
+test import::tests::a_class_map_row_can_make_a_class_an_element_of_the_app_or_a_generic_model ... ok
+test file::tests::opening_or_starting_over_with_unsaved_changes_asks_first ... ok
+test data_hall::tests::the_supply_chain_runs_from_the_air_handler_to_the_diffusers_and_into_the_ifc_file ... ok
+test import::tests::a_stair_whose_riser_count_disagrees_with_its_body_is_left_out_and_said ... ok
+test import::tests::a_product_of_a_class_the_app_has_no_element_for_is_kept_as_a_generic_model ... ok
+test import::tests::a_door_and_a_window_of_a_file_from_another_program_stand_in_the_wall_they_were_in ... ok
+test import::tests::a_family_is_found_by_its_code_when_its_name_in_the_file_is_out_of_date ... ok
+test import::tests::a_product_that_is_not_an_upright_prism_stays_out_and_is_counted ... ok
+test import::tests::a_stair_a_class_map_sends_to_generic_that_has_no_prism_body_is_counted_not_lost ... ok
+test georef_ui::tests::the_map_of_an_ifc_file_is_read_into_the_window_when_the_model_has_none ... ok
+test import::tests::a_straight_stair_of_a_file_from_another_program_comes_back_in_any_direction ... ok
+test import::tests::a_layered_wall_type_comes_back_with_its_layers_with_or_without_the_apps_own_data ... ok
+test import::tests::a_branched_network_with_a_tee_and_a_tap_keeps_its_joins_end_points_and_systems_through_the_file ... ok
+test file::tests::unsaved_work_is_kept_in_a_recovery_copy_and_comes_back_after_a_crash ... ok
+test import::tests::equipment_that_the_model_has_already_is_not_made_twice ... ok
+test import::tests::the_file_without_the_apps_own_data_still_gives_the_geometry_and_types ... ok
+test insulation_ui::tests::the_button_needs_a_selection_of_its_kind_and_the_window_adds_edits_and_removes_in_one_step_each ... ok
+test insulation_ui::tests::the_plan_outlines_the_insulation_and_the_3d_view_has_it_as_its_own_mesh_beside_the_duct ... ok
+test file::tests::later_autosaves_append_only_what_changed_and_a_torn_last_write_loses_only_that_write ... ok
+test import::tests::the_grid_lines_of_a_file_from_another_program_come_back_by_name_and_are_not_doubled ... ok
+test file::tests::the_automatic_save_follows_the_options_off_journal_or_the_file_itself ... ok
+test journal::tests::a_journal_reads_back_after_a_torn_write_and_stops_at_a_damaged_one ... ok
+test journal::tests::an_edited_element_is_one_set_and_an_unchanged_model_is_no_transaction ... ok
+test journal::tests::records_go_into_the_log_state_and_come_back_in_order ... ok
+test mep_settings_ui::tests::a_new_type_name_joins_its_list_once_and_an_empty_or_long_one_does_not ... ok
+test mep_settings_ui::tests::a_new_value_joins_its_list_sorted_once_and_a_bad_one_is_dropped ... ok
+test mep_settings_ui::tests::the_dialog_changes_the_lists_in_one_undoable_step_and_the_tools_offer_them ... ok
+test import::tests::a_space_in_a_file_comes_back_as_a_room_with_its_number_name_and_department ... ok
+test import::tests::the_equipment_of_a_file_comes_back_as_its_family_where_and_as_it_stood ... ok
+test mep_tool::tests::a_pipe_slopes_down_or_up_the_way_it_is_drawn_by_the_value_in_the_bar ... ok
+test mep_tool::tests::a_first_click_on_a_run_branches_from_it_and_inherits_its_size_and_height_when_asked ... ok
+test mep_tool::tests::a_justified_run_keeps_its_corners_and_its_elbow ... ok
+test import::tests::the_settings_of_a_file_come_with_it_for_the_kinds_the_model_has_none_of ... ok
+test insulation_ui::tests::insulation_goes_out_in_the_ifc_file_and_comes_back_and_the_window_draws ... ok
+test mep_tool::tests::a_run_from_a_connector_inherits_its_size_and_height_or_goes_to_the_bar_elevation ... ok
+test mep_tool::tests::an_end_joined_to_an_elbow_is_not_moved_from_properties_and_says_why ... ok
+test mep_tool::tests::vertical_justification_says_which_edge_the_elevation_is ... ok
+test model_edit::tests::a_beam_is_placed_from_the_options_bar_shown_in_3d_and_undone ... ok
+test mep_tool::tests::horizontal_justification_puts_the_drawn_line_on_one_edge_of_the_duct ... ok
+test mep_tool::tests::tag_on_placement_tags_every_run_and_each_tag_can_be_undone ... ok
+test model_edit::tests::a_change_of_size_between_two_clicks_gets_a_reducer_and_a_bend_with_a_size_change_is_refused_with_the_points_kept ... ok
+test model_edit::tests::a_ceiling_is_hung_in_the_space_under_the_click_or_sketched_and_is_placed_by_its_underside ... ok
+test model_edit::tests::a_footing_clicked_on_a_unit_is_its_pad_and_moves_with_the_unit ... ok
+test model_edit::tests::a_beam_system_is_drawn_as_an_area_edited_by_spacing_and_exported_as_beams ... ok
+test mep_settings_ui::render_tests::the_lists_go_out_in_the_ifc_file_and_come_back ... ok
+test model_edit::tests::a_duct_is_drawn_by_clicks_with_its_elbow_placed_for_it_and_undone_in_one_step ... ok
+test model_edit::tests::a_pipe_is_drawn_round_in_its_system_and_the_system_list_fits_the_tool ... ok
+test model_edit::tests::a_named_system_leaves_the_file_under_its_own_name_with_its_equipment_and_runs ... ok
+test model_edit::tests::a_tool_does_not_inherit_the_height_of_the_tool_before_it ... ok
+test model_edit::tests::a_door_goes_into_the_clicked_wall_cuts_it_in_3d_and_is_exported_with_its_opening ... ok
+test mep_settings_ui::render_tests::the_options_bar_and_the_window_show_the_lists_of_the_model ... ok
+test import::tests::a_space_the_walls_do_not_enclose_and_a_number_already_taken_are_said_not_guessed ... ok
+test model_edit::tests::a_duct_through_a_wall_cuts_an_opening_and_a_straight_run_keeps_its_system ... ok
+test model_edit::tests::a_type_loaded_from_a_catalogue_sets_the_ports_and_the_geometry_its_instances_are_solved_with ... ok
+test model_edit::tests::a_roof_is_drawn_like_a_slab_slopes_from_its_eaves_shows_in_3d_and_is_exported_as_a_roof ... ok
+test import::tests::changes_made_in_another_program_are_taken_and_the_rest_is_kept ... ok
+test model_edit::tests::category_controls_update_the_selected_geometry_and_undo ... ok
+test model_edit::tests::a_truss_is_built_by_two_clicks_edited_by_panel_length_and_exported_as_members ... ok
+test model_edit::tests::beams_are_cut_to_their_columns_in_3d_and_ifc_and_the_join_is_a_property ... ok
+test model_edit::tests::instance_values_of_a_door_are_edited_in_the_properties_and_change_the_door ... ok
+test import::tests::the_electrical_network_comes_back_from_a_file_in_every_schema ... ok
+test model_edit::tests::columns_are_placed_by_a_click_stand_to_the_next_level_are_edited_drawn_and_exported ... ok
+test model_edit::tests::the_brace_command_places_a_sloped_steel_member_that_is_edited_and_exported ... ok
+test model_edit::tests::round_and_i_beams_are_placed_edited_drawn_closed_in_3d_and_undone ... ok
+test model_edit::tests::footings_are_placed_by_a_click_below_the_level_edited_closed_in_3d_and_exported ... ok
+test import::tests::exported_fittings_are_joined_to_their_ducts_and_pipes_by_ports_and_the_network_is_in_the_file ... ok
+test model_edit::tests::a_wall_opening_and_a_shaft_cut_the_3d_model_and_are_exported_as_openings_of_what_they_cut ... ok
+test model_edit::tests::slabs_are_drawn_by_clicks_closed_in_3d_edited_into_foundations_and_exported ... ok
+test model_edit::tests::a_project_keeps_its_key_in_its_file_and_two_projects_differ ... ok
+test model_edit::tests::rebar_goes_into_a_clicked_beam_is_edited_in_place_and_exported_as_bars ... ok
+test model_edit::tests::a_type_is_made_from_a_beam_given_to_another_and_an_edit_in_properties_changes_both ... ok
+test model_edit::tests::a_stair_is_drawn_by_two_clicks_with_risers_from_the_level_height_edited_and_exported ... ok
+test model_edit::tests::an_l_or_u_stair_is_chosen_in_the_options_bar_placed_as_one_group_and_exported_with_its_landing ... ok
+test model_edit::tests::the_load_family_window_takes_a_catalogue_into_the_document_and_refuses_a_bad_one_whole ... ok
+test model_edit::tests::two_clicks_in_a_plan_place_a_beam_on_that_level_and_the_tool_stays_on ... ok
+test model_edit::tests::undoing_a_level_that_was_just_made_leaves_a_plan_on_a_level_that_exists ... ok
+test model_edit::tests::the_swing_of_a_door_is_a_choice_in_the_properties_that_is_checked_and_stored ... ok
+test model_edit::tests::the_global_ids_of_the_same_project_do_not_move_when_a_level_is_added ... ok
+test model_edit::tests::the_type_editor_shows_a_catalogue_that_carries_an_instance_scoped_column ... ok
+test model_edit::tests::wall_footings_are_hosted_follow_their_wall_and_are_exported_as_strip_footings ... ok
+test model_edit::tests::warnings_are_counted_listed_and_select_the_element_they_are_about ... ok
+test model_edit::tests::an_hvac_system_is_built_from_scratch_with_the_mouse_saved_and_exported ... ok
+test model_view::tests::a_level_is_renamed_and_deleted_from_the_options_bar_of_the_level_tool ... ok
+test model_edit::tests::the_types_window_opens_from_the_ribbon_and_draws_with_a_type_picked_and_drops_one_that_was_deleted ... ok
+test import::tests::a_generic_model_leaves_as_a_proxy_that_says_what_it_was_and_comes_back ... ok
+test model_view::tests::a_level_view_is_named_after_its_level_and_follows_a_rename ... ok
+test model_view::tests::a_plan_shows_a_bubble_for_every_level_highest_first_and_marks_its_own ... ok
+test model_view::tests::a_project_with_no_level_refuses_a_drawing_tool ... ok
+test model_view::tests::a_beam_and_a_duct_are_drawn_by_dragging_too ... ok
+test model_view::tests::a_new_project_starts_with_an_empty_canvas_but_the_drawing_tools_still_work ... ok
+test model_view::tests::a_new_model_has_its_own_levels_and_takes_a_drawn_wall_and_grid ... ok
+test model_view::tests::delete_takes_the_element_with_its_door_and_tag_and_undo_brings_them_back ... ok
+test model_view::tests::a_tag_is_placed_on_the_clicked_element_drawn_in_its_plan_and_undone ... ok
+test model_view::tests::a_pipe_drawn_with_clicks_and_a_slope_falls_and_its_free_end_is_edited_in_properties ... ok
+test model_view::tests::dimension_and_measure_tools_take_points_and_the_dimension_is_kept ... ok
+test model_view::tests::a_selected_wall_shows_temporary_dimensions_and_typing_a_number_changes_the_wall ... ok
+test import::tests::an_import_is_one_undo_and_does_not_double_what_is_already_there ... ok
+test model_view::tests::a_wall_is_drawn_by_two_clicks_as_a_chain_and_by_press_drag_release ... ok
+test model_edit::tests::the_export_window_offers_ifc_4_3_first_and_writes_the_schema_picked ... ok
+test model_view::tests::escape_steps_back_inside_the_wall_tool_before_leaving_it ... ok
+test model_view::tests::grids_are_drawn_named_in_sequence_and_levels_get_their_own_plan ... ok
+test model_view::tests::escape_steps_back_inside_the_framing_and_run_tools_too ... ok
+test model_view::tests::move_copy_rotate_and_mirror_work_on_the_selected_element_by_picked_points ... ok
+test model_view::tests::plan_bounds_falls_back_to_a_default_view_on_an_empty_model ... ok
+test import::tests::a_file_the_app_wrote_comes_back_with_nothing_lost_in_every_schema ... ok
+test model_view::tests::dragging_in_an_elevation_slides_an_opening_along_its_wall_and_up_and_esc_cancels ... ok
+test model_view::tests::plan_tabs_name_the_first_two_levels_and_give_every_other_level_its_own_tab ... ok
+test model_view::tests::offset_align_and_trim_work_by_clicking_the_elements ... ok
+test model_view::tests::polygon_picking_rejects_empty_plan_space ... ok
+test model_view::tests::paste_follows_the_pointer_with_a_ghost_and_a_click_puts_it_down_again_and_again ... ok
+test model_view::tests::a_level_rename_keeps_its_draft_across_frames_and_commits_on_enter ... ok
+test model_view::tests::mirror_rotate_and_align_in_a_view ... ok
+test model_view::tests::move_in_a_view_takes_a_base_point_and_a_typed_distance_and_copy_keeps_the_original ... ok
+test model_view::tests::plans_show_section_heads_and_elevation_markers_that_open_their_views_and_a_section_flips ... ok
+test model_edit::tests::the_import_window_uses_a_class_map_and_refuses_one_that_does_not_read ... ok
+test model_view::tests::section_tool_draws_a_line_in_a_plan_and_its_view_and_the_four_elevations_show_the_building ... ok
+test model_view::tests::the_browser_and_the_sheet_plans_take_their_levels_from_the_document ... ok
+test model_view::tests::the_framing_and_footing_tools_start_from_their_own_numbers ... ok
+test model_edit::tests::the_import_window_reads_a_file_the_app_wrote_back_into_an_empty_model ... ok
+test model_view::tests::stair_tool_draws_by_press_drag_release_and_shows_its_plan_symbol ... ok
+test model_view::tests::the_options_bar_does_not_leak_from_one_tool_to_the_next ... ok
+test model_view::tests::the_beam_tool_draws_a_rubber_band_and_a_click_in_the_plan_places_the_beam ... ok
+test model_view::tests::the_plan_snaps_to_walls_like_revit_not_only_to_their_corners ... ok
+test model_view::tests::the_keymap_shortcuts_choose_a_tool_and_ctrl_n_starts_a_new_model ... ok
+test model_view::tests::the_railing_tool_sketches_a_path_by_clicks_and_enter_edits_in_properties_and_is_drawn_in_every_view ... ok
+test model_view::tests::the_elevation_tool_puts_a_marker_with_views_that_switch_on_and_off_open_and_move ... ok
+test model_view::tests::wall_joins_tool_disallows_and_allows_the_join_at_a_wall_end ... ok
+test model_view::tests::tags_and_dimensions_are_placed_in_an_elevation_belong_to_it_follow_their_element_and_delete_with_undo ... ok
+test model_view::tests::vertical_opening_picks_its_host_with_tab_cuts_only_that_one_and_its_symbol_is_picked_in_the_plan ... ok
+test model_view::tests::walls_follow_the_location_line_chain_at_corners_and_close_the_loop ... ok
+test model_view::tests::wall_opening_is_sketched_on_a_wall_in_an_elevation_and_openings_and_walls_are_picked_there ... ok
+test modify_tools::more_tests::ctrl_x_then_ctrl_v_moves_a_wall_with_its_door_and_the_pasted_ones_are_selected ... ok
+test modify_tools::tests::pin_blocks_the_modify_tools_and_unpin_frees_them ... ok
+test modify_tools::more_tests::paste_in_a_section_view_or_with_an_empty_clipboard_says_why ... ok
+test modify_tools::more_tests::select_all_instances_match_type_and_create_similar ... ok
+test office::tests::the_office_builds_and_its_rooms_are_closed_spaces ... ok
+test model_view::tests::walls_have_types_a_rectangle_pick_lines_and_the_spacebar_flip ... ok
+test panels::tests::a_door_command_offers_only_door_families ... ok
+test panels::tests::browser_search_keeps_ancestors_of_matching_views ... ok
+test panels::tests::selection_edit_targets_duct_and_is_undoable ... ok
+test pdf::tests::a_pdf_has_its_objects_where_the_table_says_and_a_page_for_each ... ok
+test pdf::tests::an_empty_document_still_has_a_page ... ok
+test pdf::tests::bad_numbers_draw_nothing_and_do_not_break_the_file ... ok
+test pdf::tests::numbers_are_short_and_never_negative_zero ... ok
+test model_view::tests::the_ribbon_starts_a_tool_and_a_button_that_is_not_wired_changes_nothing ... ok
+test pdf::tests::text_is_escaped_and_encoded ... ok
+test pdf::tests::text_is_measured_with_the_widths_of_helvetica ... ok
+test plan_export::tests::desktop_export_fixtures ... ignored, writes independent PDF/DXF fixtures to OPENBIM_PRINT_TEST_OUTPUT
+test plan_export::tests::active_level_filters_models_and_keeps_shared_grid_axes ... ok
+test plan_export::tests::edits_and_undo_change_real_exports_without_mutating_document ... ok
+test plan_export::tests::orientation_scale_mode_and_warnings_reach_both_encoders ... ok
+test model_view::tests::room_tool_places_a_room_in_a_closed_space_shows_its_area_and_follows_the_walls ... ok
+test ribbon::registry_tests::a_command_that_is_not_registered_keeps_its_literal_label ... ok
+test ribbon::registry_tests::a_registered_command_is_on_the_ribbon_tab_and_group_the_registry_names ... ok
+test ribbon::registry_tests::a_registered_command_shows_the_registry_label_and_matches_its_literal ... ok
+test office::tests::the_office_is_saved_reopened_exported_read_back_and_handed_to_the_electrical_design_unchanged ... ok
+test ribbon::tests::embedded_icons_are_valid_png_and_unique ... ok
+test ribbon::tests::every_ribbon_command_is_either_handled_or_disabled ... ok
+test ribbon::tests::every_ribbon_id_has_an_icon ... ok
+test ribbon::tests::transparent_pixels_do_not_tint_filtered_edges ... ok
+test model_view::tests::document_views_render_in_both_themes_at_multiple_display_scales ... ok
+test print_dialog::tests::settings_dialog_renders_in_both_themes_and_invalidates_stale_bytes ... ok
+test schedule_ui::tests::schedules_are_saved_with_the_model_go_out_in_the_ifc_file_and_the_import_does_not_double_them ... ok
+test snap_place::tests::a_click_near_the_open_end_of_a_pipe_puts_the_elbow_on_it_turned_to_face_it_and_joined ... ok
+test snap_place::tests::a_connector_cannot_be_in_two_joins ... ok
+test print_dialog::tests::export_writes_real_bytes_and_preserves_existing_destinations ... ok
+test sheet_ui::tests::the_windows_draw_and_properties_change_the_title_block_in_one_step ... ok
+test sheet_ui::tests::views_go_on_a_sheet_once_move_come_off_and_the_whole_is_one_undo_each ... ok
+test snap_place::tests::a_cut_that_leaves_too_little_pipe_or_is_off_the_pipe_is_refused_and_nothing_changes ... ok
+test snap_place::tests::a_family_that_cannot_meet_the_connector_is_not_snapped_and_is_placed_where_clicked ... ok
+test snap_place::tests::a_level_tee_goes_into_a_sloped_pipe_and_the_two_pieces_take_the_slope_that_joins_them_to_it ... ok
+test snap_place::tests::a_pipe_that_cannot_follow_stays_and_is_unjoined_with_a_note ... ok
+test snap_place::tests::a_fitting_clicked_on_the_open_connector_of_another_fitting_is_joined_to_it ... ok
+test snap_place::tests::a_reducer_in_a_pipe_changes_the_size_after_it_and_an_elbow_is_not_cut_in ... ok
+test snap_place::tests::disjoin_lets_a_joined_pipe_be_moved_alone_and_a_plain_move_still_refuses ... ok
+test snap_place::tests::disjoin_moves_the_pump_alone_and_breaks_its_joins ... ok
+test snap_place::tests::a_tee_dropped_on_the_middle_of_a_pipe_cuts_it_and_joins_both_pieces_in_one_step ... ok
+test snap_place::tests::moving_one_of_two_joined_fittings_takes_them_apart_and_moving_both_keeps_them_joined ... ok
+test snap_place::tests::moving_the_pump_carries_the_end_of_its_pipe_and_keeps_the_other_end_and_the_heights ... ok
+test sheet_ui::tests::the_sheets_print_to_a_pdf_page_each_in_the_order_of_their_numbers ... ok
+test snap_place::tests::the_family_turns_to_whatever_way_the_pipe_runs_and_tab_takes_the_other_connector ... ok
+test snap_place::tests::the_elbow_at_the_far_end_is_rebuilt_for_the_new_angle_so_the_pipe_stays_joined_at_both_ends ... ok
+test snap_place::tests::the_ghost_shows_a_cut_across_a_run_and_a_plain_placement_away_from_everything ... ok
+test snap_place::tests::the_three_d_ghost_follows_the_hit_under_the_pointer_and_matches_the_click ... ok
+test snap_place::tests::the_ghost_stands_exactly_where_the_click_puts_the_family_and_marks_what_it_joins ... ok
+test snap_place::tests::turning_the_pump_turns_the_end_of_its_pipe_with_the_connector ... ok
+test systems_ui::tests::a_mechanical_system_of_ducted_units_gets_a_duct_trunk_along_the_row ... ok
+test systems_ui::tests::equipment_becomes_a_system_which_is_laid_out_and_finished_into_pipes_joined_to_its_connectors ... ok
+test snap_place::tests::the_table_type_whose_size_fits_the_pipe_is_the_one_used_and_a_size_that_is_missing_is_said ... ok
+test type_editor::tests::layers_are_inserted_deleted_and_moved_and_the_core_stays_on_its_layers ... ok
+test type_editor::tests::a_plain_type_is_given_layers_and_applying_changes_the_type_its_walls_and_the_wall_tool_in_one_undo ... ok
+test view3d::tests::each_level_is_a_band_up_to_the_next_one ... ok
+test view3d::tests::levels_and_grids_are_datums_of_the_view ... ok
+test view3d::tests::a_click_in_the_three_d_view_places_a_door_in_the_wall_under_it ... ok
+test view3d::tests::the_sample_document_becomes_outward_facing_triangles ... ok
+test systems_ui::tests::the_browser_edits_the_system_and_its_windows_draw ... ok
+test type_editor::tests::the_window_draws_with_layers_and_applies_with_ok ... ok
+test view3d::tests::the_three_d_view_draws_the_elbows_of_a_routed_duct ... ok
+test view3d::tests::the_three_d_view_draws_and_selection_flows_both_ways ... ok
+test view_tools::tests::perpendicular_and_centre_snaps_as_in_revit ... ok
+test view_tools::tests::the_increment_follows_the_zoom_and_the_pointer_snaps_in_revits_order ... ok
+test view_ui::tests::a_key_gives_back_its_view ... ok
+test schedule_ui::tests::a_schedule_is_made_shown_followed_with_the_model_exported_deleted_and_undone ... ok
+test view_ui::tests::annotations_keep_their_size_on_paper ... ok
+test systems_ui::tests::systems_go_out_in_the_ifc_file_and_come_back_and_the_import_does_not_double_them ... ok
+test view3d::tests::the_project_site_drives_the_sun_and_is_undoable ... ok
+test view_ui::tests::temporary_hide_and_isolate_are_not_saved_and_belong_to_their_view ... ok
+test view_ui::tests::hide_in_view_and_reveal_hidden_elements ... ok
+test view_ui::tests::views_have_keys_and_a_schedule_has_none ... ok
+test wall_shapes::tests::a_circle_stays_within_the_tolerance_and_a_bigger_one_has_more_walls ... ok
+test model_view::tests::the_small_office_is_built_from_a_new_project_then_saved_reopened_and_exported ... ok
+test wall_shapes::tests::a_polygon_is_clockwise_regular_and_inscribed_or_circumscribed ... ok
+test view_ui::tests::the_view_range_window_applies_a_valid_range_only ... ok
+test wall_shapes::tests::an_arc_runs_from_start_to_end_through_the_third_point_either_way_round ... ok
+test view_ui::tests::visibility_graphics_turns_a_category_off_in_one_view_only ... ok
+test view_ui::tests::the_view_range_decides_what_a_plan_shows ... ok
+test view_ui::tests::the_control_bar_changes_scale_and_detail_in_one_step_each ... ok
+test panels::tests::palettes_render_each_selection_and_single_palette_layout ... ok
+test model_view::tests::move_by_press_drag_release_and_a_click_picks_the_element_when_none_is_selected ... ok
+test model_view::tests::shaft_tool_sketches_an_outline_cuts_the_floor_above_and_shows_its_symbol_and_wall_opening_tool_picks_two_ends ... ok
+test model_view::tests::dragging_a_section_end_moves_only_that_end_and_undo_puts_it_back ... ok
+test model_view::tests::a_box_selects_what_it_holds_left_to_right_and_what_it_touches_right_to_left ... ok
+test model_view::tests::dragging_an_element_in_select_mode_moves_it_and_esc_cancels ... ok
+test model_view::tests::several_elements_are_selected_by_ctrl_click_by_a_box_and_edited_together ... ok
+test model_view::tests::dragging_a_wall_end_grip_moves_that_end_and_the_wall_joined_to_it ... ok
+test model_view::tests::roof_tool_draws_by_clicks_and_a_roof_in_a_plan_lies_under_the_walls_it_covers ... ok
+
+test result: ok. 271 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 50.36s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_document-796e1e33bce10aba.exe)
+
+running 188 tests
+test compute::tests::a_line_is_found_through_its_fittings_and_taps_and_given_a_system_in_one_step ... ok
+test compute::tests::a_run_that_closes_a_loop_is_refused ... ok
+test edit::tests::a_section_line_has_no_body_and_either_end_of_it_moves_alone ... ok
+test edit::tests::a_wall_moves_with_its_door_and_tag_and_a_copy_has_its_own ... ok
+test compute_elec::tests::the_tool_says_it_is_deprecated_and_where_the_calculation_is_going ... ok
+test compute::tests::what_cannot_be_computed_is_named ... ok
+test compute::tests::a_drawn_pipe_line_is_sized_and_its_losses_are_darcy_weisbach_plus_the_elbow ... ok
+test compute::tests::a_branch_is_summed_into_its_main_and_the_most_resistant_path_sets_the_duty ... ok
+test compute::tests::a_drawn_duct_is_sized_by_friction_and_velocity_with_the_equivalent_diameter ... ok
+test edit::tests::an_elevation_marker_holds_up_to_four_views_moves_saves_and_is_not_a_body ... ok
+test compute::tests::a_tap_cuts_its_run_in_two_and_the_run_keeps_the_size_its_larger_part_needs ... ok
+test compute::tests::two_loops_of_one_type_compute_apart_when_each_is_a_named_system ... ok
+test compute_elec::tests::the_drawn_network_is_sized_with_the_route_length_and_errors_name_the_node ... ok
+test compute::tests::computed_sizes_are_written_in_one_step_and_then_the_drawn_sizes_meet_the_limits ... ok
+test compute::tests::plumbing_loading_units_and_sprinklers_are_computed_the_same_way ... ok
+test edit::tests::a_wall_join_can_be_disallowed_and_allowed_again ... ok
+test edit::tests::dragging_the_end_of_a_wall_takes_the_walls_joined_there_along ... ok
+test edit::tests::an_equipment_pad_is_made_by_its_unit_and_moves_copies_and_goes_with_it ... ok
+test edit::tests::trim_align_and_offset_work_on_the_lines_of_walls ... ok
+test edit::tests::deleting_a_wall_takes_its_door_and_tag_and_undo_brings_them_back ... ok
+test electrical_exchange::tests::a_load_that_belongs_to_a_unit_carries_the_units_ifc_id_and_the_rooms_leave_with_their_numbers ... ok
+test edit::tests::wall_types_walls_in_one_step_and_flipping_a_wall ... ok
+test edit::tests::rotating_and_mirroring_turn_the_walls_and_instances ... ok
+test grid_arc::tests::a_half_circle_has_its_centre_on_the_chord_and_the_ends_of_the_polyline_are_exact ... ok
+test edit::tests::what_cannot_move_says_why ... ok
+test electrical_exchange::tests::a_network_that_cannot_be_computed_says_why ... ok
+test grid_arc::tests::a_quarter_circle_has_the_bulge_tan_of_a_sixteenth_turn_and_its_centre_to_the_left ... ok
+test grid_arc::tests::the_bulge_comes_back_from_a_centre_and_a_sense_and_a_major_arc_is_refused ... ok
+test edit::tests::temporary_dimensions_find_the_neighbours_and_typing_moves_the_wall ... ok
+test layers::tests::a_layered_type_is_as_thick_as_its_layers_and_so_are_its_walls ... ok
+test layers::tests::a_plan_draws_a_line_where_each_layer_ends_counted_from_the_exterior_on_the_left ... ok
+test layers::tests::layers_are_checked_like_revit_checks_a_compound_wall ... ok
+test electrical_exchange::tests::the_drawn_network_leaves_with_its_lengths_loads_and_the_design_basis ... ok
+test layers::tests::the_edit_type_window_changes_name_height_and_layers_of_the_type_and_its_walls_in_one_step ... ok
+test layers::tests::layers_of_a_type_are_kept_by_duplicating_it_and_by_the_records ... ok
+test layers::tests::the_location_line_puts_the_centre_of_the_wall_where_revit_does ... ok
+test mep::tests::a_pipe_is_insulated_but_not_lined_and_the_insulation_types_are_part_of_the_settings ... ok
+test mep::tests::a_routed_duct_with_its_elbow_is_held_by_the_model_linked_and_undone_in_one_step ... ok
+test mep::tests::a_branch_is_joined_to_a_drawn_run_as_a_tee_or_a_tap_and_undone_in_one_step ... ok
+test mep::tests::mechanical_settings_are_cleaned_saved_with_the_model_undone_and_kept_when_runs_go ... ok
+test layout::tests::a_network_runs_a_trunk_beside_a_column_of_equipment_and_taps_each_connector_off_it ... ok
+test mep::tests::insulation_and_lining_go_on_runs_and_fittings_are_replaced_removed_saved_and_follow_the_run ... ok
+test mep::tests::the_end_of_a_run_joined_to_an_elbow_keeps_its_height_and_the_free_ends_can_be_changed ... ok
+test mep::tests::the_electrical_network_is_checked_kept_with_the_model_and_comes_back_from_the_records ... ok
+test mep::tests::run_systems_and_end_points_are_checked_kept_with_the_model_and_come_back_from_the_records ... ok
+test mep::tests::what_the_model_cannot_hold_refuses_the_whole_route_and_bad_links_are_refused ... ok
+test mepsys::tests::a_system_groups_equipment_is_edited_renamed_and_deleted_each_in_one_undo_step ... ok
+test layout::tests::equipment_that_leaves_sideways_rises_to_the_main_at_45_degrees ... ok
+test mepsys::tests::a_bad_system_is_refused_by_the_model_and_the_records_read_back ... ok
+test layout::tests::heads_on_a_ceiling_are_joined_by_a_main_above_them_and_a_45_degree_section_to_each ... ok
+test modify::tests::a_cut_wall_is_pasted_with_its_door_where_the_pointer_goes_and_onto_another_level ... ok
+test modify::run_tests::the_offset_at_one_end_of_a_free_run_changes_with_the_slope_and_a_joined_end_is_refused ... ok
+test modify::tests::a_door_cannot_be_copied_without_its_wall ... ok
+test modify::tests::match_type_between_family_instances_needs_the_same_family ... ok
+test modify::tests::a_pinned_element_cannot_be_moved_trimmed_dragged_or_deleted_until_it_is_unpinned ... ok
+test modify::tests::match_type_gives_walls_the_type_of_the_first_and_refuses_other_kinds ... ok
+test native::tests::a_legacy_cable_record_without_solver_impedance_is_readable ... ok
+test modify::tests::select_all_instances_finds_the_elements_of_one_type_in_the_project_or_on_a_level ... ok
+test native::tests::a_document_survives_its_records_and_bad_records_are_refused ... ok
+test native::tests::an_electrical_cable_keeps_its_solver_impedance_across_the_records ... ok
+test native::tests::text_with_every_kind_of_character_and_numbers_come_back_exactly ... ok
+test native::tests::impedance_validation_rejects_nonfinite_and_negative_resistance ... ok
+test opening::tests::a_shaft_that_stops_short_of_the_floor_does_not_cut_it ... ok
+test opening::tests::a_shaft_that_runs_below_the_ground_floor_cuts_it_too ... ok
+test opening::tests::a_shaft_over_the_edge_of_a_floor_notches_it ... ok
+test opening::tests::a_shaft_cuts_the_floor_at_its_top_but_not_the_one_it_starts_on ... ok
+test railing::tests::a_railing_has_a_top_rail_a_post_at_every_point_and_even_balusters_and_each_part_is_a_closed_box ... ok
+test opening::tests::a_wall_opening_is_a_rectangle_in_its_wall_and_follows_it ... ok
+test opening::tests::a_vertical_opening_cuts_the_one_floor_it_is_made_in_and_goes_with_it ... ok
+test opening::tests::a_roof_is_cut_by_a_vertical_opening_and_by_a_shaft_keeping_its_slope_and_staying_closed ... ok
+test rebar::tests::a_beam_is_reinforced_with_bars_and_stirrups_that_follow_it ... ok
+test railing::tests::a_railing_is_placed_on_a_level_checked_moved_and_comes_back_from_the_records ... ok
+test roof::tests::a_hip_roof_rises_to_a_ridge_half_the_short_side_in_from_the_eaves ... ok
+test layout::tests::connectors_that_cannot_be_joined_are_left_out_with_the_reason_and_two_connectors_are_routed_round_a_wall ... ok
+test roof::tests::the_same_roof_comes_out_whichever_way_the_outline_runs ... ok
+test roof::tests::the_solid_is_closed_with_outward_faces ... ok
+test roof::tests::two_opposite_sloping_edges_make_a_gable_one_a_shed_none_a_flat_roof ... ok
+test roof::tests::a_roof_is_an_element_that_is_saved_moved_mirrored_and_undone ... ok
+test rooms::tests::a_room_has_a_number_a_name_and_a_department_that_undo_and_survive_saving ... ok
+test rooms::tests::a_tag_reads_the_parameters_of_its_element_the_system_and_size_of_a_duct_and_the_number_and_name_of_a_room ... ok
+test schedule::tests::csv_has_units_in_the_headings_plain_numbers_and_text_that_cannot_run_as_a_formula ... ok
+test rooms::tests::a_room_is_the_closed_space_inside_the_wall_faces_and_follows_its_walls ... ok
+test schedule::tests::every_category_has_fields_a_starter_that_checks_and_a_table_even_on_an_empty_model ... ok
+test schedule::tests::filters_sorting_headers_footers_and_blank_lines_work_like_revits ... ok
+test schedule::tests::rooms_floors_columns_beams_and_runs_give_their_quantities ... ok
+test schedule::tests::schedules_are_saved_renamed_duplicated_deleted_undone_and_read_back_from_the_records ... ok
+test schedule::tests::doors_windows_and_equipment_are_listed_by_their_family_category_with_their_marks_and_systems ... ok
+test schedule::tests::a_wall_schedule_gives_lengths_areas_and_volumes_net_of_doors_windows_and_openings ... ok
+test schedule::tests::rows_that_look_alike_are_one_row_with_their_quantities_added_up_unless_every_instance_is_itemized ... ok
+test schedule::tests::sorting_reads_numbers_in_text_as_numbers_and_a_bad_definition_is_refused ... ok
+test schematic::tests::ambiguous_endpoint_assigned_first_reported ... ok
+test schematic::tests::discipline_of_system_mapping ... ok
+test schematic::tests::draft_json_round_trip ... ok
+test schematic::tests::extract_plumbing_groups_endpoints_by_zone ... ok
+test schematic::tests::overlaps_same_level_only ... ok
+test schematic::tests::extract_electrical_pulls_boards_only ... ok
+test schematic::tests::place_and_delete_zone ... ok
+test schematic::tests::rect_normalizes_contains_overlaps ... ok
+test schematic::tests::room_fallback_labels ... ok
+test schematic::tests::zone_records_round_trip ... ok
+test schematic_view::tests::both_spacing_modes_render_without_changing_the_order ... ok
+test schematic_view::tests::generate_schematic_is_one_undoable_command ... ok
+test schematic::tests::zone_undo_redo ... ok
+test schematic_electrical::tests::a_non_finite_solver_drop_never_reaches_the_annotation ... ok
+test schematic_electrical::tests::cumulative_path_drop_differs_from_the_feeder_drop ... ok
+test schematic_view::tests::electrical_stamp_handles_board_local_load_phase_and_rejections ... ok
+test schematic_view::tests::batch_setmep_then_generate_stamps_the_staged_model ... ok
+test schematic_view::tests::generate_schematic_stamps_electrical_current_and_marks_not_approved ... ok
+test schematic_view::tests::generate_schematic_with_empty_annotations_does_not_panic ... ok
+test schematic_view::tests::plumbing_symbol_is_a_group_annotated_flow_and_pressure ... ok
+test schematic_view::tests::redo_of_stored_view_regenerates_the_stamp ... ok
+test schematic_view::tests::redo_of_stored_view_regenerates_the_vdrop ... ok
+test schematic_view::tests::render_orders_symbols_row_then_column_annotates_and_routes_wires ... ok
+test schematic_view::tests::redo_regenerates_the_electrical_stamp_from_the_model ... ok
+test schematic_view::tests::restamp_after_graph_rejection_clears_stale_current ... ok
+test schematic_view::tests::restamp_after_graph_rejection_clears_stale_vdrop ... ok
+test sheet::tests::a_view_is_on_one_sheet_only_and_a_schedule_must_exist ... ok
+test sheet::tests::a_sheet_is_made_numbered_on_from_the_last_one_changed_and_undone ... ok
+test sheet::tests::a_view_of_an_element_that_goes_leaves_the_sheet ... ok
+test sheet::tests::bad_sheets_are_refused_by_the_commands_and_by_the_model ... ok
+test sheet::tests::paper_sizes_are_the_iso_series ... ok
+test sheet::tests::view_references_name_a_schedule_or_an_element ... ok
+test skeleton::tests::a_rectangle_has_four_faces_and_a_ridge ... ok
+test sheet::tests::sheets_read_back_from_the_records_with_all_their_texts ... ok
+test skeleton::tests::a_wide_l_with_different_arms_and_the_other_ways_round ... ok
+test skeleton::tests::an_l_shape_has_a_valley_from_its_reflex_corner ... ok
+test skeleton::tests::an_l_with_slanted_arms_is_roofed ... ok
+test skeleton::tests::the_faces_meet_at_the_same_height_wherever_they_touch ... ok
+test skeleton::tests::t_and_u_shapes_tile_their_plan_with_faces_that_are_convex ... ok
+test spatial::tests::a_beam_is_placed_on_a_level_validated_and_undone_in_one_step ... ok
+test spatial::tests::a_beam_is_cut_back_to_the_columns_it_ends_in_unless_the_join_is_disallowed ... ok
+test spatial::tests::a_beam_system_makes_parallel_beams_that_follow_its_edits_and_go_with_it ... ok
+test spatial::tests::a_brace_is_a_sloped_beam_with_a_usage_and_a_material_and_only_beams_have_them ... ok
+test spatial::tests::a_beam_takes_a_round_or_an_i_section_changes_with_its_size_and_the_sections_are_validated ... ok
+test spatial::tests::a_column_stands_between_two_levels_is_validated_resized_and_undone ... ok
+test spatial::tests::a_foundation_slab_hangs_from_its_top_and_keeps_its_kind ... ok
+test spatial::tests::a_tag_says_the_type_follows_its_element_goes_with_it_and_is_saved ... ok
+test spatial::tests::a_warren_truss_is_made_of_chords_and_diagonals_that_follow_its_edits ... ok
+test spatial::tests::datum_dimensions_and_inconsistent_pipe_sections_are_rejected ... ok
+test spatial::tests::duct_and_pipe_slope_raise_the_end_by_rise_over_run ... ok
+test spatial::tests::family_instances_stand_on_a_level_or_in_a_wall_and_follow_it ... ok
+test spatial::tests::invalid_axes_and_referenced_level_deletion_are_atomic ... ok
+test spatial::tests::slabs_are_placed_validated_undone_and_meshed_closed ... ok
+test spatial::tests::wall_dimensions_and_level_elevation_drive_vertices_and_undo ... ok
+test spatial::tests::walls_are_joined_as_revit_joins_them ... ok
+test stair::tests::the_number_of_risers_keeps_each_under_the_maximum ... ok
+test stair::tests::a_stair_is_placed_between_levels_saved_moved_and_mirrored ... ok
+test stair::tests::the_solid_is_closed_with_outward_faces_and_has_the_volume_of_the_steps ... ok
+test stair_railing::tests::the_rail_goes_round_the_landing_by_the_outside_and_straight_across_the_inside ... ok
+test tests::create_resize_and_undo_are_atomic ... ok
+test tests::document_ids_remain_stable_after_undo ... ok
+test tests::duct_and_pipe_slope_edits_are_signed_and_undoable ... ok
+test tests::duplicate_and_missing_ids_rejected ... ok
+test tests::invalid_batch_rolls_back_completely ... ok
+test tests::invalid_slope_rolls_back_batch_and_other_categories_reject_slope ... ok
+test tests::redo_puts_back_what_undo_took_and_a_new_edit_ends_it ... ok
+test tests::stale_revision_rejected ... ok
+test tests::the_site_is_validated_set_and_undone_with_the_elements ... ok
+test stair::tests::l_and_u_stairs_are_two_runs_and_a_landing_that_meet_and_climb_the_whole_height ... ok
+test types::tests::a_family_type_is_named_once_among_family_types_and_serves_its_own_family_only ... ok
+test types::tests::a_member_of_a_type_cannot_be_given_other_values_one_by_one_until_it_is_detached ... ok
+test types::tests::a_rebar_type_carries_the_bars_and_the_stirrups ... ok
+test types::tests::a_type_is_made_from_a_beam_shared_by_others_and_changing_it_changes_them_all_in_one_undo ... ok
+test types::tests::a_type_is_renamed_and_duplicated_and_a_taken_name_is_refused ... ok
+test types::tests::a_schedule_reads_the_one_request_so_a_type_scoped_override_is_not_blanked ... ok
+test types::tests::walls_share_a_thickness_and_height_and_pads_share_size_thickness_and_material_in_one_undo ... ok
+test viewedit::tests::a_copy_in_a_view_keeps_the_original_and_a_copied_door_stands_in_the_same_wall ... ok
+test types::tests::detaching_a_type_keeps_the_texts_it_was_inheriting ... ok
+test types::tests::types_have_unique_names_per_kind_serve_one_kind_and_cannot_be_deleted_while_used ... ok
+test types::tests::a_family_catalogue_becomes_types_of_the_document_and_a_refused_one_changes_nothing ... ok
+test viewedit::tests::a_door_in_a_wall_at_an_angle_to_the_view_slides_so_that_its_drawing_moves_by_the_drag ... ok
+test viewedit::tests::align_in_a_view_moves_an_insert_a_wall_end_or_the_top_of_a_wall_onto_the_reference ... ok
+test viewedit::tests::rotating_in_a_view_follows_revit_walls_and_inserts_do_not_turn_and_a_beam_tilts_about_its_middle ... ok
+test viewedit::tests::mirroring_in_a_view_is_about_a_vertical_line ... ok
+test viewsettings::tests::a_filtered_document_leaves_out_what_is_turned_away_and_changes_nothing_of_the_original ... ok
+test viewedit::tests::things_move_in_a_view_along_it_and_up_and_a_door_slides_in_its_wall ... ok
+test stair_railing::tests::a_stair_gets_its_railing_on_the_sides_asked_for_climbing_with_the_runs_and_level_over_the_landing ... ok
+test viewsettings::tests::bad_settings_are_refused_by_the_commands_and_by_the_model ... ok
+test types::tests::a_family_instance_that_loses_its_type_keeps_the_values_it_had_and_a_type_copies_them ... ok
+test viewsettings::tests::every_element_has_a_category_a_code_that_reads_back_and_a_hidden_one_is_found ... ok
+test viewsettings::tests::the_view_range_puts_a_thing_in_its_class_and_must_be_in_order ... ok
+test viewsettings::tests::settings_are_saved_one_undo_step_each_default_ones_hold_nothing_and_they_read_back ... ok
+test warnings::column_tests::a_column_in_a_wall_is_reported_and_one_beside_it_is_not ... ok
+test viewedit::tests::tags_and_dimensions_belong_to_one_view_follow_their_element_there_and_go_with_what_they_are_on ... ok
+test warnings::tests::a_rebar_that_no_longer_fits_its_beam_is_reported_until_the_beam_is_large_enough_again ... ok
+test types::tests::an_out_of_range_family_type_value_is_refused_by_the_document ... ok
+test warnings::tests::two_beams_on_one_line_are_reported_in_either_direction_but_a_different_height_is_not ... ok
+test types::tests::a_family_type_gives_its_named_values_to_every_instance_and_an_instance_value_wins ... ok
+
+test result: ok. 188 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests\app_records.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\app_records-fa7d2624c1d1d727.exe)
+
+running 3 tests
+test a_line_is_kept_by_its_kind_and_replaced_by_the_next_of_that_kind ... ok
+test a_line_that_is_not_one_line_of_its_kind_is_refused ... ok
+test every_kind_is_saved_with_the_model_and_read_back ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\curved_grids.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\curved_grids-ec8deba2b5566991.exe)
+
+running 4 tests
+test undo_takes_the_curve_back_to_a_straight_line ... ok
+test mirroring_turns_the_curve_the_other_way_and_rotating_keeps_it ... ok
+test a_bulge_is_kept_only_for_a_grid_and_only_in_range ... ok
+test the_bulge_is_saved_and_a_file_without_one_is_straight ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\generic.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\generic-84a641e738832137.exe)
+
+running 4 tests
+test a_generic_model_takes_no_family_and_keeps_to_its_own_rules_when_edited ... ok
+test a_generic_model_is_a_prism_on_a_level_that_keeps_what_the_source_said ... ok
+test a_generic_model_without_a_shape_or_with_too_much_text_is_refused ... ok
+test a_generic_model_is_saved_and_read_back_whole ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\levels.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\levels-49d4bb749226b7a8.exe)
+
+running 2 tests
+test a_level_needs_its_own_name_and_room_below_the_one_above ... ok
+test a_level_is_renamed_and_deleted_only_when_nothing_stands_on_it ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_family-09a6e82e4a1ea6c0.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\arch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\arch-571502bd1dfd108a.exe)
+
+running 5 tests
+test a_semicircle_head_and_a_pure_arch_work ... ok
+test bad_arches_are_refused ... ok
+test the_outline_of_a_segmental_arch_matches_the_hand_formula ... ok
+test a_flat_head_is_a_plain_rectangle ... ok
+test any_valid_arch_has_the_hand_area_and_stays_in_its_box ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\catalogue.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\catalogue-9bc0c9018cf3a236.exe)
+
+running 8 tests
+test text_errors_name_the_line ... ok
+test shared_parameter_columns ... ok
+test apply_errors_and_atomicity ... ok
+test export_and_reload_give_the_same_types ... ok
+test numbers_out_of_range_are_found_when_the_type_is_used ... ok
+test types_from_a_catalogue_drive_the_solver ... ok
+test to_types_reads_a_catalogue_into_types_of_its_families_without_touching_them ... ok
+test limits ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\display.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\display-867239c51bb647f7.exe)
+
+running 5 tests
+test every_unit_of_the_table_round_trips_and_is_known_to_the_formula_language ... ok
+test choosing_a_unit_changes_what_is_shown_and_what_a_bare_number_means ... ok
+test typed_values_take_their_own_unit_when_they_have_one ... ok
+test what_cannot_be_read_is_refused_with_a_reason ... ok
+test values_are_shown_in_the_unit_chosen_for_their_kind ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\forms.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\forms-04ca1310c68bd152.exe)
+
+running 23 tests
+test a_circle_profile_crossing_the_axis_is_refused ... ok
+test a_path_whose_third_segment_cuts_the_first_is_refused ... ok
+test a_sweep_sits_on_its_path_by_centre_bottom_top_left_or_right ... ok
+test extrusion_volumes_and_bounds ... ok
+test a_sharp_corner_pushes_the_bounds_out_to_the_mitre_tip ... ok
+test holes_that_only_touch_are_refused ... ok
+test a_revolve_puts_its_axis_on_the_profile_where_asked ... ok
+test profile_errors ... ok
+test polygons_whose_corner_lies_on_a_later_edge_are_refused ... ok
+test formulas_drive_forms ... ok
+test partial_turns_match_the_independent_check ... ok
+test revolve_volumes_and_bounds ... ok
+test sweep_errors ... ok
+test revolve_errors ... ok
+test sweep_corner_clearance_uses_the_widest_side_and_circles ... ok
+test nested_families_carry_their_forms ... ok
+test revolving_about_a_line_away_from_the_origin ... ok
+test values_other_than_profile_points_are_limited_to_100_m_too ... ok
+test the_mitre_tip_is_exact_in_both_directions ... ok
+test hole_rules ... ok
+test naming_and_limits ... ok
+test sweep_volumes_follow_the_mitre_formula ... ok
+test nested_materials_and_limits ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\lighting.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\lighting-4a4f14c20ae1204a.exe)
+
+running 7 tests
+test a_photometric_file_fills_the_lighting_data ... ok
+test a_luminaire_family_keeps_its_lighting_data ... ok
+test a_picker_lists_every_file_and_only_the_ticked_ones_become_types ... ok
+test lighting_data_is_checked ... ok
+test pictures_and_data_sheets_are_judged_by_their_content_and_their_names ... ok
+test each_photometric_variant_becomes_a_type_with_its_own_lighting ... ok
+test variant_names_that_are_taken_get_a_number_and_a_bad_family_is_left_alone ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\mep.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mep-805674924e15c3cf.exe)
+
+running 41 tests
+test categories_map_to_known_ifc_classes ... ok
+test a_duct_stub_family_joins_the_fan_coil_after_placement ... ok
+test ahu_connectors_match_hand_figures ... ok
+test connectors_follow_the_family_size_and_can_be_hidden ... ok
+test a_family_code_that_is_not_a_plain_token_is_refused ... ok
+test classification_rules ... ok
+test direction_vectors_and_system_domain_matrix ... ok
+test ahu_follows_its_own_sizes_and_flow ... ok
+test fan_coil_connectors_match_hand_figures ... ok
+test aim_gives_arbitrary_directions ... ok
+test fan_coil_has_the_specified_connector_set ... ok
+test connector_definition_errors ... ok
+test connector_value_errors_at_solve_time ... ok
+test hosting_rules ... ok
+test joining_rules ... ok
+test every_library_family_carries_a_uniclass_code ... ok
+test library_families_carry_the_decided_uniclass_codes ... ok
+test library_families_carry_their_own_unique_codes_apart_from_uniclass ... ok
+test nested_connectors_and_plan_move_with_the_child ... ok
+test placing_turns_and_moves_connectors ... ok
+test plan_symbol_is_solved_and_scales ... ok
+test port_type_names ... ok
+test signal_connectors ... ok
+test rectangular_mate_follows_orientation ... ok
+test power_factor_apparent_power_and_current ... ok
+test plan_symbol_errors ... ok
+test nested_direction_turns_both_components_and_limit_is_exact ... ok
+test system_and_flow_names_for_ifc ... ok
+test repeated_and_hidden_nested_families ... ok
+test the_eccentric_reducer_keeps_its_flat_side_straight ... ok
+test the_pipe_elbow_outlet_follows_its_angle_and_ends_where_the_bend_ends ... ok
+test the_pipe_elbow_turns_left_right_up_and_down_and_each_outlet_is_where_the_bend_ends ... ok
+test the_reducer_and_the_tee_carry_the_sizes_of_their_type_on_every_connector ... ok
+test the_type_layer_sits_between_the_librarys_named_type_and_the_instances_own_values ... ok
+test the_library_carries_the_air_handling_unit_and_the_ceiling_diffuser ... ok
+test type_names_come_in_the_authors_order ... ok
+test solving_many_is_deterministic ... ok
+test total_limits_with_nesting ... ok
+test the_ceiling_diffuser_hangs_on_a_ceiling_and_takes_its_duct_from_above ... ok
+test up_defaults_and_roll ... ok
+test placement_keeps_lengths_and_a_facing_copy_always_joins ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\meshing.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\meshing-fdb3a5e2d3b71582.exe)
+
+running 5 tests
+test blends_check_their_profiles ... ok
+test a_swept_blend_changes_its_profile_along_the_path ... ok
+test a_blend_is_a_loft_between_two_profiles_with_exact_volume ... ok
+test the_mesh_of_a_cut_solid_is_one_closed_surface ... ok
+test a_void_form_cuts_the_solids_and_adds_no_volume ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\names_ops.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\names_ops-fa9263b28644315f.exe)
+
+running 6 tests
+test longest_name_wins_and_long_names_work ... ok
+test names_may_have_spaces_and_accents ... ok
+test equality_and_the_revit_style_logic_functions ... ok
+test units_turn_into_metres_and_degrees ... ok
+test sine_and_cosine_of_a_tiny_angle_next_to_a_multiple_of_90_are_right ... ok
+test name_rules ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\plan_arc.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\plan_arc-52fe81897f5590b7.exe)
+
+running 2 tests
+test bad_arcs_are_refused_and_a_full_turn_has_no_sweep ... ok
+test a_door_draws_the_leaf_and_the_arc_its_free_end_sweeps_on_the_hinge_side ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rotate.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\rotate-477f0f8fbb98efb1.exe)
+
+running 6 tests
+test a_turn_about_a_pivot_off_the_axes ... ok
+test a_whole_number_of_turns_is_only_a_shift ... ok
+test rotation_formulas_are_checked ... ok
+test turns_add_up_through_nested_families ... ok
+test an_open_door_leaf_turns_about_its_hinge_by_hand_calculation ... ok
+test a_turn_is_rigid_and_keeps_the_hinge_still ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\s2.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\s2-046a66632d118376.exe)
+
+running 20 tests
+test a_solid_with_no_thickness_is_refused ... ok
+test bad_formulas_are_errors_not_crashes ... ok
+test comparisons_and_clamp_are_exact_at_the_edges ... ok
+test formula_failures_at_solve_time_name_the_value ... ok
+test formulas_follow_ordinary_arithmetic ... ok
+test hostile_formula_sizes_are_refused ... ok
+test inputs_and_solids_are_validated ... ok
+test logic_short_circuits_so_guards_work ... ok
+test loops_unknown_names_and_duplicates_are_refused_when_compiling ... ok
+test inputs_below_their_minimum_and_bad_repeat_counts_are_refused ... ok
+test realistic_nesting_is_accepted ... ok
+test window_mullions_are_evenly_spaced_and_counted ... ok
+test door_default_matches_hand_calculation ... ok
+test types_and_instance_overrides_layer_correctly ... ok
+test hostile_families_are_bounded ... ok
+test random_formula_text_never_panics ... ok
+test door_resizes_without_breaking_constraints ... ok
+test window_resizes_without_breaking_constraints ... ok
+test parallel_batches_match_serial_and_keep_order ... ok
+test listing_order_does_not_change_the_answer ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests\shared.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\shared-7fbe5f16deb2b97b.exe)
+
+running 6 tests
+test naming_errors ... ok
+test text_roundtrip_is_exact ... ok
+test two_families_share_one_definition ... ok
+test text_errors_name_the_line ... ok
+test set_checks ... ok
+test prop_text_roundtrip ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\sketch_forms.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\sketch_forms-5f5605aa29f0ddc9.exe)
+
+running 7 tests
+test an_under_constrained_sketch_keeps_what_was_drawn ... ok
+test an_angle_parameter_makes_a_parallelogram ... ok
+test a_sketch_hole_and_a_sketch_in_a_nested_family ... ok
+test an_l_bracket_with_a_thickness_parameter ... ok
+test parameters_drive_a_locked_rectangle ... ok
+test offsets_angles_construction_points_and_the_100_m_limit ... ok
+test bad_sketches_are_refused_with_a_reason ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\thermal.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\thermal-1a4eb6066c91a1df.exe)
+
+running 2 tests
+test the_default_window_has_the_hand_calculated_u_value ... ok
+test the_family_formula_and_the_arch_crate_agree ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\trig.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\trig-cd19cb4bb98068be.exe)
+
+running 4 tests
+test angles_are_in_degrees_with_exact_values_at_quarter_turns ... ok
+test inverse_functions_return_degrees_in_the_right_quadrant ... ok
+test tangent_refuses_within_a_hair_of_a_pole_and_cosine_survives_huge_angles ... ok
+test domains_and_arity_are_refused ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\typed.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\typed-efeab28717fbe3aa.exe)
+
+running 19 tests
+test a_loop_path_starts_where_the_loop_starts ... ok
+test a_choice_drives_formulas_and_a_flag_reads_as_one_or_zero ... ok
+test a_choice_can_feed_a_nested_text_value ... ok
+test nested_families_repeat_with_their_own_index ... ok
+test every_bar_of_an_array_carries_the_solids_material ... ok
+test nested_families_are_checked_when_compiling ... ok
+test material_names_are_limited_to_128_characters ... ok
+test families_that_contain_each_other_or_nest_too_deep_are_refused ... ok
+test a_failing_nested_family_is_named_in_the_error ... ok
+test library_order_does_not_change_the_answer ... ok
+test text_values_are_kept_checked_and_never_used_in_formulas ... ok
+test the_nested_handle_sits_where_the_hinge_side_says ... ok
+test solids_take_their_material_from_a_value_and_nested_families_pass_it_on ... ok
+test yes_no_and_choice_values_are_validated ... ok
+test the_box_limit_is_exact ... ok
+test nested_work_and_size_are_bounded ... ok
+test the_nested_instance_budget_stops_runaway_nesting_even_when_nothing_is_drawn ... ok
+test batches_with_typed_values_are_identical_on_any_thread_count ... ok
+test handle_follows_door_size_hinge_side_and_rules ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\units.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\units-c67c58ad93ba93de.exe)
+
+running 14 tests
+test a_declared_dimension_must_be_what_the_formula_gives ... ok
+test a_nested_family_gets_values_of_the_dimension_its_inputs_have ... ok
+test a_bare_number_has_one_safe_reading_and_one_refused ... ok
+test dimensions_follow_the_arithmetic ... ok
+test inputs_say_what_they_measure ... ok
+test places_that_use_a_formula_check_its_dimension ... ok
+test quantities_of_different_kinds_are_not_mixed ... ok
+test the_four_formulas_of_the_issue_are_refused ... ok
+test shared_parameters_carry_their_unit_through_the_text_file ... ok
+test the_new_dimensions_go_through_the_shared_parameter_file ... ok
+test the_same_ideas_written_with_units_are_accepted_and_keep_their_value ... ok
+test what_is_refused ... ok
+test time_mass_temperature_and_what_is_built_from_them_have_dimensions_and_units ... ok
+test the_library_still_compiles_and_says_its_units ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_geom-8e3a0ea50b235027.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\s1.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\s1-d506634edeb4320c.exe)
+
+running 30 tests
+test a_chain_that_crosses_or_touches_itself_is_refused ... ok
+test bad_input_is_rejected_not_panicking ... ok
+test a_chain_that_doubles_back_is_refused ... ok
+test bad_stops_are_rejected ... ok
+test openings_inside_a_mitre_zone_are_rejected ... ok
+test bad_openings_and_tops_are_rejected ... ok
+test door_keeps_its_width_on_both_faces_of_a_wall_with_angled_ends ... ok
+test openings_inside_the_far_mitre_zone_are_rejected ... ok
+test arched_door_and_round_window ... ok
+test rectangle_volume_is_perimeter_times_t_times_h ... ok
+test concave_l_shape_and_open_chain ... ok
+test door_and_window_match_independent_reference ... ok
+test gable_wall_and_attachment_to_a_sloped_roof ... ok
+test fast_path_equals_profile_path_for_valid_and_invalid_openings ... ok
+test fast_path_equals_profile_path_on_mitred_rooms ... ok
+test a_long_chain_is_checked_quickly ... ok
+test garbage_never_panics ... ok
+test ring_of_walls_is_one_closed_manifold_torus ... ok
+test size_limits_stop_huge_inputs ... ok
+test accepted_geometry_is_always_consistent ... ok
+test sloped_top_with_angled_ends_has_planar_faces_and_matching_volumes ... ok
+test wall_shorter_than_its_own_mitres_is_rejected ... ok
+test t_junction_has_no_overlap_and_exact_volume ... ok
+test wall_top_attached_to_slab_underside_is_a_flat_top_at_that_height ... ok
+test wall_with_door_is_a_sphere_and_with_window_gains_a_hole ... ok
+test random_angled_walls_mesh_equals_exact_and_door_width_is_true ... ok
+test random_rect_openings_match_reference_and_stay_manifold ... ok
+test rectangles_match_closed_form ... ok
+test random_gable_walls_with_round_windows ... ok
+test parallel_equals_serial_bitwise_any_thread_count ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_ifc-ca17ae9512fabacd.exe)
+
+running 5 tests
+test step::tests::only_rooted_entities_get_the_owner_history ... ok
+test step_read::tests::a_small_file_reads_values_of_every_kind ... ok
+test step_read::tests::unicode_escapes_and_complex_entities_and_bad_files ... ok
+test tests::flow_goes_from_the_equipment_through_the_pieces_and_meets_where_two_flows_meet ... ok
+test tests::a_value_is_written_as_the_kind_it_measures ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\boundaries.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\boundaries-965f513b4b0ad45c.exe)
+
+running 29 tests
+test a_column_clockwise_or_a_storey_apart_behaves_as_stated ... ok
+test a_column_with_no_wall_at_it_or_not_room_bounding_is_not_a_boundary ... ok
+test a_door_that_fills_an_opening_has_a_face_of_its_own_inside_the_wall_face ... ok
+test a_face_longer_than_the_side_is_cut_to_the_side_and_to_the_room_height ... ok
+test a_finish_that_does_not_stand_on_the_level_or_hangs_too_low_is_not_a_boundary ... ok
+test a_floor_finish_and_a_false_ceiling_become_the_floor_and_ceiling_of_the_room ... ok
+test a_hole_is_measured_from_where_the_face_begins ... ok
+test a_room_inside_a_closed_wall_has_one_boundary_for_each_face ... ok
+test a_room_on_the_upper_storey_is_in_the_frame_of_its_storey ... ok
+test a_room_with_a_hole_has_the_hole_in_its_floor ... ok
+test a_separation_line_bounds_a_side_without_a_wall_and_is_virtual ... ok
+test a_slab_inside_the_height_of_the_room_is_neither_floor_nor_ceiling ... ok
+test a_wall_lower_than_the_room_gives_a_lower_face ... ok
+test a_wall_that_covers_part_of_a_side_bounds_that_part ... ok
+test a_wall_that_touches_the_side_at_a_point_or_slants_away_or_stands_inside_the_room_bounds_nothing ... ok
+test a_wall_that_does_not_bound_rooms_makes_no_boundary_and_the_side_is_reported ... ok
+test a_wall_with_a_sloped_top_is_left_out_and_a_wall_below_the_storey_does_not_bound_it ... ok
+test air_changes_use_the_room_or_the_room_with_its_ceiling_void ... ok
+test an_opening_in_the_face_is_a_hole_and_the_hole_is_clipped_to_the_room ... ok
+test slab_to_slab_is_the_basis_that_ignores_finishes ... ok
+test the_boundary_location_moves_the_boundary_to_the_centre_line ... ok
+test the_boundaries_are_written_with_their_geometry ... ok
+test the_ceiling_of_a_room_with_a_hole_has_the_hole_too ... ok
+test the_faces_of_a_column_with_a_wall_attached_that_look_into_the_room_are_boundaries ... ok
+test the_normal_of_each_face_points_out_of_the_room ... ok
+test the_floor_and_ceiling_need_a_slab_that_covers_the_room_and_sits_at_the_right_height ... ok
+test volumes_split_into_the_room_the_ceiling_void_and_the_floor_build_up ... ok
+test walls_that_do_not_touch_the_room_do_not_bound_it ... ok
+test without_volumes_the_floor_and_ceiling_are_not_boundaries ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\georef.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\georef-cf04d8ba842048db.exe)
+
+running 11 tests
+test a_bad_position_is_refused ... ok
+test each_coordinate_base_puts_the_files_origin_where_revit_does ... ok
+test a_bad_position_stops_the_export ... ok
+test the_axes_land_where_the_map_says_and_the_angle_turns_project_north ... ok
+test scale_multiplies_lengths_and_heights_and_the_inverse_undoes_it ... ok
+test the_survey_point_has_the_shared_coordinates_it_was_given_wherever_it_is ... ok
+test with_a_position_the_file_has_the_map_the_north_and_the_site_position ... ok
+test true_north_in_the_model_is_map_north_turned_back_by_the_angle ... ok
+test compound_angles_carry_their_sign_and_do_not_round_up_into_60 ... ok
+test without_a_position_the_file_has_no_map_and_an_empty_site ... ok
+test the_site_carries_the_model_to_the_chosen_origin ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\grids.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\grids-a549bcecb78583c8.exe)
+
+running 14 tests
+test a_model_without_grids_has_no_grid ... ok
+test assemblies::a_truss_is_one_assembly_over_its_members_and_the_storey_holds_the_assembly ... ok
+test assemblies::the_guid_of_an_assembly_comes_from_its_element_and_repeats ... ok
+test one_direction_only_is_written_as_u_axes_with_no_v_list ... ok
+test systems::a_system_whose_equipment_is_not_in_the_model_writes_nothing ... ok
+test grid_lines_become_one_grid_with_a_named_axis_each ... ok
+test assemblies::a_beam_system_is_a_beam_grid_and_a_truss_with_no_written_members_is_reported ... ok
+test systems::a_named_system_takes_its_equipment_and_the_runs_connected_to_it ... ok
+test vertical_lines_are_u_axes_and_horizontal_lines_are_v_axes ... ok
+test systems::without_a_named_system_runs_go_into_the_group_of_their_kind ... ok
+test an_arc_over_half_a_circle_reads_as_a_straight_line_and_says_so ... ok
+test the_grid_belongs_to_the_lowest_storey_and_exports_repeatably ... ok
+test a_curved_line_is_a_trimmed_circle_that_reads_back_with_its_bulge_in_every_schema ... ok
+test systems::the_guid_of_a_named_system_does_not_change_when_other_things_are_added ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ifc.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\ifc-3c014f53019d9fda.exe)
+
+running 25 tests
+test a_frame_on_a_wall_turns_and_shifts_points_and_directions ... ok
+test global_id_text_matches_the_reference_encoder ... ok
+test global_ids_roundtrip_and_never_collide_across_parts_elements_and_projects ... ok
+test bad_scenes_are_refused ... ok
+test beams_and_columns_take_round_and_i_sections ... ok
+test a_beam_exports_as_an_ifcbeam_along_its_own_axis_and_a_bad_one_is_refused ... ok
+test a_swept_profile_is_written_turned_a_quarter_for_the_fixed_reference_sweep ... ok
+test an_edited_wall_keeps_its_id_and_a_new_one_gets_its_own ... ok
+test reals_and_strings_follow_step_rules ... ok
+test a_plain_wall_exports_and_exports_again_identically ... ok
+test a_blend_is_a_faceted_brep_and_a_void_is_cut_with_a_boolean_result ... ok
+test occurrences_differing_only_in_a_form_or_a_turn_keep_their_own_bodies ... ok
+test walls_slabs_and_rooms_get_base_quantities ... ok
+test slab_net_quantities_take_off_shafts_and_cut_openings ... ok
+test the_ifc2x3_export_has_the_2x3_header_an_owner_history_and_the_same_ids ... ok
+test an_occurrence_with_another_shape_keeps_its_own_bodies ... ok
+test door_and_window_get_base_quantities_from_their_opening ... ok
+test a_missing_family_is_refused ... ok
+test a_value_that_does_not_fit_its_row_stays_custom_with_a_warning ... ok
+test a_family_type_carries_its_code_and_a_native_classification ... ok
+test mapped_parameters_go_to_their_standard_set_and_the_rest_stay_custom ... ok
+test quantities_with_a_unit_are_written_as_that_measure ... ok
+test the_ifc2x3_export_writes_doors_and_windows_as_plain_boxes_and_counts_what_it_leaves_out ... ok
+test every_library_family_classifies_in_ifc_export ... ok
+test occurrences_of_one_type_share_one_type_entity_and_one_map ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\lighting.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\lighting-6e0a1ba64b07ae47.exe)
+
+running 3 tests
+test room_inputs_are_checked_and_missing_ones_listed ... ok
+test luminaires_of_different_types_carry_their_own_lighting_in_the_schedule_and_the_file ... ok
+test the_luminaire_catalogue_page_embeds_checked_pictures_and_escapes_text ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\quantities.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\quantities-b68cb09432b2c0c8.exe)
+
+running 6 tests
+test map_errors ... ok
+test map_text_round_trip_and_lookup ... ok
+test overlap_area_cases ... ok
+test slab_and_opening_and_space_quantities_by_hand ... ok
+test wall_quantities_by_hand ... ok
+test map_from_shared_parameters_and_overlay ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\reader.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\reader-f4b8887a9e09ebef.exe)
+
+running 22 tests
+test boolean_results_are_not_imported_as_uncut_operands ... ok
+test complex_entities_cannot_bypass_reference_or_termination_validation ... ok
+test header_and_comment_truncation_are_not_hidden_by_token_search ... ok
+test malformed_shift_escapes_also_never_panic ... ok
+test short_or_nonfinite_points_are_diagnosed_without_panicking ... ok
+test malformed_string_escapes_are_errors_not_panics ... ok
+test null_placement_unsupported_products_are_counted ... ok
+test metres_and_millimetres_have_equivalent_canonical_lengths ... ok
+test nonsharp_i_profile_attributes_are_explicitly_rejected ... ok
+test sharp_i_profile_null_and_zero_attributes_preserve_geometry ... ok
+test i_profile_retains_its_reentrant_outline ... ok
+test step_ids_are_positive_unique_u32_including_references_and_complex_entities ... ok
+test step_requires_section_and_file_terminators ... ok
+test the_reader_reads_the_storey_from_a_minimal_file ... ok
+test the_step_parser_reads_a_minimal_ifc4_file ... ok
+test exported_ifc_round_trips_through_the_reader ... ok
+test the_step_parser_rejects_a_non_step_file ... ok
+test the_reader_keeps_the_wall_global_id_stable_across_exports ... ok
+test unsupported_or_missing_length_units_are_explicit_errors ... ok
+test units_scale_circle_i_and_polygon_profiles_and_nested_placements ... ok
+test valid_unicode_and_delimiter_text_in_headers_survive ... ok
+test writer_literal_backslashes_survive_headers_and_data ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stable_ids.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\stable_ids-69730c4c1a132a62.exe)
+
+running 3 tests
+test two_property_sets_that_are_the_same_in_everything_are_still_told_apart ... ok
+test adding_a_room_before_another_leaves_the_ids_of_the_other_alone ... ok
+test every_id_in_a_file_is_different_and_exports_repeat_exactly ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\walls.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\walls-d8c858f1791c6ea2.exe)
+
+running 16 tests
+test a_path_is_offset_to_the_left_with_mitred_corners ... ok
+test a_wall_drawn_on_a_location_line_has_its_centre_where_the_type_says ... ok
+test bad_paths_are_refused ... ok
+test each_location_line_puts_the_drawn_line_where_revit_does ... ok
+test a_type_that_does_not_fit_the_wall_is_refused ... ok
+test a_join_between_typed_walls_carries_the_layer_priorities ... ok
+test bad_joins_are_refused ... ok
+test a_typed_wall_is_one_element_with_its_type_a_layer_set_and_a_usage ... ok
+test the_core_is_between_the_boundaries_and_needs_a_structure_layer ... ok
+test joins_are_written_between_two_elements_with_their_connection_types ... ok
+test the_layer_functions_have_revits_priorities ... ok
+test materials_are_shared_and_walls_of_one_type_share_it ... ok
+test a_wall_end_that_may_not_join_joins_nothing ... ok
+test the_export_lists_the_layers_from_the_right_and_says_what_each_is ... ok
+test walls_on_other_storeys_a_closed_wall_and_a_wall_itself_are_not_joined ... ok
+test joins_are_found_for_ends_that_meet_and_ends_that_land_on_a_side ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_keymap-d04e8c7e70170f06.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\keymap.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\keymap-468a9255667149bb.exe)
+
+running 17 tests
+test a_bad_preset_is_refused_whole ... ok
+test a_key_name_in_a_revit_token_is_one_key_and_not_its_letters ... ok
+test a_real_revit_file_may_give_two_commands_one_shortcut ... ok
+test mouse_controls::gestures_parse_and_print ... ok
+test mouse_controls::the_preset_file_gives_pan_zoom_and_orbit ... ok
+test mouse_controls::the_user_can_change_and_clear_gestures_and_reset ... ok
+test a_shortcut_two_commands_share_offers_both_and_the_settings_menu_can_list_the_sharing ... ok
+test preset_lookup_and_settings_changes ... ok
+test reassign_takes_the_shortcut_from_its_owner ... ok
+test parsing_and_printing_keys ... ok
+test typing_sequences ... ok
+test reading_a_revit_style_shortcut_file ... ok
+test settings_file_round_trip_and_bad_files_change_nothing ... ok
+test the_revit_style_preset_file_loads_without_clashes ... ok
+test mouse_controls::a_bad_preset_file_is_refused ... ok
+test the_preset_has_no_chord_that_begins_a_typed_sequence_and_the_single_keys_run_at_once ... ok
+test random_settings_keep_the_map_valid ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_oplog-159d2159d5823220.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\assets.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\assets-74063d4f6d588013.exe)
+
+running 4 tests
+test a_file_is_kept_in_the_project_and_comes_back_after_replay ... ok
+test photometric_files_from_an_import_are_kept_and_read_again_from_the_project ... ok
+test name_and_role_lengths_are_limited_exactly ... ok
+test a_damaged_file_is_noticed_and_the_limits_hold ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests\oplog.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\oplog-61c785884f8b4d67.exe)
+
+running 21 tests
+test a_transaction_is_merged_or_left_out_as_a_whole ... ok
+test all_value_types_roundtrip_exactly ... ok
+test authors_never_hand_out_the_same_element_number ... ok
+test crc_known_value ... ok
+test delete_restores_everything_on_undo ... ok
+test fingerprint_is_stable_across_versions ... ok
+test merge_disjoint_edits_commute ... ok
+test merge_reports_clashes_and_a_wins ... ok
+test partial_header_classification ... ok
+test replay_equals_live_state ... ok
+test damage_is_detected_not_ignored ... ok
+test replay_error_names_the_transaction ... ok
+test snapshot_plus_tail_equals_full_replay ... ok
+test torn_tail_is_dropped_at_every_cut_point ... ok
+test undo_redo_roundtrip_and_log_grows ... ok
+test valid_checksum_but_extra_bytes_is_damage ... ok
+test failed_edit_changes_nothing_and_logs_nothing ... ok
+test prop_merge_is_symmetric_when_nothing_clashes ... ok
+test prop_truncation_yields_a_state_that_existed ... ok
+test prop_undo_everything_returns_to_empty_and_redo_returns_back ... ok
+test what_is_written_can_always_be_read_back ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_photo-898cbdd925b1fa17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\photo.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\photo-52fa149d7557a909.exe)
+
+running 9 tests
+test a_tilt_table_and_comma_lists_are_read ... ok
+test real_manufacturer_files_when_a_folder_is_given ... ok
+test an_even_light_gives_four_pi_times_its_intensity ... ok
+test eulumdat_files_with_each_symmetry_read_the_same_light ... ok
+test a_cosine_downlight_gives_pi_times_its_peak_and_units_and_multiplier_count ... ok
+test the_horizontal_symmetries_unfold_and_agree_with_the_full_table ... ok
+test files_that_are_wrong_are_errors_not_crashes ... ok
+test nothing_panics ... ok
+test an_archive_of_photometric_files_gives_one_result_per_file ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\photo_more.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\photo_more-9c4b3265d347f73e.exe)
+
+running 15 tests
+test errors_read_in_words ... ok
+test c_planes_fold_by_each_symmetry ... ok
+test an_entry_with_an_unsafe_name_is_never_read_as_a_path ... ok
+test flux_counts_every_plane_round_the_circle ... ok
+test eulumdat_stores_the_planes_each_symmetry_asks_for ... ok
+test intensity_is_linear_in_gamma_and_zero_outside_the_table ... ok
+test eulumdat_lamp_data_sizes_and_conversion ... ok
+test eulumdat_gamma_angles_come_from_the_file_or_the_step ... ok
+test the_light_output_ratio_note_appears_beyond_five_percent ... ok
+test the_beam_angle_is_measured_in_the_c0_plane_at_half_the_peak ... ok
+test the_format_is_told_from_the_content_and_the_size_limit_is_exact ... ok
+test eulumdat_counts_and_symmetry_are_limited ... ok
+test archive_limits_are_exact ... ok
+test ies_counts_multiplier_and_angles_are_checked ... ok
+test eulumdat_table_size_axial_c_and_zero_intensity ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_place-dc0b94a5d7adac10.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\arch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\arch-deab5779e02240cc.exe)
+
+running 5 tests
+test the_build_is_the_same_on_one_and_many_threads ... ok
+test arches_go_into_the_wall_segment_they_are_placed_on ... ok
+test an_arched_door_cuts_the_hand_calculated_volume_and_the_mesh_agrees ... ok
+test trouble_is_reported_against_the_placement ... ok
+test an_arched_window_with_a_sill_is_a_hole_and_mixes_with_a_flat_one ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\floors.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\floors-b39bf1c8c329cbe7.exe)
+
+running 14 tests
+test bad_slabs_are_refused ... ok
+test close_risers_share_one_rectangular_opening_and_far_ones_do_not ... ok
+test margin_applies_to_both_sides_of_a_rectangular_run ... ok
+test level_runs_and_runs_beside_or_short_of_the_slab_make_nothing ... ok
+test rect_riser_and_roll ... ok
+test merging_does_not_depend_on_the_order_or_the_axis ... ok
+test opening_that_does_not_fit_the_slab_outline_is_flagged ... ok
+test plumb_round_riser_gets_its_own_square_opening_with_margin ... ok
+test leaning_riser_opening_is_longer_along_the_lean ... ok
+test riser_through_a_shaft_is_recorded_as_in_the_shaft ... ok
+test run_lying_in_or_ending_in_the_slab_is_a_problem ... ok
+test register_order_is_by_slab_then_position ... ok
+test the_floor_openings_export_as_safe_csv ... ok
+test matches_a_brute_force_sampling_of_the_pipe_surface ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\incremental.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\incremental-869b8331de4b20d0.exe)
+
+running 5 tests
+test an_edit_moves_a_door_to_another_wall_and_the_volumes_follow ... ok
+test most_edits_take_the_quick_path_and_the_rest_the_full_build ... ok
+test a_result_that_does_not_belong_to_the_model_is_never_patched ... ok
+test a_position_that_is_not_a_number_is_refused_as_the_full_build_refuses_it ... ok
+test every_edit_gives_what_a_full_build_gives ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+     Running tests\penetrations.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\penetrations-cf5ad74dd4fd5e20.exe)
+
+running 15 tests
+test a_square_pipe_through_a_wall_gets_its_own_size_plus_margin ... ok
+test one_pipe_gets_a_round_opening_and_a_group_a_rectangle ... ok
+test runs_that_miss_touch_or_cross_several_walls ... ok
+test a_penetration_that_runs_off_the_wall_end_is_not_cut ... ok
+test registers_do_not_depend_on_the_order_of_the_runs ... ok
+test the_register_exports_as_safe_csv ... ok
+test a_skewed_pipe_needs_a_wider_opening_by_hand_calculation ... ok
+test firestop_fields_sit_beside_the_wall_rating ... ok
+test rectangular_ducts_follow_width_height_and_roll ... ok
+test the_wall_is_cut_by_exactly_the_register_opening ... ok
+test close_pipes_share_one_rectangular_opening ... ok
+test bad_runs_are_errors_in_the_strict_build_and_warnings_in_the_lenient_one ... ok
+test fire_partitions_are_listed ... ok
+test a_penetration_that_clashes_with_a_door_is_named_and_not_cut ... ok
+test the_opening_matches_an_independent_rim_walk_for_many_runs ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\place.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\place-3b474cc7b605328e.exe)
+
+running 21 tests
+test a_door_cuts_exactly_its_opening ... ok
+test a_window_cuts_at_its_sill_and_the_family_takes_the_wall_thickness ... ok
+test a_family_without_an_opening_does_not_cut ... ok
+test a_family_error_and_a_window_through_the_top_are_warnings ... ok
+test lenient_build_equals_strict_when_nothing_is_wrong ... ok
+test existing_wall_openings_are_kept ... ok
+test placed_parts_sit_exactly_in_the_opening_on_a_diagonal_wall ... ok
+test a_broken_chain_is_left_out_and_its_placements_are_skipped ... ok
+test lenient_results_do_not_depend_on_order_of_good_and_bad ... ok
+test an_open_door_leaf_is_placed_turned_in_the_world ... ok
+test a_bad_placement_is_skipped_and_the_rest_is_built ... ok
+test placement_order_does_not_change_the_wall ... ok
+test texts_reach_the_family_and_the_handle_follows_the_hinge_side ... ok
+test resizing_a_door_updates_the_wall_and_a_bad_edit_changes_nothing ... ok
+test updating_a_placement_that_does_not_exist_is_refused ... ok
+test walls_on_an_upper_level_place_their_parts_at_that_level ... ok
+test on_a_long_chain_the_error_still_names_the_placement_that_caused_it ... ok
+test bad_placements_are_refused_with_the_culprit_named ... ok
+test a_long_chain_gives_the_same_bits_on_any_number_of_threads ... ok
+test many_rooms_build_identically_on_any_thread_count ... ok
+test random_placements_in_a_room_follow_the_rules ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_route-0df8b83de2519186.exe)
+
+running 1 test
+test shift_tests::a_path_moves_to_the_left_of_the_way_it_is_drawn_and_its_corners_follow ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\auto.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\auto-40767aaec5c47acb.exe)
+
+running 19 tests
+test the_exemption_only_covers_the_way_out_of_the_connector_not_the_line_behind_it ... ok
+test a_zone_the_equipment_stands_in_is_not_charged_on_the_way_out ... ok
+test facing_connectors_in_the_open_are_joined_by_one_straight_run ... ok
+test no_turn_is_made_inside_a_soft_zone ... ok
+test a_riser_costs_more_and_makes_two_bends ... ok
+test running_along_inside_a_wall_costs_more_than_stepping_beside_it ... ok
+test an_l_path_has_one_elbow_and_costs_length_plus_a_bend ... ok
+test a_wall_is_crossed_when_that_is_cheaper_and_gone_round_when_it_is_not ... ok
+test the_ends_own_equipment_is_left_by_the_connector_and_avoided_after_that ... ok
+test bad_requests_are_refused ... ok
+test the_result_joins_both_pieces_of_equipment_in_the_graph ... ok
+test two_facing_connectors_too_close_for_both_stubs_are_not_joined_by_a_straight_pipe ... ok
+test the_far_end_leaves_its_own_equipment_the_same_way ... ok
+test a_later_pipe_goes_round_an_earlier_one_in_a_sequence ... ok
+test a_box_in_the_way_is_gone_round_and_never_entered ... ok
+test many_paths_at_once_give_what_each_gives_alone_and_a_sequence_keeps_apart ... ok
+test walls_far_from_the_search_change_nothing ... ok
+test the_zone_lookup_gives_the_answer_of_the_search_over_every_zone ... ok
+test the_cost_is_the_best_there_is_and_the_path_is_clear ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.29s
+
+     Running tests\catalogue.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\catalogue-cacb60b181063405.exe)
+
+running 11 tests
+test a_catalogue_that_is_not_valid_is_refused ... ok
+test a_route_from_a_connector_uses_the_catalogue_for_the_transition ... ok
+test a_type_for_one_system_is_used_only_for_that_system ... ok
+test angles_exist_only_where_the_catalogue_has_them_for_that_size ... ok
+test shapes_and_domains_are_matched ... ok
+test size_ranges_include_both_ends_exactly ... ok
+test the_elbow_is_picked_by_size_and_its_radius_sets_the_trim ... ok
+test the_first_matching_type_wins_so_the_order_is_the_authors_preference ... ok
+test the_plain_fields_and_an_equal_catalogue_route_identically ... ok
+test the_transition_is_picked_by_size_and_sets_its_length ... ok
+test tees_are_picked_by_run_size_branch_size_and_angle ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\grade.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\grade-d21881841a15d32b.exe)
+
+running 9 tests
+test a_branch_joins_a_sloped_run_and_slack_covers_the_slope ... ok
+test a_fall_between_two_elevations_is_even ... ok
+test a_steep_slope_needs_slack_because_the_bend_in_space_is_less_than_the_bend_in_plan ... ok
+test elevations_follow_the_gradient_leg_by_leg ... ok
+test bad_gradients_are_refused ... ok
+test slack_is_checked ... ok
+test the_fall_check_names_the_first_run_that_does_not_fall_enough ... ok
+test the_plan_snaps_apply_but_the_slope_is_kept ... ok
+test every_straight_run_keeps_its_gradient_and_the_invert_follows_the_legs ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\graph.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\graph-c047e34a4f556395.exe)
+
+running 12 tests
+test a_record_with_a_run_of_no_length_is_refused ... ok
+test a_tap_keeps_the_run_whole_and_is_recorded_as_a_tapping ... ok
+test a_size_change_links_runs_of_the_two_sizes_through_the_transition ... ok
+test a_tee_splits_the_run_and_keeps_what_was_joined_to_its_far_end ... ok
+test failures_leave_the_network_as_it_was ... ok
+test links_are_checked_for_size_place_and_direction ... ok
+test two_ports_at_one_place_must_face_each_other ... ok
+test saved_form_reads_back_the_same_and_is_deterministic ... ok
+test a_tap_before_a_tee_follows_the_half_it_sits_on ... ok
+test an_l_route_from_equipment_is_linked_end_to_end ... ok
+test damaged_records_are_refused_not_trusted ... ok
+test any_routed_path_becomes_one_valid_chain ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\reroute.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\reroute-7ab33ef338d4e3b5.exe)
+
+running 14 tests
+test a_pipe_that_ends_in_the_open_cannot_be_rerouted ... ok
+test a_pipe_with_a_tap_on_it_is_not_taken_away ... ok
+test removing_pieces_renumbers_the_rest_and_keeps_their_links ... ok
+test the_graph_refuses_a_chain_swap_for_the_wrong_kind_of_connector ... ok
+test a_failed_reroute_leaves_the_network_as_it_was ... ok
+test a_connector_of_another_size_is_taken_over_with_the_unit ... ok
+test a_moved_unit_is_joined_to_the_tee_again_and_the_rest_is_untouched ... ok
+test a_junction_numbered_after_the_pieces_that_go_is_found_again ... ok
+test the_pipe_keeps_its_size_and_a_shorter_way_retires_the_pieces_it_no_longer_needs ... ok
+test a_pipe_between_two_units_follows_the_one_that_moves ... ok
+test rerouting_twice_gives_the_same_network ... ok
+test two_connectors_of_one_unit_move_together_or_not_at_all ... ok
+test the_rest_of_the_network_is_kept_clear_of ... ok
+test wherever_the_unit_goes_the_network_stays_whole ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+     Running tests\route.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\route-84009bbb9d12089a.exe)
+
+running 23 tests
+test a_45_degree_bend_uses_the_half_angle_tangent ... ok
+test a_bend_with_no_elbow_in_the_preferences_is_refused ... ok
+test a_branch_dropped_on_a_run_gets_a_tee_and_splits_it ... ok
+test a_connector_must_belong_to_the_system_and_be_routable ... ok
+test a_kink_too_small_for_a_fitting_keeps_both_runs_and_gets_no_elbow ... ok
+test a_list_of_angles_is_mirrored_into_all_quadrants ... ok
+test a_rectangular_connector_sets_the_roll_of_the_stub ... ok
+test a_right_angle_gets_an_elbow_and_trimmed_runs_by_hand_calculation ... ok
+test a_session_can_override_the_project_snaps_without_changing_them ... ok
+test a_size_change_in_a_straight_line_gets_a_transition_of_the_preferred_length ... ok
+test a_tap_leaves_the_run_whole ... ok
+test a_routed_pipe_through_a_wall_gets_its_opening_in_the_register ... ok
+test a_reversed_route_is_the_same_path ... ok
+test a_route_leaves_a_connector_straight_and_is_resized_after_the_stub ... ok
+test increment_snaps_to_the_nearest_multiple ... ok
+test a_list_snap_is_the_nearest_of_the_mirrored_angles ... ok
+test bad_input_is_refused ... ok
+test branch_errors ... ok
+test points_are_snapped_one_after_the_other_keeping_the_distance ... ok
+test short_legs_reversals_and_collinear_points ... ok
+test snap_settings_are_checked ... ok
+test snapping_lands_on_an_allowed_angle_no_further_than_half_a_step ... ok
+test the_routed_path_is_the_drawn_polyline_with_its_corners_rounded ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_schematic-5e87952f27366509.exe)
+
+running 4 tests
+test layout::tests::duplicate_and_self_connections_count_once ... ok
+test layout::tests::unknown_level_and_non_finite_key_are_skipped ... ok
+test layout::tests::golden_uniform_from_fixture ... ok
+test layout::tests::golden_footprint_from_fixture ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_sheets-20cef3773e14fe79.exe)
+
+running 4 tests
+test annotations::tests::long_labels_expand_bubbles_and_edge_markers_are_never_partially_drawn ... ok
+test annotations::tests::paper_size_is_fixed_while_anchor_follows_model_scale ... ok
+test import::tests::digits_distinguish_headers ... ok
+test annotations::tests::invalid_marker_data_is_rejected_before_encoding ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\export.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\export-590db669e0353e6e.exe)
+
+running 3 tests
+test font_and_render_warnings_reach_the_caller ... ok
+test invalid_selection_and_disconnected_content_fail_for_both_formats ... ok
+test selected_sheets_keep_request_order_and_do_not_mutate_inputs ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\import.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\import-508e0d693045c445.exe)
+
+running 13 tests
+test a_repeated_number_updates_in_create_or_update_mode ... ok
+test another_worksheet_can_be_chosen ... ok
+test a_title_block_column_and_field_precedence ... ok
+test expected_columns_lists_what_a_file_should_contain ... ok
+test bad_rows_are_reported_with_their_spreadsheet_row_and_nothing_is_applied ... ok
+test files_that_cannot_work_are_refused_whole ... ok
+test non_atomic_import_applies_the_good_rows ... ok
+test rows_become_sheets_with_values_params_and_viewports ... ok
+test the_header_need_not_start_in_cell_a1 ... ok
+test unmatched_columns_can_be_kept_as_parameters ... ok
+test the_imported_set_prints ... ok
+test columns_match_names_ignoring_case_spaces_and_punctuation ... ok
+test update_changes_only_the_filled_cells ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\model.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\model-0f62f06c76f85e8a.exe)
+
+running 9 tests
+test clouds_need_a_known_revision_and_stay_inside_the_border ... ok
+test computed_fields ... ok
+test current_revision_is_the_latest_issued_one_with_a_cloud_on_the_sheet ... ok
+test parameters_sheet_before_project_and_names_ignore_case ... ok
+test project_and_parameter_limits ... ok
+test scale_text_follows_the_viewports ... ok
+test sheets_are_checked_when_added ... ok
+test viewports_must_lie_in_the_free_area_and_have_sane_scales ... ok
+test replace_keeps_the_position ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\paper_titleblock.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\paper_titleblock-057f81e94241face.exe)
+
+running 8 tests
+test bad_templates_are_refused ... ok
+test custom_sizes_are_checked_and_keep_orientation ... ok
+test generic_title_block_has_the_usual_fields_and_a_clear_free_area ... ok
+test generic_title_block_refuses_small_paper_and_bad_margins ... ok
+test iso_and_ansi_sizes_are_exact ... ok
+test paper_names_parse ... ok
+test templates_find_fields_and_escape_braces ... ok
+test validation_catches_items_off_the_sheet_and_bad_numbers ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\print_files.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\print_files-13f33d2c4f0935b6.exe)
+
+running 14 tests
+test colour_index_mapping ... ok
+test a_full_revision_table_reports_what_does_not_fit ... ok
+test dxf_is_complete_and_layered_by_weight ... ok
+test custom_orientation_reaches_titleblock_pdf_and_dxf ... ok
+test dxf_team_colours_use_the_full_palette ... ok
+test missing_fields_are_reported_not_invented ... ok
+test pdf_escapes_text_and_reports_unprintable_characters ... ok
+test pdf_structure_pages_and_sizes ... ok
+test revision_cloud_bulges_outward_for_either_winding ... ok
+test revision_table_lists_oldest_first_and_tags_sit_in_the_clouds ... ok
+test text_widths_come_from_the_helvetica_metrics ... ok
+test pdf_alignment_uses_the_text_width ... ok
+test unknown_sheet_view_and_missing_content_are_handled ... ok
+test rendering_is_deterministic ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\print_modes.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\print_modes-5804e53bf69acf68.exe)
+
+running 2 tests
+test print_modes_preserve_colour_or_make_grey_and_black_with_halftone ... ok
+test mode_selection_is_per_run_and_changes_only_stroke_colours ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\profile.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\profile-a2d65919a235c0d9.exe)
+
+running 4 tests
+test malformed_or_ambiguous_profiles_are_rejected ... ok
+test media_comparison_reports_matches_differences_missing_names_and_orientation ... ok
+test synthetic_profile_loads_ten_papers_and_roundtrips_without_changing_values ... ok
+test profile_pens_and_mode_drive_real_sheet_output ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\render_print.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\render_print-8b7ab6cad4fdee35.exe)
+
+running 8 tests
+test coordination_view_shows_everything_at_its_own_scale ... ok
+test architectural_view_hides_services_and_halftones_structure ... ok
+test lines_are_clipped_to_the_viewport_frame ... ok
+test halftone_and_weights_follow_the_tables ... ok
+test mechanical_view_shows_ducts_over_a_halftone_background ... ok
+test title_block_text_is_filled_from_the_sheet_set ... ok
+test viewport_maps_model_metres_to_sheet_millimetres ... ok
+test clip_agrees_with_dense_sampling ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\visibility.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\visibility-2cbb209a2acd408b.exe)
+
+running 10 tests
+test a_template_replaces_the_views_own_settings ... ok
+test changing_the_modes_changes_the_view ... ok
+test discipline_defaults_by_view ... ok
+test discipline_names_parse ... ok
+test explicit_overrides_beat_the_discipline_mode ... ok
+test filters_apply_to_matching_elements_in_list_order ... ok
+test library_checks ... ok
+test listed_categories_follow_the_discipline ... ok
+test linked_models_follow_host_a_linked_view_or_a_template ... ok
+test rules ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_sketch-12916c1d6c64f3f0.exe)
+
+running 1 test
+test tests::linear_solver_pivots_and_detects_singular ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sketch.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\sketch-acdcde8ffe29c83c.exe)
+
+running 18 tests
+test a_3_4_5_triangle_picks_the_side_it_was_drawn_on ... ok
+test a_missing_dimension_leaves_one_movement_and_unfixed_points ... ok
+test circles_radius_tangent_and_points_on_them ... ok
+test a_single_dimension_moves_both_points_the_least ... ok
+test a_locked_rectangle_with_two_dimensions_is_fully_fixed ... ok
+test angles_are_counter_clockwise_between_lines ... ok
+test bad_input_is_refused_with_a_reason ... ok
+test a_bad_first_guess_still_converges ... ok
+test a_repeated_constraint_is_redundant_not_wrong ... ok
+test free_movements_stay_where_they_were_drawn ... ok
+test every_index_of_every_constraint_is_checked ... ok
+test nothing_to_solve_changes_nothing ... ok
+test points_drawn_on_top_of_each_other_still_solve ... ok
+test conflicting_dimensions_are_reported_not_hidden ... ok
+test relations_one_by_one ... ok
+test limits ... ok
+test a_sketch_made_from_a_real_drawing_solves_from_a_nearby_one ... ok
+test derivatives_match_finite_differences ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_view-12f4c67270576923.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\elevation.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\elevation-0802314a4d4565f4.exe)
+
+running 8 tests
+test a_stair_is_cut_in_steps_by_a_section_along_it ... ok
+test nearer_walls_are_painted_after_farther_ones_so_they_hide_them ... ok
+test a_roof_is_seen_in_an_elevation_from_the_side_it_slopes_to_and_cut_by_a_section ... ok
+test an_elevation_is_a_face_with_its_openings_as_holes_and_nothing_is_cut ... ok
+test the_four_standard_elevations_look_at_the_building_with_u_growing_to_the_right ... ok
+test slabs_and_columns_in_front_are_faces_and_those_the_line_crosses_are_cut ... ok
+test an_elevation_is_the_same_on_any_number_of_threads_and_draws_with_white_faces ... ok
+test doors_and_windows_are_drawn_from_the_boxes_of_their_families_after_the_wall_they_sit_in ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\mesh.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\mesh-3f22751879aec244.exe)
+
+running 21 tests
+test a_batch_names_the_element_and_material_of_every_triangle ... ok
+test a_floor_opening_is_a_hole_in_the_slab_mesh ... ok
+test every_element_gets_a_closed_outward_mesh_with_the_right_volume ... ok
+test extrusions_in_every_work_plane_are_meshed_in_place ... ok
+test a_window_is_meshed_from_its_solids_with_their_materials ... ok
+test parts_cover_every_triangle_and_walls_have_exterior_and_interior_materials ... ok
+test a_transition_is_a_loft_from_one_section_to_the_other ... ok
+test circle_and_i_beams_have_the_volume_of_their_section ... ok
+test insulation_is_a_layer_round_runs_and_fittings_of_its_system_and_is_its_own_element ... ok
+test only_what_an_edit_touches_is_meshed_again ... ok
+test every_family_of_the_library_is_meshed_from_its_solids ... ok
+test a_free_void_cuts_a_hole_through_a_column_and_a_distant_one_cuts_nothing ... ok
+test a_free_standing_void_cuts_the_slab_it_passes_through ... ok
+test a_beam_is_a_closed_box_and_a_free_void_cuts_a_hole_through_it ... ok
+test sloped_tops_and_arched_openings_are_in_the_wall_mesh ... ok
+test pipes_ducts_and_fittings_are_meshed_and_a_change_to_one_remeshes_only_it ... ok
+test sweeps_follow_the_path_with_mitred_bends_and_are_closed ... ok
+test blends_and_voids_reach_the_3d_mesh_in_the_model ... ok
+test revolves_are_closed_solids_of_the_right_volume_whole_or_partial ... ok
+test the_meshes_do_not_depend_on_the_number_of_threads ... ok
+test a_void_of_a_hosted_family_cuts_the_wall_it_sits_in ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\plan.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\plan-7b8a99c9c9646614.exe)
+
+running 13 tests
+test a_sloped_top_is_cut_only_where_the_wall_is_higher_than_the_cut ... ok
+test a_closed_wall_chain_has_no_lines_across_its_corners ... ok
+test a_polygonal_opening_is_a_gap_as_wide_as_the_polygon_at_the_cut_height ... ok
+test a_window_is_a_gap_only_while_the_cut_is_between_its_sill_and_head ... ok
+test a_door_in_a_wall_is_a_gap_in_the_cut_below_its_head_and_no_gap_above_it ... ok
+test rooms_of_the_level_are_regions_with_a_tag_inside_them_and_the_area_without_holes ... ok
+test the_level_decides_the_heights_and_bad_input_is_an_error ... ok
+test separation_lines_of_the_level_are_drawn_and_rooms_and_slabs_go_under_the_walls ... ok
+test the_revit_look_has_white_walls_hatched_concrete_and_untinted_rooms ... ok
+test walls_below_above_and_beyond_the_cut_are_classed_by_the_range ... ok
+test a_slab_follows_the_view_range_and_its_voids_are_holes ... ok
+test a_door_symbol_follows_the_wall_it_is_in_and_turns_with_it ... ok
+test the_view_does_not_depend_on_the_number_of_threads_and_draws_as_svg ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\section.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\section-bdf2df390cd67746.exe)
+
+running 7 tests
+test a_section_across_a_wall_cuts_its_thickness_and_a_door_is_a_gap_only_where_the_line_crosses_it ... ok
+test a_section_along_a_wall_shows_the_door_where_it_is_and_the_direction_decides_left_and_right ... ok
+test arched_openings_sloped_tops_and_bad_sections ... ok
+test levels_are_datum_lines_with_names_and_the_view_height_clips_everything ... ok
+test slabs_and_columns_are_cut_and_a_shaft_void_splits_the_slab ... ok
+test walls_in_front_of_the_plane_within_the_depth_are_beyond_outlines_and_those_behind_are_not_drawn ... ok
+test a_section_is_the_same_on_any_number_of_threads_and_draws_as_svg ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_viewport-92cb65885ee0a8f2.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\viewport.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\viewport-2b774112abaca6b7.exe)
+
+running 15 tests
+test blending_cameras_turns_the_short_way ... ok
+test mouse_buttons_map_as_in_revit ... ok
+test the_sun_is_where_astronomy_puts_it ... ok
+test zoom_to_fit_puts_every_corner_of_the_box_inside_the_picture ... ok
+test the_default_3d_view_looks_from_the_south_east_and_above ... ok
+test pan_moves_the_target_in_the_view_plane_by_the_pixels_dragged ... ok
+test the_view_cube_snaps_to_faces_edges_and_corners ... ok
+test orbit_turns_about_the_target_and_cannot_go_over_the_pole ... ok
+test project_north_turns_the_sun_with_the_georeference ... ok
+test the_sun_and_the_ifc_true_north_direction_agree_on_the_sign_of_the_angle ... ok
+test zoom_keeps_the_point_under_the_cursor_where_it_is ... ok
+test nearer_things_hide_farther_ones_in_the_shaded_picture ... ok
+test hidden_line_draws_edges_that_are_seen_and_not_those_behind_a_face ... ok
+test picking_finds_the_front_element_and_respects_the_section_box ... ok
+test hidden_line_draws_the_line_where_two_walls_meet ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\openbim_viewport_egui-0e922929576e7a61.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\gpu.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\gpu-b758145e77028ff0.exe)
+
+running 10 tests
+test shader_is_valid_wgsl ... ok
+test edge_extraction_finds_creases ... ok
+test a_model_over_the_memory_budget_is_refused_with_the_reason_instead_of_stopping ... ok
+test gpu_hidden_line_and_wireframe_draw_lines ... ok
+test the_shadow_follows_the_sun_and_night_has_none ... ok
+test realistic_walls_cast_shadows_on_the_floor ... ok
+test section_box_cuts_the_picture ... ok
+test realistic_differs_from_shaded_and_selection_is_orange ... ok
+test gpu_shaded_agrees_with_software ... ok
+test a_model_of_more_than_one_buffer_is_uploaded_in_parts_and_drawn ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+
+     Running tests\widget.rs (C:/Users/wilfr/hermes-first-task/revit-alike-gate/target-fa9f0237eb\release\deps\widget-604bbfd25d46b767.exe)
+
+running 5 tests
+test default_view_shows_three_faces_and_27_cells ... ok
+test every_place_can_be_clicked_and_snaps_the_camera ... ok
+test view_cube_snap_is_animated_and_ends_at_the_target ... ok
+test middle_drag_pans_shift_middle_orbits_wheel_zooms ... ok
+test clicking_selects_the_element_under_the_cursor ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests obg_ds
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_arch
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_automation
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_calc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_commands
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_document
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_family
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_geom
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_ifc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_keymap
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_oplog
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_photo
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_place
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_route
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_schematic
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_sheets
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_sketch
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_view
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_viewport
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests openbim_viewport_egui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+--- [2/3] cargo clippy --workspace --all-targets -- -D warnings ---
+    Checking cfg-if v1.0.5
+   Compiling libm v0.2.16
+   Compiling autocfg v1.5.1
+    Checking foldhash v0.2.0
+    Checking log v0.4.34
+    Checking equivalent v1.0.3
+    Checking simd-adler32 v0.3.10
+    Checking memchr v2.8.3
+   Compiling crc32fast v1.5.2
+    Checking adler2 v2.0.1
+    Checking zlib-rs v0.6.8
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+    Checking bumpalo v3.20.3
+    Checking windows-link v0.2.1
+    Checking either v1.19.0
+    Checking rand_core v0.10.1
+    Checking hashbrown v0.17.1
+    Checking typed-path v0.12.3
+    Checking miniz_oxide v0.9.1
+   Compiling getrandom v0.4.3
+   Compiling crossbeam-utils v0.8.23
+   Compiling crossbeam-epoch v0.9.21
+   Compiling crossbeam-deque v0.8.8
+   Compiling rayon-core v1.13.0
+    Checking itertools v0.14.0
+    Checking bitflags v2.13.2
+   Compiling num-traits v0.2.19
+    Checking once_cell v1.21.4
+    Checking indexmap v2.14.2
+    Checking openbim-sketch v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\sketch)
+    Checking core_detect v1.0.0
+    Checking windows-sys v0.61.2
+    Checking fastrand v2.5.0
+    Checking fnv v1.0.7
+    Checking bit-vec v0.10.1
+    Checking quick-error v1.2.3
+    Checking flate2 v1.1.10
+    Checking zopfli v0.8.4
+    Checking cpufeatures v0.3.1
+    Checking wait-timeout v0.2.1
+    Checking rand_xorshift v0.5.0
+    Checking regex-syntax v0.8.11
+    Checking unarray v0.1.4
+    Checking rand v0.10.3
+    Checking bit-set v0.11.1
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+    Checking chacha20 v0.10.2
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.154
+   Compiling thiserror v2.0.21
+    Checking itoa v1.0.18
+    Checking scopeguard v1.2.0
+    Checking zip v9.0.4
+    Checking uuid v1.28.0
+    Checking smallvec v1.16.3
+   Compiling cfg_aliases v0.2.2
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling rustversion v1.0.23
+    Checking i_float v1.16.0
+    Checking arrayvec v0.7.8
+    Checking openbim-electrical-model v0.0.1 (https://github.com/wildut85523456k/edesign-alike?rev=57ef01848860771d29960dcf2e8af2f831fe1e6c#57ef0184)
+    Checking i_key_sort v0.10.3
+    Checking earcutr v0.5.0
+    Checking tempfile v3.27.0
+    Checking openbim-photo v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\photo)
+    Checking i_tree v0.18.0
+   Compiling zerocopy v0.8.63
+    Checking windows-strings v0.5.1
+    Checking i_shape v1.18.0
+    Checking windows-result v0.4.1
+    Checking simdutf8 v0.1.5
+   Compiling multiversion_no_op v1.0.0
+    Checking rusty-fork v0.3.1
+    Checking debug_unsafe v0.1.4
+   Compiling parking_lot_core v0.9.12
+    Checking windows-threading v0.2.1
+   Compiling khronos_api v3.1.0
+    Checking stable_deref_trait v1.2.1
+    Checking rayon v1.12.0
+    Checking raw-window-handle v0.6.2
+    Checking fast-float2 v0.2.4
+    Checking allocator-api2 v0.2.21
+    Checking byteorder v1.5.0
+    Checking proptest v1.12.0
+    Checking i_overlay v4.5.2
+    Checking lock_api v0.4.14
+    Checking static_assertions v1.1.0
+    Checking polycool v0.4.0
+    Checking profiling v1.0.18
+    Checking rustc-hash v1.1.0
+    Checking hashbrown v0.16.1
+   Compiling xml-rs v0.8.29
+    Checking euclid v0.22.14
+   Compiling encoding_rs v0.8.42
+   Compiling synstructure v0.14.0
+    Checking atoi_simd v0.18.1
+   Compiling naga v30.0.1
+    Checking kurbo v0.13.1
+    Checking libloading v0.8.9
+   Compiling libc v0.2.190
+    Checking parking_lot v0.12.5
+    Checking linebender_resource_handle v0.1.1
+    Checking unicode-width v0.1.14
+   Compiling version_check v0.9.5
+   Compiling ash v0.38.0+1.3.281
+   Compiling gl_generator v0.14.0
+   Compiling windows_x86_64_msvc v0.52.6
+    Checking bit-vec v0.9.1
+    Checking guillotiere v0.7.0
+    Checking codespan-reporting v0.13.1
+    Checking openbim-geom v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\geom)
+    Checking openbim-family v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\family)
+    Checking openbim-calc v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\calc)
+   Compiling ahash v0.8.12
+    Checking bit-set v0.10.0
+    Checking accesskit v0.24.1
+    Checking spirv v0.4.0+sdk-1.4.341.0
+   Compiling unicode-general-category v1.1.0
+    Checking openbim-arch v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\arch)
+   Compiling glutin_wgl_sys v0.6.1
+   Compiling khronos-egl v6.0.0
+    Checking fearless_simd v0.4.1
+    Checking quick-xml v0.42.0
+    Checking codepage v0.1.3
+    Checking unicode-segmentation v1.13.3
+   Compiling wgpu-hal v30.0.1
+    Checking presser v0.3.1
+    Checking windows-targets v0.52.6
+    Checking openbim-place v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\place)
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling bytemuck_derive v1.12.1
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+    Checking ordered-float v4.6.0
+    Checking openbim-route v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\route)
+   Compiling winit v0.30.13
+    Checking pin-project-lite v0.2.17
+    Checking epaint_default_fonts v0.36.2
+    Checking litemap v0.8.3
+    Checking nohash-hasher v0.2.0
+    Checking range-alloc v0.1.5
+    Checking writeable v0.6.4
+    Checking zerofrom v0.1.8
+    Checking self_cell v1.3.0
+    Checking tracing-core v0.1.36
+    Checking openbim-ifc v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\ifc)
+    Checking renderdoc-sys v1.1.0
+    Checking glow v0.17.0
+    Checking windows-sys v0.52.0
+   Compiling wgpu-core v30.0.1
+    Checking itertools v0.15.0
+    Checking yoke v0.8.3
+    Checking bytemuck v1.25.2
+    Checking dpi v0.1.2
+    Checking tracing v0.1.44
+    Checking zerovec v0.11.8
+    Checking zerotrie v0.2.5
+    Checking naga-types v30.0.1
+   Compiling icu_normalizer_data v2.3.0
+   Compiling litrs v1.0.1
+    Checking font-types v0.12.6
+    Checking color v0.3.3
+    Checking wgpu-types v30.0.1
+    Checking emath v0.36.2
+    Checking cursor-icon v1.2.0
+    Checking tinystr v0.8.4
+    Checking potential_utf v0.1.6
+    Checking read-fonts v0.41.0
+    Checking openbim-view v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\view)
+    Checking smol_str v0.2.2
+    Checking peniko v0.6.1
+    Checking ecolor v0.36.2
+    Checking icu_locale_core v2.3.0
+   Compiling icu_properties_data v2.3.0
+    Checking utf8_iter v1.0.4
+   Compiling document-features v0.2.12
+   Compiling windows-implement v0.60.2
+   Compiling zerocopy-derive v0.8.63
+   Compiling windows-interface v0.59.3
+    Checking vello_common v0.1.0
+    Checking icu_collections v2.3.0
+   Compiling wgpu v30.0.1
+    Checking icu_provider v2.3.1
+    Checking rustc-hash v2.1.3
+    Checking web-time v1.1.0
+    Checking vello_cpu v0.1.0
+   Compiling windows_x86_64_msvc v0.53.1
+    Checking openbim-viewport v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\viewport)
+    Checking windows-core v0.62.2
+    Checking miniz_oxide v0.8.9
+    Checking type-map v0.5.1
+    Checking fdeflate v0.3.7
+    Checking icu_normalizer v2.3.0
+    Checking icu_properties v2.3.0
+    Checking pxfm v0.1.30
+    Checking byteorder-lite v0.1.0
+    Checking windows-numerics v0.3.1
+    Checking windows-future v0.3.2
+    Checking windows-collections v0.3.2
+    Checking png v0.18.1
+    Checking percent-encoding v2.3.2
+    Checking accesskit_consumer v0.35.0
+    Checking pollster v1.0.1
+    Checking error-code v3.4.0
+    Checking openbim-oplog v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\oplog)
+    Checking windows v0.62.2
+    Checking windows-targets v0.53.5
+    Checking idna_adapter v1.2.2
+    Checking form_urlencoded v1.2.2
+   Compiling enum-map-derive v0.17.0
+    Checking clipboard-win v5.4.1
+    Checking openbim-schematic v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\schematic)
+    Checking openbim-electrical-solver v0.0.1 (https://github.com/wildut85523456k/edesign-alike?rev=57ef01848860771d29960dcf2e8af2f831fe1e6c#57ef0184)
+    Checking calamine v0.36.1 (https://github.com/tafia/calamine.git?rev=39ebf5d851543e4f3dc5964baeadd383eb17a3ae#39ebf5d8)
+    Checking idna v1.1.0
+   Compiling rfd v0.17.2
+    Checking windows-sys v0.60.2
+    Checking openbim-commands v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\commands)
+    Checking openbim-keymap v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\keymap)
+    Checking obg-ds v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\obg-ds)
+    Checking openbim-document v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\document)
+    Checking url v2.5.8
+    Checking enum-map v2.7.3
+    Checking moxcms v0.8.1
+    Checking webbrowser v1.2.4
+    Checking openbim-sheets v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\sheets)
+    Checking image v0.25.10
+    Checking arboard v3.6.1
+    Checking openbim-automation v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\automation)
+    Checking half v2.7.1
+    Checking harfrust v0.12.0
+    Checking skrifa v0.44.0
+    Checking epaint v0.36.2
+    Checking egui v0.36.2
+    Checking egui_extras v0.36.2
+    Checking wgpu-naga-bridge v30.0.1
+    Checking gpu-allocator v0.28.0
+    Checking accesskit_windows v0.32.1
+    Checking accesskit_winit v0.32.2
+    Checking egui-winit v0.36.2
+    Checking wgpu-core-deps-windows-linux-android v30.0.1
+    Checking egui-wgpu v0.36.2
+    Checking openbim-viewport-egui v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\crates\viewport-egui)
+    Checking eframe v0.36.2
+    Checking openbim-desktop v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike-gate\wt-fa9f0237eb\apps\desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 19s
+--- [3/3] cargo audit ---
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1352 security advisories (from C:\Users\wilfr\.cargo\advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (490 crate dependencies)
+Crate:     ttf-parser
+Version:   0.25.1
+Warning:   unmaintained
+Title:     `ttf-parser` is unmaintained
+Date:      2026-06-28
+ID:        RUSTSEC-2026-0192
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0192
+
+Crate:     zbus_names
+Version:   4.3.4
+Warning:   unmaintained
+Title:     `zbus_names` is unmaintained
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0371
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0371
+
+Crate:     zvariant
+Version:   5.15.0
+Warning:   unmaintained
+Title:     `zvariant` is unmaintained
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0370
+
+Crate:     zvariant_derive
+Version:   5.15.0
+Warning:   unmaintained
+Title:     `zvariant_derive` is unmaintained
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0372
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0372
+
+Crate:     clipboard-win
+Version:   5.4.1
+Warning:   yanked
+
+warning: 5 allowed warnings found
+GATE PASS: fa9f0237eb8581e19f50cd074cebc092cfd2d41c
+To https://github.com/wildut85523456k/revit-alike.git
+ + 5879180...fa9f023 feat/auto-008-obg-ds -> feat/auto-008-obg-ds (forced update)
+=== push exit: 0 ===
+fa9f0237eb8581e19f50cd074cebc092cfd2d41c
+26 Oct 2026 11:13:20

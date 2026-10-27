@@ -1,0 +1,11 @@
+log=docs/agent-team/evidence/auto-008-rebase-2026-10-26/cargo-team/push-auto008.log
+=== git push origin feat/auto-008-obg-ds (pre-push hook runs cargo test+clippy+audit) ===
+To https://github.com/wildut85523456k/revit-alike.git
+ ! [rejected]        feat/auto-008-obg-ds -> feat/auto-008-obg-ds (non-fast-forward)
+error: failed to push some refs to 'https://github.com/wildut85523456k/revit-alike.git'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+=== push exit: 1 ===
+26 Oct 2026 09:07:15

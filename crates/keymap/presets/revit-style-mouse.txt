@@ -1,7 +1,0 @@
-# Default mouse controls: Revit-style navigation.
-# Source: the issue "Shortcuts: ... mouse controls" (15 Oct 2026) names the three below; the author knows them as Revit's. Anything else is left unspecified
-# until it is checked against a clean install. Format: gesture <TAB> action <TAB> English name (not read by the program).
-# Gestures: [Ctrl+][Shift+][Alt+] then Wheel, or Left/Middle/Right followed by Drag, Click or DoubleClick.
-MiddleDrag	nav.pan	Pan
-Wheel	nav.zoom-at-cursor	Zoom about the pointer
-Shift+MiddleDrag	nav.orbit	Orbit in a 3D view
