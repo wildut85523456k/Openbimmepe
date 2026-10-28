@@ -6,7 +6,7 @@ members = ["apps/desktop"]
 # They are consumed as git-SHA-pinned dependencies from:
 #   https://github.com/wildut85523456k/openbim-core
 #
-# Migration date: 2026-10-27  Core SHA: d7cdc1d68a914eb0f6acfc71f5fd4ce3553199eb
+# Migration date: 2026-10-27  Core SHA: 544ee0d7c035cb0dffa57f5981094f28fe7ce591
 
 [workspace.package]
 edition = "2021"

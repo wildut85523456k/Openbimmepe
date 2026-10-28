@@ -1658,7 +1658,7 @@ mod tests {
             let Some(over) = over else { break };
             let up = full.center().y < over.y;
             window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(over), egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, if up { 40.0 } else { -40.0 }), phase: egui::TouchPhase::Move, modifiers: Default::default(),
+                unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, if up { 40.0 } else { -40.0 }), phase: egui::TouchPhase::Move, modifiers: Default::default(), source: egui::MouseWheelSource::Unknown,
             }]);
         }
         panic!("the window shows no reachable control {name:?}; it shows {:?} ({})",
