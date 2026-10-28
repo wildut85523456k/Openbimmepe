@@ -9,7 +9,7 @@ resolver = "2"
 members = ["electrical-adapter", "desktop-full"]
 
 [workspace.dependencies]
-openbim-document = { git = "https://github.com/wildut85523456k/openbim-core", rev = "50f634efffdd9dff63aad96b14baa0ac89f3e382" }
+openbim-document = { git = "https://github.com/wildut85523456k/openbim-core", rev = "d7cdc1d68a914eb0f6acfc71f5fd4ce3553199eb" }
 openbim-desktop = { path = "../apps/desktop" }
-openbim-electrical-model = { git = "https://github.com/wildut85523456k/openbim-core", rev = "50f634efffdd9dff63aad96b14baa0ac89f3e382" }
-openbim-electrical-solver = { git = "https://github.com/wildut85523456k/openbim-core", rev = "50f634efffdd9dff63aad96b14baa0ac89f3e382" }
+openbim-electrical-model = { git = "https://github.com/wildut85523456k/openbim-core", rev = "d7cdc1d68a914eb0f6acfc71f5fd4ce3553199eb" }
+openbim-electrical-solver = { git = "https://github.com/wildut85523456k/openbim-core", rev = "d7cdc1d68a914eb0f6acfc71f5fd4ce3553199eb" }
