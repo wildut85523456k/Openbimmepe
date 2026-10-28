@@ -119,7 +119,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         if matches!(node.kind,NodeKind::Slider {..}) && crate::automation_slider::expanded(&ctx,node.id) {rect.max.y+=146.0;}
         rect
     };
-    let selection_key=ui.id().with("selected-blocks");
+    let selection_key=ui.scope_id().with("selected-blocks");
     let mut selected=ui.ctx().data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(selection_key)).unwrap_or_default();
     selected.retain(|id|graph.nodes.iter().any(|n|n.id==*id));
     let group_requested=ui.button("Group selected (Ctrl+G)").clicked() || ui.input_mut(|i|i.consume_key(egui::Modifiers::COMMAND,egui::Key::G));
@@ -138,7 +138,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     let unconnected = if dark { Color32::from_gray(180) } else { Color32::from_gray(115) };
     painter.rect_filled(canvas, 4.0, ui.visuals().extreme_bg_color);
     let mut changed = group_requested;
-    let marquee_key=ui.id().with("selection-marquee");
+    let marquee_key=ui.scope_id().with("selection-marquee");
     let mut marquee=ui.ctx().data(|d|d.get_temp::<Marquee>(marquee_key));
     let escaped=ui.input(|i|i.key_pressed(egui::Key::Escape));
     if escaped {
@@ -193,9 +193,9 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     for node in &graph.nodes {
         let rect = node_rect(canvas.min, node);
         let header = Rect::from_min_size(rect.min, Vec2::new(WIDTH, HEADER));
-        let response = ui.interact(header.intersect(canvas), ui.id().with(("node-header", node.id)), Sense::click_and_drag());
+        let response = ui.interact(header.intersect(canvas), ui.scope_id().with(("node-header", node.id)), Sense::click_and_drag());
         if response.double_clicked() && matches!(node.kind,NodeKind::Python {..}) {
-            ui.ctx().data_mut(|d|d.insert_temp(ui.id().with("python-editor"),node.id));
+            ui.ctx().data_mut(|d|d.insert_temp(ui.scope_id().with("python-editor"),node.id));
         }
         if response.clicked() {
             if ui.input(|i|i.modifiers.command || i.modifiers.ctrl) {
@@ -214,8 +214,8 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         });
     }
     if let Some(delta)=selection_motion {move_selection(graph,&selected,delta);}
-    let drag_key = ui.id().with("connector-drag");
-    let cancel_key = ui.id().with("connector-drag-cancelled");
+    let drag_key = ui.scope_id().with("connector-drag");
+    let cancel_key = ui.scope_id().with("connector-drag-cancelled");
     if ui.input(|i|i.key_pressed(egui::Key::Escape)) {
         ui.ctx().data_mut(|data|data.insert_temp(cancel_key,true));
     }
@@ -259,7 +259,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
             } else if !blocked && pending.is_none() {
                 Rect::from_center_size(handle,Vec2::splat(14.0)).intersect(canvas)
             } else { Rect::from_min_size(canvas.min,Vec2::ZERO) };
-            let response = ui.interact(hit,ui.id().with(("wire-route",connection.from,connection.output,connection.to,connection.input)),Sense::click_and_drag());
+            let response = ui.interact(hit,ui.scope_id().with(("wire-route",connection.from,connection.output,connection.to,connection.input)),Sense::click_and_drag());
             if response.double_clicked() {
                 connection.route=None;
                 handle=route_point(start,end,None);
@@ -307,7 +307,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         }
         for (index, ty) in inputs.iter().enumerate() {
             let cell = Rect::from_min_size(egui::pos2(rect.left(), header.bottom() + index as f32 * ROW), Vec2::new(WIDTH * 0.5, ROW));
-            let response = ui.interact(cell.intersect(canvas), ui.id().with(("input-row", node.id, index)), Sense::click());
+            let response = ui.interact(cell.intersect(canvas), ui.scope_id().with(("input-row", node.id, index)), Sense::click());
             // Hover ownership belongs to the dragged output during a drag;
             // drop targeting must use geometry, not widget hover ownership.
             if ui.ctx().pointer_interact_pos().is_some_and(|p|canvas.contains(p) && cell.expand2(Vec2::new(10.0,0.0)).contains(p)) {
@@ -338,7 +338,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
         for (row,(output,name,ty)) in node.kind.outputs().into_iter().enumerate() {
         let cell = Rect::from_min_size(egui::pos2(middle, header.bottom()+row as f32*ROW), Vec2::new(WIDTH * 0.5, ROW));
         let selected = *pending == Some((node.id,output));
-        let response = ui.interact(cell.intersect(canvas), ui.id().with(("output-row", node.id,output)), Sense::click_and_drag());
+        let response = ui.interact(cell.intersect(canvas), ui.scope_id().with(("output-row", node.id,output)), Sense::click_and_drag());
         if selected || response.hovered() { painter.rect_filled(cell.shrink(1.0), 0.0, blue.gamma_multiply(0.16)); }
         let connected = graph.wires.iter().any(|w| w.from == node.id && w.output==output);
         socket(&painter, cell, false, connected || selected, if connected || selected { blue } else { unconnected });
@@ -392,7 +392,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
                 }
                 NodeKind::Dimensions => { ui.label("Width / height / elevation"); },
                 NodeKind::Selection { ids } => {
-                    let key=ui.id().with("selection-text");
+                    let key=ui.scope_id().with("selection-text");
                     let mut text=ui.ctx().data(|d|d.get_temp::<String>(key)).unwrap_or_else(||ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", "));
                     let response=ui.add(egui::TextEdit::singleline(&mut text).hint_text("Element IDs, comma separated"));
                     if response.changed() {
@@ -406,7 +406,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
             }
         });
     }
-    let editor_key=ui.id().with("python-editor");
+    let editor_key=ui.scope_id().with("python-editor");
     if let Some(id)=ui.ctx().data(|d|d.get_temp::<u64>(selection_key.with("python-editor-request"))) {
         ui.ctx().data_mut(|d| {d.remove::<u64>(selection_key.with("python-editor-request"));d.insert_temp(editor_key,id);});
     }
@@ -462,7 +462,7 @@ mod tests {
         }
         let mut output=ctx.run_ui(RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1000.0,600.0))),events,..Default::default() },|ui| {
             egui::ScrollArea::vertical().show(ui,|ui| {
-                ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("test-canvas-id"),ui.id()));
+                ui.ctx().data_mut(|d|d.insert_temp(egui::Id::unique("test-canvas-id"),ui.scope_id()));
                 show(ui,graph,pending,&mut String::new());
             });
         });
@@ -486,7 +486,7 @@ mod tests {
         frame(&ctx,&mut graph,&mut pending,vec![button(first,false)]);
         let ctrl=Modifiers {ctrl:true,command:true,..Default::default()};
         for pressed in [true,false] {frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(second),Event::PointerButton {pos:second,pressed,button:PointerButton::Primary,modifiers:ctrl}]);}
-        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::unique("test-canvas-id"))).unwrap();
         assert_eq!(ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap(),std::collections::BTreeSet::from([1,2]));
         for pressed in [true,false] {frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(first),Event::PointerButton {pos:first,pressed,button:PointerButton::Primary,modifiers:ctrl}]);}
         assert_eq!(ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap(),std::collections::BTreeSet::from([2]));
@@ -494,7 +494,7 @@ mod tests {
         let ctx=egui::Context::default();
         let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[3]-Vec2::new(290.0,74.0);
         let second=origin+Vec2::new(410.0,45.0);
-        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::unique("test-canvas-id"))).unwrap();
         for _ in 0..2 {
             frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(second),button(second,true)]);
             frame(&ctx,&mut graph,&mut pending,vec![button(second,false)]);
@@ -505,7 +505,7 @@ mod tests {
     fn escape_restores_selection_and_empty_click_clears_it() {
         let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
         let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[0]-Vec2::new(260.0,74.0);
-        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::unique("test-canvas-id"))).unwrap();
         ctx.data_mut(|d|d.insert_temp(id.with("selected-blocks"),std::collections::BTreeSet::from([4_u64])));
         let start=origin+Vec2::new(10.0,15.0);let end=origin+Vec2::new(550.0,170.0);
         frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
@@ -527,7 +527,7 @@ mod tests {
         frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(start),button(start,true)]);
         frame(&ctx,&mut graph,&mut pending,vec![Event::PointerMoved(end)]);
         frame(&ctx,&mut graph,&mut pending,vec![button(end,false)]);
-        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::new("test-canvas-id"))).unwrap();
+        let id=ctx.data(|d|d.get_temp::<egui::Id>(egui::Id::unique("test-canvas-id"))).unwrap();
         let selected=ctx.data(|d|d.get_temp::<std::collections::BTreeSet<u64>>(id.with("selected-blocks"))).unwrap();
         assert_eq!(selected,std::collections::BTreeSet::from([1,2]));
         let before=graph.nodes.clone();let wires=graph.wires.clone();

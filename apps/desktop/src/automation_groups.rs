@@ -17,7 +17,7 @@ pub fn show(ui:&mut egui::Ui,graph:&mut Graph,canvas:Rect,selected:&mut BTreeSet
         if !bounds.is_finite() {continue}
         bounds=bounds.expand(12.0);bounds.min.y-=28.0;
         let header=Rect::from_min_size(bounds.min,Vec2::new(bounds.width(),28.0));
-        let response=ui.interact(header.intersect(canvas),ui.id().with(("group-header",group.id)),Sense::click_and_drag());
+        let response=ui.interact(header.intersect(canvas),ui.scope_id().with(("group-header",group.id)),Sense::click_and_drag());
         if response.clicked() {
             let additive=ui.input(|i|i.modifiers.command || i.modifiers.ctrl);
             if additive && group.nodes.iter().all(|id|selected.contains(id)) {

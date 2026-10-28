@@ -286,7 +286,7 @@ impl Desktop {
     pub(crate) fn new_sheet_window(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.sheets.new.take() else { return };
         let (mut open, mut ok, mut cancel) = (true, false, false);
-        egui::Window::new("New Sheet").id(egui::Id::new("new_sheet_window")).open(&mut open).collapsible(false).default_width(320.0).show(ctx, |ui| {
+        egui::Window::new("New Sheet").id(egui::Id::unique("new_sheet_window")).open(&mut open).collapsible(false).default_width(320.0).show(ctx, |ui| {
             egui::Grid::new("new_sheet_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Title block");
                 egui::ComboBox::from_id_salt("new_sheet_size").selected_text({ let (w, h) = d.size.dims_mm(d.portrait); format!("{} {w:.0} x {h:.0} mm", d.size.name()) }).show_ui(ui, |ui| {
@@ -320,7 +320,7 @@ impl Desktop {
     pub(crate) fn sheet_props_window(&mut self, ctx: &egui::Context) {
         let Some(mut p) = self.sheets.props.take() else { return };
         let (mut open, mut ok, mut apply, mut cancel) = (true, false, false, false);
-        egui::Window::new(format!("Sheet Properties - {}", p.draft.label())).id(egui::Id::new("sheet_props_window")).open(&mut open).default_width(380.0).show(ctx, |ui| {
+        egui::Window::new(format!("Sheet Properties - {}", p.draft.label())).id(egui::Id::unique("sheet_props_window")).open(&mut open).default_width(380.0).show(ctx, |ui| {
             egui::Grid::new("sheet_props_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Sheet number");
                 ui.text_edit_singleline(&mut p.draft.number);
@@ -363,7 +363,7 @@ impl Desktop {
         let (mut open, mut add, mut cancel) = (true, false, false);
         let sheets: Vec<(u64, String)> = self.document.sheets().iter().map(|s| (s.id, s.label())).collect();
         let views = self.placeable_views();
-        egui::Window::new("Place View").id(egui::Id::new("add_view_window")).open(&mut open).collapsible(false).default_width(340.0).show(ctx, |ui| {
+        egui::Window::new("Place View").id(egui::Id::unique("add_view_window")).open(&mut open).collapsible(false).default_width(340.0).show(ctx, |ui| {
             egui::Grid::new("add_view_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Sheet");
                 let combo = egui::ComboBox::from_id_salt("add_view_sheet").selected_text(a.sheet.and_then(|id| sheets.iter().find(|s| s.0 == id)).map_or("choose a sheet".to_string(), |s| s.1.clone())).show_ui(ui, |ui| {
@@ -401,7 +401,7 @@ impl Desktop {
         let Some(mut d) = self.sheets.print.take() else { return };
         let (mut open, mut go, mut cancel) = (true, false, false);
         let labels: BTreeMap<u64, String> = self.document.sheets().iter().map(|s| (s.id, s.label())).collect();
-        egui::Window::new("Print").id(egui::Id::new("print_window")).open(&mut open).collapsible(false).default_width(340.0).show(ctx, |ui| {
+        egui::Window::new("Print").id(egui::Id::unique("print_window")).open(&mut open).collapsible(false).default_width(340.0).show(ctx, |ui| {
             ui.label("Print to PDF, one page for each sheet, at the size of its paper:");
             egui::ScrollArea::vertical().id_salt("print_sheets").max_height(220.0).show(ui, |ui| {
                 for (id, on) in d.sheets.iter_mut() { ui.checkbox(on, labels.get(id).cloned().unwrap_or_default()); }

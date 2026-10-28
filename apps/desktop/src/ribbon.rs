@@ -230,7 +230,7 @@ pub fn icon_image(ui: &egui::Ui, id: &str, dark: bool, size: Vec2) -> egui::Imag
     let pixels = (size * ui.ctx().pixels_per_point()).round();
     let width = (pixels.x as u32).clamp(1, 512);
     let height = (pixels.y as u32).clamp(1, 512);
-    let key = egui::Id::new(("filtered-icon-v1", icon.id, theme, width, height));
+    let key = egui::Id::unique(("filtered-icon-v1", icon.id, theme, width, height));
     let cached = ui.ctx().data_mut(|data| data.get_temp::<egui::TextureHandle>(key));
     let texture = cached.unwrap_or_else(|| {
         let rgba = prepare_icon(bytes, width, height);

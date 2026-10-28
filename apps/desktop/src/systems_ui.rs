@@ -68,7 +68,7 @@ impl Desktop {
         let (mut open, mut ok, mut cancel) = (true, false, false);
         let list: &[System] = if d.pipe { &PIPING } else { &AIR };
         let hint = self.document.default_system_name(d.system);
-        egui::Window::new(if d.pipe { "Create Piping System" } else { "Create Mechanical System" }).id(egui::Id::new("create_system_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
+        egui::Window::new(if d.pipe { "Create Piping System" } else { "Create Mechanical System" }).id(egui::Id::unique("create_system_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
             ui.label(format!("{} piece{} of equipment selected", d.members.len(), if d.members.len() == 1 { "" } else { "s" }));
             ui.horizontal(|ui| {
                 ui.label("System type");
@@ -207,7 +207,7 @@ impl Desktop {
         let pipe = domain_of(s.system) == Domain::Pipe;
         let shown = s.solutions[s.current].trunk.sizes.iter().copied().map(size_mm).fold([0.0f64, 0.0], |a, b| [a[0].max(b[0]), a[1].max(b[1])]);
         let mut size = s.trunk_mm.unwrap_or(shown);
-        egui::Window::new(format!("Generate Layout: {}", s.name)).id(egui::Id::new("layout_window")).open(&mut open).default_width(420.0).show(ctx, |ui| {
+        egui::Window::new(format!("Generate Layout: {}", s.name)).id(egui::Id::unique("layout_window")).open(&mut open).default_width(420.0).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("◀").clicked() { s.current = (s.current + s.solutions.len() - 1) % s.solutions.len(); }
                 ui.label(format!("{} of {}", s.current + 1, s.solutions.len()));
@@ -272,7 +272,7 @@ impl Desktop {
         let selected = self.selected_ids();
         let systems = self.document.mep().systems.clone();
         let mut act: Option<BrowserAct> = None;
-        egui::Window::new("System Browser").id(egui::Id::new("system_browser_window")).open(&mut open).default_width(460.0).show(ctx, |ui| {
+        egui::Window::new("System Browser").id(egui::Id::unique("system_browser_window")).open(&mut open).default_width(460.0).show(ctx, |ui| {
             if systems.is_empty() { ui.label("No systems yet: select equipment and choose Mechanical System or Piping System."); }
             egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                 for def in &systems {

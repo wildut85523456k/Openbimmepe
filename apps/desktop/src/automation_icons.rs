@@ -2,7 +2,7 @@
 use eframe::egui::{self, Color32, Vec2};
 pub fn image(ui: &egui::Ui, id: &str, dark: bool, size: Vec2) -> egui::Image<'static> {
     let side = (size.x*ui.ctx().pixels_per_point()).ceil().clamp(16.,512.) as usize;
-    let key = egui::Id::new(("automation-icon",id.to_owned(),dark,side));
+    let key = egui::Id::unique(("automation-icon",id.to_owned(),dark,side));
     let cached = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(key));
     let texture = cached.unwrap_or_else(|| {
         let mut pixels = Vec::with_capacity(side*side);

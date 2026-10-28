@@ -986,7 +986,7 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                                     ui.horizontal(|ui| {
                                         ui.label(label);
                                         // edited on a copy; one change is made when the drag ends or Enter is pressed
-                                        let key = ui.id().with(("run_end", el.id.0, at_start));
+                                        let key = ui.scope_id().with(("run_end", el.id.0, at_start));
                                         let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(cur);
                                         let r = ui.add(egui::DragValue::new(&mut v).speed(1.0).max_decimals(1)).on_hover_text("Height of the middle of the run at this end, above its level. A joined end cannot be changed here: move what it is joined to");
                                         if r.drag_stopped() || r.lost_focus() {
@@ -1169,7 +1169,7 @@ fn level_plans(app: &mut Desktop, ui: &mut egui::Ui, query: &str) {
 /// Number, Name and Department of the selected room, editable in place and applied as one undoable step (B21). The
 /// draft is held in the UI memory keyed by the room and its revision, so it is re-read after an undo or another edit.
 fn room_identity(app: &mut Desktop, ui: &mut egui::Ui, el: &openbim_document::Element) {
-    let key = egui::Id::new(("room_identity", el.id.0, el.revision));
+    let key = egui::Id::unique(("room_identity", el.id.0, el.revision));
     let seed = (app.document.room_text(el.id, "Number"), el.name.clone(), app.document.room_text(el.id, "Department"));
     let mut draft = ui.data_mut(|d| d.get_temp::<(String, String, String)>(key)).unwrap_or(seed);
     egui::CollapsingHeader::new(RichText::new("Identity Data").strong()).id_salt("room_identity").default_open(true).show(ui, |ui| {

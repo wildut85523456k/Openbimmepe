@@ -352,7 +352,7 @@ impl Desktop {
         let (mut open, mut ok, mut apply, mut cancel, mut restore) = (true, false, false, false, false);
         let level = self.plan_level();
         let level_name = self.document.get(level).map_or(String::new(), |l| l.name.clone());
-        egui::Window::new("View Range").id(egui::Id::new("view_range_window")).open(&mut open).default_width(360.0).show(ctx, |ui| {
+        egui::Window::new("View Range").id(egui::Id::unique("view_range_window")).open(&mut open).default_width(360.0).show(ctx, |ui| {
             ui.label(format!("Plan of {level_name}: heights are in millimetres above the level"));
             egui::Grid::new("view_range_grid").num_columns(2).show(ui, |ui| {
                 for (label, v) in [("Top", &mut d.range.top_m), ("Cut plane", &mut d.range.cut_m), ("Bottom", &mut d.range.bottom_m), ("View depth", &mut d.range.depth_m)] {
@@ -396,7 +396,7 @@ impl Desktop {
             for e in self.document.elements() { if let Some(c) = ViewCategory::of(e) { if !v.contains(&c) { v.push(c); } } }
             v
         };
-        egui::Window::new("Visibility/Graphics Overrides").id(egui::Id::new("vis_graphics_window")).open(&mut open).default_width(380.0).show(ctx, |ui| {
+        egui::Window::new("Visibility/Graphics Overrides").id(egui::Id::unique("vis_graphics_window")).open(&mut open).default_width(380.0).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut d.annotation, false, "Model Categories");
                 ui.selectable_value(&mut d.annotation, true, "Annotation Categories");

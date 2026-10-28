@@ -84,7 +84,7 @@ impl Desktop {
         let (mut open, mut add, mut remove, mut close) = (true, false, false, false);
         let title = format!("{} {}", if d.pipe { "Pipe" } else { "Duct" }, if d.kind == InsulationKind::Lining { "Lining" } else { "Insulation" });
         let before = d.kind;
-        egui::Window::new(title).id(egui::Id::new("insulation_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
+        egui::Window::new(title).id(egui::Id::unique("insulation_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
             ui.label(format!("{} selected {}", d.runs.len(), if d.pipe { "pipe(s)" } else { "duct(s)" }));
             if !d.pipe {
                 ui.horizontal(|ui| {

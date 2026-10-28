@@ -2,7 +2,7 @@ use eframe::egui;
 use openbim_automation::{NodeKind,Type};
 
 pub fn expanded(ctx:&egui::Context,id:u64)->bool {
-    ctx.data(|d|d.get_temp::<bool>(egui::Id::new(("slider-range",id))).unwrap_or(false))
+    ctx.data(|d|d.get_temp::<bool>(egui::Id::unique(("slider-range",id))).unwrap_or(false))
 }
 
 pub fn show(ui:&mut egui::Ui,kind:&mut NodeKind,id:u64)->bool {
@@ -12,7 +12,7 @@ pub fn show(ui:&mut egui::Ui,kind:&mut NodeKind,id:u64)->bool {
     ui.horizontal(|ui| {
         if ui.small_button("?").on_hover_text("Edit Min / Max / Step").clicked() {
             open = !open;
-            ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("slider-range",id)),open));
+            ui.ctx().data_mut(|d|d.insert_temp(egui::Id::unique(("slider-range",id)),open));
             ui.ctx().request_repaint();
         }
         if min.is_finite() && max.is_finite() && min<max && step.is_finite() && *step>0.0 {

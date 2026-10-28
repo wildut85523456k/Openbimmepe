@@ -1163,7 +1163,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                     painter.rect_filled(r, 2.0, ui.visuals().panel_fill);
                     painter.rect_stroke(r, 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Middle);
                     painter.galley(r.center() - galley.size() / 2.0, galley, ink);
-                    let hit = ui.interact(r, egui::Id::new(("tempdim", dim.key())), Sense::click());
+                    let hit = ui.interact(r, egui::Id::unique(("tempdim", dim.key())), Sense::click());
                     if hit.clicked() { app.temp_edit = Some(dim); app.temp_text = text; }
                     if hit.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::Text); }
                     app.temp_labels.push((r, dim, value));

@@ -75,7 +75,7 @@ impl Desktop {
         let Some(mut d) = self.schedules.new.take() else { return };
         let (mut open, mut ok, mut cancel) = (true, false, false);
         let hint = self.document.default_schedule_name(d.kind);
-        egui::Window::new("New Schedule/Quantities").id(egui::Id::new("new_schedule_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
+        egui::Window::new("New Schedule/Quantities").id(egui::Id::unique("new_schedule_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
             ui.label("Category");
             egui::ScrollArea::vertical().id_salt("new_schedule_kinds").max_height(220.0).show(ui, |ui| {
                 for k in ScheduleKind::ALL {
@@ -118,7 +118,7 @@ impl Desktop {
     pub(crate) fn rename_schedule_window(&mut self, ctx: &egui::Context) {
         let Some((id, mut name)) = self.schedules.rename.take() else { return };
         let (mut open, mut ok, mut cancel) = (true, false, false);
-        egui::Window::new("Rename Schedule").id(egui::Id::new("rename_schedule_window")).open(&mut open).show(ctx, |ui| {
+        egui::Window::new("Rename Schedule").id(egui::Id::unique("rename_schedule_window")).open(&mut open).show(ctx, |ui| {
             ui.add(egui::TextEdit::singleline(&mut name).desired_width(240.0));
             ui.horizontal(|ui| {
                 if ui.button("OK").clicked() { ok = true; }
@@ -169,7 +169,7 @@ impl Desktop {
         let Some(mut p) = self.schedules.props.take() else { return };
         let kind = p.draft.kind;
         let (mut open, mut ok, mut apply, mut cancel) = (true, false, false, false);
-        egui::Window::new(format!("Schedule Properties - {}", p.draft.name)).id(egui::Id::new("schedule_props_window")).open(&mut open).default_width(560.0).show(ctx, |ui| {
+        egui::Window::new(format!("Schedule Properties - {}", p.draft.name)).id(egui::Id::unique("schedule_props_window")).open(&mut open).default_width(560.0).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 for (t, n) in [(Tab::Fields, "Fields"), (Tab::Filter, "Filter"), (Tab::Sorting, "Sorting/Grouping"), (Tab::Formatting, "Formatting")] { ui.selectable_value(&mut p.tab, t, n); }
             });
