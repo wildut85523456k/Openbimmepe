@@ -77,7 +77,7 @@ impl Desktop {
         let hint = self.document.default_schedule_name(d.kind);
         egui::Window::new("New Schedule/Quantities").id(egui::Id::unique("new_schedule_window")).open(&mut open).default_width(340.0).show(ctx, |ui| {
             ui.label("Category");
-            egui::ScrollArea::vertical().id_salt("new_schedule_kinds").max_height(220.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("new_schedule_kinds").max_height(400.0).show(ui, |ui| {
                 for k in ScheduleKind::ALL {
                     let r = ui.selectable_label(d.kind == k, k.name());
                     test_hit!(self, r, "schedule_new:{}", k.name());

@@ -1669,14 +1669,13 @@ mod tests {
     fn click_at(ctx: &egui::Context, screen: Rect, app: &mut Desktop, rect: Rect) {
         let at = rect.center();
         assert!(screen.contains(at), "the control at {rect:?} is outside the window");
-        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at)]);
-        window_frame(ctx, screen, app, vec![button(at, true)]);
-        window_frame(ctx, screen, app, vec![button(at, false)]);
+        window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(at), button(at, true), button(at, false)]);
     }
 
     fn click_widget(ctx: &egui::Context, screen: Rect, app: &mut Desktop, name: &str) {
         let rect = widget(ctx, screen, app, name);
         click_at(ctx, screen, app, rect);
+        window_frame(ctx, screen, app, vec![]);
     }
 
     /// Two clicks in quick succession, as a user opens a view from the Project Browser.
