@@ -3,7 +3,7 @@
 //! depth-buffered GPU BIM engine (cut planes/joins/hidden-line are future work).
 use crate::{Desktop, ElementId, TempDim, View};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
-use openbim_document::{Category, Geometry, RangeClass};
+use openbim_document::{Category, Command, Geometry, RangeClass};
 
 /// How near (screen pixels) to a room's label a Select click picks the room instead of the slab it lies on.
 const ROOM_LABEL_PICK_PX: f32 = 24.0;
@@ -424,10 +424,154 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             dashed(&painter, ring[1], ring[2], stroke);
         }
     }
+    // --- Door swing arc (plan view only) ---
+    if !three_d {
+        for el in app.document.elements() {
+            if el.category != Category::Family || !el.family.starts_with("Door") {
+                continue;
+            }
+            let Some(Geometry::InWall { host, along_m }) = el.geometry else {
+                continue;
+            };
+            let wall = match app.document.get(host) {
+                Some(w) if w.category == Category::Wall => w,
+                _ => continue,
+            };
+            let Some(Geometry::Linear { start, end, level }) = wall.geometry else {
+                continue;
+            };
+            if level != level_id { continue; }
+            let wall_z = app.document.get(level).map_or(0.0, |l| l.elevation_m) + wall.elevation_m;
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let len = dx.hypot(dy);
+            if len <= 0.0 {
+                continue;
+            }
+            let wx = dx / len;
+            let wy = dy / len;
+            let swing = el.texts.iter().find(|(k, _)| k == "swing").map(|(_, v)| v.as_str()).unwrap_or("right");
+            let flipped = swing == "left";
+            let (px, py) = if flipped {
+                (dy / len, -dx / len)
+            } else {
+                (-dy / len, dx / len)
+            };
+            let hx = start[0] + wx * along_m;
+            let hy = start[1] + wy * along_m;
+            let radius = el.width_m.max(0.05);
+            let n = 16;
+            let arc_color = Color32::from_gray(120);
+            let mut prev = screen([hx, hy, wall_z]);
+            for i in 1..=n {
+                let theta = (i as f64) * (std::f64::consts::FRAC_PI_2) / n as f64;
+                let cx = hx + radius * (wx * theta.cos() + px * theta.sin());
+                let cy = hy + radius * (wy * theta.cos() + py * theta.sin());
+                let cur = screen([cx, cy, wall_z]);
+                painter.line_segment([prev, cur], Stroke::new(1.5, arc_color));
+                prev = cur;
+            }
+            painter.line_segment(
+                [prev, screen([hx, hy, wall_z])],
+                Stroke::new(1.0, arc_color),
+            );
+        }
+    }
     for (_, id, points, color) in &faces {
         painter.add(egui::Shape::convex_polygon(points.clone(), *color,
             Stroke::new(if selected_all.contains(id) { 2.0 } else { 0.8 },
                 if selected_all.contains(id) { blue } else { Color32::from_gray(80) })));
+    }
+    // --- Hosted opening move + width/height resize handles (plan and 3D) ---
+    if app.tool == crate::Tool::Select {
+        let sel_id = app.selected_id();
+        if let Some(id) = sel_id {
+            let handle_data = app.document.get(id).and_then(|el| {
+                let is_hosted = matches!(el.geometry, Some(Geometry::InWall { .. }));
+                let is_door = el.category == Category::Family && el.family.starts_with("Door");
+                let is_window = el.category == Category::Family && el.family.starts_with("Window");
+                let is_hosted_opening = is_door || is_window || is_hosted;
+                let (host, along_m) = match el.geometry {
+                    Some(Geometry::InWall { host, along_m }) if is_hosted_opening => (host, along_m),
+                    _ => (ElementId(0), 0.0),
+                };
+                if !is_hosted_opening || !matches!(el.geometry, Some(Geometry::InWall { .. })) {
+                    return None;
+                }
+                let wall = app.document.get(host)?;
+                let Geometry::Linear { start, end, level } = wall.geometry? else { return None; };
+                let level_z = app.document.get(level).map_or(0.0, |l| l.elevation_m);
+                let wall_z = level_z + wall.elevation_m;
+                Some((el.id, el.width_m, el.height_m, host, along_m, start, end, level, wall_z))
+            });
+            if let Some((el_id, w_m, h_m, host, along_m, start, end, _level, wall_z)) = handle_data {
+                let dx = end[0] - start[0];
+                let dy = end[1] - start[1];
+                let len = dx.hypot(dy);
+                if len > 0.0 {
+                    let wx = dx / len;
+                    let wy = dy / len;
+                    let move_pos = screen([start[0] + wx * along_m, start[1] + wy * along_m, wall_z]);
+                    let hw = w_m / 2.0;
+                    let left_pos = screen([start[0] + wx * (along_m - hw), start[1] + wy * (along_m - hw), wall_z]);
+                    let right_pos = screen([start[0] + wx * (along_m + hw), start[1] + wy * (along_m + hw), wall_z]);
+                    // Move handle (blue circle with white dot).
+                    painter.circle_filled(move_pos, 12.0, blue);
+                    painter.circle_filled(move_pos, 6.0, Color32::WHITE);
+                    // Width handles (gray).
+                    painter.circle_filled(left_pos, 8.0, Color32::from_gray(160));
+                    painter.circle_filled(right_pos, 8.0, Color32::from_gray(160));
+                    // Height handle (3D only, green).
+                    if three_d {
+                        let hp = screen([start[0] + wx * along_m, start[1] + wy * along_m, wall_z + h_m]);
+                        let h_color = Color32::from_rgb(100, 200, 100);
+                        painter.line_segment([move_pos, hp], Stroke::new(1.0, h_color));
+                        painter.circle_filled(hp, 8.0, h_color);
+                    }
+                    // Handle dragging: project pointer onto wall, adjust offset or width.
+                    let pp = ui.input(|i| i.pointer.latest_pos());
+                    let dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
+                    if let Some(pp) = pp {
+                        let s_screen = screen([start[0], start[1], wall_z]);
+                        let e_screen = screen([end[0], end[1], wall_z]);
+                        let d = e_screen - s_screen;
+                        let proj_offset = if d.length_sq() > 1e-6 {
+                            let t = ((pp - s_screen).dot(d) / d.length_sq()).clamp(0.0, 1.0) as f64;
+                            t * len
+                        } else {
+                            along_m
+                        };
+                        // Move handle: adjust along_m along the wall.
+                        if dragging && pp.distance(move_pos) < 24.0 {
+                            let new_offset = proj_offset.clamp(0.0, len);
+                            if (new_offset - along_m).abs() > 1e-9 {
+                                let ops = [Command::SetGeometry {
+                                    id: el_id,
+                                    geometry: Geometry::InWall { host, along_m: new_offset },
+                                }];
+                                let _ = app.document.transact(app.document.revision(), &ops);
+                            }
+                        }
+                        // Right width handle: grow/shrink width from center.
+                        if dragging && pp.distance(right_pos) < 24.0 {
+                            let new_width = ((proj_offset - along_m) * 2.0).max(0.05);
+                            if (new_width - w_m).abs() > 1e-9 {
+                                let ops = [Command::Resize { id: el_id, width_m: new_width, height_m: h_m }];
+                                let _ = app.document.transact(app.document.revision(), &ops);
+                            }
+                        }
+                        // Left width handle: grow/shrink width from center (opposite side).
+                        if dragging && pp.distance(left_pos) < 24.0 {
+                            let new_width = ((along_m - proj_offset) * 2.0).max(0.05);
+                            if (new_width - w_m).abs() > 1e-9 {
+                                let ops = [Command::Resize { id: el_id, width_m: new_width, height_m: h_m }];
+                                let _ = app.document.transact(app.document.revision(), &ops);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     if !three_d {
         // the layers of a layered wall: a thin line where each ends, a heavier one at the core boundaries
