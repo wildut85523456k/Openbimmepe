@@ -28,11 +28,19 @@ The full procedure is documented in the `openbim-cross-repo-release` skill (gold
 
 ## Verified
 
-- Script is executable and syntactically valid (`bash -n` passes)
-- Patch generation produces valid TOML (tested via `cargo check` after patch)
-- Cargo.toml is correctly restored after the run (verified by `git diff` showing no changes)
-- `cargo test --workspace --no-run` passes after restore
+- Script syntax valid (`bash -n` passes) — fixed: patch quoting (printf) + MSYS path normalization
+- Patch generation produces **valid TOML** — `cargo` accepts the `[patch]` section and begins resolving dependencies (warnings about unused patches are expected; not all core crates are used by each app)
+- Path normalization (`normalize_path`): converts MSYS-style `/c/Users/...` to Windows `C:/Users/...` so native cargo reads local paths correctly
+- Workspace-root-only patching: `[patch]` in member `Cargo.toml` is ignored by cargo — script now patches only the workspace root `Cargo.toml`
+- Cargo.toml is correctly restored after each consumer run (verified by `git diff` showing no changes to tracked Cargo.toml files)
+
+## Bugs found and fixed during verification
+
+1. **TOML quoting** — `echo` with `\\\"` produced `crates/"arch""` (invalid TOML). Fix: switched to `printf '%s = { path = "%s/crates/%s" }\n'` which emits clean `path = "..."`.
+2. **Member Cargo.toml** — `[patch]` in `apps/desktop/Cargo.toml` was ignored by cargo. Fix: removed member_toml from CONSUMERS array; patch workspace root only.
+3. **MSYS path conversion** — `/c/Users/...` mangled by native Windows cargo into `C:\c\Users\...`. Fix: `normalize_path()` converts to `C:/Users/...` for cargo; `git -C` handles both formats.
 
 ## Candidate SHA
 
 `81c7fa1` — "G-M07: add cross-repo consumer gate script"
+`102e406` — "G-M07: fix patch quoting (printf) + MSYS path normalization for native cargo"
