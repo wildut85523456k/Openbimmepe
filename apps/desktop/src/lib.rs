@@ -336,7 +336,7 @@ const IMPLEMENTED: &[&str] = &[
     "pin", "unpin", "select_instances", "create_similar", "rotate", "mirror", "delete", "level", "wall", "beam",
     "structural_column", "column", "structural_floor", "floor", "elevation", "railing", "section",
     "opening_vertical", "shaft", "opening_wall", "stair", "ceiling", "roof", "footing", "truss", "door", "window",
-    "ahu", "component", "rebar", "beam_system", "foundation", "slab", "brace", "select", "ifc_export", "ifc_import",
+    "ahu", "component", "rebar", "beam_system", "foundation", "slab", "brace", "select", "clash", "ifc_export", "ifc_import",
     "new", "open", "save", "save_as", "mep_settings", "duct_insulation", "pipe_insulation", "create_mech_system",
     "create_pipe_system", "generate_layout", "system_browser", "schedule", "sheet", "add_view", "print",
     "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out",
@@ -650,7 +650,10 @@ impl Desktop {
             "slab" => { self.slab_kind_pick = openbim_document::SlabKind::Foundation; self.choose_tool(Tool::Slab) }
             "brace" => { self.usage_pick = openbim_document::Usage::Brace; self.choose_tool(Tool::Beam) }
             "select" => self.choose_tool(Tool::Select),
-            "ifc_export" => self.export_ifc_file(),
+            "clash" => {
+                let clashes = openbim_clash::detect_clashes(&self.document);
+                self.message = format!("{} clash(es) detected", clashes.len());
+            }
             "ifc_import" => self.import_ifc_file(),
             "load_family" => self.load_family_file(),
             "new" => self.new_model(),

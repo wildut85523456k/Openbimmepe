@@ -25,6 +25,7 @@ openbim-route = { git = "https://github.com/wildut85523456k/openbim-core", rev =
 openbim-view = { git = "https://github.com/wildut85523456k/openbim-core", rev = "544ee0d7c035cb0dffa57f5981094f28fe7ce591" }
 openbim-viewport-egui = { git = "https://github.com/wildut85523456k/openbim-core", rev = "544ee0d7c035cb0dffa57f5981094f28fe7ce591" }
 openbim-sheets = { git = "https://github.com/wildut85523456k/openbim-core", rev = "544ee0d7c035cb0dffa57f5981094f28fe7ce591" }
+openbim-clash = { git = "https://github.com/wildut85523456k/openbim-core", rev = "544ee0d7c035cb0dffa57f5981094f28fe7ce591" }
 rfd = "0.17.2"
 rayon = "1.10"
 

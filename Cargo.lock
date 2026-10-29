@@ -1729,6 +1729,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "ifc-lite-clash"
+version = "20.3.0"
+source = "git+https://github.com/BIMvoice/ifcsheet?rev=04c639e8687e658f0efe9cf3f2dee515ad6cfc08#04c639e8687e658f0efe9cf3f2dee515ad6cfc08"
+
+[[package]]
 name = "ifc-lite-core"
 version = "20.3.0"
 source = "git+https://github.com/BIMvoice/ifcsheet?rev=04c639e8687e658f0efe9cf3f2dee515ad6cfc08#04c639e8687e658f0efe9cf3f2dee515ad6cfc08"
@@ -2579,6 +2584,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbim-clash"
+version = "0.0.1"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=544ee0d7c035cb0dffa57f5981094f28fe7ce591#544ee0d7c035cb0dffa57f5981094f28fe7ce591"
+dependencies = [
+ "ifc-lite-clash",
+ "openbim-document",
+]
+
+[[package]]
 name = "openbim-commands"
 version = "0.1.0"
 source = "git+https://github.com/wildut85523456k/openbim-core?rev=544ee0d7c035cb0dffa57f5981094f28fe7ce591#544ee0d7c035cb0dffa57f5981094f28fe7ce591"
@@ -2597,6 +2611,7 @@ dependencies = [
  "openbim-arch",
  "openbim-automation",
  "openbim-calc",
+ "openbim-clash",
  "openbim-commands",
  "openbim-document",
  "openbim-family",
