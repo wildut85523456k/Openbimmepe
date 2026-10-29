@@ -1,7 +1,9 @@
-# The full build: the open workspace plus the edesign-alike electrical solver.
+# The full build: the open workspace plus the edesign-alike electrical solver (OPTIONAL).
 #
 # This is a separate workspace with its own Cargo.lock so the main workspace never resolves the
 # private repository. Building here needs read access to github.com/wildut85523456k/edesign-alike.
+# Decision (2026-10-29): keep ElectricalCalc optional (G-M08) — the main workspace builds without
+# the private solver; full/ remains a separate opt-in build.
 #   cargo run --locked -p openbim-desktop-full
 #   cargo test --locked
 [workspace]
