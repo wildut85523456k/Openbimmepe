@@ -15,6 +15,15 @@ set -euo pipefail
 CORE_REPO="https://github.com/wildut85523456k/openbim-core"
 CORE_URL="https://github.com/wildut85523456k/openbim-core"
 
+# Normalize MSYS-style paths (/c/Users/...) to Windows-style (C:/Users/...)
+# so native cargo can read them correctly.
+normalize_path() {
+    local p="$1"
+    p=$(echo "$p" | sed 's|^/c/|C:/|; s|^/d/|D:/|; s|^/e/|E:/|')
+    p="${p%/}"
+    echo "$p"
+}
+
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <core-sha> [core-checkout-path]"
     exit 2
@@ -35,6 +44,7 @@ else
     git -C "$CORE_CHECKOUT" checkout "$CORE_SHA"
 fi
 
+CORE_CHECKOUT_NORM=$(normalize_path "$CORE_CHECKOUT")
 echo "Core checkout: $CORE_CHECKOUT @ $(git -C "$CORE_CHECKOUT" rev-parse --short HEAD)"
 
 # --- 2. Discover all openbim-* crate names in core ---
@@ -65,7 +75,7 @@ generate_patch() {
         echo "[patch.\"$CORE_URL\"]"
         for c in "${PATCH_CRATES[@]}"; do
             short="${c#openbim-}"
-            printf '%s = { path = "%s/crates/%s" }\n' "$c" "$CORE_CHECKOUT" "$short"
+            printf '%s = { path = "%s/crates/%s" }\n' "$c" "$CORE_CHECKOUT_NORM" "$short"
         done
     } >> "$target_toml"
 }
@@ -76,19 +86,19 @@ restore_toml() {
 }
 
 # --- 4. Consumer repos ---
-# Each repo: (name, root_cargo_toml, member_cargo_toml_or_empty)
+# Only workspace-root Cargo.toml is patched (cargo ignores [patch] in members)
 REVIT_ALIKE="/c/Users/wilfr/hermes-first-task/wt-g-m02"
 EDESIGL_ALIKE="/c/Users/wilfr/hermes-first-task/edesign-alike"
 
 CONSUMERS=(
-    "revit-alike:$REVIT_ALIKE:Cargo.toml:apps/desktop/Cargo.toml"
-    "edesign-alike:$EDESIGL_ALIKE:Cargo.toml:"
+    "revit-alike:$REVIT_ALIKE:Cargo.toml"
+    "edesign-alike:$EDESIGL_ALIKE:Cargo.toml"
 )
 
 FAILED=0
 
 for consumer in "${CONSUMERS[@]}"; do
-    IFS=':' read -r name repo root_toml member_toml <<< "$consumer"
+    IFS=':' read -r name repo root_toml <<< "$consumer"
     echo ""
     echo "=========================================="
     echo "CONSUMER: $name ($repo)"
@@ -96,21 +106,13 @@ for consumer in "${CONSUMERS[@]}"; do
 
     # Save original Cargo.toml content
     cp "$repo/$root_toml" "$repo/$root_toml.gate.bak" 2>/dev/null || true
-    [ -n "$member_toml" ] && cp "$repo/$member_toml" "$repo/$member_toml.gate.bak" 2>/dev/null || true
 
-    # Patch root Cargo.toml
-    if [ -n "$root_toml" ] && [ -f "$repo/$root_toml" ]; then
-        generate_patch "$repo/$root_toml"
-    fi
-
-    # Patch member Cargo.toml
-    if [ -n "$member_toml" ] && [ -f "$repo/$member_toml" ]; then
-        generate_patch "$repo/$member_toml"
-    fi
+    # Patch workspace-root Cargo.toml
+    generate_patch "$repo/$root_toml"
 
     # Run tests
     set +e
-    echo "--- cargo test --workspace ---"
+    echo "--- cargo test --workspace --release ---"
     (cd "$repo" && cargo test --workspace --release 2>&1)
     TEST_RC=$?
     set -e
@@ -122,11 +124,9 @@ for consumer in "${CONSUMERS[@]}"; do
         echo "PASS: cargo test in $name"
     fi
 
-    # Restore original Cargo.toml files (remove [patch] overrides)
+    # Restore original Cargo.toml files
     cp "$repo/$root_toml.gate.bak" "$repo/$root_toml" 2>/dev/null || true
     rm -f "$repo/$root_toml.gate.bak" 2>/dev/null || true
-    [ -n "$member_toml" ] && cp "$repo/$member_toml.gate.bak" "$repo/$member_toml" 2>/dev/null || true
-    [ -n "$member_toml" ] && rm -f "$repo/$member_toml.gate.bak" 2>/dev/null || true
 done
 
 echo ""
