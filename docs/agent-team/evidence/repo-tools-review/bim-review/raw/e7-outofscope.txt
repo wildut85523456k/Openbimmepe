@@ -1,0 +1,29 @@
+=== Out-of-scope confirmation (present in 23f2df4) ===
+--- F4: status kill -0 vs health /proc ---
+45:      if [ -n "$OWNER" ] && kill -0 "$OWNER" 2>/dev/null; then
+202:      if [ -n "$OWNER_PID" ] && ! kill -0 "$OWNER_PID" 2>/dev/null; then
+84:      if [ -n "$OWNER" ] && [ -d "/proc/$OWNER" ]; then
+85:        echo "LOCK: held by PID $OWNER (/proc/$OWNER present)"
+--- F5: gate lock at $REPO_ROOT/$TARGET ---
+150:    LOCK_FILE="$REPO_ROOT/$TARGET"
+--- F7: GNU/Linux-only constructs ---
+52:      echo "  acquired: $(stat -c '%y' "$LOCK_FILE" 2>/dev/null | cut -d' ' -f1-2)"
+84:      if [ -n "$OWNER" ] && [ -d "/proc/$OWNER" ]; then
+85:        echo "LOCK: held by PID $OWNER (/proc/$OWNER present)"
+--- F8: trap installed after lock acquisition (mkdir lines vs trap) ---
+151:    if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+197:  if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+207:      if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+226:trap cleanup EXIT INT TERM
+
+=== gate-held exit path (target dir planted; waits 10s then exit 1) ===
+[gate target-z] lock held — waiting...
+[gate target-z] still held — not pushing
+gate_held_exit=1 (expect 1)
+
+=== health on a held lock (live PID) -> Sane ===
+  === gh-ctl health ===
+  AUTH: ok (github.com)
+  REPO: ok (main)
+  LOCK: free
+  ENVIRONMENT: Sane

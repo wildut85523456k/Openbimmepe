@@ -1,0 +1,21 @@
+=== health with a LIVE held lock (planted live PID) ===
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (main)
+LOCK: held by PID 1148 (/proc/1148 present)
+ENVIRONMENT: Sane
+health_held_exit=0
+--- status with live held lock ---
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 1148 (alive)
+  acquired: 2026-10-23 06:16:52.721230500
+QUEUE: empty
+--- cleanup planted lock ---
+=== health with a DEAD (stale) lock ===
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (main)
+LOCK: STALE
+ENVIRONMENT: NOT Sane — 1 issue(s)
+health_stale_exit=1 (expect 1)

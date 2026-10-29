@@ -1,0 +1,24 @@
+   Compiling openbim-family v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\family)
+   Compiling wgpu-core v30.0.1
+   Compiling openbim-place v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\place)
+   Compiling openbim-route v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\route)
+   Compiling openbim-ifc v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\ifc)
+   Compiling openbim-document v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\document)
+   Compiling openbim-view v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\view)
+warning: unused variable: `g`
+   --> crates\document\src\schedule.rs:511:13
+    |
+511 |         (k, g) if (k == ScheduleKind::DuctFittings || k == ScheduleKind::PipeFittings) && e.category == Category::Family => {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_g`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling openbim-automation v0.1.0 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\automation)
+   Compiling openbim-viewport v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\viewport)
+warning: `openbim-document` (lib) generated 1 warning (run `cargo fix --lib -p openbim-document` to apply 1 suggestion)
+   Compiling wgpu v30.0.1
+   Compiling egui-wgpu v0.36.2
+   Compiling eframe v0.36.2
+   Compiling openbim-viewport-egui v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\crates\viewport-egui)
+   Compiling openbim-desktop v0.0.1 (C:\Users\wilfr\hermes-first-task\revit-alike\apps\desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 09s

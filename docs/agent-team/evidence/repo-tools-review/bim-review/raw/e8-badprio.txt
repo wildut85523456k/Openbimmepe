@@ -1,0 +1,31 @@
+### E8 unknown/typo tier handling
+--- gh-ctl rank() ---
+rank() { case "${1:-p2}" in p0) echo 0;; p1) echo 1;; p2) echo 2;; *) echo 99;; esac; }
+--- gh-ctl p2 guard ---
+if [ "$MY_RANK" -gt 1 ] 2>/dev/null; then
+=== gh-ctl P0 'echo CAPITAL-P0' (uppercase typo) ===
+[gh-ctl p2] running (parallel): echo CAPITAL-P0
+CAPITAL-P0
+exit=0
+=== gh-ctl p0x 'echo TYPO' ===
+[gh-ctl p2] running (parallel): echo TYPO
+TYPO
+exit=0
+=== gh-ctl p3 'echo THREE' ===
+[gh-ctl p2] running (parallel): echo THREE
+THREE
+exit=0
+=== gh-ctl p1 with a lock held by a live holder (should queue, not run) ===
+mkdir: cannot create directory ‘C:\\Users\\wilfr\\AppData\\Local/Temp/pr72-evidence/throwaway-badprio/.gh-ctl’: File exists
+[gh-ctl p1] lock held -> queued (priority p1)
+exit=0
+--- queue ---
+1	echo QUEUED-P1
+=== gh-ctl p3 with the SAME lock held (does it queue or run unlocked?) ===
+[gh-ctl p2] running (parallel): echo P3-UNLOCKED
+P3-UNLOCKED
+exit=0
+--- queue after p3 ---
+1	echo QUEUED-P1
+--- did P3-UNLOCKED run? (it printed above if so) ---
+exit=0

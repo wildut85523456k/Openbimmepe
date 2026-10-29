@@ -1,0 +1,32 @@
+### E6b gate + cargo subcommands (fresh throwaway)
+=== gate no args ===
+gh-ctl gate <target> <command...>
+GATE_NOARG_EXIT=2
+=== gate target-x 'echo gated-ran' (fresh) ===
+[gate target-x] acquired — running: echo gated-ran
+gated-ran
+GATE_EXIT=0
+=== target-x lock released? ===
+.gh-ctl
+target-x
+=== gate target-x again (should acquire) ===
+[gate target-x] lock held — waiting...
+[gate target-x] still held — not pushing
+GATE2_EXIT=1
+=== gate contention: pre-create target-y lock, then run ===
+[gate target-y] lock held — waiting...
+[gate target-y] still held — not pushing
+GATE_HELD_EXIT=1
+=== cargo fresh ===
+[cargo] acquiring lock (timeout 5s)...
+[cargo] acquired — running: echo cargorun
+cargorun
+CARGO_EXIT=0
+=== cargo with a queued job ===
+[cargo] acquiring lock (timeout 5s)...
+[cargo] acquired — running: echo cargorun2
+cargorun2
+queued-cargo-ran
+CARGO_Q_EXIT=0
+=== .gh-ctl final ===
+exit=0

@@ -1,0 +1,31 @@
+### E5 status vs health liveness
+=== status with live PID 1454 ===
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 1454 (alive)
+  acquired: 2026-10-23 05:55:39.111123300
+QUEUE: empty
+status_exit=0
+=== health with live PID 1454 ===
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: FAIL
+LOCK: held by PID 1454 (/proc/1454 present)
+ENVIRONMENT: NOT Sane — 1 issue(s)
+health_exit=1
+=== status with dead PID 999999 ===
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 999999 (stale — not running)
+  acquired: 2026-10-23 05:55:39.111123300
+QUEUE: empty
+status_exit=0
+=== health with dead PID 999999 ===
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: FAIL
+LOCK: STALE
+ENVIRONMENT: NOT Sane — 2 issue(s)
+health_exit=1
+cleaned
+exit=0

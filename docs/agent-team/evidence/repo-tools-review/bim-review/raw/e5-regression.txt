@@ -1,0 +1,75 @@
+=== A5a: p2 never touches the lock ===
+[gh-ctl p2] running (parallel): echo P2-ONE
+P2-ONE
+p2_exit=0
+.gh-ctl entries after p2: 0 (expect 0)
+
+=== A5b: p0/p1 lock + priority-ordered queue drain ===
+[gh-ctl p0] holding lock -> running: sleep 4; echo HOLDER-DONE
+--- status while holder active ---
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 869 (alive)
+  acquired: 2026-10-23 06:15:25.022148000
+QUEUE: empty
+--- queue a p1 then a p0 ---
+[gh-ctl p1] lock held -> queued (priority p1)
+p1_exit=0
+[gh-ctl p0] lock held -> queued (priority p0)
+p0_exit=0
+--- queue contents while held ---
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 869 (alive)
+  acquired: 2026-10-23 06:15:25.022148000
+QUEUE: 2 pending job(s)
+  - echo QUEUED-A
+  - echo QUEUED-B
+HOLDER-DONE
+[gh-ctl p0] draining queue (priority order)...
+QUEUED-B
+QUEUED-A
+holder_exit=0
+--- status after drain ---
+=== gh-ctl status ===
+LOCK: free
+QUEUE: empty
+
+=== A5c: cargo lock + queue ===
+[cargo] acquiring lock (timeout 300s)...
+[cargo] acquired — running: echo CARGO-ONE
+CARGO-ONE
+cargo1_exit=0
+.gh-ctl entries after cargo: 0 (expect 0)
+
+=== A5d: gate usage/exit codes ===
+gh-ctl gate <target> <command...>
+gate_noargs_exit=2 (expect 2)
+[gate t1] acquired — running: echo G1
+G1
+gate_t1_exit=0
+[gate t1] acquired — running: echo G2
+G2
+gate_t1_second_exit=0
+t1 still a dir? NO
+
+=== A5e: status/health exit codes (free lock) ===
+status_exit=0
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: FAIL
+LOCK: free
+ENVIRONMENT: NOT Sane — 1 issue(s)
+health_exit=1 (expect 1: REPO FAIL on non-git throwaway)
+
+=== A5f: p0 honors a failing queued job (non-zero propagation) ===
+[gh-ctl p0] holding lock -> running: sleep 4; echo HOLDER2-DONE
+[gh-ctl p1] lock held -> queued (priority p1)
+queued_fail_exit=0
+HOLDER2-DONE
+[gh-ctl p0] draining queue (priority order)...
+holder2_exit=7 (expect 1: a queued job returned non-zero)
+=== gh-ctl status ===
+LOCK: free
+QUEUE: 1 pending job(s)
+  - exit 7

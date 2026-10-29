@@ -318,6 +318,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
     }
     let mut faces = Vec::new();
+    let mut outer_edges: Vec<(ElementId, Vec<Pos2>, Color32)> = Vec::new();
     for (id, category, mesh, fade, revealed) in meshes {
         let color = match category {
             Category::Wall => if app.dark { Color32::from_gray(115) } else { Color32::from_gray(195) },
@@ -344,6 +345,34 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if area < 0.2 { continue; }
             let depth = if under { f32::MIN / 2.0 } else { face.iter().map(|&v| proj(mesh.vertices[v]).1).sum::<f32>() / face.len() as f32 };
             faces.push((depth, id, points, color.gamma_multiply(fade * if three_d { 0.72 + (i % 3) as f32 * 0.12 } else { 1.0 })));
+        }
+        // outer face edges only: an edge shared by two faces is an internal diagonal and is not stroked
+        {
+            use std::collections::HashMap;
+            let mut edge_count: HashMap<(usize, usize), usize> = HashMap::new();
+            for face in &mesh.faces {
+                for k in 0..face.len() {
+                    let a = face[k];
+                    let b = face[(k + 1) % face.len()];
+                    let key = (a.min(b), a.max(b));
+                    *edge_count.entry(key).or_insert(0) += 1;
+                }
+            }
+            let mut edge_pts: Vec<Pos2> = Vec::new();
+            for face in &mesh.faces {
+                for k in 0..face.len() {
+                    let a = face[k];
+                    let b = face[(k + 1) % face.len()];
+                    let key = (a.min(b), a.max(b));
+                    if edge_count.get(&key) == Some(&1) {
+                        edge_pts.push(screen(mesh.vertices[a]));
+                        edge_pts.push(screen(mesh.vertices[b]));
+                    }
+                }
+            }
+            if !edge_pts.is_empty() {
+                outer_edges.push((id, edge_pts, color));
+            }
         }
     }
     // rooms of this level (plan only): a tinted floor under everything, picked last; a room without a closed space shows a warning
@@ -479,8 +508,17 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     }
     for (_, id, points, color) in &faces {
         painter.add(egui::Shape::convex_polygon(points.clone(), *color,
-            Stroke::new(if selected_all.contains(id) { 2.0 } else { 0.8 },
-                if selected_all.contains(id) { blue } else { Color32::from_gray(80) })));
+            Stroke::NONE));
+    }
+    // outer face edges (no internal diagonals from triangulation)
+    for (id, pts, color) in &outer_edges {
+        let stroke = Stroke::new(if selected_all.contains(id) { 2.0 } else { 0.8 },
+            if selected_all.contains(id) { blue } else { Color32::from_gray(80) });
+        for w in pts.chunks(2) {
+            if w.len() == 2 {
+                painter.line_segment([w[0], w[1]], stroke);
+            }
+        }
     }
     // --- Hosted opening move + width/height resize handles (plan and 3D) ---
     if app.tool == crate::Tool::Select {

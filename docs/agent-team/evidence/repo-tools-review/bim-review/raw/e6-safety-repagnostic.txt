@@ -1,0 +1,51 @@
+=== A7: secrets scan (expect no matches) ===
+secret_scan_exit=1 (1 = no matches)
+
+=== A7: all rm / eval / destructive sites ===
+gh-ctl:11:#   .gh-ctl/lock     — atomic mkdir lock; a p0/p1 job holds it for its entire run
+gh-ctl:37:mkdir -p "$LOCK_DIR" 2>/dev/null || { echo "gh-ctl: cannot create $LOCK_DIR" >&2; exit 1; }
+gh-ctl:112:    if ! mkdir "$CARGO_LOCK" 2>/dev/null; then
+gh-ctl:118:    eval "$*"
+gh-ctl:123:        GHCTL_SKIP_LOCK=1 eval "$CMD"
+gh-ctl:127:      rm -f "$CARGO_QUEUE"
+gh-ctl:129:    rm -rf "$CARGO_PID" "$CARGO_LOCK" 2>/dev/null
+gh-ctl:151:    if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+gh-ctl:165:    eval "$*"
+gh-ctl:167:    # The lock is a directory (mkdir is the atomic primitive); rm -f cannot
+gh-ctl:168:    # remove it, so a gate that used rm -f left the target blocked forever.
+gh-ctl:169:    rm -f "$LOCK_FILE.pid" 2>/dev/null
+gh-ctl:170:    rm -rf "$LOCK_FILE" 2>/dev/null
+gh-ctl:191:  eval "$*"
+gh-ctl:197:  if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+gh-ctl:204:        rm -f "$LOCK_FILE.pid" 2>/dev/null
+gh-ctl:205:        rm -rf "$LOCK_FILE" 2>/dev/null
+gh-ctl:207:      if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+gh-ctl:222:    rm -f "$LOCK_FILE.pid" 2>/dev/null
+gh-ctl:223:    rm -rf "$LOCK_FILE" 2>/dev/null
+gh-ctl:226:trap cleanup EXIT INT TERM
+gh-ctl:229:eval "$*"
+gh-ctl:237:    GHCTL_SKIP_LOCK=1 eval "$CMD"
+gh-ctl:241:  rm -f "$QUEUE_FILE"
+
+=== A7: rm -rf sites only ===
+gh-ctl:129:    rm -rf "$CARGO_PID" "$CARGO_LOCK" 2>/dev/null
+gh-ctl:170:    rm -rf "$LOCK_FILE" 2>/dev/null
+gh-ctl:205:        rm -rf "$LOCK_FILE" 2>/dev/null
+gh-ctl:223:    rm -rf "$LOCK_FILE" 2>/dev/null
+
+=== A8: diff is shell-only ===
+automation.sh
+gh-ctl
+rust/cargo files in diff? 0 (expect 0)
+
+=== A8: REPO_ROOT coupling ===
+gh-ctl:23:REPO_ROOT="${REPO_ROOT:-$HOME/hermes-first-task/revit-alike}"
+gh-ctl:24:LOCK_DIR="$REPO_ROOT/.gh-ctl"
+gh-ctl:69:    cd "$REPO_ROOT" 2>/dev/null || { echo "REPO: FAIL (cannot cd to $REPO_ROOT)"; FAILURES=$((FAILURES+1)); }
+gh-ctl:150:    LOCK_FILE="$REPO_ROOT/$TARGET"
+automation.sh:21:REPO_ROOT="${REPO_ROOT:-$HOME/hermes-first-task/revit-alike}"
+automation.sh:22:GHCTL="$REPO_ROOT/gh-ctl"
+automation.sh:73:      branch="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null)"
+
+=== A8: host/path-specific references ===
+host_ref_exit=1 (1 = none)

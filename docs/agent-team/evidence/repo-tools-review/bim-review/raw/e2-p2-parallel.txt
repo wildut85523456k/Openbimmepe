@@ -1,0 +1,6 @@
+### E2 p2 never touches the lock
+$ REPO_ROOT=$TH bash gh-ctl p2 'echo p2ran'
+[gh-ctl p2] running (parallel): echo p2ran
+p2ran
+exit=0
+contents of $TH/.gh-ctl after p2:

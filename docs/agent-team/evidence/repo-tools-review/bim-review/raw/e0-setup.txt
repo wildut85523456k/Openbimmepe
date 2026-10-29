@@ -1,0 +1,4 @@
+throwaway=/tmp/pr72-r2-899
+REPO_ROOT=/tmp/pr72-r2-899/repo
+TMPDIR=/tmp
+worktree=C:/Users/wilfr/hermes-first-task/revit-alike-tools

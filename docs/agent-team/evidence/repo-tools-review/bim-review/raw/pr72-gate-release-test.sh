@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# A2: confirm the `gate` lock directory is never removed (rm -f on a directory).
+EV="$LOCALAPPDATA/Temp/pr72-evidence"
+TH="$EV/throwaway-gate2"
+WT="C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72"
+rm -rf "$TH"; mkdir -p "$TH"
+cd "$WT" || exit 9
+export REPO_ROOT="$TH"
+echo "--- gh-ctl line 150 ---"; sed -n '150p' "$WT/gh-ctl"
+echo "--- gh-ctl line 167 ---"; sed -n '167p' "$WT/gh-ctl"
+bash gh-ctl gate target-x 'echo first'; echo "first_exit=$?"
+echo "is target-x a directory? $([ -d "$TH/target-x" ] && echo YES || echo NO)"
+echo "does it still exist after the run? $([ -e "$TH/target-x" ] && echo YES || echo NO)"
+echo "--- can rm -f remove it? ---"
+rm -f "$TH/target-x"; echo "rm -f exit=$?"
+echo "still present? $([ -e "$TH/target-x" ] && echo YES || echo NO)"
+echo "--- second gate on same target ---"
+bash gh-ctl gate target-x 'echo second'; echo "second_exit=$?"
+echo "--- third gate on same target ---"
+bash gh-ctl gate target-x 'echo third'; echo "third_exit=$?"

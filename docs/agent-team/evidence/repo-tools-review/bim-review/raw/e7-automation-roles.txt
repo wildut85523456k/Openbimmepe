@@ -1,0 +1,45 @@
+### E7 automation.sh role reachability
+=== health (throwaway-sane) ===
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (master)
+LOCK: free
+ENVIRONMENT: Sane
+HEALTH_EXIT=0
+=== automation.sh cargo 'echo hi' ===
+automation.sh — role-based automation driver (gates on `gh-ctl health`)
+
+  review   parallel-safe, read-only job  (gh-ctl p2)
+           e.g. "cargo check --workspace" / "gh pr view <N>" / batch of PRs
+
+  impl     serialised git+remote job    (gh-ctl p0)
+           e.g. "git checkout -b feat/x && cargo build && gh pr merge"
+
+Both roles abort if `gh-ctl health` is not ENVIRONMENT: Sane.
+CARGO_ROLE_EXIT=2
+=== automation.sh review 'echo hi' ===
+[automation] gating: gh-ctl health
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (master)
+LOCK: free
+ENVIRONMENT: Sane
+[automation] health gate passed
+[automation] role=review (gh-ctl p2) — parallel-safe, read-only
+[gh-ctl p2] running (parallel): echo hi
+hi
+REVIEW_ROLE_EXIT=0
+=== automation.sh impl on branch 'main' (shared-branch warning) ===
+[automation] gating: gh-ctl health
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (main)
+LOCK: free
+ENVIRONMENT: Sane
+[automation] health gate passed
+[automation] WARNING: impl running on shared branch 'main' — use a dedicated feature branch
+[automation] role=impl (gh-ctl p0) — serialised git+remote
+[gh-ctl p0] holding lock -> running: echo hi
+hi
+IMPL_MAIN_EXIT=0
+exit=0

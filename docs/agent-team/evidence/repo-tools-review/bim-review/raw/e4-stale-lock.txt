@@ -1,0 +1,36 @@
+### E4 stale-lock deadlock
+=== status (stale lock) ===
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 999999 (stale — not running)
+  acquired: 2026-10-23 05:55:35.895523700
+QUEUE: empty
+status_exit=0
+=== health (stale lock) ===
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: FAIL
+LOCK: STALE
+ENVIRONMENT: NOT Sane — 2 issue(s)
+health_exit=1
+=== gh-ctl p0 'echo SHOULD-RUN' (stale lock held) ===
+[gh-ctl p0] lock held -> queued (priority p0)
+P0_EXIT=0
+=== did SHOULD-RUN execute? ===
+=== queue now ===
+0	echo SHOULD-RUN
+=== lock still present? ===
+lock
+lock.pid
+queue
+=== a second p0 job ===
+[gh-ctl p0] lock held -> queued (priority p0)
+P0B_EXIT=0
+=== queue after 2nd ===
+0	echo SHOULD-RUN
+0	echo SECOND-RUN
+=== lock dir contents ===
+lock
+lock.pid
+queue
+exit=0

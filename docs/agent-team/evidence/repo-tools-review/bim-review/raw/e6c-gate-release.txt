@@ -1,0 +1,23 @@
+### E6c gate lock release
+--- gh-ctl line 150 ---
+    LOCK_FILE="$REPO_ROOT/$TARGET"
+--- gh-ctl line 167 ---
+    rm -f "$LOCK_FILE.pid" "$LOCK_FILE" 2>/dev/null
+[gate target-x] acquired — running: echo first
+first
+first_exit=0
+is target-x a directory? YES
+does it still exist after the run? YES
+--- can rm -f remove it? ---
+rm: cannot remove 'C:\Users\wilfr\AppData\Local/Temp/pr72-evidence/throwaway-gate2/target-x': Is a directory
+rm -f exit=1
+still present? YES
+--- second gate on same target ---
+[gate target-x] lock held — waiting...
+[gate target-x] still held — not pushing
+second_exit=1
+--- third gate on same target ---
+[gate target-x] lock held — waiting...
+[gate target-x] still held — not pushing
+third_exit=1
+exit=0

@@ -1,0 +1,17 @@
+### E1 syntax + diff identity
+$ bash -n gh-ctl
+exit=0
+$ bash -n automation.sh
+exit=0
+$ git diff --name-only f0dc0b7 799c1f0
+automation.sh
+gh-ctl
+exit=0
+$ git diff --stat f0dc0b7 799c1f0
+ automation.sh |  85 ++++++++++++++++++++++
+ gh-ctl        | 227 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 312 insertions(+)
+exit=0
+$ git rev-parse HEAD
+799c1f08283d61365d9c6b37aaad425ff16fb959
+exit=0

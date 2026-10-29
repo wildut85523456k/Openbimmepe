@@ -1,0 +1,43 @@
+### E6 subcommands (gate/cargo) + secrets/destructive/eval scan
+=== gate with no args ===
+gh-ctl gate <target> <command...>
+GATE_NOARG_EXIT=2
+=== gate target-x 'echo gated' ===
+[gate target-x] lock held — waiting...
+[gate target-x] still held — not pushing
+GATE_EXIT=1
+=== gate held-lock path (simulate contention) ===
+[gate target-y] lock held — waiting...
+[gate target-y] still held — not pushing
+GATE_HELD_EXIT=1
+=== cargo 'echo cargorun' ===
+[cargo] acquiring lock (timeout 5s)...
+[cargo] acquired — running: echo cargorun
+cargorun
+CARGO_EXIT=0
+=== cargo with queued job ===
+[cargo] acquiring lock (timeout 5s)...
+[cargo] acquired — running: echo cargorun2
+cargorun2
+queued-cargo-ran
+CARGO_Q_EXIT=0
+=== gate lock pid file content check ===
+--- secrets scan (both scripts) ---
+no secret-like strings found
+--- destructive-command scan ---
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:129:    rm -rf "$CARGO_PID" "$CARGO_LOCK" 2>/dev/null
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:202:    rm -rf "$LOCK_FILE" 2>/dev/null
+--- eval sites ---
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:118:    eval "$*"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:123:        GHCTL_SKIP_LOCK=1 eval "$CMD"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:165:    eval "$*"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:181:  eval "$*"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:208:eval "$*"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:216:    GHCTL_SKIP_LOCK=1 eval "$CMD"
+--- stat/proc/sort constructs ---
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:52:      echo "  acquired: $(stat -c '%y' "$LOCK_FILE" 2>/dev/null | cut -d' ' -f1-2)"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:84:      if [ -n "$OWNER" ] && [ -d "/proc/$OWNER" ]; then
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:85:        echo "LOCK: held by PID $OWNER (/proc/$OWNER present)"
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:126:      done < <(sort -t$'\t' -k1,1n "$CARGO_QUEUE")
+C:/Users/wilfr/hermes-first-task/revit-alike-wt-pr72/gh-ctl:219:  done < <(sort -t$'\t' -k1,1n "$QUEUE_FILE")
+exit=0

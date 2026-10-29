@@ -1,0 +1,19 @@
+=== A1: F3 gate lock release (two gates, same target) ===
+--- gate 1 ---
+[gate target-x] acquired — running: echo GATE-ONE
+GATE-ONE
+gate1_exit=0
+--- is target-x still a directory? ---
+target-x gone (PASS)
+--- .gh-ctl contents after gate 1 ---
+total 0
+drwxr-xr-x 1 wilfr 197609 0 Oct 23 06:12 .
+drwxr-xr-x 1 wilfr 197609 0 Oct 23 06:12 ..
+--- gate 2 on same target ---
+[gate target-x] acquired — running: echo GATE-TWO
+GATE-TWO
+gate2_exit=0
+target-x gone after gate2 (PASS)
+--- gate with no args (usage) ---
+gh-ctl gate <target> <command...>
+gate_noargs_exit=2

@@ -1,0 +1,88 @@
+=== A4: F6 automation.sh cargo reaches the health gate ===
+throwaway sane=/tmp/pr72-r2/sane
+--- cargo role ---
+[automation] gating: gh-ctl health
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (main)
+LOCK: free
+ENVIRONMENT: Sane
+[automation] health gate passed
+[automation] role=cargo (gh-ctl cargo) — serialised build, blocking-wait, never pushes while taken
+[cargo] acquiring lock (timeout 300s)...
+[cargo] acquired — running: echo CARGO-REACHED
+CARGO-REACHED
+exit=0
+
+--- review role ---
+[automation] gating: gh-ctl health
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (main)
+LOCK: free
+ENVIRONMENT: Sane
+[automation] health gate passed
+[automation] role=review (gh-ctl p2) — parallel-safe, read-only
+[gh-ctl p2] running (parallel): echo REVIEW-OK
+REVIEW-OK
+exit=0
+
+--- impl role (main -> warning) ---
+[automation] gating: gh-ctl health
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: ok (main)
+LOCK: free
+ENVIRONMENT: Sane
+[automation] health gate passed
+[automation] role=impl (gh-ctl p0) — serialised git+remote
+[gh-ctl p0] holding lock -> running: echo IMPL-OK
+IMPL-OK
+exit=0
+
+--- bogus role (usage + exit 2) ---
+automation.sh — role-based automation driver (gates on `gh-ctl health`)
+
+  review   parallel-safe, read-only job  (gh-ctl p2)
+           e.g. "cargo check --workspace" / "gh pr view <N>" / batch of PRs
+
+  impl     serialised git+remote job    (gh-ctl p0)
+           e.g. "git checkout -b feat/x && cargo build && gh pr merge"
+
+Both roles abort if `gh-ctl health` is not ENVIRONMENT: Sane.
+exit=2
+
+--- no role (usage + exit 2) ---
+automation.sh — role-based automation driver (gates on `gh-ctl health`)
+
+  review   parallel-safe, read-only job  (gh-ctl p2)
+           e.g. "cargo check --workspace" / "gh pr view <N>" / batch of PRs
+
+  impl     serialised git+remote job    (gh-ctl p0)
+           e.g. "git checkout -b feat/x && cargo build && gh pr merge"
+
+Both roles abort if `gh-ctl health` is not ENVIRONMENT: Sane.
+exit=2
+
+--- cargo, no command (usage + exit 2) ---
+[automation] missing command
+automation.sh — role-based automation driver (gates on `gh-ctl health`)
+
+  review   parallel-safe, read-only job  (gh-ctl p2)
+           e.g. "cargo check --workspace" / "gh pr view <N>" / batch of PRs
+
+  impl     serialised git+remote job    (gh-ctl p0)
+           e.g. "git checkout -b feat/x && cargo build && gh pr merge"
+
+Both roles abort if `gh-ctl health` is not ENVIRONMENT: Sane.
+exit=2
+
+--- non-sane repo (no git dir) -> health gate aborts ---
+[automation] gating: gh-ctl health
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: FAIL
+LOCK: free
+ENVIRONMENT: NOT Sane — 1 issue(s)
+[automation] ABORT — ENVIRONMENT: NOT Sane (gh-ctl health exit 1)
+exit=1

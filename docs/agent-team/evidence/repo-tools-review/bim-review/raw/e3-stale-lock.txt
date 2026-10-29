@@ -1,0 +1,30 @@
+=== A3: F1 stale-lock reclaim (planted dead PID) ===
+planted: lock dir + lock.pid=999999
+--- status before ---
+=== gh-ctl status ===
+LOCK: held
+  owner PID: 999999 (stale — not running)
+  acquired: 2026-10-23 06:13:09.457083100
+QUEUE: empty
+--- health before ---
+=== gh-ctl health ===
+AUTH: ok (github.com)
+REPO: FAIL
+LOCK: STALE
+ENVIRONMENT: NOT Sane — 2 issue(s)
+health_exit=1
+--- run p0 job against the stale lock ---
+[gh-ctl p0] reclaiming stale lock (owner PID 999999 is gone)
+[gh-ctl p0] holding lock -> running: echo SHOULD-RUN-RECLAIMED
+SHOULD-RUN-RECLAIMED
+p0_exit=0
+--- lock dir gone? ---
+lock reclaimed/removed (PASS)
+--- status after ---
+=== gh-ctl status ===
+LOCK: free
+QUEUE: empty
+--- p1 job (fresh, after reclaim) ---
+[gh-ctl p1] holding lock -> running: echo P1-RUNS
+P1-RUNS
+p1_exit=0

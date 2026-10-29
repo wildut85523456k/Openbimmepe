@@ -1,0 +1,17 @@
+=== A2: F2 unknown tier refused (exit codes captured directly) ===
+--- gh-ctl 'p3' 'echo SHOULD-NOT-RUN' ---
+gh-ctl: unknown priority 'p3' (use p0|p1|p2)
+exit=2
+--- gh-ctl 'P0' 'echo SHOULD-NOT-RUN' ---
+gh-ctl: unknown priority 'P0' (use p0|p1|p2)
+exit=2
+--- gh-ctl 'p0x' 'echo SHOULD-NOT-RUN' ---
+gh-ctl: unknown priority 'p0x' (use p0|p1|p2)
+exit=2
+--- gh-ctl 'p1x' 'echo SHOULD-NOT-RUN' ---
+gh-ctl: unknown priority 'p1x' (use p0|p1|p2)
+exit=2
+--- empty tier (defaults to p2, expected to run) ---
+[gh-ctl p2] running (parallel): echo EMPTY-TIER-RUNS
+EMPTY-TIER-RUNS
+exit=0

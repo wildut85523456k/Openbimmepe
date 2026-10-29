@@ -1,0 +1,42 @@
+=== A5.1 p2 runs parallel (no lock) ===
+    [gh-ctl p2] running (parallel): echo P2-RAN
+    P2-RAN
+  PASS  p2 ran (exit 0)
+  PASS  p2 left no lock
+=== A5.2 p0/p1 serialize + queue drain (priority order) ===
+    [gh-ctl p1] lock held -> queued (priority p1)
+    [gh-ctl p0] lock held -> queued (priority p0)
+  PASS  p1 enqueued while held
+  PASS  p0 enqueued while held
+    [gh-ctl p0] holding lock -> running: sleep 3; echo HOLDER-DONE
+    HOLDER-DONE
+    [gh-ctl p0] draining queue (priority order)...
+    P0-QUEUED
+    P1-QUEUED
+  PASS  holder drained the queue
+  PASS  drained in priority order (p0 before p1)
+  PASS  lock released after the holder finished
+=== A5.3 status ===
+    === gh-ctl status ===
+    LOCK: free
+    QUEUE: empty
+  PASS  status reports lock + queue
+=== A5.4 health (throwaway dir -> REPO FAIL, exit 1) ===
+    === gh-ctl health ===
+    AUTH: ok (github.com)
+    REPO: FAIL
+    LOCK: free
+    ENVIRONMENT: NOT Sane — 1 issue(s)
+  PASS  health prints a verdict
+  PASS  health exit 1 on a non-git dir
+=== A5.5 gate usage + no-args exit codes ===
+    gh-ctl gate <target> <command...>
+  PASS  gate with no target -> usage exit 2
+=== A5.6 cargo lock acquire/release ===
+    [cargo] acquiring lock (timeout 5s)...
+    [cargo] acquired — running: echo CARGO-RAN
+    CARGO-RAN
+  PASS  cargo ran
+  PASS  cargo lock released
+
+=== RESULT: 13 passed, 0 failed ===

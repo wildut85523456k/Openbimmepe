@@ -1,0 +1,17 @@
+### E3 lock + queue (p0 holder drains p1 queue; p2 parallel)
+[t] START 05:55:32.652482300
+[gh-ctl p0] holding lock -> running: echo HOLDER-START; sleep 2; echo HOLDER-END
+HOLDER-START
+[gh-ctl p2] running (parallel): echo P2-PARALLEL
+P2-PARALLEL
+[gh-ctl p1] lock held -> queued (priority p1)
+[gh-ctl p1] lock held -> queued (priority p1)
+HOLDER-END
+[gh-ctl p0] draining queue (priority order)...
+QUEUED-A
+QUEUED-B
+[t] P0 exited rc=0
+[t] .gh-ctl after: []
+[t] status: === gh-ctl status ===|LOCK: free|QUEUE: empty|
+[t] DONE
+exit=0
