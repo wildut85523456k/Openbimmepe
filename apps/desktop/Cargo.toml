@@ -35,3 +35,12 @@ unsafe_code = "forbid"
 [dependencies.openbim-automation]
 git = "https://github.com/wildut85523456k/openbim-core"
 rev = "544ee0d7c035cb0dffa57f5981094f28fe7ce591"
+
+[package.metadata.bundle]
+name = "OpenBIM"
+identifier = "com.wildut85523456k.openbim"
+version = "0.0.1"
+short_description = "Revit-style openBIM desktop authoring"
+icon = ["../assets/icon.png", "../assets/icon.ico"]
+# Windows: .msi via cargo-bundle native msi crate, macOS: .app/.dmg
+resources = ["../assets"]
