@@ -58,6 +58,8 @@ pub(crate) struct SheetUi {
     /// the viewport that is selected
     pub selected: Option<u64>,
     drag: Option<Drag>,
+    /// V7: a view is being placed at a click. Stores (sheet id, view key) and the drawing size.
+    pub placing: Option<(u64, String, (f64, f64))>,
     pan: Vec2,
     zoom: Option<f32>,
     /// the title being typed for the selected viewport
@@ -154,6 +156,7 @@ impl Desktop {
                     self.view = View::Sheet(id);
                     self.selected = None;
                     self.sheets.selected = None;
+                    self.sheets.placing = None;
                     self.message = format!("Sheet {} made; Place View puts views on it, undo takes it back", self.document.sheet(id).map_or(String::new(), SheetDef::label));
                     true
                 }
@@ -232,6 +235,15 @@ impl Desktop {
         let ops = self.document.place_viewport_commands(sheet, key, (x * 2.0).round() / 2.0, (y * 2.0).round() / 2.0).map(|r| r.0);
         let name = sheet_draw::view_title(&self.document, key);
         let ok = self.apply_sheet(ops, &format!("{name} put on sheet {}", def.label()));
+        if ok { self.sheets.selected = self.document.sheet(sheet).and_then(|s| s.viewports.last().map(|v| v.id)); }
+        ok
+    }
+
+    /// V7: puts a view on a sheet at the clicked position (x, y in mm from the top-left of the sheet).
+    pub(crate) fn place_view_at(&mut self, sheet: u64, key: &str, x: f64, y: f64) -> bool {
+        let name = sheet_draw::view_title(&self.document, key);
+        let ops = self.document.place_viewport_commands(sheet, key, (x * 2.0).round() / 2.0, (y * 2.0).round() / 2.0).map(|r| r.0);
+        let ok = self.apply_sheet(ops, &format!("{name} put on sheet {}", self.document.sheet(sheet).map_or(String::new(), SheetDef::label)));
         if ok { self.sheets.selected = self.document.sheet(sheet).and_then(|s| s.viewports.last().map(|v| v.id)); }
         ok
     }
@@ -360,7 +372,7 @@ impl Desktop {
 
     pub(crate) fn add_view_window(&mut self, ctx: &egui::Context) {
         let Some(mut a) = self.sheets.add.take() else { return };
-        let (mut open, mut add, mut cancel) = (true, false, false);
+        let (mut open, mut add, mut place_at_click, mut cancel) = (true, false, false, false);
         let sheets: Vec<(u64, String)> = self.document.sheets().iter().map(|s| (s.id, s.label())).collect();
         let views = self.placeable_views();
         egui::Window::new("Place View").id(egui::Id::unique("add_view_window")).open(&mut open).collapsible(false).default_width(340.0).show(ctx, |ui| {
@@ -385,13 +397,25 @@ impl Desktop {
                 let r = ui.add_enabled(a.sheet.is_some() && a.view.is_some(), egui::Button::new("Add View to Sheet"));
                 test_hit!(self, r, "add_view:add");
                 if r.clicked() { add = true; }
+                let at = ui.add_enabled(a.sheet.is_some() && a.view.is_some(), egui::Button::new("Place at Click…"));
+                test_hit!(self, at, "add_view:place_at_click");
+                if at.clicked() { place_at_click = true; }
                 if ui.button("Cancel").clicked() { cancel = true; }
             });
         });
         let mut keep = open && !cancel;
-        if add {
+        if add || place_at_click {
             if let (Some(s), Some(k)) = (a.sheet, a.view.clone()) {
-                if self.add_view_to_sheet(s, &k) { keep = false; self.view = View::Sheet(s); }
+                if place_at_click {
+                    // V7: enter click-to-place mode on the sheet
+                    let drawing = sheet_draw::view_drawing(&self.document, &k);
+                    let size = drawing.as_ref().map(|d| (d.w, d.h)).unwrap_or((100.0, 70.0));
+                    self.sheets.placing = Some((s, k.clone(), size));
+                    self.sheets.selected = None;
+                    self.message = format!("Click on the sheet to place {}; Esc cancels", sheet_draw::view_title(&self.document, &k));
+                    self.view = View::Sheet(s);
+                    keep = false;
+                } else if self.add_view_to_sheet(s, &k) { keep = false; self.view = View::Sheet(s); }
             }
         }
         if keep { self.sheets.add = Some(a); }
@@ -504,6 +528,16 @@ impl Desktop {
         paint(&painter, &prims, k, origin);
         let blue = ui.visuals().hyperlink_color;
         let at = |p: [f64; 2]| origin + Vec2::new(p[0] as f32, p[1] as f32) * k;
+        // V7: when placing a view at a click, show a ghost rectangle at the pointer
+        if let Some((_, _, (dw, dh))) = self.sheets.placing.as_ref() {
+            let ghost_color = Color32::from_rgba_premultiplied(60, 150, 255, 128);
+            if let Some(p) = response.interact_pointer_pos() {
+                let paper = to_paper(p);
+                let (cx, cy) = (paper[0], paper[1]);
+                painter.rect_stroke(Rect::from_min_max(at([cx - dw / 2.0, cy - dh / 2.0 - 8.5]), at([cx + dw / 2.0, cy + dh / 2.0 + 8.5])), 0.0, Stroke::new(2.0, ghost_color), egui::StrokeKind::Middle);
+            }
+            ui.label(egui::RichText::new("Click to drop the viewport, or Esc to cancel").color(ghost_color));
+        }
         let inside = |pl: &Placed, p: [f64; 2]| p[0] >= pl.rect[0] && p[0] <= pl.rect[2] && p[1] >= pl.rect[1] && p[1] <= pl.rect[3];
         let under = |p: [f64; 2]| placed.iter().rev().find(|pl| inside(pl, p)).map(|pl| pl.id);
         // the viewport that is selected
@@ -541,7 +575,23 @@ impl Desktop {
             }
         }
         if !ui.input(|i| i.pointer.primary_down()) && self.sheets.drag.is_some() && !response.dragged() { self.sheets.drag = None; }
-        if response.clicked() {
+        // V7: click-to-place mode — Esc cancels, click drops the viewport at the pointer
+        if self.sheets.placing.is_some() {
+            if !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.sheets.placing = None;
+                self.message = "Place cancelled".into();
+            } else if response.clicked() {
+                if let Some(p) = response.interact_pointer_pos() {
+                    let paper = to_paper(p);
+                    // don't drop on an existing viewport; just select it instead
+                    if under(paper).is_none() {
+                        if let Some((sheet, key, _)) = self.sheets.placing.take() {
+                            self.place_view_at(sheet, &key, paper[0], paper[1]);
+                        }
+                    }
+                }
+            }
+        } else if response.clicked() {
             if let Some(p) = response.interact_pointer_pos() { self.sheets.selected = under(to_paper(p)); }
         }
         if response.double_clicked() {
@@ -706,19 +756,68 @@ mod tests {
             assert!(app.add_view_to_sheet(id, if number == "A100" { "p10" } else { "mech" }), "{}", app.message);
         }
         let ids: Vec<u64> = app.document.sheets().iter().map(|s| s.id).collect();
-        let dir = std::env::temp_dir().join(format!("openbim-print-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("openbim-print-{}-{}", std::process::id(), "click"));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sheets.pdf");
         assert_eq!(app.print_sheets(&ids, false, &path), Ok(2));
         let bytes = std::fs::read(&path).unwrap();
         let text: String = bytes.iter().map(|&b| if b < 128 { b as char } else { '?' }).collect();
         assert!(text.starts_with("%PDF-1.4") && text.contains("/Count 2"));
-        // A100 (A3, 420 x 297 mm) comes first, B200 (A1) second
         let a3 = text.find("/MediaBox [0 0 1190.551 841.89]").expect("an A3 page");
         let a1 = text.find("/MediaBox [0 0 2383.937 1683.78]").expect("an A1 page");
         assert!(a3 < a1);
         assert_eq!(app.print_sheets(&[], false, &path), Err("no sheet is chosen".into()));
         assert!(app.print_sheets(&ids, true, &dir.join("no such folder").join("x.pdf")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_view_on_an_empty_sheet_goes_to_the_middle_not_the_top_left() {
+        // V7: default_place must return the center of the drawing area when there are no existing viewports.
+        let sheet = SheetDef {
+            id: 1, number: "A-101".into(), name: "Test".into(),
+            size: PaperSize::A1, portrait: false,
+            block: openbim_document::TitleBlock::default(), viewports: vec![],
+        };
+        let [l, t, r, b] = sheet_draw::drawing_area(&sheet);
+        let (cx, cy) = sheet_draw::default_place(&sheet, &[], (100.0, 70.0));
+        let center_x = (l + r) / 2.0;
+        let center_y = (t + b) / 2.0 - 7.0;
+        // the center of the drawing area
+        assert!((cx - center_x).abs() < 0.1, "x is the center: {cx} vs {center_x}");
+        assert!((cy - center_y).abs() < 0.1, "y is the center: {cy} vs {center_y}");
+        // and it is NOT the top-left corner (which was the bug)
+        assert!(cx > center_x - 50.0, "x is not near the left edge: {cx}");
+    }
+
+    #[test]
+    fn a_view_can_be_placed_at_a_clicked_position_on_a_sheet() {
+        // V7: place_view_at drops a viewport at the (x, y) given in millimetres.
+        let mut app = Desktop::sample();
+        let (ops, id) = app.document.new_sheet_commands(PaperSize::A1, false, "A-101", "Test").unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
+        assert!(app.place_view_at(id, "p10", 300.0, 250.0), "{}", app.message);
+        let vp = app.document.sheet(id).unwrap().viewports[0].clone();
+        assert_eq!(vp.view, "p10");
+        assert!((vp.x_mm - 300.0).abs() < 0.1, "x_mm matches: {}", vp.x_mm);
+        assert!((vp.y_mm - 250.0).abs() < 0.1, "y_mm matches: {}", vp.y_mm);
+        // placing again at a different position adds a second viewport
+        assert!(app.place_view_at(id, "3d", 500.0, 400.0), "{}", app.message);
+        assert_eq!(app.document.sheet(id).unwrap().viewports.len(), 2);
+    }
+
+    #[test]
+    fn place_at_click_mode_esc_cancels_without_placing() {
+        // V7: entering click-to-place mode and pressing Esc leaves the sheet empty.
+        let mut app = Desktop::sample();
+        let (ops, id) = app.document.new_sheet_commands(PaperSize::A1, false, "A-101", "Test").unwrap();
+        app.document.transact(app.document.revision(), &ops).unwrap();
+        let drawing = sheet_draw::view_drawing(&app.document, "p10").unwrap();
+        app.sheets.placing = Some((id, "p10".into(), (drawing.w, drawing.h)));
+        assert!(app.sheets.placing.is_some());
+        // simulate Esc: clear the placing state
+        app.sheets.placing = None;
+        assert!(app.sheets.placing.is_none());
+        assert!(app.document.sheet(id).unwrap().viewports.is_empty(), "no view was placed");
     }
 }

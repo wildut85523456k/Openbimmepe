@@ -674,6 +674,8 @@ pub fn sheet_page(doc: &Document, sheet: &SheetDef, bw: bool) -> Page {
 /// with titles; the new view's box is its drawing and its title below.
 pub fn default_place(sheet: &SheetDef, existing: &[[f64; 4]], drawing_size: (f64, f64)) -> (f64, f64) {
     let [l, t, r, b] = drawing_area(sheet);
+    // V7: when the sheet is empty, place the view in the middle of the drawing area, not the top-left.
+    if existing.is_empty() { return ((l + r) / 2.0, (t + b) / 2.0 - 7.0); }
     let (w, h) = (drawing_size.0, drawing_size.1 + 17.0);
     let gap = 8.0;
     let step = 5.0;
