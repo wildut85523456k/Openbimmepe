@@ -1252,6 +1252,15 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             if let Some(p) = pick {
                 let closing = app.tool != crate::Tool::Railing && pts.first().is_some_and(|f| f.distance(p) < 10.0);
                 if app.tool == crate::Tool::VerticalOpening && app.opening_host.is_none() { app.vertical_host_click(level_id, to_model(p)); }
+                else if app.tool == crate::Tool::Slab && app.slab_pick_walls {
+                    // Pick Walls mode: if the click lands on a wall, add its exterior face to the outline
+                    let wall = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some_and(|e| e.category == Category::Wall)).map(|(_, id, _, _)| *id);
+                    if let Some(w) = wall {
+                        app.slab_pick_wall(w);
+                    } else {
+                        app.slab_click(level_id, to_model(p), closing);
+                    }
+                }
                 else { app.slab_click(level_id, to_model(p), closing); }
             }
         }

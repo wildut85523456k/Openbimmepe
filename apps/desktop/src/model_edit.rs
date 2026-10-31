@@ -585,6 +585,33 @@ impl Desktop {
 
     /// A click of the Slab tool in the plan of `level`: a corner, or the closing of the outline when it lands on the
     /// first corner of a polygon that has three or more.
+    /// Pick a wall for a slab boundary: adds the wall's exterior face to the slab outline.
+    pub(crate) fn slab_pick_wall(&mut self, wall: ElementId) {
+        let Some(w) = self.document.get(wall) else { return };
+        let Some(Geometry::Linear { start, end, level }) = w.geometry else { return };
+        if level.0 != self.plan_level().0 { return; } // only walls on the current level
+        let th = w.width_m; // wall thickness
+        // exterior face is on the left of the direction of drawing
+        let dx = end[0] - start[0];
+        let dy = end[1] - start[1];
+        let len = dx.hypot(dy);
+        if len < 1e-9 { return; }
+        let nx = -dy / len; // normal to the left
+        let ny = dx / len;
+        let half = th / 2.0;
+        // exterior face: offset centerline by half thickness to the left
+        let a = [start[0] + nx * half, start[1] + ny * half];
+        let b = [end[0] + nx * half, end[1] + ny * half];
+        // avoid duplicate consecutive points
+        if let Some(last) = self.slab_points.last() {
+            if (last[0] - a[0]).abs() < 1e-9 && (last[1] - a[1]).abs() < 1e-9 { }
+            else { self.slab_points.push(a); }
+        } else {
+            self.slab_points.push(a);
+        }
+        self.slab_points.push(b);
+        self.message = format!("Slab: {} corners from walls; Enter closes the outline", self.slab_points.len());
+    }
     pub(crate) fn slab_click(&mut self, level: ElementId, at: [f64; 2], closing: bool) {
         if self.tool == crate::Tool::Slab && self.slab_kind_pick == openbim_document::SlabKind::Ceiling && self.ceiling_auto { return self.ceiling_auto_click(level, at); }
         if closing && self.slab_points.len() >= 3 { return self.finish_slab(level); }
