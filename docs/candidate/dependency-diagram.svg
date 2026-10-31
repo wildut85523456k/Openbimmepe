@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenBIMMepe dependency & ownership diagram (candidate @76963c0, core @544ee0d7, egui 0.37) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="760" viewBox="0 0 980 760" role="img" focusable="false">
+  <title>OpenBIMMeme dependency and ownership diagram</title>
+  <defs>
+    <style>
+      text { font-family: ui-monospace, Consolas, monospace; font-size: 15px; fill: #d8dee9; }
+      h  { font-size: 19px; font-weight: 600; fill: #ffffff; }
+      rect { stroke: #4c566a; stroke-width: 1.5; rx: 8; }
+      a { stroke: #81a1c1; stroke-width: 2; marker-end: url(#arrow); }
+      .app  { fill: #2e3440; }
+      .core { fill: #3b330e; }
+      .crat { fill: #2b2f36; }
+      .host { fill: #2b3a42; }
+      .down { fill: #3b1856; }
+      .graph{ fill: #352e43; }
+      .src  { fill: #3a2d1f; }
+      .tag  { font-size: 12px; fill: #888ea0; }
+      g label { text-anchor: middle; }
+    </style>
+    <marker id="arrow" marker-width="10" marker-height="10" refX="18" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#81a1c1"/>
+    </marker>
+  </defs>
+  <!-- App -->
+  <rect class="app" x="330" y="40" width="320" height="76"/>
+  <text x="490" y="60" h>OpenBIMMepe (app repo)</text>
+  <text class="tag" x="490" y="78" text-anchor="middle">fork of revit-alike @76963c0 — main</text>
+  <text class="tag" x="490" y="94">wildut85523456k/Openbimmepe</text>
+
+  <!-- Source fork -->
+  <rect class="src" x="70" y="200" width="230" height="70"/>
+  <text x="185" y="222" h>revit-alike</text>
+  <text class="tag" x="185" y="240" text-anchor="middle">source commit @76963c0 (PR#111)</text>
+  <text class="tag" x="185" y="256">working tree c3bad7a left untouched</text>
+
+  <!-- Core pin -->
+  <rect class="core" x="480" y="200" width="320" height="70"/>
+  <text x="640" y="222" h>openbim-core (dependency pin)</text>
+  <text class="tag" x="640" y="240" text-anchor="middle">git SHA 544ee0d7 — NOT alterable without approval</text>
+  <text class="tag" x="640" y="256">crate checkout: ~/.cargo/.../544ee0d</text>
+
+  <!-- Crates (consumers of core) -->
+  <g>
+    <rect class="crat" x="110" y="320" width="150" height="54"/>
+    <text x="185" y="342" h>document</text>
+    <text class="tag" x="185" y="360" text-anchor="middle">+ viewport-egui</text>
+    <rect class="crat" x="280" y="320" width="150" height="54"/>
+    <text x="355" y="342" h>viewport / model3d</text>
+    <text class="tag" x="355" y="360" text-anchor="middle">Camera (Revit mouse)</text>
+    <rect class="crat" x="450" y="320" width="150" height="54"/>
+    <text x="525" y="342" h>keymap</text>
+    <text class="tag" x="525" y="360" text-anchor="middle">revit-style presets</text>
+    <rect class="crat" x="620" y="320" width="150" height="54"/>
+    <text x="695" y="342" h>family / sched / sheet</text>
+    <text class="tag" x="695" y="360" text-anchor="middle">+ mep, georef, class_map</text>
+    <rect class="crat" x="790" y="320" width="150" height="54"/>
+    <text x="865" y="342" h>automation</text>
+    <text class="tag" x="865" y="360" text-anchor="middle">local Plan/apply graph</text>
+  </g>
+
+  <!-- Host -->
+  <rect class="host" x="330" y="420" width="320" height="60"/>
+  <text x="490" y="442" h>eframe / egui 0.37 (host)</text>
+  <text class="tag" x="490" y="460">native Rust desktop, no JavaScript</text>
+
+  <!-- Downstream -->
+  <rect class="down" x="70" y="530" width="210" height="54"/>
+  <text x="175" y="552" h>edesign-alike (downstream)</text>
+  <text class="tag" x="175" y="570">MV/LV electrical design</text>
+  <!-- Graph -->
+  <rect class="graph" x="300" y="530" width="200" height="54"/>
+  <text x="400" y="552" h>dynamo-rs (graph)</text>
+  <text class="tag" x="400" y="570">G-A02 shared execution stack</text>
+
+  <!-- Edges -->
+  <line x1="490" y1="116" x2="490" y2="200" stroke="#81a1c1"/>
+  <text class="tag" x="505" y="160" text-anchor="middle">derived/forked from</text>
+  <line x1="185"  y1="270" x2="640" y2="200" stroke="#81a1c1"/>
+  <text class="tag" x="410" y="236" text-anchor="middle">pins (git SHA)</text>
+  <line x1="490" y1="270" x2="490" y2="320" stroke="#81a1c1"/>
+  <text class="tag" x="505" y="296" text-anchor="middle">contains / uses</text>
+  <line x1="490" y1="380" x2="490" y2="420" stroke="#81a1c1"/>
+  <text class="tag" x="505" y="400" text-anchor="middle">runs on</text>
+  <line x1="530" y1="480" x2="700" y2="556" stroke="#81a1c1"/>
+  <text class="tag" x="610" y="520">consumed by</text>
+  <line x1="490" y1="480" x2="400" y2="556" stroke="#81a1c1"/>
+  <text class="tag" x="440" y="520">graph (G-A02)</text>
+  <line x1="175" y1="530" x2="400" y2="530" stroke="#4c566a" stroke-width="1" stroke-dasharray="4 3"/>
+  <text class="tag" x="290" y="524">also forks openbim-core</text>
+</svg>
