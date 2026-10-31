@@ -1679,6 +1679,15 @@ mod tests {
     }
 
     #[test]
+    fn the_keymap_defaults_match_revit() {
+        let app = crate::Desktop::sample();
+        assert_eq!(app.keymap.shortcuts("Duct"), vec!["D T".to_string()], "Duct must use Revit's DT");
+        assert_eq!(app.keymap.shortcuts("Slab"), vec!["S B".to_string()], "Slab must use Revit's SB");
+        assert_eq!(app.keymap.shortcuts("Wall"), vec!["W A".to_string()], "Wall must use Revit's WA");
+        assert_eq!(app.keymap.shortcuts("Pipe"), vec!["P I".to_string()], "Pipe must use Revit's PI");
+    }
+
+    #[test]
     fn a_level_view_is_named_after_its_level_and_follows_a_rename() {
         let mut app = Desktop::sample();
         let level = app.levels()[0].0;

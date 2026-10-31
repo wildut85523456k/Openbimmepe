@@ -146,6 +146,22 @@ impl Desktop {
                 self.dark = self.settings.theme.is_dark();
                 self.apply_theme(ui.ctx());
             }
+
+            ui.separator();
+            ui.label(egui::RichText::new("Keyboard (Revit defaults)").heading());
+            ui.small("Shortcuts match Revit's defaults. Middle-drag pans, Shift+Middle-drag orbits, wheel zooms.");
+            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                for cmd in self.keymap.commands() {
+                    let sc = self.keymap.shortcuts(cmd).join(", ");
+                    ui.horizontal(|ui| { ui.label(format!("{cmd}:")); ui.label(if sc.is_empty() { "(none)".into() } else { sc }); });
+                }
+            });
+            if ui.button("Reset all shortcuts to Revit defaults").clicked() {
+                self.keymap.reset_all();
+                self.settings.keymap_overrides = self.keymap.save_overrides();
+                self.settings.save();
+                self.message = "Keyboard shortcuts reset to Revit defaults".into();
+            }
         });
         if !open { self.show_options = false; }
         if self.settings != before && !self.settings.save() { self.message = "The options could not be written; they hold for this session".into(); }

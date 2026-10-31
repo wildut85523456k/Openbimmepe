@@ -356,6 +356,8 @@ impl Desktop {
         // restore the persisted Light/Dark theme before the first frame is shown
         app.dark = app.settings.theme.is_dark();
         app.apply_theme(&cc.egui_ctx);
+        // apply persisted keyboard-shortcut overrides on top of the Revit defaults
+        let _ = app.keymap.load_overrides(&app.settings.keymap_overrides);
         // a model file named on the command line (or by the system, when a .obim file is opened) is opened at start
         match std::env::args_os().nth(1).map(|a| a.to_string_lossy().into_owned()).filter(|a| !a.starts_with('-')) {
             Some(path) => { app.new_model(); app.load_model(&path); }
@@ -374,12 +376,12 @@ impl Desktop {
         let mut keymap = openbim_keymap::Keymap::new(&["Select", "Duct", "Pipe", "Wall", "Beam", "Column", "Slab", "Footing", "Wall Footing", "Beam System", "Truss", "Rebar", "Family"])
             .expect("static shortcut commands");
         keymap.set_preset(&[
-            ("Duct", &["D D"]),
+            ("Duct", &["D T"]),
             ("Pipe", &["P I"]),
             ("Wall", &["W A"]),
             ("Beam", &["B M"]),
             ("Column", &["C L"]),
-            ("Slab", &["S L"]),
+            ("Slab", &["S B"]),
             ("Footing", &["F T"]),
             ("Wall Footing", &["W F"]),
             ("Beam System", &["B S"]),
@@ -951,7 +953,7 @@ impl Desktop {
             egui::Window::new("Prototype scope").open(&mut self.show_help).show(&ctx, |ui| {
                 ui.label("Plan and orbitable 3D views derive geometry from the same in-memory document.");
                 ui.label("Model files, server, IFC editing, routing and persistence are not connected yet.");
-                ui.label("ESC: cancel. TAB: cycle sample selection. Mouse wheel: zoom. Middle-drag: pan. Right-drag: orbit in 3D.");
+                ui.label("ESC: cancel. TAB: cycle sample selection. Mouse wheel: zoom. Middle-drag: pan. Shift+Middle-drag: orbit in 3D.");
                 ui.label(format!("Existing keymap crate: Duct shortcut = {:?}",
                     self.keymap.shortcuts("Duct")));
             });

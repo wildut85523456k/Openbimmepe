@@ -24,15 +24,18 @@ pub(crate) struct AppSettings {
     pub autosave_to_file: bool,
     /// light/dark application theme (persisted; defaults to Light)
     pub theme: Theme,
+    /// keyboard-shortcut overrides, one line per customised command (escaped single line); empty = Revit defaults
+    pub keymap_overrides: String,
 }
 
 impl Default for AppSettings {
-    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light } }
+    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light, keymap_overrides: String::new() } }
 }
 
 impl AppSettings {
     pub(crate) fn to_text(&self) -> String {
-        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name())
+        let escaped = self.keymap_overrides.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', "\\t");
+        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\nkeymap_overrides={}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name(), escaped)
     }
 
     pub(crate) fn from_text(text: &str) -> Self {
@@ -43,6 +46,10 @@ impl AppSettings {
                 "autosave_minutes" => if let Ok(m) = v.trim().parse::<u32>() { s.autosave_minutes = m.min(MAX_AUTOSAVE_MINUTES); },
                 "autosave_to_file" => s.autosave_to_file = v.trim() == "1",
                 "theme" => s.theme = match v.trim() { "dark" => Theme::Dark, _ => Theme::Light },
+                "keymap_overrides" => {
+                    let unesc = v.replace("\\\\", "\x00").replace("\\n", "\n").replace("\\t", "\t").replace("\x00", "\\");
+                    s.keymap_overrides = unesc;
+                }
                 _ => {}
             }
         }
