@@ -395,6 +395,7 @@ struct Desktop {
     site_edit: Option<openbim_document::Site>,
     property_query: String,
     browser_query: String,
+    ribbon_query: String,
     browser_selected: String,
     message: String,
     show_properties: bool,
@@ -547,7 +548,7 @@ impl Desktop {
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_opts: mep_tool::RunOpts::default(), run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_kind: None, family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, stair_shape: openbim_document::StairShape::Straight, stair_railing: openbim_document::RailingSides::Both, opening_host: None, opening_cands: Vec::new(), shaft_base_mm: 0.0, shaft_top: None, shaft_top_mm: 0.0, opening_sill_mm: 900.0, opening_head_mm: 2100.0, opening_from: None, view_corner: None, view_drag: None, view_edit: None, section_xf: None, elev_marks: None, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
-            property_query: String::new(), browser_query: String::new(),
+            property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(),
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
             show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
@@ -718,6 +719,23 @@ impl Desktop {
             ] {
                 if ui.selectable_label(self.workspace == ws, label).clicked() {
                     self.workspace = ws;
+                }
+            }
+            ui.separator();
+            ui.add(egui::TextEdit::singleline(&mut self.ribbon_query).hint_text("Search commands...").desired_width(160.0));
+            // Show matching commands when searching
+            if !self.ribbon_query.trim().is_empty() {
+                let q = self.ribbon_query.trim().to_lowercase();
+                let matches: Vec<_> = ribbon::all_commands().into_iter().filter(|(_, label, _)| label.to_lowercase().contains(&q)).collect();
+                if !matches.is_empty() {
+                    ui.separator();
+                    for (id, label, tab) in matches.iter().take(8) {
+                        let enabled = Self::ribbon_command_implemented(id);
+                        if ui.add_enabled(enabled, egui::Button::new(format!("{} ({})", label, tab)).small()).clicked() {
+                            self.run_command(id, label);
+                            self.ribbon_query.clear();
+                        }
+                    }
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

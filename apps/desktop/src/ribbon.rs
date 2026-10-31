@@ -217,6 +217,23 @@ pub fn groups(tab: &str, systems_sub: &str) -> Vec<&'static Group> {
     list.iter().flat_map(|g| g.iter()).collect()
 }
 
+/// Collect every ribbon command id, label and tab it belongs to, for command discovery (REA-008).
+pub fn all_commands() -> Vec<(&'static str, &'static str, &'static str)> {
+    let mut out = Vec::new();
+    for (tab, _) in TABS {
+        for sub in ["HVAC", "Plumbing & Piping", "Electrical", "All"] {
+            for g in groups(tab, sub) {
+                for cmd in g.commands {
+                    out.push((cmd.id, label(cmd), *tab));
+                }
+            }
+        }
+    }
+    out.sort_by_key(|c| c.1);
+    out.dedup_by_key(|c| c.0);
+    out
+}
+
 /// The icon for a command ID; unknown IDs fall back to the generic component icon.
 pub fn icon_image(ui: &egui::Ui, id: &str, dark: bool, size: Vec2) -> egui::Image<'static> {
     if id.starts_with("automation_") { return crate::automation_icons::image(ui, id, dark, size); }
