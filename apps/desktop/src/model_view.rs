@@ -1712,6 +1712,37 @@ mod tests {
     }
 
     #[test]
+    fn open_views_add_activate_close_and_cap() {
+        let mut app = crate::Desktop::sample();
+        assert_eq!(app.open_views.len(), 1, "one tab at start");
+        // opening a new view adds a tab and activates it, under the cap
+        assert_eq!(app.add_view(crate::View::ThreeD), crate::ViewOpenPolicy::Continue);
+        assert_eq!(app.open_views.len(), 2);
+        assert_eq!(app.view, crate::View::ThreeD, "active view switched to the new tab");
+        assert_eq!(app.activate_view_at(0), ());
+        assert_eq!(app.view, crate::View::Mechanical);
+        // re-adding an open view just activates it, no new tab
+        let len = app.open_views.len();
+        assert_eq!(app.add_view(crate::View::ThreeD), crate::ViewOpenPolicy::Continue);
+        assert_eq!(app.open_views.len(), len, "no duplicate tab");
+        // distinct sections fill up to the Revit-like cap of 10
+        for n in 0..9u64 { let _ = app.add_view(crate::View::Section(1_000_000 + n)); }
+        assert_eq!(app.open_views.len(), crate::MAX_OPEN_VIEWS);
+        // the cap-th+1 view is refused with Replace until the user clears a tab
+        let p = app.add_view(crate::View::Section(9_999_999));
+        assert_eq!(p, crate::ViewOpenPolicy::Replace);
+        assert_eq!(app.open_views.len(), crate::MAX_OPEN_VIEWS, "replace prompt does not add a tab");
+        // closing a tab shrinks the list and keeps the active view valid
+        let before = app.open_views.len();
+        app.close_view_at(0);
+        assert_eq!(app.open_views.len(), before - 1);
+        assert!(app.active_view < app.open_views.len());
+        // stable id survives close/activate
+        let id = app.active_view_id();
+        assert_eq!(app.open_views[app.active_view].id(), id);
+    }
+
+    #[test]
     fn a_level_view_is_named_after_its_level_and_follows_a_rename() {
         let mut app = Desktop::sample();
         let level = app.levels()[0].0;

@@ -108,6 +108,46 @@ pub(crate) fn view_open_policy(open_count: usize) -> ViewOpenPolicy {
     if open_count >= crate::MAX_OPEN_VIEWS { ViewOpenPolicy::Replace } else { ViewOpenPolicy::Continue }
 }
 
+impl Desktop {
+    /// Open `v` as a tab if it is not already open, making it active. Returns the cap policy
+    /// (REA-006): `Replace` when the Revit-like tab limit is reached so the caller can prompt
+    /// to replace an existing tab; the tab is NOT added until the user chooses one.
+    pub(crate) fn add_view(&mut self, v: View) -> ViewOpenPolicy {
+        if let Some(i) = self.open_views.iter().position(|o| *o == v) {
+            self.activate_view_at(i);
+            return ViewOpenPolicy::Continue;
+        }
+        let policy = view_open_policy(self.open_views.len());
+        if policy == ViewOpenPolicy::Replace { return policy; }
+        self.open_views.push(v);
+        self.activate_view_at(self.open_views.len() - 1);
+        policy
+    }
+    /// Make the tab at index `i` active; `view` follows it so the viewport and the rest of
+    /// the UI show that view (per-view state comes in Increment 2).
+    pub(crate) fn activate_view_at(&mut self, i: usize) {
+        let Some(v) = self.open_views.get(i).copied() else { return };
+        self.active_view = i;
+        self.view = v;
+    }
+    /// Close the tab at index `i`, keeping `active_view` and `view` valid (REA-006).
+    pub(crate) fn close_view_at(&mut self, i: usize) {
+        if i >= self.open_views.len() { return; }
+        self.open_views.remove(i);
+        self.active_view = match self.active_view.cmp(&(self.open_views.len())) {
+            std::cmp::Ordering::Greater if self.active_view > 0 => self.active_view - 1,
+            std::cmp::Ordering::Greater => 0,
+            std::cmp::Ordering::Less => self.active_view.min(self.open_views.len().saturating_sub(1)),
+            std::cmp::Ordering::Equal => self.active_view.min(self.open_views.len().saturating_sub(1)),
+        };
+        self.view = self.open_views[self.active_view];
+    }
+    /// Stable id of the active view (REA-006).
+    pub(crate) fn active_view_id(&self) -> u64 {
+        self.open_views.get(self.active_view).map_or(self.view.id(), |v| v.id())
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// What the options bar starts from when a command is chosen. A field left `None` is not touched (A5).
@@ -144,6 +184,9 @@ struct Desktop {
     document: Document,
     workspace: Workspace,
     view: View,
+    /// The open view tabs (REA-006). `view` is always `open_views[active_view]`.
+    open_views: Vec<View>,
+    active_view: usize,
     tool: Tool,
     selected: Option<SampleElement>,
     ribbon: &'static str,
@@ -423,7 +466,7 @@ impl Desktop {
         Self {
             automation: automation::Automation::default(),
             document,
-            workspace: Workspace::Design, view: View::Mechanical, tool: Tool::Select,
+            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
