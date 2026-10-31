@@ -1,56 +1,49 @@
-# OpenBIM / Revit-alike
+# Openbimmepe — independent clean rebuild candidate
 
-Rust desktop BIM authoring with egui/wgpu, a native project format and IFC exchange.
-The application is under development. Implemented subsets are not full Revit parity.
+This is an **independent** Rust/eGUI openBIM authoring repo — a clean rebuild
+alternative to `revit-alike`. It is the buildable, verifiable candidate for the
+`OpenBIM-REA-2026-10-31` gap-register refresh (START-HERMES pack), kept separate
+from in-progress corrections landing on `revit-alike`.
 
-Start with the [current capability register](docs/capability-register.md), which records the inspected commit,
-implementation evidence, limitations and P0 validation gates. The [UI specification](docs/revit-style-ui/README.md)
-defines the intended behaviour; historical audits describe their own pinned baselines.
+## Provenance
 
-## Run and validate
+- Forked from `revit-alike` at commit `76963c0`
+  (`feat(viewport): family tool preview handled by the application, not viewport overlays`)
+- Baseline tag: `v0.0.1-candidate-76963c0`.
+- Candidate core pin: `openbim-core` @ `544ee0d7c035cb0dffa57f5981094f28fe7ce591`
+  — the **PR#111 actual** core pin audited by START-HERMES.md. `master` (`eda121c`)
+  is deliberately **not** used (it lacks crates the app needs).
+- egui / eframe / egui_extras `0.37`.
+- Local-only: the `origin` remote is stripped; nothing auto-pushes or merges.
+- Intentionally **does not** carry `revit-alike`'s uncommitted `c3bad7a` bump +
+  compile fixes — that is the other agent's in-progress work. Openbimmepe builds
+  the committed PR#111 candidate independently; the `c3bad7a` follow-up is a
+  documented next step (see `docs/openbimmepe/S0-INVENTORY.md`).
+
+## Layout (post core-dep migration)
+
+Shared library crates now live in the `openbim-core` monorepo and are consumed as
+git-SHA-pinned dependencies (all `@ 544ee0d7`): `openbim-keymap`,
+`openbim-commands`, `openbim-document`, `openbim-oplog`, `openbim-arch`,
+`openbim-geom`, `openbim-ifc`, `openbim-place`, `openbim-calc`, `openbim-family`,
+`openbim-route`, `openbim-view`, `openbim-viewport-egui`, `openbim-sheets`,
+`openbim-clash`, `openbim-automation`.
+
+`apps/desktop` → `openbim-desktop` is the desktop application.
+
+## Build / verify
 
 ```sh
-cargo run --locked -p openbim-desktop
-cargo test --locked -p openbim-desktop
-cargo test --locked --workspace --release
-cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo build    -p openbim-desktop
+cargo test     -p openbim-desktop
+cargo test     --workspace --release
+cargo clippy   --workspace --all-targets -- -D warnings
 cargo audit
 ```
 
-Windows requires MSVC Build Tools and the Windows SDK; Linux needs X11/Wayland/graphics development libraries.
-The workspace builds with no private access. The electrical solver (single-line feeder currents and voltage
-drops) is the private `edesign-alike` repository and is plugged in only by the separate [full build](full/README.md);
-without it, schematics keep their placeholders and say the currents were not calculated.
-See [P0 validation](docs/p0-validation.md) for native CI and evidence limits.
+Windows requires MSVC Build Tools + Windows SDK; Linux needs X11/Wayland/graphics
+dev libs. The workspace builds with no private access. The electrical solver is
+the separate private `edesign-alike` repo, wired only by `full/`; without it the
+app stamps calculations as "not calculated".
 
-## Crates
-
-| Crate | What it is |
-|---|---|
-| `crates/geom` | wall chains, mitres, openings, exact volumes, meshes (S1) |
-| `crates/family` | parametric family engine: formulas, typed values, nested families, turns (S2) |
-| `crates/place` | placing families in walls and cutting openings |
-| `crates/keymap` | keyboard shortcut presets and user overrides |
-| `crates/arch` | levels, grids, rooms, layered assemblies, envelope, windows, ceilings, shafts |
-| `crates/oplog` | operation log spike (S8): a small binary format with a CRC-32 per record, so a torn tail is detected and dropped |
-| `crates/sketch` | sketch-and-lock: a small 2D geometric constraint solver (S2h) |
-| `crates/route` | MEP routing: a path drawn point by point becomes straight runs joined by fittings |
-| `crates/ifc` | IFC4 writer: takes the model as the app holds it (wall chains, slabs, openings, MEP networks) and writes a STEP file |
-| `crates/view` | plan views: looking down on a level with a horizontal cut — cut, below-cut, overhead and beyond geometry |
-| `crates/viewport` | the logic of a 3D view with no window or GPU: camera, mouse-driven orbit, ViewCube, software renderer |
-| `crates/viewport-egui` | the 3D view as a widget for egui, drawn with wgpu |
-| `crates/photo` | photometric files as manufacturers publish them: IES (IESNA LM-63) and Eulumdat (.ldt) |
-| `crates/sheets` | sheets, title blocks and printing, the Revit way |
-| `crates/automation` | independent typed automation: evaluation is read-only; only a validated plan can modify the document |
-| `crates/calc` | sizing and losses of a branched network of pipes or ducts |
-| `crates/document` | sprint 1 BIM document foundation |
-| `crates/schematic` | openbim-schematic: the pure grid layout engine behind `MEP: Generate Schematic` |
-| `crates/commands` | typed command and query API (AUTO-001) |
-| `apps/desktop` | the desktop application |
-| `spikes/*` | Python scripts that write the Rust output to IFC4 and check it against hand-calculated figures |
-
-Save/Open, autosave recovery, architectural placement, MEP routing, schedules, sheets and IFC exchange have
-implementations. Associative dimensions, complete documentation workflows, a graphical family editor and
-shared-folder collaboration remain incomplete. See the register before planning new work.
-
-Example/test sizes and engineering values are illustrative, not project design recommendations.
+Example/test sizes and engineering values are illustrative, not design recommendations.

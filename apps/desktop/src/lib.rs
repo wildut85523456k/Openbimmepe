@@ -655,6 +655,7 @@ impl Desktop {
                 self.message = format!("{} clash(es) detected", clashes.len());
             }
             "ifc_import" => self.import_ifc_file(),
+            "ifc_export" => self.export_ifc_file(),
             "load_family" => self.load_family_file(),
             "new" => self.new_model(),
             "open" => self.open_file(),
