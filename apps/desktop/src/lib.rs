@@ -396,6 +396,8 @@ struct Desktop {
     property_query: String,
     browser_query: String,
     ribbon_query: String,
+    /// active discipline filter for the ribbon (REA-008): Architecture, Structure, MEP or All
+    discipline: &'static str,
     browser_selected: String,
     message: String,
     show_properties: bool,
@@ -548,7 +550,7 @@ impl Desktop {
             slab_points: Vec::new(), run_points: Vec::new(), branch_main: None, run_opts: mep_tool::RunOpts::default(), run_sizes: Vec::new(), system_pick: openbim_family::mep::System::SupplyAir, spacing_mm: 600.0, angle_deg: 0.0, bar_count: 3.0, family_pick: String::new(), family_type: String::new(), family_kind: None, family_values: Vec::new(), family_texts: Vec::new(), slab_thickness_mm: 200.0, slab_offset_mm: 0.0, roof_slope_deg: 30.0, ceiling_auto: true, stair_width_mm: 1000.0, stair_riser_mm: 175.0, stair_tread_mm: 280.0, stair_rise_mm: 3000.0, stair_shape: openbim_document::StairShape::Straight, stair_railing: openbim_document::RailingSides::Both, opening_host: None, opening_cands: Vec::new(), shaft_base_mm: 0.0, shaft_top: None, shaft_top_mm: 0.0, opening_sill_mm: 900.0, opening_head_mm: 2100.0, opening_from: None, view_corner: None, view_drag: None, view_edit: None, section_xf: None, elev_marks: None, slab_kind_pick: openbim_document::SlabKind::Floor, footing_thickness_mm: 500.0, join_pick: [true; 2],
             camera_yaw: 0.7, camera_pitch: 0.6,
             view3d: openbim_viewport_egui::Viewport3d::new(), view3d_revision: None, site_edit: None,
-            property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(),
+            property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(), discipline: "All",
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
             show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
@@ -722,6 +724,14 @@ impl Desktop {
                 }
             }
             ui.separator();
+            // Discipline filter (REA-008) — hides ribbon tabs not relevant to the active discipline.
+            let disciplines: &[&str] = &["Architecture", "Structure", "MEP", "All"];
+            for d in disciplines {
+                if ui.selectable_label(self.discipline == *d, *d).clicked() {
+                    self.discipline = *d;
+                }
+            }
+            ui.separator();
             ui.add(egui::TextEdit::singleline(&mut self.ribbon_query).hint_text("Search commands...").desired_width(160.0));
             // Show matching commands when searching
             if !self.ribbon_query.trim().is_empty() {
@@ -757,7 +767,7 @@ impl Desktop {
     /// Commands without an implementation yet report it in the status bar.
     fn run_command(&mut self, id: &str, label: &str) {
         if !Self::ribbon_command_implemented(id) {
-            self.message = format!("{label} is not implemented yet - the button is disabled");
+            self.message = format!("{} is not implemented yet - the button is disabled (see {})", label, ribbon::backlog_row(id));
             return;
         }
         self.apply_command_defaults(id);
@@ -858,7 +868,7 @@ impl Desktop {
             other => {
                 // the list above and this match have to agree: a listed command with no arm is a bug, not a message
                 debug_assert!(false, "ribbon command {other} is listed as implemented but has no arm");
-                self.message = format!("{label} is not implemented in this UI prototype");
+                self.message = format!("{} is not implemented in this UI prototype (see {})", label, ribbon::backlog_row(other));
             }
         }
     }
@@ -867,12 +877,17 @@ impl Desktop {
         // Ribbon tabs, each with a small icon.
         ui.horizontal(|ui| {
             for (tab, icon) in ribbon::TABS {
+                if !ribbon::tab_visible(tab, self.discipline) { continue; }
                 let img = ribbon::icon_image(ui, icon, self.dark, Vec2::splat(16.0));
                 let response = ui.add(egui::Button::image_and_text(img, *tab).selected(self.ribbon == *tab).frame(false));
                 test_hit!(self, response, "tab:{tab}");
                 if response.clicked() {
                     self.ribbon = tab;
                 }
+            }
+            // If the active tab was filtered out by the discipline switch, fall back to the first visible tab.
+            if !ribbon::tab_visible(self.ribbon, self.discipline) {
+                self.ribbon = ribbon::TABS.iter().find(|(t, _)| ribbon::tab_visible(t, self.discipline)).map(|(t, _)| *t).unwrap_or("Modify");
             }
         });
         if self.ribbon == "Systems" {

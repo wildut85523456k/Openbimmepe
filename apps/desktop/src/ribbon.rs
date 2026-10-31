@@ -217,7 +217,54 @@ pub fn groups(tab: &str, systems_sub: &str) -> Vec<&'static Group> {
     list.iter().flat_map(|g| g.iter()).collect()
 }
 
-/// Collect every ribbon command id, label and tab it belongs to, for command discovery (REA-008).
+/// The backlog row (B17, C1, C5, ...) that wires a not-yet-implemented command, for the
+/// context/availability tooltip (REA-008). Unknown ids fall back to B17.
+pub fn backlog_row(id: &str) -> &'static str {
+    match id {
+        "load_family" => "C1",
+        "slab" | "structural_floor" | "floor" | "ceiling" | "roof" | "shaft" | "room" | "area" => "C21",
+        "door" | "window" | "ahu" | "component" => "C5",
+        "duct" | "duct_fitting" | "duct_elbow" | "duct_transition" | "flex_duct" | "duct_insulation"
+        | "damper" | "air_terminal" | "diffuser" | "grille" | "end_point" | "compute"
+        | "create_mech_system" | "generate_layout" | "system_browser" | "ahu" | "vav_box"
+        | "chiller" | "cooling_tower" | "fan" => "C3",
+        "pipe" | "pipe_fitting" | "pipe_elbow" | "pipe_tee" | "pipe_transition" | "pipe_insulation"
+        | "valve_gate" | "valve_ball" | "valve_butterfly" | "backflow_preventer" | "hanger" | "pipe_support"
+        | "plumbing_fixture" | "sprinkler" | "drain" | "cleanout" | "pump" => "C15",
+        "cable_tray" | "cable_tray_fitting" | "conduit" | "conduit_fitting" | "raceway" | "junction_box"
+        | "pull_box" | "lighting_fixture" | "light_pendant" | "light_surface" | "switch" | "socket"
+        | "device" | "panel" | "transformer" | "generator" | "disconnect" | "elec_node" | "elec_cable" | "elec_compute" => "C17",
+        "stair" | "railing" | "ramp" => "C19",
+        "truss" | "beam_system" | "rebar" | "shear_wall" => "C12",
+        "column" | "structural_column" | "foundation" | "footing" | "structural_wall" => "B14",
+        "interference_check" | "clash" => "C29",
+        "dimension" | "measure" => "C19",
+        "detail" | "tag" | "revision_cloud" | "section" | "elevation" | "sheet" | "add_view" | "print" => "C20",
+        "schedule" | "visibility" | "view_range" | "project_parameters" | "mep_settings"
+        | "duct_insulation" | "pipe_insulation" | "open_new_schedule" => "C30",
+        "model_line" => "C20",
+        "structural_section" => "B14",
+        "slab_thickness_mm" | "slab_offset_mm" => "B5",
+        "types" => "R5",
+        _ => "B17",
+    }
+}
+
+/// Human-readable note appended to a disabled button's tooltip (REA-008).
+pub fn disabled_tooltip(id: &str) -> String {
+    format!("planned, not implemented yet (see {} )", backlog_row(id))
+}
+
+/// Whether a ribbon tab is visible for the given discipline (REA-008).
+/// "All" shows everything; each discipline shows only its own tabs plus the always-visible ones.
+pub fn tab_visible(tab: &str, discipline: &str) -> bool {
+    if discipline == "All" { return true; }
+    let arch: &[&str] = &["Architecture", "Insert", "Annotate", "View", "Manage", "Add-Ins", "Modify", "Collaborate", "Analyze"];
+    let structure: &[&str] = &["Structure", "Steel", "Precast", "Insert", "Annotate", "View", "Manage", "Add-Ins", "Modify", "Collaborate", "Analyze"];
+    let mep: &[&str] = &["Systems", "Insert", "Annotate", "View", "Manage", "Add-Ins", "Modify", "Collaborate", "Analyze"];
+    let set = match discipline { "Architecture" => arch, "Structure" => structure, "MEP" => mep, _ => return true };
+    set.contains(&tab)
+}
 pub fn all_commands() -> Vec<(&'static str, &'static str, &'static str)> {
     let mut out = Vec::new();
     for (tab, _) in TABS {
@@ -338,7 +385,7 @@ pub fn big_button(ui: &mut egui::Ui, id: &str, label: &str, dark: bool, active: 
         let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
         ui.painter().galley(egui::pos2(rect.center().x, rect.top() + 39.0), galley, color);
     }
-    if enabled { response.on_hover_text(label) } else { response.on_hover_text(format!("{label} - planned, not implemented yet")) }
+    if enabled { response.on_hover_text(label) } else { response.on_hover_text(disabled_tooltip(id)) }
 }
 
 #[cfg(test)]
