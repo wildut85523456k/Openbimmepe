@@ -1736,11 +1736,32 @@ mod tests {
         // one and applies the typed value.
         click_widget(&ctx, screen, &mut app, "param:Width (mm)");
         type_into(&ctx, screen, &mut app, "param:Width (mm)", "9999");
-        eprintln!("DEBUG before Height click: width_mm={} ({})", app.width_mm, app.message);
+        click_widget(&ctx, screen, &mut app, "param:Height (mm)");
+        assert_eq!(app.width_mm, 9999.0, "moving focus commits the pending numeric edit: {}", app.message);
+    }
+
+    #[test]
+    fn multiselect_properties_applies_to_all_selected() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        let level = match app.document.get(ElementId(20)).unwrap().geometry { Some(Geometry::Linear { level, .. }) => level, _ => panic!() };
+        let w1 = app.document.place_wall(level, [0.0, 4.0], [8.0, 4.0], 0.2, 3.0, 0.0).unwrap();
+        let w2 = app.document.place_wall(level, [0.0, 6.0], [8.0, 6.0], 0.2, 3.0, 0.0).unwrap();
+        app.select_many(vec![w1, w2]);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(app.message.contains("2 elements selected"), "multiselect is acknowledged in the message: {}", app.message);
+        // edit Width: a deferred edit on the primary, not yet committed to either wall
+        click_widget(&ctx, screen, &mut app, "param:Thickness (mm)");
+        type_into(&ctx, screen, &mut app, "param:Thickness (mm)", "500");
+        // commit the deferred edit by moving focus to the next field
         click_widget(&ctx, screen, &mut app, "param:Height (mm)");
         window_frame(&ctx, screen, &mut app, vec![]);
-        eprintln!("DEBUG after Height click + frame: width_mm={} ({})", app.width_mm, app.message);
-        assert_eq!(app.width_mm, 9999.0, "moving focus commits the pending numeric edit: {}", app.message);
+        assert_eq!(app.width_mm, 500.0, "the draft commits to 500 mm: {}", app.message);
+        // Apply to all selected walls at once
+        click_widget(&ctx, screen, &mut app, "props:Apply");
+        assert!((app.document.get(w1).unwrap().width_m - 0.5).abs() < 1e-9, "wall 1 width updated to 500 mm: {}", app.message);
+        assert!((app.document.get(w2).unwrap().width_m - 0.5).abs() < 1e-9, "wall 2 width updated to 500 mm: {}", app.message);
     }
 
     #[test]
