@@ -108,6 +108,15 @@ pub(crate) fn view_open_policy(open_count: usize) -> ViewOpenPolicy {
     if open_count >= crate::MAX_OPEN_VIEWS { ViewOpenPolicy::Replace } else { ViewOpenPolicy::Continue }
 }
 
+/// Per-view state each open tab remembers (REA-006): the plan camera (pan/zoom), the 3D orbit
+/// intent (yaw/pitch) and the section/elevation model-to-screen transform. The 3D viewport
+/// widget keeps its own keyed camera. Snapshotted on leave, restored on switch.
+#[derive(Clone, Debug)]
+pub(crate) struct ViewState { camera_yaw: f32, camera_pitch: f32, zoom: f32, pan: Vec2, section_xf: Option<crate::section_ui::Xf> }
+impl Default for ViewState {
+    fn default() -> Self { Self { camera_yaw: 0.7, camera_pitch: 0.6, zoom: 1.0, pan: Vec2::ZERO, section_xf: None } }
+}
+
 impl Desktop {
     /// Open `v` as a tab if it is not already open, making it active. Returns the cap policy
     /// (REA-006): `Replace` when the Revit-like tab limit is reached so the caller can prompt
@@ -120,20 +129,32 @@ impl Desktop {
         let policy = view_open_policy(self.open_views.len());
         if policy == ViewOpenPolicy::Replace { return policy; }
         self.open_views.push(v);
+        self.view_states.push(ViewState::default());
         self.activate_view_at(self.open_views.len() - 1);
         policy
     }
     /// Make the tab at index `i` active; `view` follows it so the viewport and the rest of
     /// the UI show that view (per-view state comes in Increment 2).
     pub(crate) fn activate_view_at(&mut self, i: usize) {
-        let Some(v) = self.open_views.get(i).copied() else { return };
-        self.active_view = i;
-        self.view = v;
+        let i = i.min(self.open_views.len().saturating_sub(1));
+        if let Some(v) = self.open_views.get(i).copied() {
+            if self.active_view < self.view_states.len() {
+                let s = self.save_view_state();
+                self.view_states[self.active_view] = s;
+            }
+            self.active_view = i;
+            self.view = v;
+            if i < self.view_states.len() {
+                let s = self.view_states[i].clone();
+                self.restore_view_state(s);
+            }
+        }
     }
     /// Close the tab at index `i`, keeping `active_view` and `view` valid (REA-006).
     pub(crate) fn close_view_at(&mut self, i: usize) {
-        if i >= self.open_views.len() { return; }
+        if i >= self.open_views.len() || self.open_views.len() <= 1 { return; }
         self.open_views.remove(i);
+        self.view_states.remove(i);
         self.active_view = match self.active_view.cmp(&(self.open_views.len())) {
             std::cmp::Ordering::Greater if self.active_view > 0 => self.active_view - 1,
             std::cmp::Ordering::Greater => 0,
@@ -141,10 +162,31 @@ impl Desktop {
             std::cmp::Ordering::Equal => self.active_view.min(self.open_views.len().saturating_sub(1)),
         };
         self.view = self.open_views[self.active_view];
+        if self.active_view < self.view_states.len() {
+            let s = self.view_states[self.active_view].clone();
+            self.restore_view_state(s);
+        }
     }
     /// Stable id of the active view (REA-006).
     pub(crate) fn active_view_id(&self) -> u64 {
         self.open_views.get(self.active_view).map_or(self.view.id(), |v| v.id())
+    }
+    fn save_view_state(&self) -> ViewState {
+        ViewState { camera_yaw: self.camera_yaw, camera_pitch: self.camera_pitch, zoom: self.zoom, pan: self.pan, section_xf: self.section_xf }
+    }
+    fn restore_view_state(&mut self, s: ViewState) {
+        self.camera_yaw = s.camera_yaw; self.camera_pitch = s.camera_pitch;
+        self.zoom = s.zoom; self.pan = s.pan; self.section_xf = s.section_xf;
+    }
+    /// Open-or-switch to `v` (as in Revit, pointing at a view makes it a tab).
+    pub(crate) fn set_view(&mut self, v: View) -> ViewOpenPolicy { self.add_view(v) }
+    /// Reset the tab set to a single view (new document / reset).
+    pub(crate) fn reset_view(&mut self, v: View) {
+        self.open_views = vec![v];
+        self.view_states = vec![ViewState::default()];
+        self.active_view = 0;
+        self.view = v;
+        self.restore_view_state(ViewState::default());
     }
 }
 
@@ -187,6 +229,8 @@ struct Desktop {
     /// The open view tabs (REA-006). `view` is always `open_views[active_view]`.
     open_views: Vec<View>,
     active_view: usize,
+    /// per-open-view state, kept parallel to `open_views` (REA-006)
+    view_states: Vec<ViewState>,
     tool: Tool,
     selected: Option<SampleElement>,
     ribbon: &'static str,
@@ -466,7 +510,7 @@ impl Desktop {
         Self {
             automation: automation::Automation::default(),
             document,
-            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, tool: Tool::Select,
+            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![ViewState::default()], tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,

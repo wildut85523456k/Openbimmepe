@@ -109,6 +109,23 @@ fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: P
     s
 }
 
+/// Label for a view tab (REA-006): the level/facing/section name, or "{3D}"/"Mechanical".
+fn view_label(app: &Desktop, v: View) -> String {
+    use crate::section_ui::name_of_marker;
+    match v {
+        View::Plan => app.levels().first().map(|l| l.1.clone()).unwrap_or_else(|| "Level 1".into()),
+        View::UpperPlan => app.levels().get(1).map(|l| l.1.clone()).unwrap_or_else(|| "Level 2".into()),
+        View::Level(id) => app.levels().iter().find(|l| l.0 == ElementId(id)).map(|l| l.1.clone()).unwrap_or_default(),
+        View::ThreeD => "{3D}".into(),
+        View::Mechanical => "Mechanical".into(),
+        View::Elevation(k) => crate::section_ui::FACINGS[k as usize].1.to_string(),
+        View::Section(id) => app.document.get(ElementId(id)).map(|e| e.name.clone()).unwrap_or_default(),
+        View::Schedule(n) => format!("Schedule {n}"),
+        View::Sheet(n) => format!("Sheet {n}"),
+        View::Marked(id, k) => app.document.get(ElementId(id)).map(|e| name_of_marker(&e.name, k)).unwrap_or_default(),
+    }
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         let level_tabs = plan_tabs(&app.levels());
@@ -119,9 +136,25 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             .chain([("{3D}".to_string(), View::ThreeD), ("Mechanical".to_string(), View::Mechanical)])
             .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
             .chain(sections);
-        for (label, view) in tabs {
-            if ui.selectable_label(app.view == view, label).clicked() { app.view = view; }
+        // Open-view tabs (REA-006): one tab per open view, the active one highlighted, each closeable.
+        // `view` is always `open_views[active_view]`, so `app.view == v` marks the active tab.
+        let mut close_ix: Option<usize> = None;
+        for i in 0..app.open_views.len() {
+            let v = app.open_views[i];
+            let label = view_label(app, v);
+            if ui.selectable_label(app.view == v, label).clicked() { app.activate_view_at(i); }
+            if ui.button("\u{2715}").clicked() { close_ix = Some(i); }
         }
+        if let Some(i) = close_ix { app.close_view_at(i); }
+        // Available views open on demand (open-or-switch) -- as in Revit, pointing at a view
+        // makes it a tab, up to the Revit-like cap of 10; at the cap the user is asked to replace.
+        let mut tab_cap_warn = false;
+        for (label, view) in tabs {
+            if ui.selectable_label(app.view == view, label).clicked() {
+                if app.set_view(view) == crate::ViewOpenPolicy::Replace { tab_cap_warn = true; }
+            }
+        }
+        if tab_cap_warn { ui.colored_label(egui::Color32::YELLOW, "Tab limit reached - close a tab"); }
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
@@ -1740,6 +1773,27 @@ mod tests {
         // stable id survives close/activate
         let id = app.active_view_id();
         assert_eq!(app.open_views[app.active_view].id(), id);
+    }
+
+    #[test]
+    fn per_view_state_survives_a_tab_switch() {
+        let mut app = crate::Desktop::sample();
+        app.add_view(crate::View::Plan); // [Mechanical, Plan], active = Plan
+        assert_eq!(app.view, crate::View::Plan);
+        app.pan = egui::vec2(100.0, 50.0); app.zoom = 2.0; app.camera_yaw = 1.1;
+        let (pan1, zoom1, yaw1) = (app.pan, app.zoom, app.camera_yaw);
+        // switch to Mechanical: Plan's live state is snapshotted, Mechanical's restored
+        app.activate_view_at(0);
+        assert_eq!(app.view, crate::View::Mechanical);
+        assert_eq!(app.zoom, 1.0, "plan state must not leak into the other tab");
+        assert_eq!(app.pan, egui::Vec2::ZERO);
+        assert_eq!(app.camera_yaw, 0.7);
+        // switch back to Plan: its state is restored
+        app.activate_view_at(1);
+        assert_eq!(app.view, crate::View::Plan);
+        assert_eq!(app.zoom, zoom1, "plan zoom restored");
+        assert_eq!(app.pan, pan1, "plan pan restored");
+        assert_eq!(app.camera_yaw, yaw1, "plan yaw restored");
     }
 
     #[test]

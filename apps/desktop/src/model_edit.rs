@@ -1227,7 +1227,7 @@ impl Desktop {
                 let n = self.document.get(id).map(|l| l.name.clone()).unwrap_or_default();
                 self.level_elev_mm += 3000.0;
                 self.level_name.clear();
-                self.view = crate::View::Level(id.0);
+                self.set_view(crate::View::Level(id.0));
                 self.message = format!("{n} added with its plan view; undo removes it");
             }
             Err(error) => self.message = format!("Level rejected ({error:?}): a level already stands at that elevation"),

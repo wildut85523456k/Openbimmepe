@@ -287,7 +287,7 @@ impl Desktop {
         self.compute = Default::default();
         self.georef = Default::default();
         self.selected = None;
-        self.view = crate::View::Plan;
+        self.reset_view(crate::View::Plan);
         self.tool = crate::Tool::Select;
         self.message = "New model: Level 1 and Level 2 are in place - draw a wall, or add your own levels".into();
     }
