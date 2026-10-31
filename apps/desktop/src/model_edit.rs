@@ -612,6 +612,38 @@ impl Desktop {
         self.slab_points.push(b);
         self.message = format!("Slab: {} corners from walls; Enter closes the outline", self.slab_points.len());
     }
+    /// Slab edit mode: when a slab is selected and the Slab tool is activated, load its outline into slab_points.
+    pub(crate) fn slab_edit_begin(&mut self) {
+        if let Some(id) = self.selected_id() {
+            if let Some(el) = self.document.get(id) {
+                if el.category == Category::Slab && !el.outline.is_empty() {
+                    self.slab_points = el.outline.clone();
+                    self.message = format!("Slab {}: editing outline ({} corners); Enter to apply, Esc to cancel", id.0, self.slab_points.len());
+                }
+            }
+        }
+    }
+
+    /// Slab edit mode: apply the edited outline to the selected slab.
+    pub(crate) fn slab_edit_finish(&mut self) {
+        if let Some(id) = self.selected_id() {
+            if let Some(el) = self.document.get(id) {
+                if el.category == Category::Slab {
+                    let ops = [openbim_document::Command::SetOutline { id, outline: self.slab_points.clone() }];
+                    match self.document.transact(self.document.revision(), &ops) {
+                        Ok(_) => {
+                            self.slab_points.clear();
+                            self.message = format!("Slab {} outline updated; undo restores it", id.0);
+                        }
+                        Err(e) => self.message = format!("Slab edit rejected ({e:?}); Backspace takes a corner back"),
+                    }
+                    return;
+                }
+            }
+        }
+        // no slab selected: place a new one
+        self.finish_slab(ElementId(self.plan_level().0));
+    }
     pub(crate) fn slab_click(&mut self, level: ElementId, at: [f64; 2], closing: bool) {
         if self.tool == crate::Tool::Slab && self.slab_kind_pick == openbim_document::SlabKind::Ceiling && self.ceiling_auto { return self.ceiling_auto_click(level, at); }
         if closing && self.slab_points.len() >= 3 { return self.finish_slab(level); }

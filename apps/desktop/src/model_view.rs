@@ -1247,7 +1247,12 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 else { app.choose_tool(crate::Tool::Select); }
             } else { app.slab_points.clear(); }
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.slab_points.pop();
-        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= if app.tool == crate::Tool::Railing { 2 } else { 3 } { app.finish_slab(level_id);
+        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= if app.tool == crate::Tool::Railing { 2 } else { 3 } {
+            if app.tool == crate::Tool::Slab && app.selected_id().is_some_and(|id| app.document.get(id).is_some_and(|e| e.category == Category::Slab)) {
+                app.slab_edit_finish();
+            } else {
+                app.finish_slab(level_id);
+            }
         } else if pick.is_some() {
             if let Some(p) = pick {
                 let closing = app.tool != crate::Tool::Railing && pts.first().is_some_and(|f| f.distance(p) < 10.0);

@@ -645,6 +645,7 @@ impl Desktop {
         self.edit_ref = None;
         self.drag = None;
         self.slab_points.clear();
+        if tool == Tool::Slab { self.slab_edit_begin(); }
         self.opening_from = None;
         self.view_corner = None;
         self.view_edit = None;
