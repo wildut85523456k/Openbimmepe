@@ -665,6 +665,22 @@ impl Desktop {
     /// Lays the slab drawn so far on `level` with the thickness, top offset, kind and material of the options bar.
     pub(crate) fn finish_slab(&mut self, level: ElementId) {
         let m = |v: f64| v / 1000.0;
+        // REA-011: reject tiny edges (< 50 mm) before attempting placement
+        if self.slab_points.len() >= 3 {
+            let mut tiny = false;
+            for i in 0..self.slab_points.len() {
+                let a = self.slab_points[i];
+                let b = self.slab_points[(i + 1) % self.slab_points.len()];
+                if (a[0] - b[0]).hypot(a[1] - b[1]) < 0.05 {
+                    tiny = true;
+                    break;
+                }
+            }
+            if tiny {
+                self.message = "Slab rejected (an edge is shorter than 50 mm): Backspace takes a corner back".into();
+                return;
+            }
+        }
         if self.tool == crate::Tool::Shaft {
             let Some(top) = self.shaft_top.filter(|t| self.document.get(*t).is_some()).or_else(|| self.document.level_above(level)) else {
                 self.message = "Shaft: there is no level above to go up to; add a level first".into();
