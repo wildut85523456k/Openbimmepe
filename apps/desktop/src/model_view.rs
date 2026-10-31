@@ -111,7 +111,6 @@ fn plan_snap(edges: &[crate::view_tools::Edge], xf: &crate::section_ui::Xf, p: P
 
 /// Label for a view tab (REA-006): the level/facing/section name, or "{3D}"/"Mechanical".
 fn view_label(app: &Desktop, v: View) -> String {
-    use crate::section_ui::name_of_marker;
     match v {
         View::Plan => app.levels().first().map(|l| l.1.clone()).unwrap_or_else(|| "Level 1".into()),
         View::UpperPlan => app.levels().get(1).map(|l| l.1.clone()).unwrap_or_else(|| "Level 2".into()),
@@ -119,19 +118,25 @@ fn view_label(app: &Desktop, v: View) -> String {
         View::ThreeD => "{3D}".into(),
         View::Mechanical => "Mechanical".into(),
         View::Elevation(k) => crate::section_ui::FACINGS[k as usize].1.to_string(),
-        View::Section(id) => app.document.get(ElementId(id)).map(|e| e.name.clone()).unwrap_or_default(),
+        View::Section(id) => app.view_name(View::Section(id)),
         View::Schedule(n) => format!("Schedule {n}"),
         View::Sheet(n) => format!("Sheet {n}"),
-        View::Marked(id, k) => app.document.get(ElementId(id)).map(|e| name_of_marker(&e.name, k)).unwrap_or_default(),
+        View::Marked(id, k) => app.view_name(View::Marked(id, k)),
     }
 }
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         let level_tabs = plan_tabs(&app.levels());
-        let sections: Vec<(String, View)> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| (e.name.clone(), View::Section(e.id.0)))
-            .chain(app.document.elements().filter(|e| e.category == Category::Elevation).flat_map(|e| (0..4u8).filter(move |k| e.count >> k & 1 == 1).map(move |k| (crate::section_ui::name_of_marker(&e.name, k), View::Marked(e.id.0, k)))))
-            .collect();
+        let section_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| e.id).collect();
+        let elevation_elems: Vec<(ElementId, u32)> = app.document.elements().filter(|e| e.category == Category::Elevation).map(|e| (e.id, e.count)).collect();
+        let mut sections: Vec<(String, View)> = Vec::with_capacity(section_ids.len());
+        for id in section_ids { sections.push((app.view_name(View::Section(id.0)), View::Section(id.0))); }
+        for (id, count) in elevation_elems {
+            for k in 0..4u32 {
+                if count >> k & 1 == 1 { sections.push((app.view_name(View::Marked(id.0, k as u8)), View::Marked(id.0, k as u8))); }
+            }
+        }
         let tabs = level_tabs.into_iter()
             .chain([("{3D}".to_string(), View::ThreeD), ("Mechanical".to_string(), View::Mechanical)])
             .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
@@ -1646,6 +1651,13 @@ mod tests {
         out.textures_delta.clear();
     }
     fn button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() } }
+    fn secondary_button(at: Pos2, pressed: bool) -> egui::Event { egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() } }
+    /// Right-clicks a widget to open its context menu (REA-009), leaving the menu open for the next frame.
+    fn right_click_widget(ctx: &egui::Context, screen: Rect, app: &mut Desktop, name: &str) {
+        let at = widget(ctx, screen, app, name).center();
+        window_frame(ctx, screen, app, vec![secondary_button(at, true)]);
+        window_frame(ctx, screen, app, vec![secondary_button(at, false)]);
+    }
     fn walls(app: &Desktop) -> usize { app.document.elements().filter(|e| e.category == Category::Wall).count() }
 
     /// The whole window, as the app runs it: the toolbar, the ribbon, the options bar, the panels and the viewport,
@@ -1816,6 +1828,52 @@ mod tests {
         assert_eq!(app.view, View::Plan, "a single click on a plan view displays it: {}", app.message);
         assert!(app.open_views.contains(&View::Plan), "the selected view is also a tab");
         assert_eq!(app.active_view, app.open_views.len() - 1, "the opened view is the active tab");
+    }
+
+    #[test]
+    fn a_section_view_can_be_renamed_deleted_and_duplicated_from_the_browser() {
+        // REA-009: the app methods the Project Browser's context menu drives.
+        let mut app = Desktop::sample();
+        let level = app.levels()[0].0;
+        let id = app.document.place_section(level, [1.0, -2.0], [7.0, -2.0], 3.0).unwrap();
+        let _ = app.set_view(crate::View::Section(id.0));
+        assert_eq!(app.document.get(id).map(|e| e.name.clone()), Some("Section 1".to_string()), "{}", app.message);
+        // rename: the view label follows the rename (the element name stays put; the document cannot rename sections)
+        app.rename_view(crate::View::Section(id.0), "Floor Plan Ref");
+        assert_eq!(app.view_name(crate::View::Section(id.0)), "Floor Plan Ref", "{}", app.message);
+        // duplicate: a copy is placed beside it and opened as a tab
+        let count_before = app.document.elements().filter(|e| e.category == openbim_document::Category::Section).count();
+        app.duplicate_view(crate::View::Section(id.0));
+        let sections: Vec<_> = app.document.elements().filter(|e| e.category == openbim_document::Category::Section).collect();
+        assert_eq!(sections.len(), count_before + 1, "a copy was placed: {}", app.message);
+        assert!(sections.iter().any(|e| e.id != id), "the copy has a new id");
+        assert!(app.open_views.contains(&crate::View::Section(id.0)), "the duplicate opens as a tab");
+        // delete the original: its element is gone and its tab closed, undo would bring it back
+        let before = app.document.elements().count();
+        app.delete_view(crate::View::Section(id.0));
+        assert!(app.document.get(id).is_none(), "the section is deleted: {}", app.message);
+        assert_eq!(app.document.elements().count(), before - 1);
+        assert!(!app.open_views.contains(&crate::View::Section(id.0)), "the deleted view's tab is closed");
+    }
+
+    #[test]
+    fn a_section_view_context_menu_renames_from_the_browser() {
+        // REA-009: right-click the section in the Project Browser -> Rename -> type -> OK.
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        let mut app = Desktop::sample();
+        let level = app.levels()[0].0;
+        let id = app.document.place_section(level, [1.0, -2.0], [7.0, -2.0], 3.0).unwrap();
+        let _ = app.set_view(crate::View::Section(id.0));
+        let name = app.document.get(id).map(|e| e.name.clone()).unwrap();
+        window_frame(&ctx, screen, &mut app, vec![]);
+        right_click_widget(&ctx, screen, &mut app, &format!("view:{name}"));
+        click_widget(&ctx, screen, &mut app, &format!("view:{name}:rename"));
+        type_into(&ctx, screen, &mut app, &format!("view:{name}:rename_field"), "Ref Plan");
+        click_widget(&ctx, screen, &mut app, &format!("view:{name}:rename_ok"));
+        assert_eq!(app.document.get(id).map(|e| e.name.clone()), Some("Section 1".to_string()), "{}", app.message);
+        assert!(app.view_name(crate::View::Section(id.0)) == "Ref Plan", "the view label follows the rename");
+        assert!(app.rename_view_pending.is_none(), "the rename is committed");
     }
 
     #[test]

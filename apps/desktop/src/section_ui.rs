@@ -20,8 +20,8 @@ pub const MARKER_WIDTH_M: f64 = 20.0;
 pub fn name_of(app: &Desktop, view: View) -> String {
     match view {
         View::Elevation(k) => FACINGS.get(usize::from(k)).map_or("Elevation".into(), |f| format!("{} elevation", f.1)),
-        View::Section(id) => app.document.get(ElementId(id)).map_or("Section".into(), |e| e.name.clone()),
-        View::Marked(id, k) => format!("{} - {}", app.document.get(ElementId(id)).map_or("Elevation", |e| e.name.as_str()), FACINGS.get(usize::from(k)).map_or("", |f| f.1)),
+        View::Section(id) => app.view_name(View::Section(id)),
+        View::Marked(id, k) => app.view_name(View::Marked(id, k)),
         _ => String::new(),
     }
 }

@@ -256,6 +256,10 @@ struct Desktop {
     view_states: Vec<Option<ViewState>>,
     /// a view the user tried to open at the tab cap, awaiting a replace/cancel (REA-006)
     view_replace_pending: Option<View>,
+    /// a view the user chose to rename in the Project Browser, with the name typed so far (REA-009)
+    rename_view_pending: Option<View>,
+    rename_view_text: String,
+    view_names: std::collections::HashMap<u64, String>,
     tool: Tool,
     selected: Option<SampleElement>,
     ribbon: &'static str,
@@ -535,7 +539,7 @@ impl Desktop {
         Self {
             automation: automation::Automation::default(),
             document,
-            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![Some(ViewState::default())], view_replace_pending: None, tool: Tool::Select,
+            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![Some(ViewState::default())], view_replace_pending: None, rename_view_pending: None, rename_view_text: String::new(), view_names: std::collections::HashMap::new(), tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,

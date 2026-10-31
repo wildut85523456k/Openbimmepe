@@ -96,9 +96,27 @@ cases in the two-storey-office e2e test still pass).
 - Open-or-switch: re-selecting an already-open view just activates its tab (no duplicate).
 - Test: `browser_single_click_opens_the_view_in_the_active_viewport` (single-click "view:Level 1"
   → `app.view == View::Plan`, present in `open_views`, active tab).
-- Deferred to Increment 2: full Properties panel type-vs-instance + mixed multiselect + grouped
-  searchable properties + numeric commit/cancel; browser rename/duplicate/delete; persistent docking
-  splitters/width.
+- Deferred (post-Increment 2): full Properties panel type-vs-instance + mixed multiselect + grouped
+  searchable properties + numeric commit/cancel; persistent docking splitters/width.
+
+**Increment 2 — browser rename/duplicate/delete.** Each view in the Project Browser now has a
+right-click context menu (Rename / Duplicate / Delete), matching Revit's view-context actions.
+
+- **Rename**: opens an inline single-line field committed on Enter, OK, or blur; cancelled on Escape.
+  A level plan renames its level (`Desktop::rename_level`); a section or elevation-marker view stores a
+  desktop view-name override (`view_names: HashMap<u64,String>`) because the pinned document cannot rename
+  those element categories — `el.name` is preserved and `view_name()` resolves the override so the tab
+  label, viewport title, and browser node all stay consistent. `rename_view_pending`/
+  `rename_view_text` hold the in-progress edit; the field re-renders the node.
+- **Duplicate**: `place_section` (sections) / `place_elevation` (markers) re-creates the view at the
+  element's geometry; the copy is placed beside the original and opened as a tab.
+- **Delete**: `delete_commands` + `transact` remove the backing element and `close_view_at` closes its
+  tab (level plans reuse `delete_level`, refused if the level holds elements). Delete carries an undo.
+- Tests: `a_section_view_can_be_renamed_deleted_and_duplicated_from_the_browser` (method-level: rename
+  → `view_name()` reflects the override; duplicate → +1 element of the same category with a new id and
+  a new tab; delete → element removed + tab closed) and `a_section_view_context_menu_renames_from_the_browser`
+  (full harness: right-click "view:Section 1" → Rename → type "Ref Plan" → OK → rename committed). 285 passed,
+  0 failed (was 283; +2).
 
 ## Out of scope / blocked (applies to the candidate)
 

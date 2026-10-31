@@ -1093,6 +1093,91 @@ impl Desktop {
         }
     }
 
+    /// Rename a view shown in the Project Browser (REA-009): a level plan renames its level; a section or
+    /// elevation-marker view renames its backing element, whose name the view label follows.
+    pub(crate) fn rename_view(&mut self, view: crate::View, name: &str) {
+        let name = name.trim();
+        if name.is_empty() { self.message = "A view needs a name".into(); return; }
+        match view {
+            crate::View::Level(id) => self.rename_level(ElementId(id), name),
+            crate::View::Section(id) | crate::View::Marked(id, _) => {
+                let kind = if matches!(view, crate::View::Section(_)) { "Section" } else { "Elevation" };
+                self.view_names.insert(id, name.to_string());
+                self.message = format!("{kind} renamed to {name}");
+            }
+            _ => self.message = "That view cannot be renamed".into(),
+        }
+    }
+
+    /// The display name of a view (REA-009): a browser-rename override for a section or elevation-marker
+    /// view, else the backing element's name; other views are named by their own logic.
+    pub(crate) fn view_name(&self, view: crate::View) -> String {
+        use crate::View;
+        match view {
+            View::Section(id) => self
+                .view_names
+                .get(&id)
+                .cloned()
+                .or_else(|| self.document.get(ElementId(id)).map(|e| e.name.clone()))
+                .unwrap_or_else(|| "Section".to_string()),
+            View::Marked(id, k) => {
+                let base = self
+                    .view_names
+                    .get(&id)
+                    .cloned()
+                    .or_else(|| self.document.get(ElementId(id)).map(|e| e.name.clone()))
+                    .unwrap_or_else(|| "Elevation".to_string());
+                crate::section_ui::name_of_marker(&base, k)
+            }
+            _ => String::new(),
+        }
+    }
+    /// Delete a view from the Project Browser (REA-009): a level plan deletes its level (refused if it holds
+    /// elements); a section or elevation-marker view deletes its backing element and closes its tab.
+    pub(crate) fn delete_view(&mut self, view: crate::View) {
+        match view {
+            crate::View::Level(id) => self.delete_level(ElementId(id)),
+            crate::View::Section(id) | crate::View::Marked(id, _) => {
+                let kind = if matches!(view, crate::View::Section(_)) { "Section" } else { "Elevation" };
+                match self.document.delete_commands(&[ElementId(id)]).and_then(|ops| self.document.transact(self.document.revision(), &ops).map_err(|e| format!("{e:?}"))) {
+                    Ok(_) => {
+                        if let Some(i) = self.open_views.iter().position(|v| *v == view) { self.close_view_at(i); }
+                        self.message = format!("{kind} view deleted; undo brings it back");
+                    }
+                    Err(e) => self.message = format!("Cannot delete {kind}: {e}"),
+                }
+            }
+            _ => self.message = "That view cannot be deleted".into(),
+        }
+    }
+    /// Duplicate a view from the Project Browser (REA-009): a section or elevation-marker view places a copy of
+    /// its backing element beside it; the new view opens as a tab. Level plans are not duplicated here.
+    pub(crate) fn duplicate_view(&mut self, view: crate::View) {
+        match view {
+            crate::View::Section(id) => {
+                if let Some(el) = self.document.get(ElementId(id)) {
+                    if let Some(Geometry::Linear { start, end, level }) = el.geometry {
+                        match self.document.place_section(level, start, end, el.width_m) {
+                            Ok(new) => { let _ = self.set_view(crate::View::Section(new.0)); self.message = "Section duplicated".into(); }
+                            Err(error) => self.message = format!("Section not duplicated: {error:?}"),
+                        }
+                    } else { self.message = "That section has no line to copy".into(); }
+                } else { self.message = "That section is missing".into(); }
+            }
+            crate::View::Marked(id, _) => {
+                if let Some(el) = self.document.get(ElementId(id)) {
+                    if let Some(Geometry::Point { at, level, .. }) = el.geometry {
+                        match self.document.place_elevation(level, at, el.count, el.width_m, el.height_m) {
+                            Ok(new) => { let _ = self.set_view(crate::View::Marked(new.0, 0)); self.message = "Elevation duplicated".into(); }
+                            Err(error) => self.message = format!("Elevation not duplicated: {error:?}"),
+                        }
+                    } else { self.message = "That marker has no point to copy".into(); }
+                } else { self.message = "That marker is missing".into(); }
+            }
+            _ => self.message = "That view cannot be duplicated".into(),
+        }
+    }
+
     /// The four lines (start, end) of a rectangle of walls drawn clockwise from the top left of the corners `a` and
     /// `b`, along the Location Line, meeting at the corners of their offset lines.
     pub(crate) fn rectangle_lines(&self, a: [f64; 2], b: [f64; 2]) -> Vec<([f64; 2], [f64; 2])> {
