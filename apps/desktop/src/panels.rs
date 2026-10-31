@@ -952,13 +952,13 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                             ui.horizontal(|ui| {
                                 let mut on = el.count >> k & 1 == 1;
                                 if ui.checkbox(&mut on, *name).on_hover_text("A view of the marker looking this way").changed() { app.toggle_marker_view(el.id, k); }
-                                if on && ui.small_button("Open").clicked() { app.view = View::Marked(el.id.0, k as u8); app.selected = None; }
+                                if on && ui.small_button("Open").clicked() { let _ = app.set_view(View::Marked(el.id.0, k as u8)); app.selected = None; }
                             });
                         }
                     }
                     if el.category == openbim_document::Category::Section && ui.button("Flip direction").on_hover_text("Look to the other side of the line (Space)").clicked() { app.flip_selected_section(); }
                     if el.category == openbim_document::Category::Section && ui.button("Open view").on_hover_text("Go to the view of this section line").clicked() {
-                        app.view = View::Section(el.id.0);
+                        let _ = app.set_view(View::Section(el.id.0));
                         app.selected = None;
                     }
                     if el.category == openbim_document::Category::Beam {
@@ -1086,10 +1086,10 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
         let response = ui.selectable_label(app.browser_selected == path, label)
             .on_hover_text("Double-click to open view");
         test_hit!(app, response, "view:{}", level_view_name(app, node.name, view));
-        if response.clicked() { app.browser_selected = path; }
+        if response.clicked() { app.browser_selected = path; let _ = app.set_view(view); }
         response.context_menu(|ui| app.add_to_sheet_menu(ui, crate::view_ui::view_key(view)));
         if response.double_clicked() {
-            app.view = view;
+            let _ = app.set_view(view);
             app.selected = None;
             app.message = format!("Opened {}", level_view_name(app, node.name, view));
         }
@@ -1131,7 +1131,7 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
                 let active = app.view == View::Section(id.0);
                 let r = ui.selectable_label(active, RichText::new(format!("{name} (section)"))).on_hover_text("Open the view of this section line");
                 test_hit!(app, r, "view:{name}");
-                if r.clicked() { app.view = View::Section(id.0); app.selected = None; }
+                if r.clicked() { let _ = app.set_view(View::Section(id.0)); app.selected = None; }
             }
             // the views of the elevation markers placed in plans
             let marked: Vec<(ElementId, String, u32)> = app.document.elements().filter(|e| e.category == openbim_document::Category::Elevation).map(|e| (e.id, e.name.clone(), e.count)).collect();
@@ -1140,7 +1140,7 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
                     let label = format!("{name} - {side}");
                     if views >> k & 1 == 0 || !matches(&query, &label) { continue; }
                     let active = app.view == View::Marked(id.0, k as u8);
-                    if ui.selectable_label(active, RichText::new(format!("{label} (elevation)"))).on_hover_text("Open this view of the elevation marker").clicked() { app.view = View::Marked(id.0, k as u8); app.selected = None; }
+                    if ui.selectable_label(active, RichText::new(format!("{label} (elevation)"))).on_hover_text("Open this view of the elevation marker").clicked() { let _ = app.set_view(View::Marked(id.0, k as u8)); app.selected = None; }
                 }
             }
             if !TREE.iter().any(|node| node_matches(app, node, &query)) { ui.weak("No matching items"); }
@@ -1160,9 +1160,9 @@ fn level_plans(app: &mut Desktop, ui: &mut egui::Ui, query: &str) {
         let path = format!("project/Views (all)/Floor Plans/{name}");
         let r = ui.selectable_label(app.browser_selected == path, if active { label.strong() } else { label }).on_hover_text("Double-click to open view");
         test_hit!(app, r, "view:{name}");
-        if r.clicked() { app.browser_selected = path; }
+        if r.clicked() { app.browser_selected = path; let _ = app.set_view(view); }
         r.context_menu(|ui| app.add_to_sheet_menu(ui, crate::view_ui::view_key(view)));
-        if r.double_clicked() { app.view = view; app.selected = None; app.message = format!("Opened {name}"); }
+        if r.double_clicked() { let _ = app.set_view(view); app.selected = None; app.message = format!("Opened {name}"); }
     }
 }
 

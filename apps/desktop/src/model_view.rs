@@ -1805,6 +1805,20 @@ mod tests {
     }
 
     #[test]
+    fn browser_single_click_opens_the_view_in_the_active_viewport() {
+        // REA-009: pointing at (single-clicking) a view in the Project Browser displays it in the
+        // active viewport, as in Revit, and opens it as a tab.
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        let mut app = Desktop::sample();
+        window_frame(&ctx, screen, &mut app, vec![]);
+        click_widget(&ctx, screen, &mut app, "view:Level 1");
+        assert_eq!(app.view, View::Plan, "a single click on a plan view displays it: {}", app.message);
+        assert!(app.open_views.contains(&View::Plan), "the selected view is also a tab");
+        assert_eq!(app.active_view, app.open_views.len() - 1, "the opened view is the active tab");
+    }
+
+    #[test]
     fn at_cap_opening_a_view_prompts_replace_then_evicts_or_cancels() {
         let mut app = crate::Desktop::sample();
         // fill to the Revit-like cap of 10 (sample starts with 1)

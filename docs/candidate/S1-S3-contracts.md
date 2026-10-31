@@ -57,8 +57,12 @@ verified green before push (279 → 282 passed, 0 failed, 1 ignored; review step
 - `activate_view_at`/`add_view`/`set_view`/`close_view_at`/`reset_view` keep the tab set and
   the active view in sync.
 - **Per-view state** (`ViewState: pan/zoom/camera_yaw/camera_pitch/section_xf`) is snapshotted
-  on leave and restored on switch, so each tab remembers its camera (the 3D viewport widget
-  keeps its own keyed camera).
+  on leave and restored on switch, so each tab remembers its camera. A tab with no saved state yet
+  (just opened) inherits the live camera, so pointing at a view keeps the picture continuous (as in
+  Revit) until the user leaves and returns; state is stored as `Vec<Option<ViewState>>` so "no snapshot
+  yet" is distinct from a snapshot equal to the default. The 3D viewport widget keeps its own keyed
+  camera. (Refinement of Increment 2: needed so browser/section/elevation opens keep camera
+  continuity while still opening a tab.)
 - **Tab bar** in `model_view.rs::show()`: one tab per open view, active highlighted, per-tab
   close button; available views (levels / {3D} / facings / sections) open-or-switch as tabs.
 - **Replace/cancel prompt at the cap**: a pending view (`view_replace_pending`) opens a prompt
@@ -67,6 +71,34 @@ verified green before push (279 → 282 passed, 0 failed, 1 ignored; review step
 - Tests: `view_ids_are_stable_and_disjoint`, `the_open_view_cap_is_ten`,
   `open_views_add_activate_close_and_cap`, `per_view_state_survives_a_tab_switch`,
   `at_cap_opening_a_view_prompts_replace_then_evicts_or_cancels`.
+
+
+
+## REA-009 — properties browser & docking (in progress)
+
+**Increment 1 — a view selected in the Project Browser displays in the active viewport.**
+A single click on a plan / level plan / section / elevation-marker view now opens (or switches to)
+that view in the active viewport and as a tab, matching the user's "select a view, it displays"
+point. Verified green before any push (283 passed; was 282; the 5 `double_click_widget("view:…")`
+cases in the two-storey-office e2e test still pass).
+
+- All Project-Browser and Properties view-open sites route through `Desktop::set_view` (the tab
+  model) instead of assigning `app.view` directly, so the selected view becomes a real tab and the
+  active-view distinction (acceptance: "active view distinction") is established:
+  `app.view == open_views[active_view]`.
+  - `tree_node` single-click — now opens + displays (was highlight-only); double-click open-or-switch.
+  - `level_plans` single-click — now opens + displays; double-click open-or-switch.
+  - browser sections / elevation markers — open-or-switch (single-click).
+  - Properties "Open" (elevation marker) and "Open view" (section line) — open-or-switch.
+- Camera continuity: because `set_view` adds a new tab that inherits the live camera (`None`
+  state, see the Incremental 2 refinement above), opening a view from the browser does not snap the
+  viewport to a default — the 5 double-click e2e assertions on continuous zoom/pan/yaw hold unchanged.
+- Open-or-switch: re-selecting an already-open view just activates its tab (no duplicate).
+- Test: `browser_single_click_opens_the_view_in_the_active_viewport` (single-click "view:Level 1"
+  → `app.view == View::Plan`, present in `open_views`, active tab).
+- Deferred to Increment 2: full Properties panel type-vs-instance + mixed multiselect + grouped
+  searchable properties + numeric commit/cancel; browser rename/duplicate/delete; persistent docking
+  splitters/width.
 
 ## Out of scope / blocked (applies to the candidate)
 

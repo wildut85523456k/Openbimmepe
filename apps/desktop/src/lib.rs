@@ -132,7 +132,7 @@ impl Desktop {
             return policy;
         }
         self.open_views.push(v);
-        self.view_states.push(ViewState::default());
+        self.view_states.push(None);
         self.activate_view_at(self.open_views.len() - 1);
         self.view_replace_pending = None;
         policy
@@ -142,21 +142,28 @@ impl Desktop {
     pub(crate) fn activate_view_at(&mut self, i: usize) {
         let i = i.min(self.open_views.len().saturating_sub(1));
         if let Some(v) = self.open_views.get(i).copied() {
+            // snapshot the outgoing view's live camera before it is left behind
             if self.active_view < self.view_states.len() {
                 let s = self.save_view_state();
-                self.view_states[self.active_view] = s;
+                self.view_states[self.active_view] = Some(s);
             }
             self.active_view = i;
             self.view = v;
-            if i < self.view_states.len() {
-                let s = self.view_states[i].clone();
-                self.restore_view_state(s);
+            // restore an incoming view only if it has saved state; a tab with none inherits the
+            // live camera, so pointing at a view keeps the picture continuous (Revit)
+            if let Some(st) = self.view_states.get(i).and_then(|o| o.clone()) {
+                self.restore_view_state(st);
             }
         }
     }
     /// Close the tab at index `i`, keeping `active_view` and `view` valid (REA-006).
     pub(crate) fn close_view_at(&mut self, i: usize) {
         if i >= self.open_views.len() || self.open_views.len() <= 1 { return; }
+        // snapshot the active view's live camera before the parallel lists shift
+        if self.active_view < self.view_states.len() {
+            let s = self.save_view_state();
+            self.view_states[self.active_view] = Some(s);
+        }
         self.open_views.remove(i);
         self.view_states.remove(i);
         self.view_replace_pending = None;
@@ -167,9 +174,8 @@ impl Desktop {
             std::cmp::Ordering::Equal => self.active_view.min(self.open_views.len().saturating_sub(1)),
         };
         self.view = self.open_views[self.active_view];
-        if self.active_view < self.view_states.len() {
-            let s = self.view_states[self.active_view].clone();
-            self.restore_view_state(s);
+        if let Some(st) = self.view_states.get(self.active_view).and_then(|o| o.clone()) {
+            self.restore_view_state(st);
         }
     }
     /// Stable id of the active view (REA-006).
@@ -188,7 +194,7 @@ impl Desktop {
     /// Reset the tab set to a single view (new document / reset).
     pub(crate) fn reset_view(&mut self, v: View) {
         self.open_views = vec![v];
-        self.view_states = vec![ViewState::default()];
+        self.view_states = vec![Some(ViewState::default())];
         self.active_view = 0;
         self.view = v;
         self.restore_view_state(ViewState::default());
@@ -243,8 +249,11 @@ struct Desktop {
     /// The open view tabs (REA-006). `view` is always `open_views[active_view]`.
     open_views: Vec<View>,
     active_view: usize,
-    /// per-open-view state, kept parallel to `open_views` (REA-006)
-    view_states: Vec<ViewState>,
+    /// per-open-view state, kept parallel to `open_views` (REA-006). `None` means the tab has no
+    /// saved state yet: opening such a view inherits the live camera (a continuous picture, as in
+    /// Revit) until the user leaves it and returns, at which point its state is snapshotted and
+    /// restored on re-entry.
+    view_states: Vec<Option<ViewState>>,
     /// a view the user tried to open at the tab cap, awaiting a replace/cancel (REA-006)
     view_replace_pending: Option<View>,
     tool: Tool,
@@ -526,7 +535,7 @@ impl Desktop {
         Self {
             automation: automation::Automation::default(),
             document,
-            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![ViewState::default()], view_replace_pending: None, tool: Tool::Select,
+            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![Some(ViewState::default())], view_replace_pending: None, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,
