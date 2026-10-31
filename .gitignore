@@ -3,3 +3,4 @@ __pycache__/
 *.log
 *.msi
 docs/agent-team/evidence/auto-*/cargo-team/
+build.err
