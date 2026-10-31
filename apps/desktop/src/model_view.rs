@@ -1246,6 +1246,10 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 if app.tool == crate::Tool::VerticalOpening && app.opening_host.is_some() { app.opening_host = None; app.opening_cands.clear(); app.message = "Vertical Opening: click the floor, roof or ceiling to cut".into(); }
                 else { app.choose_tool(crate::Tool::Select); }
             } else { app.slab_points.clear(); }
+        } else if ui.input(|i| i.key_pressed(egui::Key::H)) && app.slab_points.len() >= 3 {
+            // Close current ring and start a new one (hole/courtyard)
+            app.slab_rings.push(std::mem::take(&mut app.slab_points));
+            app.message = format!("Slab: {} rings; draw the next ring (hole or courtyard), Enter to finish", app.slab_rings.len() + 1);
         } else if ui.input(|i| i.key_pressed(egui::Key::Backspace)) { app.slab_points.pop();
         } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) && app.slab_points.len() >= if app.tool == crate::Tool::Railing { 2 } else { 3 } {
             if app.tool == crate::Tool::Slab && app.selected_id().is_some_and(|id| app.document.get(id).is_some_and(|e| e.category == Category::Slab)) {

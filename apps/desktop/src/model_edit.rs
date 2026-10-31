@@ -740,6 +740,36 @@ impl Desktop {
                 return;
             }
         }
+        // REA-011: handle multi-ring slabs (courtyard + inner holes)
+        if !self.slab_rings.is_empty() && self.tool == crate::Tool::Slab {
+            // Collect all rings: completed rings + current points
+            let mut all_rings = std::mem::take(&mut self.slab_rings);
+            if self.slab_points.len() >= 3 {
+                all_rings.push(std::mem::take(&mut self.slab_points));
+            }
+            if all_rings.is_empty() { return; }
+            // First ring is the outer boundary
+            let outer = all_rings[0].clone();
+            // Place the slab with the outer ring
+            let spec = openbim_document::SlabSpec { outline: outer, thickness_m: m(self.slab_thickness_mm), top_offset_m: m(self.slab_offset_mm), kind: self.slab_kind_pick, material: self.material_pick };
+            match self.document.place_slab(level, &spec) {
+                Ok(id) => {
+                    // Place shafts for inner rings (holes)
+                    for ring in all_rings.iter().skip(1) {
+                        let shaft_spec = openbim_document::ShaftSpec { outline: ring.clone(), top: self.document.level_above(level).unwrap_or(level), base_offset_m: 0.0, top_offset_m: m(self.slab_thickness_mm) };
+                        let _ = self.document.place_shaft(level, &shaft_spec);
+                    }
+                    self.slab_points.clear();
+                    self.slab_rings.clear();
+                    self.message = format!("{} {} placed with {} hole(s); undo removes it", self.slab_kind_pick.name(), id.0, all_rings.len() - 1);
+                }
+                Err(error) => {
+                    self.slab_rings = all_rings;
+                    self.message = format!("Slab rejected ({error:?}); Backspace takes a corner back");
+                }
+            }
+            return;
+        }
         if self.tool == crate::Tool::Shaft {
             let Some(top) = self.shaft_top.filter(|t| self.document.get(*t).is_some()).or_else(|| self.document.level_above(level)) else {
                 self.message = "Shaft: there is no level above to go up to; add a level first".into();
