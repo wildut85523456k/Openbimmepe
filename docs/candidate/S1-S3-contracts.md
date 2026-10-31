@@ -44,16 +44,27 @@ Repository: `github.com/wildut85523456k/Openbimmepe` (public). `main` tracks `or
   refreshed against candidate `544ee0d7`: REA-007 and REA-046 promoted to `VERIFIED`.
 - Preservation ledger, contracts, dependency diagram authored under `docs/candidate/`.
 
-## S3 — future work (NOT started)
+## S3 — implementation (in progress)
 
-- S3 is gated on shared contracts (graph execution G-A02, IFC preservation modes).
-  Not undertaken in this fork until the S0/S1/S2 foundation is accepted.
+Started with **REA-006** (open view tabs with stable IDs). This fork currently holds a single
+active `app.view`; REA-006 is the first multi-view feature. Delivered as a bounded,
+regression-safe foundation (commit `1e1e343`, `279 passed, 0 failed, 1 ignored`):
+
+- `View::id(&self) -> u64` — stable, restart-invariant, disjoint-per-variant view id.
+- `MAX_OPEN_VIEWS = 10` (Revit-like tab cap) and `view_open_policy(open_count)` →
+  `Continue` until the cap, then `Replace` (the 7th-open prompts replace/cancel).
+- Tests: `view_ids_are_stable_and_disjoint`, `the_open_view_cap_is_ten`.
+
+- **S3 next increment (NOT yet done, large):** replace the single `app.view` with an
+  open-views list + active index and render the actual tab bar (close / reorder / overflow /
+  per-view state). ~176 call sites read `app.view`, so this is a sizable, app-owned refactor
+  that needs its own review step; proposed as the next slice once this foundation is accepted.
 
 ## Out of scope / blocked (applies to the candidate)
 
-- **Mouse remapping at runtime**: owned upstream by `openbim-viewport`'s `Camera::drag_kind`
-  (crate at `544ee0d7`). The candidate pins that crate and must not be altered without
+- **Runtime mouse remapping**: owned upstream by `openbim-viewport`'s `Camera::drag_kind`
+  (crate pinned `544ee0d7`). The candidate pins that crate and must not be altered without
   approval, so runtime mouse rebinding is **blocked** at the app layer — the defaults already
   match Revit. `MouseMap`/`Gesture` exist in the `keymap` crate but the viewport widget does
   not consume them (it calls `camera.drag(buttons, mods, …)` directly).
-- Adding further keyboard commands beyond the 13 registered ones is an S3 feature-expansion.
+- Adding keyboard commands beyond the 13 registered ones is an S3 feature-expansion.
