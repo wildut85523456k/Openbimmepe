@@ -127,10 +127,14 @@ impl Desktop {
             return ViewOpenPolicy::Continue;
         }
         let policy = view_open_policy(self.open_views.len());
-        if policy == ViewOpenPolicy::Replace { return policy; }
+        if policy == ViewOpenPolicy::Replace {
+            self.view_replace_pending = Some(v);
+            return policy;
+        }
         self.open_views.push(v);
         self.view_states.push(ViewState::default());
         self.activate_view_at(self.open_views.len() - 1);
+        self.view_replace_pending = None;
         policy
     }
     /// Make the tab at index `i` active; `view` follows it so the viewport and the rest of
@@ -155,6 +159,7 @@ impl Desktop {
         if i >= self.open_views.len() || self.open_views.len() <= 1 { return; }
         self.open_views.remove(i);
         self.view_states.remove(i);
+        self.view_replace_pending = None;
         self.active_view = match self.active_view.cmp(&(self.open_views.len())) {
             std::cmp::Ordering::Greater if self.active_view > 0 => self.active_view - 1,
             std::cmp::Ordering::Greater => 0,
@@ -188,6 +193,15 @@ impl Desktop {
         self.view = v;
         self.restore_view_state(ViewState::default());
     }
+    /// Confirm the pending replace: evict tab `i` then add the view the user tried to open.
+    pub(crate) fn replace_pending_with(&mut self, i: usize) {
+        if let Some(v) = self.view_replace_pending.take() {
+            self.close_view_at(i);
+            let _ = self.add_view(v);
+        }
+    }
+    /// Dismiss the replace/cancel prompt; the attempted view is dropped (as in Revit).
+    pub(crate) fn cancel_replace(&mut self) { self.view_replace_pending = None; }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -231,6 +245,8 @@ struct Desktop {
     active_view: usize,
     /// per-open-view state, kept parallel to `open_views` (REA-006)
     view_states: Vec<ViewState>,
+    /// a view the user tried to open at the tab cap, awaiting a replace/cancel (REA-006)
+    view_replace_pending: Option<View>,
     tool: Tool,
     selected: Option<SampleElement>,
     ribbon: &'static str,
@@ -510,7 +526,7 @@ impl Desktop {
         Self {
             automation: automation::Automation::default(),
             document,
-            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![ViewState::default()], tool: Tool::Select,
+            workspace: Workspace::Design, view: View::Mechanical, open_views: vec![View::Mechanical], active_view: 0, view_states: vec![ViewState::default()], view_replace_pending: None, tool: Tool::Select,
             selected: Some(SampleElement::Duct), ribbon: "Systems", systems_sub: "HVAC",
             width_mm: 200.0, height_mm: 300.0, elevation_mm: 2700.0,
             slope_percent: 0.0, section_pick: 0, usage_pick: openbim_document::Usage::Girder, material_pick: openbim_document::Material::Unspecified, brace_rise_mm: 3000.0, web_mm: 10.0, flange_mm: 20.0,

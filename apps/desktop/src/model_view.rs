@@ -148,13 +148,21 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if let Some(i) = close_ix { app.close_view_at(i); }
         // Available views open on demand (open-or-switch) -- as in Revit, pointing at a view
         // makes it a tab, up to the Revit-like cap of 10; at the cap the user is asked to replace.
-        let mut tab_cap_warn = false;
         for (label, view) in tabs {
-            if ui.selectable_label(app.view == view, label).clicked() {
-                if app.set_view(view) == crate::ViewOpenPolicy::Replace { tab_cap_warn = true; }
-            }
+            if ui.selectable_label(app.view == view, label).clicked() { app.set_view(view); }
         }
-        if tab_cap_warn { ui.colored_label(egui::Color32::YELLOW, "Tab limit reached - close a tab"); }
+        // At the Revit-like tab cap, opening another view prompts replace/cancel (REA-006).
+        if let Some(pending) = app.view_replace_pending {
+            ui.separator();
+            ui.label(format!("Tab limit reached: pick a tab to replace to open \"{}\", or cancel.", view_label(app, pending)));
+            let mut replace_ix: Option<usize> = None;
+            for i in 0..app.open_views.len() {
+                let label = view_label(app, app.open_views[i]);
+                if ui.button(format!("Replace \"{label}\"")).clicked() { replace_ix = Some(i); }
+            }
+            if let Some(i) = replace_ix { app.replace_pending_with(i); }
+            if ui.button("Cancel").clicked() { app.cancel_replace(); }
+        }
         if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
         if ui.small_button("Clear selection").clicked() { app.select_element(None); }
     });
@@ -1794,6 +1802,29 @@ mod tests {
         assert_eq!(app.zoom, zoom1, "plan zoom restored");
         assert_eq!(app.pan, pan1, "plan pan restored");
         assert_eq!(app.camera_yaw, yaw1, "plan yaw restored");
+    }
+
+    #[test]
+    fn at_cap_opening_a_view_prompts_replace_then_evicts_or_cancels() {
+        let mut app = crate::Desktop::sample();
+        // fill to the Revit-like cap of 10 (sample starts with 1)
+        for n in 0..9u64 { let _ = app.add_view(crate::View::Section(1_000_000 + n)); }
+        assert_eq!(app.open_views.len(), crate::MAX_OPEN_VIEWS);
+        // the cap-th+1 view is refused: a prompt is pending, no tab added yet
+        assert_eq!(app.add_view(crate::View::Elevation(0)), crate::ViewOpenPolicy::Replace);
+        assert_eq!(app.open_views.len(), crate::MAX_OPEN_VIEWS, "pending view not added");
+        assert_eq!(app.view_replace_pending, Some(crate::View::Elevation(0)));
+        // pick tab 3 to evict -> elevation opens, prompt cleared
+        app.replace_pending_with(3);
+        assert_eq!(app.view_replace_pending, None);
+        assert_eq!(app.open_views.len(), crate::MAX_OPEN_VIEWS);
+        assert_eq!(app.view, crate::View::Elevation(0));
+        // cancel a fresh prompt: the attempted view is dropped, nothing changes
+        assert_eq!(app.add_view(crate::View::Elevation(1)), crate::ViewOpenPolicy::Replace);
+        assert_eq!(app.view_replace_pending, Some(crate::View::Elevation(1)));
+        app.cancel_replace();
+        assert_eq!(app.view_replace_pending, None);
+        assert_eq!(app.open_views.len(), crate::MAX_OPEN_VIEWS);
     }
 
     #[test]
