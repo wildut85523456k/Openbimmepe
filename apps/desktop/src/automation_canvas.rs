@@ -72,18 +72,19 @@ fn title(kind: &NodeKind) -> String {
         NodeKind::Selection { .. } => "Select elements".into(),
         NodeKind::Dimensions => "Read dimensions".into(),
         NodeKind::Read { property } => format!("Read {property:?}"),
-        NodeKind::Set { property } => format!("Set {property:?}"),
+        NodeKind::Set { property, .. } => format!("Set {property:?}"),
         NodeKind::Length { .. } => "Length".into(),
         NodeKind::Ratio { .. } => "Ratio".into(),
         NodeKind::Slider { .. } => "Number slider".into(),
         NodeKind::Python { .. } => "Python expression".into(),
+        _ => "node".into(),
     }
 }
 
 fn input_name(kind: &NodeKind, index: usize) -> String {
     match (kind, index) {
         (NodeKind::Read { .. } | NodeKind::Set { .. } | NodeKind::Dimensions, 0) => "elements".into(),
-        (NodeKind::Set { property }, 1) => format!("{property:?}").to_lowercase(),
+        (NodeKind::Set { property, .. }, 1) => format!("{property:?}").to_lowercase(),
         (NodeKind::Python { .. }, 0) => "x".into(),
         _ => "input".into(),
     }
@@ -98,6 +99,7 @@ fn output_name(kind: &NodeKind) -> String {
         NodeKind::Ratio { .. } => "ratio".into(),
         NodeKind::Slider { .. } => "value".into(),
         NodeKind::Python { .. } => "result".into(),
+        _ => "value".into(),
     }
 }
 
@@ -383,7 +385,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
                 NodeKind::Length { metres } => { changed |= ui.add(egui::DragValue::new(metres).speed(0.01).suffix(" m")).changed(); }
                 NodeKind::Ratio { value } => { changed |= ui.add(egui::DragValue::new(value).speed(0.001)).changed(); }
                 NodeKind::Python { expression,.. } => { changed |= ui.text_edit_singleline(expression).changed(); }
-                NodeKind::Read { property } | NodeKind::Set { property } => {
+                NodeKind::Read { property } | NodeKind::Set { property, .. } => {
                     egui::ComboBox::from_id_salt("property").selected_text(format!("{property:?}")).show_ui(ui,|ui| {
                         for p in [openbim_automation::Property::Width,openbim_automation::Property::Height,openbim_automation::Property::Elevation,openbim_automation::Property::Slope] {
                             changed |= ui.selectable_value(property,p,format!("{p:?}")).changed();
@@ -403,6 +405,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
                     if response.has_focus() { ui.ctx().data_mut(|d|d.insert_temp(key,text)); }
                     else { ui.ctx().data_mut(|d|d.remove::<String>(key)); }
                 }
+                _ => {},
             }
         });
     }
@@ -413,7 +416,7 @@ pub fn show(ui: &mut egui::Ui, graph: &mut Graph, pending: &mut Option<(u64,u16)
     if let Some(id)=ui.ctx().data(|d|d.get_temp::<u64>(editor_key)) {
         let mut open=true;
         if let Some(node)=graph.nodes.iter_mut().find(|n|n.id==id) {
-            if let NodeKind::Python {expression,quantity}=&mut node.kind {
+            if let NodeKind::Python {expression,quantity,..}=&mut node.kind {
                 egui::Window::new(format!("Python expression | Node {id}")).id(editor_key).open(&mut open).default_width(480.0).show(ui.ctx(),|ui| {
                     ui.label("Numeric expression using x. The worker currently supports expressions, not general Python scripts.");
                     changed|=ui.add(egui::TextEdit::multiline(expression).code_editor().desired_rows(8)).changed();
@@ -478,7 +481,7 @@ mod tests {
     #[test]
     fn ctrl_click_toggles_selection_and_double_click_opens_python_editor() {
         let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
-        graph.nodes[1].kind=NodeKind::Python {expression:"x + 0.3".into(),quantity:openbim_automation::Type::Length};
+        graph.nodes[1].kind=NodeKind::Python {expression:"x + 0.3".into(),quantity:openbim_automation::Type::Length, lacing: openbim_automation::Lacing::Auto};
         graph.wires[0].from=3;graph.validate().unwrap();
         let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[3]-Vec2::new(290.0,74.0);
         let first=origin+Vec2::new(140.0,45.0);let second=origin+Vec2::new(410.0,45.0);

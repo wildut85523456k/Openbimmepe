@@ -220,7 +220,7 @@ fn field_name(field: Field, category: openbim_document::Category) -> &'static st
     }
 }
 
-fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
+fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field, deferred: bool) -> egui::Response {
     let value = match field {
         Field::Count => &mut app.bar_count, Field::Spacing => &mut app.spacing_mm, Field::Angle => &mut app.angle_deg,
         Field::Thickness => &mut app.footing_thickness_mm, Field::Width | Field::Diameter => &mut app.width_mm, Field::Web => &mut app.web_mm, Field::Flange => &mut app.flange_mm, Field::Height => &mut app.height_mm,
@@ -228,8 +228,14 @@ fn editor(app: &mut Desktop, ui: &mut egui::Ui, field: Field) {
         Field::X1 => &mut app.axis_mm[0], Field::Y1 => &mut app.axis_mm[1],
         Field::X2 => &mut app.axis_mm[2], Field::Y2 => &mut app.axis_mm[3],
     };
+    // Properties-panel fields edit-then-commit like Revit: the draft value is applied
+    // only when the field loses focus (Enter / click away) and Escape reverts the
+    // in-progress edit, instead of committing every keystroke. Placement-options
+    // ribbon editors stay live (deferred = false). Callers pin a testable hit-name.
     let editor = egui::DragValue::new(value).speed(if matches!(field, Field::Slope) { 0.1 } else { 1.0 });
-    ui.add(if matches!(field, Field::Width | Field::Height | Field::Diameter | Field::Web | Field::Flange | Field::Thickness) { editor.range(1.0..=100_000.0) } else { editor });
+    let editor = if deferred { editor.update_while_editing(false) } else { editor };
+    let r = ui.add(if matches!(field, Field::Width | Field::Height | Field::Diameter | Field::Web | Field::Flange | Field::Thickness) { editor.range(1.0..=100_000.0) } else { editor });
+    if deferred { r.on_hover_text("Type a value: Enter or click away to apply, Escape reverts") } else { r }
 }
 
 fn edit_group(app: &mut Desktop, ui: &mut egui::Ui, name: &str, query: &str,
@@ -243,7 +249,8 @@ fn edit_group(app: &mut Desktop, ui: &mut egui::Ui, name: &str, query: &str,
                         let label = field_name(*field, category);
                         if !matches(query, name) && !matches(query, label) { continue; }
                         ui.add_sized([ui.available_width() * 0.46, 18.0], egui::Label::new(label));
-                        editor(app, ui, *field);
+                        let r = editor(app, ui, *field, true);
+                        test_hit!(app, r, "param:{}", label);
                         ui.end_row();
                     }
                 });
@@ -549,7 +556,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             let cat = openbim_document::Category::WallFooting;
             for field in dimensions(cat, 0).iter().copied() {
                 ui.label(field_name(field, cat));
-                if matches!(field, Field::Elevation) { ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0)); } else { editor(app, ui, field); }
+                if matches!(field, Field::Elevation) { ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0)); } else { editor(app, ui, field, false); }
             }
         });
         return;
@@ -563,7 +570,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             for field in dimensions(cat, 0).iter().copied() {
                 if matches!(field, Field::Elevation) { ui.label(field_name(field, cat)); ui.add(egui::DragValue::new(&mut app.slab_offset_mm).speed(1.0)); continue; }
                 ui.label(field_name(field, cat));
-                editor(app, ui, field);
+                editor(app, ui, field, false);
             }
         });
         return;
@@ -586,7 +593,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.separator();
             for field in dimensions(openbim_document::Category::Rebar, 0).iter().copied() {
                 ui.label(field_name(field, openbim_document::Category::Rebar));
-                editor(app, ui, field);
+                editor(app, ui, field, false);
             }
         });
         return;
@@ -598,7 +605,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             usage_material_combos(app, ui, false);
             for field in dimensions(openbim_document::Category::Truss, 0).iter().copied() {
                 ui.label(field_name(field, openbim_document::Category::Truss));
-                editor(app, ui, field);
+                editor(app, ui, field, false);
             }
         });
         return;
@@ -621,7 +628,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             usage_material_combos(app, ui, true);
             for field in dimensions(openbim_document::Category::BeamSystem, 0).iter().copied() {
                 ui.label(field_name(field, openbim_document::Category::BeamSystem));
-                editor(app, ui, field);
+                editor(app, ui, field, false);
             }
             ui.label(format!("{} corners", app.slab_points.len()));
             if ui.add_enabled(app.slab_points.len() >= 3, egui::Button::new("Finish")).clicked() { app.finish_slab(app.plan_level()); }
@@ -763,7 +770,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             let cat = openbim_document::Category::Column;
             for field in dimensions(cat, app.section_pick).iter().copied().filter(|f| !matches!(f, Field::Elevation)) {
                 ui.label(field_name(field, cat));
-                editor(app, ui, field);
+                editor(app, ui, field, false);
             }
         });
         return;
@@ -790,7 +797,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             fields.extend([Field::X1, Field::Y1, Field::X2, Field::Y2]);
             for field in fields {
                 ui.label(field_name(field, cat));
-                editor(app, ui, field);
+                editor(app, ui, field, false);
             }
             if ui.button("Place Beam").clicked() { app.place_beam_from_controls(); }
         });
@@ -804,7 +811,7 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
         let fields = if el.category == openbim_document::Category::Grid {
             &[Field::X1, Field::Y1, Field::X2, Field::Y2][..]
         } else if matches!(el.geometry, Some(openbim_document::Geometry::Shaft { .. })) || openbim_document::Document::is_vertical_opening(&el) { &[][..] } else { dimensions(el.category, app.section_pick) };
-        for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field); }
+        for field in fields { ui.label(field_name(*field, el.category)); editor(app, ui, *field, false); }
         let pending = app.has_pending_edit();
         let apply = ui.add_enabled(pending, egui::Button::new("Apply"));
         test_hit!(app, apply, "props:Apply");
@@ -818,9 +825,16 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
 pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
     use openbim_document::Geometry;
     title_bar(ui, "Properties", &mut app.show_properties);
-    let element = app.selected_id().and_then(|id| app.document.get(id)).cloned();
-    let (category, family_type, icon) = element.as_ref().map(|el| category_info(el.category))
-        .unwrap_or(("View Properties", "Current View", "view"));
+    let selected = app.selected_ids();
+    let element = app.selected_id().and_then(|id| app.document.get(id).cloned());
+    let multi_count = selected.len();
+    let (category, family_type, icon) = if multi_count > 1 {
+        ("Multiple elements selected", format!("{} elements", multi_count), "view")
+    } else {
+        let (c, f, i) = element.as_ref().map(|el| category_info(el.category))
+            .unwrap_or(("View Properties", "Current View", "view"));
+        (c, f.to_string(), i)
+    };
     ui.horizontal(|ui| {
         ui.add(ribbon::icon_image(ui, icon, app.dark, Vec2::splat(40.0)));
         ui.vertical(|ui| {
@@ -828,8 +842,8 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
             match &element {
                 Some(el) if openbim_document::Element::can_have_type(el.category) => type_combo(app, ui, el),
                 _ => { egui::ComboBox::from_id_salt("property_type").width(180.0)
-                    .selected_text(family_type).show_ui(ui, |ui| {
-                        ui.label(family_type); ui.weak("No additional types loaded");
+                    .selected_text(&family_type).show_ui(ui, |ui| {
+                        ui.label(&family_type); ui.weak("No additional types loaded");
                     }); }
             }
         });
@@ -1065,7 +1079,42 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
     if element.is_some() {
         let pending = app.has_pending_edit();
         ui.horizontal(|ui| {
-            if ui.add_enabled(pending, egui::Button::new("Apply")).clicked() { app.apply_selected_edit(); }
+            let apply = ui.add_enabled(pending, egui::Button::new("Apply"));
+            test_hit!(app, apply, "props:Apply");
+            if apply.clicked() {
+                let ids = app.selected_ids();
+                let primary = app.selected_id();
+                if ids.len() <= 1 {
+                    app.apply_selected_edit();
+                } else {
+                    // apply the same edited values to every selected element in turn; set `selected`
+                    // directly (not via select_element) so sync_duct_controls does not clobber the
+                    // draft before each element is updated
+                    let saved = (app.width_mm, app.height_mm, app.elevation_mm, app.slope_percent,
+                        app.spacing_mm, app.angle_deg, app.material_pick, app.section_pick,
+                        app.web_mm, app.flange_mm, app.footing_thickness_mm, app.join_pick,
+                        app.usage_pick, app.slope_percent, app.slab_kind_pick);
+                    for id in &ids {
+                        app.selected = Some(if *id == crate::ElementId(1) { crate::SampleElement::Duct } else { crate::SampleElement::Model(*id) });
+                        app.multi.clear();
+                        app.width_mm = saved.0; app.height_mm = saved.1; app.elevation_mm = saved.2;
+                        app.slope_percent = saved.3; app.spacing_mm = saved.4; app.angle_deg = saved.5;
+                        app.material_pick = saved.6; app.section_pick = saved.7; app.web_mm = saved.8;
+                        app.flange_mm = saved.9; app.footing_thickness_mm = saved.10; app.join_pick = saved.11;
+                        app.usage_pick = saved.12; app.slope_percent = saved.13; app.slab_kind_pick = saved.14;
+                        app.apply_selected_edit();
+                    }
+                    // restore primary selection + multiselect
+                    if let Some(p) = primary { app.select_element(Some(p)); }
+                    if ids.len() > 1 {
+                        let mut rest = ids.clone();
+                        rest.retain(|i| Some(*i) != primary);
+                        app.select_many(rest.into_iter().chain(primary.into_iter()).collect());
+                    } else {
+                        app.sync_duct_controls();
+                    }
+                }
+            }
             if ui.add_enabled(pending, egui::Button::new("Reset")).clicked() { app.sync_duct_controls(); }
             if pending { ui.weak("Pending changes"); }
         });

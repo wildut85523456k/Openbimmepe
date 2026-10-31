@@ -1715,6 +1715,35 @@ mod tests {
     }
 
     #[test]
+    fn numeric_properties_edit_is_deferred_and_escappable_like_revit() {
+        let (ctx, screen) = frames();
+        let mut app = Desktop::sample();
+        app.view = View::Plan;
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert_eq!(app.width_mm, 200.0, "the sample Duct's default Width");
+
+        // Focus the Width field and type a value: like Revit, the draft is not committed
+        // to the model while the text is being edited, so the underlying value is unchanged.
+        click_widget(&ctx, screen, &mut app, "param:Width (mm)");
+        type_into(&ctx, screen, &mut app, "param:Width (mm)", "9999");
+        assert_eq!(app.width_mm, 200.0, "the typed value is not committed while editing: {}", app.message);
+
+        // Escape reverts the in-progress edit (the typed text is discarded).
+        window_frame(&ctx, screen, &mut app, vec![key(egui::Key::Escape)]);
+        assert_eq!(app.width_mm, 200.0, "Escape reverts the pending numeric edit: {}", app.message);
+
+        // Edit again, then confirm by moving focus: clicking the next field blurs this
+        // one and applies the typed value.
+        click_widget(&ctx, screen, &mut app, "param:Width (mm)");
+        type_into(&ctx, screen, &mut app, "param:Width (mm)", "9999");
+        eprintln!("DEBUG before Height click: width_mm={} ({})", app.width_mm, app.message);
+        click_widget(&ctx, screen, &mut app, "param:Height (mm)");
+        window_frame(&ctx, screen, &mut app, vec![]);
+        eprintln!("DEBUG after Height click + frame: width_mm={} ({})", app.width_mm, app.message);
+        assert_eq!(app.width_mm, 9999.0, "moving focus commits the pending numeric edit: {}", app.message);
+    }
+
+    #[test]
     fn the_keymap_shortcuts_choose_a_tool_and_ctrl_n_starts_a_new_model() {
         let (ctx, screen) = frames();
         let mut app = Desktop::sample();
@@ -2053,12 +2082,21 @@ mod tests {
         for _ in 0..40 {
             window_frame(ctx, screen, app, vec![]);
             let Some((_, reach, full)) = app.widget_hits.iter().rev().find(|(hit, ..)| hit == name).cloned() else { break };
-            if reach.height() >= full.height().min(8.0) && reach.width() > 1.0 { return reach; }
+            if reach.height() >= full.height().abs().min(8.0) && reach.width() > 1.0 { return reach; }
             // the scroll area clips the control: wheel over a visible control of the same group (the same name
             // before the colon, so the same scroll area) in the direction that reveals it
             let group = name.split(':').next().unwrap_or(name);
             let over = app.widget_hits.iter().rev().find(|(n, r, _)| n.split(':').next() == Some(group) && r.height() > 4.0).map(|(_, r, _)| r.center());
-            let Some(over) = over else { break };
+            let Some(over) = over else {
+                // no visible control in this group: the whole group is scrolled out of sight, so wheel at the
+                // bottom edge of the clipping rect (shared by every clipped control) to bring it into view
+                let scroll_at = egui::pos2(full.center().x, reach.min.y.min(reach.max.y) - 1.0);
+                let up = full.center().y < scroll_at.y;
+                window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(scroll_at), egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, if up { 40.0 } else { -40.0 }), phase: egui::TouchPhase::Move, modifiers: Default::default(), source: egui::MouseWheelSource::Unknown,
+                }]);
+                continue;
+            };
             let up = full.center().y < over.y;
             window_frame(ctx, screen, app, vec![egui::Event::PointerMoved(over), egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, if up { 40.0 } else { -40.0 }), phase: egui::TouchPhase::Move, modifiers: Default::default(), source: egui::MouseWheelSource::Unknown,
