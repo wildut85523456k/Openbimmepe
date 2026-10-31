@@ -79,6 +79,35 @@ enum View {
     /// a schedule/quantities view (its number)
     Schedule(u64),
     Sheet(u64) }
+
+impl View {
+    /// A stable identifier for a view, independent of its position in an open-views list (REA-006).
+    /// Two equal views share an id; the id is stable across restarts so a view can be re-opened
+    /// exactly after close/reorder. Ranges are disjoint per variant so ids never collide.
+    pub(crate) fn id(&self) -> u64 {
+        match self {
+            View::Plan => 0, View::UpperPlan => 1, View::ThreeD => 2, View::Mechanical => 3,
+            View::Elevation(k) => 4 + *k as u64,
+            View::Level(n) => 100 + n,
+            View::Section(n) => 1_000 + n,
+            View::Marked(n, k) => 10_000 + n * 8 + *k as u64,
+            View::Schedule(n) => 20_000 + n,
+            View::Sheet(n) => 30_000 + n,
+        }
+    }
+}
+
+/// Cap on the number of views open as tabs at once (REA-006). A seventh open view
+/// prompts the user to replace an existing tab or cancel; 10 is the Revit-like default.
+pub(crate) const MAX_OPEN_VIEWS: usize = 10;
+/// What to do when opening a view while the tab cap is reached.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ViewOpenPolicy { Continue, Replace }
+/// Returns `Replace` once `open_count` has reached `MAX_OPEN_VIEWS`, else `Continue`.
+pub(crate) fn view_open_policy(open_count: usize) -> ViewOpenPolicy {
+    if open_count >= crate::MAX_OPEN_VIEWS { ViewOpenPolicy::Replace } else { ViewOpenPolicy::Continue }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// What the options bar starts from when a command is chosen. A field left `None` is not touched (A5).

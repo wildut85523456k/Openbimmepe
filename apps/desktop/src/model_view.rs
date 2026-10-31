@@ -1688,6 +1688,30 @@ mod tests {
     }
 
     #[test]
+    fn view_ids_are_stable_and_disjoint() {
+        // stable & disjoint ranges (REA-006): equal views share an id
+        assert_eq!(crate::View::Plan.id(), crate::View::Plan.id());
+        assert_eq!(crate::View::Level(7).id(), crate::View::Level(7).id());
+        assert_ne!(crate::View::Level(7).id(), crate::View::Level(8).id(), "differing levels differ");
+        assert_ne!(crate::View::Plan.id(), crate::View::Level(5).id(), "no variant collision");
+        assert_ne!(crate::View::Marked(3, 2).id(), crate::View::Marked(3, 0).id());
+        assert_ne!(crate::View::Sheet(1).id(), crate::View::Schedule(1).id());
+        assert_eq!(crate::View::Plan.id(), 0);
+        assert_eq!(crate::View::ThreeD.id(), 2);
+        assert_eq!(crate::View::Level(5).id(), 105);
+        assert_eq!(crate::View::Section(9).id(), 1009);
+    }
+
+    #[test]
+    fn the_open_view_cap_is_ten() {
+        assert_eq!(crate::MAX_OPEN_VIEWS, 10, "Revit-like tab cap");
+        assert_eq!(crate::view_open_policy(0), crate::ViewOpenPolicy::Continue);
+        assert_eq!(crate::view_open_policy(9), crate::ViewOpenPolicy::Continue);
+        assert_eq!(crate::view_open_policy(10), crate::ViewOpenPolicy::Replace);
+        assert_eq!(crate::view_open_policy(11), crate::ViewOpenPolicy::Replace);
+    }
+
+    #[test]
     fn a_level_view_is_named_after_its_level_and_follows_a_rename() {
         let mut app = Desktop::sample();
         let level = app.levels()[0].0;
