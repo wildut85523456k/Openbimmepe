@@ -353,12 +353,21 @@ impl Desktop {
         if let Some(rs) = cc.wgpu_render_state.as_ref() { openbim_viewport_egui::Viewport3d::init(rs); }
         let mut app = Self::sample();
         app.settings = app_settings::AppSettings::load();
+        // restore the persisted Light/Dark theme before the first frame is shown
+        app.dark = app.settings.theme.is_dark();
+        app.apply_theme(&cc.egui_ctx);
         // a model file named on the command line (or by the system, when a .obim file is opened) is opened at start
         match std::env::args_os().nth(1).map(|a| a.to_string_lossy().into_owned()).filter(|a| !a.starts_with('-')) {
             Some(path) => { app.new_model(); app.load_model(&path); }
             None => app.check_recovery(None),
         }
         app
+    }
+
+    /// Applies the in-memory theme (`self.dark`) to the egui visuals. Centralised so `new`, the
+    /// toolbar toggle and the Options window all restore/apply the persisted theme consistently.
+    pub(crate) fn apply_theme(&self, ctx: &egui::Context) {
+        ctx.set_visuals(if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
     }
 
     fn sample() -> Self {
@@ -567,7 +576,9 @@ impl Desktop {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(if self.dark { "Light" } else { "Dark" }).clicked() {
                     self.dark = !self.dark;
-                    ui.ctx().set_visuals(if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+                    self.settings.theme = if self.dark { app_settings::Theme::Dark } else { app_settings::Theme::Light };
+                    self.apply_theme(ui.ctx());
+                    if !self.settings.save() { self.message = "Theme could not be saved; it holds for this session".into(); }
                 }
                 if ui.button("Help").clicked() { self.show_help = !self.show_help; }
                 let r = ui.button("Options");

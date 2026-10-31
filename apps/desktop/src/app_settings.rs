@@ -5,21 +5,34 @@
 /// Longest interval offered, minutes.
 pub(crate) const MAX_AUTOSAVE_MINUTES: u32 = 120;
 
+/// Light/Dark application theme, persisted as `theme=light|dark`. A missing or unknown value means Light.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Theme { Light, Dark }
+
+impl Default for Theme { fn default() -> Self { Theme::Light } }
+
+impl Theme {
+    pub(crate) fn is_dark(self) -> bool { matches!(self, Theme::Dark) }
+    pub(crate) fn name(self) -> &'static str { match self { Theme::Light => "light", Theme::Dark => "dark" } }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AppSettings {
     /// minutes between automatic saves of unsaved work; 0 switches it off
     pub autosave_minutes: u32,
     /// also write the model's own file at that interval (only a model that already has a file), not just the journal
     pub autosave_to_file: bool,
+    /// light/dark application theme (persisted; defaults to Light)
+    pub theme: Theme,
 }
 
 impl Default for AppSettings {
-    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false } }
+    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light } }
 }
 
 impl AppSettings {
     pub(crate) fn to_text(&self) -> String {
-        format!("autosave_minutes={}\nautosave_to_file={}\n", self.autosave_minutes, u8::from(self.autosave_to_file))
+        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name())
     }
 
     pub(crate) fn from_text(text: &str) -> Self {
@@ -29,6 +42,7 @@ impl AppSettings {
             match k.trim() {
                 "autosave_minutes" => if let Ok(m) = v.trim().parse::<u32>() { s.autosave_minutes = m.min(MAX_AUTOSAVE_MINUTES); },
                 "autosave_to_file" => s.autosave_to_file = v.trim() == "1",
+                "theme" => s.theme = match v.trim() { "dark" => Theme::Dark, _ => Theme::Light },
                 _ => {}
             }
         }
@@ -63,11 +77,24 @@ mod tests {
 
     #[test]
     fn settings_round_trip_default_when_unreadable_and_are_bounded() {
-        let s = AppSettings { autosave_minutes: 5, autosave_to_file: true };
+        let s = AppSettings { autosave_minutes: 5, autosave_to_file: true, ..Default::default() };
         assert_eq!(AppSettings::from_text(&s.to_text()), s);
         assert_eq!(AppSettings::from_text(""), AppSettings::default());
         assert_eq!(AppSettings::from_text("garbage\nautosave_minutes=abc\nfuture_key=1\n"), AppSettings::default());
         assert_eq!(AppSettings::from_text("autosave_minutes=99999").autosave_minutes, MAX_AUTOSAVE_MINUTES);
         assert_eq!(AppSettings::from_text("autosave_minutes=0").autosave_minutes, 0);
+    }
+
+    #[test]
+    fn theme_round_trip_and_defaults() {
+        assert_eq!(AppSettings::from_text("theme=dark").theme, Theme::Dark);
+        assert_eq!(AppSettings::from_text("theme=light").theme, Theme::Light);
+        assert_eq!(AppSettings::from_text("theme=neon").theme, Theme::Light, "unknown value keeps the default");
+        assert_eq!(AppSettings::from_text("").theme, Theme::Light, "missing line keeps the default");
+        assert_eq!(AppSettings::from_text(&AppSettings::default().to_text()).theme, Theme::Light);
+        assert_eq!(AppSettings::from_text(&AppSettings { theme: Theme::Dark, ..Default::default() }.to_text()).theme, Theme::Dark);
+        assert!(Theme::Dark.is_dark() && !Theme::Light.is_dark());
+        assert_eq!(Theme::Light.name(), "light");
+        assert_eq!(Theme::Dark.name(), "dark");
     }
 }

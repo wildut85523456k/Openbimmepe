@@ -133,6 +133,19 @@ impl Desktop {
                     .on_hover_text("Off: the unsaved work is kept in a recovery journal beside the file and the file changes only when you save. On: the file is overwritten each time.");
             });
             if on && !self.settings.autosave_to_file { ui.small("Unsaved work is kept in a recovery journal; the file changes only when you save."); }
+
+            ui.separator();
+            ui.label(egui::RichText::new("Customisation").heading());
+            let theme = self.settings.theme;
+            ui.horizontal(|ui| {
+                ui.label("Theme");
+                ui.selectable_value(&mut self.settings.theme, crate::app_settings::Theme::Light, "Light");
+                ui.selectable_value(&mut self.settings.theme, crate::app_settings::Theme::Dark, "Dark");
+            });
+            if self.settings.theme != theme {
+                self.dark = self.settings.theme.is_dark();
+                self.apply_theme(ui.ctx());
+            }
         });
         if !open { self.show_options = false; }
         if self.settings != before && !self.settings.save() { self.message = "The options could not be written; they hold for this session".into(); }
@@ -506,7 +519,7 @@ mod tests {
         assert!(app.message.starts_with("Autosaved"));
         // a model with no file is still kept in the journal
         let mut fresh = Desktop::sample();
-        fresh.settings = crate::app_settings::AppSettings { autosave_minutes: 1, autosave_to_file: true };
+        fresh.settings = crate::app_settings::AppSettings { autosave_minutes: 1, autosave_to_file: true, ..Default::default() };
         beam(&mut fresh);
         fresh.file.path = None;
         fresh.autosave();
