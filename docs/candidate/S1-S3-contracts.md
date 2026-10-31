@@ -44,21 +44,29 @@ Repository: `github.com/wildut85523456k/Openbimmepe` (public). `main` tracks `or
   refreshed against candidate `544ee0d7`: REA-007 and REA-046 promoted to `VERIFIED`.
 - Preservation ledger, contracts, dependency diagram authored under `docs/candidate/`.
 
-## S3 — implementation (in progress)
+## S3 — implementation (DONE — pushed)
 
-Started with **REA-006** (open view tabs with stable IDs). This fork currently holds a single
-active `app.view`; REA-006 is the first multi-view feature. Delivered as a bounded,
-regression-safe foundation (commit `1e1e343`, `279 passed, 0 failed, 1 ignored`):
+**REA-006** (open view tabs with stable IDs) is complete. Delivered in three increments, each
+verified green before push (279 → 282 passed, 0 failed, 1 ignored; review step held each):
 
 - `View::id(&self) -> u64` — stable, restart-invariant, disjoint-per-variant view id.
 - `MAX_OPEN_VIEWS = 10` (Revit-like tab cap) and `view_open_policy(open_count)` →
-  `Continue` until the cap, then `Replace` (the 7th-open prompts replace/cancel).
-- Tests: `view_ids_are_stable_and_disjoint`, `the_open_view_cap_is_ten`.
-
-- **S3 next increment (NOT yet done, large):** replace the single `app.view` with an
-  open-views list + active index and render the actual tab bar (close / reorder / overflow /
-  per-view state). ~176 call sites read `app.view`, so this is a sizable, app-owned refactor
-  that needs its own review step; proposed as the next slice once this foundation is accepted.
+  `Continue` until the cap, then `Replace`.
+- `open_views: Vec<View>` + `active_view: usize` are the open tab set; `view` is always
+  `open_views[active_view]`, so the ~176 read-only call sites are untouched (regression-safe).
+- `activate_view_at`/`add_view`/`set_view`/`close_view_at`/`reset_view` keep the tab set and
+  the active view in sync.
+- **Per-view state** (`ViewState: pan/zoom/camera_yaw/camera_pitch/section_xf`) is snapshotted
+  on leave and restored on switch, so each tab remembers its camera (the 3D viewport widget
+  keeps its own keyed camera).
+- **Tab bar** in `model_view.rs::show()`: one tab per open view, active highlighted, per-tab
+  close button; available views (levels / {3D} / facings / sections) open-or-switch as tabs.
+- **Replace/cancel prompt at the cap**: a pending view (`view_replace_pending`) opens a prompt
+  offering a per-tab "Replace" or "Cancel" (evict the picked tab, or drop the attempt). Note:
+  reorder/overflow-scroll and the 3D-viewport internal orbit per tab remain follow-up polish.
+- Tests: `view_ids_are_stable_and_disjoint`, `the_open_view_cap_is_ten`,
+  `open_views_add_activate_close_and_cap`, `per_view_state_survives_a_tab_switch`,
+  `at_cap_opening_a_view_prompts_replace_then_evicts_or_cancels`.
 
 ## Out of scope / blocked (applies to the candidate)
 
