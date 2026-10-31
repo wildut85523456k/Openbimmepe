@@ -248,6 +248,33 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 None => app.message = "Add a level first: Architecture > Datum > Level".into(),
             }
         }
+    } else if matches!(app.tool, crate::Tool::Move | crate::Tool::Copy | crate::Tool::Rotate | crate::Tool::Mirror) {
+        // 3D move/rotate/mirror: clicks pick the element and the points, as in the plan view.
+        // Handle Escape to cancel the in-progress edit.
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if app.edit_pts.is_empty() {
+                app.choose_tool(crate::Tool::Select);
+            } else {
+                app.edit_pts.clear();
+                app.edit_num.clear();
+                app.message = "Cancelled".into();
+            }
+        }
+        if let Some(hit) = app.view3d.last_hit.take() {
+            let id = ElementId(hit.element.id);
+            let snap = |v: f64| (v / 0.05).round() * 0.05;
+            let at = [snap(hit.point[0]), snap(hit.point[1])];
+            if app.selected_id().is_none() {
+                app.select_element(Some(id));
+                app.message = "Now pick the points".into();
+            } else {
+                app.edit_click(at);
+            }
+        } else if *app.view3d.selection() != wanted {
+            // keep the app selection in sync with the viewport (e.g. empty-space click deselects)
+            let id = app.view3d.selection().iter().next().map(|e| ElementId(e.id));
+            app.select_element(id);
+        }
     } else if *app.view3d.selection() != wanted {
         let id = app.view3d.selection().iter().next().map(|e| ElementId(e.id));
         app.select_element(id);
@@ -350,6 +377,33 @@ mod tests {
         assert_eq!(app.document.site(), Some(site));
     }
 
+    #[test]
+    fn a_move_in_the_three_d_view_moves_the_selected_element() {
+        let ctx = egui::Context::default();
+        let mut app = Desktop::sample();
+        app.view = crate::View::ThreeD;
+        // select a wall first
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
+        app.select_element(Some(wall));
+        let Some(Geometry::Linear { start, end, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
+        let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+        // activate Move
+        app.run_command("move", "Move");
+        assert_eq!(app.tool, crate::Tool::Move);
+        // first click: base point
+        app.view3d.last_hit = Some(openbim_viewport_egui::Hit { triangle: 0, element: Element { kind: Kind::Wall, id: wall.0 }, face: FaceKind::Side, distance: 1.0, point: [mid[0], mid[1], 1.0] });
+        let out = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1000.0, 700.0))), ..Default::default() }, |ui| { egui::CentralPanel::default().show(ui, |ui| show(&mut app, ui)); });
+        out.drop_without_applying_deltas();
+        assert!(app.edit_pts.len() == 1, "base point recorded: {}", app.message);
+        // second click: target point (shift 1m in x)
+        app.view3d.last_hit = Some(openbim_viewport_egui::Hit { triangle: 0, element: Element { kind: Kind::Wall, id: wall.0 }, face: FaceKind::Side, distance: 1.0, point: [mid[0] + 1.0, mid[1], 1.0] });
+        let out = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1000.0, 700.0))), ..Default::default() }, |ui| { egui::CentralPanel::default().show(ui, |ui| show(&mut app, ui)); });
+        out.drop_without_applying_deltas();
+        // the wall should have moved
+        let Some(Geometry::Linear { start: s2, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
+        let moved = (s2[0] - start[0]).abs() > 0.5 || (s2[1] - start[1]).abs() > 0.5;
+        assert!(moved, "wall moved after 3D move: start {:?} -> {:?}", start, s2);
+    }
     #[test]
     fn the_three_d_view_draws_and_selection_flows_both_ways() {
         let ctx = egui::Context::default();
