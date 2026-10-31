@@ -26,16 +26,20 @@ pub(crate) struct AppSettings {
     pub theme: Theme,
     /// keyboard-shortcut overrides, one line per customised command (escaped single line); empty = Revit defaults
     pub keymap_overrides: String,
+    /// width of the left docking sidebar (browser + properties), persisted
+    pub sidebar_width: f32,
+    /// fraction of the sidebar height given to the top Properties strip vs the Browser, persisted
+    pub properties_split: f32,
 }
 
 impl Default for AppSettings {
-    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light, keymap_overrides: String::new() } }
+    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light, keymap_overrides: String::new(), sidebar_width: 310.0, properties_split: 0.55 } }
 }
 
 impl AppSettings {
     pub(crate) fn to_text(&self) -> String {
         let escaped = self.keymap_overrides.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', "\\t");
-        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\nkeymap_overrides={}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name(), escaped)
+        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\nkeymap_overrides={}\nsidebar_width={:.1}\nproperties_split={:.3}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name(), escaped, self.sidebar_width, self.properties_split)
     }
 
     pub(crate) fn from_text(text: &str) -> Self {
@@ -50,6 +54,8 @@ impl AppSettings {
                     let unesc = v.replace("\\\\", "\x00").replace("\\n", "\n").replace("\\t", "\t").replace("\x00", "\\");
                     s.keymap_overrides = unesc;
                 }
+                "sidebar_width" => if let Ok(w) = v.trim().parse::<f32>() { s.sidebar_width = w.clamp(260.0, 520.0); },
+                "properties_split" => if let Ok(f) = v.trim().parse::<f32>() { s.properties_split = f.clamp(0.1, 0.9); },
                 _ => {}
             }
         }
@@ -103,5 +109,17 @@ mod tests {
         assert!(Theme::Dark.is_dark() && !Theme::Light.is_dark());
         assert_eq!(Theme::Light.name(), "light");
         assert_eq!(Theme::Dark.name(), "dark");
+    }
+
+    #[test]
+    fn dock_widths_round_trip_defaults_and_clamping() {
+        assert_eq!(AppSettings::default().sidebar_width, 310.0);
+        assert_eq!(AppSettings::default().properties_split, 0.55);
+        let s = AppSettings { sidebar_width: 420.0, properties_split: 0.7, ..Default::default() };
+        assert_eq!(AppSettings::from_text(&s.to_text()), s, "dock widths round-trip");
+        assert_eq!(AppSettings::from_text("sidebar_width=600").sidebar_width, 520.0, "clamped to max");
+        assert_eq!(AppSettings::from_text("sidebar_width=100").sidebar_width, 260.0, "clamped to min");
+        assert_eq!(AppSettings::from_text("properties_split=0.95").properties_split, 0.9, "clamped to max");
+        assert_eq!(AppSettings::from_text("properties_split=0.02").properties_split, 0.1, "clamped to min");
     }
 }

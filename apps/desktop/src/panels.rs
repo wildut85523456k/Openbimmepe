@@ -28,11 +28,19 @@ pub fn sidebar(app: &mut Desktop, ui: &mut egui::Ui) {
     palette_style(ui);
     if app.show_properties && app.show_browser {
         let height = ui.available_height();
-        egui::Panel::top("properties_split")
-            .default_size(height * 0.55)
+        let top = egui::Panel::top("properties_split")
+            .default_size(height * app.settings.properties_split)
             .min_size(90.0).max_size((height - 100.0).max(90.0))
             .resizable(true)
             .show(ui, |ui| properties(app, ui));
+        // persist a drag on the internal Properties/Browser split across restarts (skipped under cfg(test))
+        if crate::app_settings::AppSettings::path().is_some() {
+            let frac = (top.response.rect.height() / height).clamp(0.1, 0.9);
+            if (frac - app.settings.properties_split).abs() > 0.01 && !ui.input(|i| i.pointer.any_down()) {
+                app.settings.properties_split = frac;
+                let _ = app.settings.save();
+            }
+        }
         egui::CentralPanel::default().frame(egui::Frame::new())
             .show(ui, |ui| browser(app, ui));
     } else if app.show_properties {

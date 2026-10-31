@@ -118,6 +118,22 @@ right-click context menu (Rename / Duplicate / Delete), matching Revit's view-co
   (full harness: right-click "view:Section 1" → Rename → type "Ref Plan" → OK → rename committed). 285 passed,
   0 failed (was 283; +2).
 
+**Persistent docking / splitter width.** The left docking sidebar (browser + properties) width and
+the internal Properties/Browser split are now persisted to the single settings file
+(`%APPDATA%/openbim/settings.txt`), matching the theme/keymap persistence pattern.
+
+- New `AppSettings` fields `sidebar_width` (default 310.0, clamped to the panel's 260–520 px range)
+  and `properties_split` (default 0.55, clamped 0.1–0.9), round-tripped through `to_text`/`from_text`
+  as `sidebar_width={:.1}` / `properties_split={:.3}` (one line per key, unknown keys ignored).
+- Applied as the panels' `default_size` (`egui::Panel::left("side")` and the top `properties_split`
+  panel) in `window()` / `panels::sidebar()`.
+- A drag on either panel is captured from the `PanelResponse` rect and written back to settings only
+  when no pointer button is held (drag ended) and the value changed by >1 px / >0.01 — so a live drag
+  does not thrash the file. The capture is gated on `AppSettings::path().is_some()`, which is `None`
+  under `cfg(test)`, so tests never touch the user's settings file.
+- Test: `dock_widths_round_trip_defaults_and_clamping` (round-trip + default values + out-of-range
+  clamping). 286 passed, 0 failed (was 285; +1).
+
 ## Out of scope / blocked (applies to the candidate)
 
 - **Runtime mouse remapping**: owned upstream by `openbim-viewport`'s `Camera::drag_kind`

@@ -1077,8 +1077,16 @@ impl Desktop {
         self.options_window(&ctx);
         self.georef_window(&ctx);
         if self.show_properties || self.show_browser {
-            egui::Panel::left("side").default_size(310.0).min_size(260.0)
+            let side = egui::Panel::left("side").default_size(self.settings.sidebar_width).min_size(260.0)
                 .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));
+            // persist a drag on the docking sidebar across restarts (skipped under cfg(test): path() is None)
+            if app_settings::AppSettings::path().is_some() {
+                let w = side.response.rect.width().clamp(260.0, 520.0);
+                if (w - self.settings.sidebar_width).abs() > 1.0 && !ui.input(|i| i.pointer.any_down()) {
+                    self.settings.sidebar_width = w;
+                    let _ = self.settings.save();
+                }
+            }
         }
         egui::CentralPanel::default().show(ui, |ui| {
             match self.workspace {
