@@ -149,6 +149,22 @@ Revit: Import (not link) STEP/SAT/DWG/DXF/Image into a family; imported geometry
 part of the family (can be exploded for some formats). Used to bring manufacturer 3D models
 into families.
 
+**Priority: HIGH.** Manufacturers ship STEP/SAT, not RVT families. STEP import lets us skip
+hand-modelling the family shape entirely — the geometry comes from the manufacturer file and
+we only author parameters, connectors and visibility on top of it. This is the primary
+authoring path for equipment families (AHUs, chillers, diffusers, valves, luminaires).
+
+Parameter tables linked to imported STEP geometry:
+- A family may contain **multiple STEP variants** (one per size) keyed by a type parameter
+  (e.g. "Size" = S/M/L), or a single STEP with dimensions driven by parameters where the
+  STEP is a "template" shape.
+- The **Family Types table** (rows × parameters) drives which STEP variant / scale is shown;
+  changing the type swaps the displayed geometry (Revit's "nested family by type" pattern,
+  applied to imported geometry).
+- Per-type overrides: material, visibility, connector positions may vary by type row.
+- STEP geometry is imported as a **display mesh/shape** (not editable B-rep) in v1;
+  parametric scaling of the whole imported shape via a scale parameter is supported.
+
 Our app: already has DWG import (acadrust) and PDF import. STEP/SAT need a parser.
 - **STEP**: use a Rust STEP reader (e.g. `step` crate or OpenCASCADE via FFI). Geometry
   becomes meshes/B-rep; for family authoring we likely import as a mesh/shape (display only)
@@ -206,15 +222,16 @@ Status: **not done** (create_family is catalogue-based, not a full editor).
 ## 10. Implementation order (full family authoring)
 
 1. Family Editor mode + ribbon tab (entry point).
-2. Reference planes/lines + work planes.
-3. Solid/void geometry + booleans (reuse existing primitives).
-4. Parameters + formulas (§3) + Family Types dialog extension.
-5. Binding: dimensions → params, visibility, material.
-6. Constraints (align/equality/lock).
-7. Connector authoring.
-8. Import STEP/SAT (mesh import).
-9. Nested families + type mapping.
-10. Shared parameters + type catalogs.
+2. **STEP/SAT import as display mesh (HIGH priority — primary authoring path).**
+3. Parameter tables linked to imported geometry (type → variant/scale).
+4. Reference planes/lines + work planes.
+5. Solid/void geometry + booleans (reuse existing primitives) — for non-imported families.
+6. Parameters + formulas (§3) + Family Types dialog extension.
+7. Binding: dimensions → params, visibility, material.
+8. Constraints (align/equality/lock).
+9. Connector authoring.
+10. Nested families + type mapping.
+11. Shared parameters + type catalogs.
 
 ## 11. Open questions (carried over)
 
