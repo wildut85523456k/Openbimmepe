@@ -40,6 +40,7 @@ pub const TABS: &[(&str, &str)] = &[
     ("View", "view"),
     ("Manage", "settings"),
     ("Add-Ins", "new"),
+    ("Family", "component"),
     ("Modify", "select"),
 ];
 
@@ -180,6 +181,7 @@ const MANAGE: &[Group] = &[
     Group { title: "AI Integration", commands: &[c("automation_mcp", "MCP Setup"), c("automation_snapshot", "Export Snapshot")] },
 ];
 const ADDINS: &[Group] = &[Group { title: "Automation", commands: &[c("automation_editor", "Graph Editor"), c("automation_player", "Player")] }];
+const FAMILY: &[Group] = &[Group { title: "Family", commands: &[c("family_editor_toggle", "Family Editor"), c("create_family", "Create Family"), c("load_family", "Load Family"), c("family_parameters", "Parameters"), c("import_step", "Import STEP")] }];
 const MODIFY: &[Group] = &[
     Group { title: "Select", commands: &[c("select", "Modify"), c("select_instances", "Select All Instances")] },
     Group { title: "Clipboard", commands: &[c("paste", "Paste"), c("paste_same_place", "Paste Same Place"), c("cut", "Cut"), c("copy_clipboard", "Copy"), c("match_type", "Match Type")] },
@@ -212,6 +214,7 @@ pub fn groups(tab: &str, systems_sub: &str) -> Vec<&'static Group> {
         "View" => &[VIEW],
         "Manage" => &[MANAGE],
         "Add-Ins" => &[ADDINS],
+        "Family" => &[FAMILY],
         _ => &[MODIFY],
     };
     list.iter().flat_map(|g| g.iter()).collect()

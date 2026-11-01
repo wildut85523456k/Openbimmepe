@@ -455,6 +455,8 @@ struct Desktop {
     import_dialog: Option<model_edit::ImportDialog>,
     load_family_dialog: Option<model_edit::LoadFamilyDialog>,
     create_family_dialog: Option<model_edit::CreateFamilyDialog>,
+    /// Family Editor mode: ribbon switches to Family tabs; document treated as a family definition.
+    family_editor_mode: bool,
     family_types_dialog: Option<family_types_ui::FamilyTypesDialog>,
     /// which of the family's connectors meets the open connector it snaps to (Tab takes the next)
     family_snap_k: usize,
@@ -579,7 +581,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(), discipline: "All",
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -872,6 +874,7 @@ impl Desktop {
             "ifc_export" => self.export_ifc_file(),
             "load_family" => self.load_family_file(),
             "create_family" => self.create_family_file(),
+            "family_editor_toggle" => { self.family_editor_mode = !self.family_editor_mode; if self.family_editor_mode { self.ribbon = "Family"; } self.message = if self.family_editor_mode { "Family Editor mode on".into() } else { "Family Editor mode off".into() }; }
             "import_dwg" => self.import_dwg_file(),
             "import_pdf" => self.import_pdf_file(),
             "new" => self.new_model(),
@@ -908,6 +911,7 @@ impl Desktop {
         // Ribbon tabs, each with a small icon.
         ui.horizontal(|ui| {
             for (tab, icon) in ribbon::TABS {
+                if *tab == "Family" && !self.family_editor_mode { continue; }
                 if !ribbon::tab_visible(tab, self.discipline) { continue; }
                 let img = ribbon::icon_image(ui, icon, self.dark, Vec2::splat(16.0));
                 let response = ui.add(egui::Button::image_and_text(img, *tab).selected(self.ribbon == *tab).frame(false));
