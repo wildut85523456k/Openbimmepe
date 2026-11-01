@@ -1295,7 +1295,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let pts: Vec<Pos2> = app.run_points.iter().map(|p| screen([p[0], p[1], level_z])).collect();
         let colour = Color32::from_rgba_unmultiplied(90, 150, 200, 160);
         for (i, w) in pts.windows(2).enumerate() {
-            let width = match app.run_sizes.get(i) { Some(openbim_place::penetrations::RunSize::Round { diameter }) => *diameter, Some(openbim_place::penetrations::RunSize::Rect { width, .. }) => *width, None => 0.1 } as f32;
+            let width = match app.run_sizes.get(i) { Some(openbim_place::penetrations::RunSize::Round { diameter }) => *diameter, Some(openbim_place::penetrations::RunSize::Rect { width, .. }) => *width, Some(openbim_place::penetrations::RunSize::Oval { width, .. }) => *width, None => 0.1 } as f32;
             painter.line_segment([w[0], w[1]], Stroke::new((width * scale).max(2.0), colour));
         }
         if let (Some(last), Some(h)) = (pts.last(), response.hover_pos()) {

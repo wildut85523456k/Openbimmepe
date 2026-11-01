@@ -56,7 +56,7 @@ fn size_list(ui: &mut egui::Ui, id: &str, sizes: &[f64], value: &mut f64) {
 }
 
 fn run_size_extent(s: &RunSize) -> (f64, f64) {
-    match s { RunSize::Round { diameter } => (*diameter, *diameter), RunSize::Rect { width, height, .. } => (*width, *height) }
+    match s { RunSize::Round { diameter } => (*diameter, *diameter), RunSize::Rect { width, height, .. } => (*width, *height), RunSize::Oval { width, height, .. } => (*width, *height) }
 }
 
 impl Desktop {

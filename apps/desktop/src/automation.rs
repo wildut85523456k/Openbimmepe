@@ -190,12 +190,12 @@ impl Automation {
                     ("Ratio", NodeKind::Ratio { value: 0.01 }),
                     ("Length slider",NodeKind::Slider {value:1.0,min:0.0,max:10.0,step:0.01,quantity:Type::Length}),
                     ("Number slider",NodeKind::Slider {value:0.5,min:0.0,max:1.0,step:0.01,quantity:Type::Ratio}),
-                    ("Python", NodeKind::Python { expression:"x + 0.3".into(),quantity:Type::Length, lacing: openbim_automation::Lacing::Auto }),
-                    ("Set", NodeKind::Set { property: Property::Elevation, lacing: openbim_automation::Lacing::Auto }),
+                    ("Python", NodeKind::Python { expression:"x + 0.3".into(),quantity:Type::Length }),
+                    ("Set", NodeKind::Set { property: Property::Elevation }),
                 ] {
                     if ui.button(label).clicked() {
                         let id = self.graph.nodes.iter().map(|n| n.id).max().unwrap_or(0).saturating_add(1);
-                        self.graph.nodes.push(Node { id, kind, position: [40., 40.], frozen: false, frozen_value: None }); dirty = true;
+                        self.graph.nodes.push(Node { id, kind, position: [40., 40.] }); dirty = true;
                     }
                 }
                 if ui.button("Disconnect all").clicked() { self.graph.wires.clear(); dirty = true; }

@@ -255,7 +255,7 @@ impl Desktop {
                 fluid: calc::Fluid { density: d.density, viscosity: d.viscosity_mpas / 1000.0, specific_heat: d.specific_heat },
                 roughness: d.roughness_mm / 1000.0,
                 criteria: calc::Criteria { max_velocity: (d.max_velocity > 0.0).then_some(d.max_velocity), max_friction: (d.max_friction > 0.0).then_some(d.max_friction) },
-                catalogue, count_static: d.count_static, loading, hazen_williams: (d.hazen_c > 0.0).then_some(d.hazen_c),
+                catalogue, count_static: d.count_static, loading, hazen_williams: (d.hazen_c > 0.0).then_some(d.hazen_c), sizing_method: Default::default(),
             },
             losses: FittingLosses { elbow: d.k[0], transition: d.k[1], tee: d.k[2], tap: d.k[3] },
             keep_sizes: d.keep_sizes,

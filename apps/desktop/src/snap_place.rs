@@ -27,7 +27,7 @@ pub(crate) struct SnapPlan { pub at: [f64; 2], pub angle_deg: f64, pub elevation
 
 fn unit(v: [f64; 3]) -> [f64; 3] { let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(); if l < 1e-12 { v } else { [v[0] / l, v[1] / l, v[2] / l] } }
 
-fn size_of_run(s: RunSize) -> Size { match s { RunSize::Round { diameter } => Size::Round { diameter }, RunSize::Rect { width, height, .. } => Size::Rect { width, height } } }
+fn size_of_run(s: RunSize) -> Size { match s { RunSize::Round { diameter } => Size::Round { diameter }, RunSize::Rect { width, height, .. } => Size::Rect { width, height }, RunSize::Oval { width, height, .. } => Size::Rect { width, height } } }
 
 fn same_size(a: &Size, b: &Size) -> bool {
     match (a, b) {

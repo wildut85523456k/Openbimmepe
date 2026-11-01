@@ -48,7 +48,7 @@ pub(crate) struct SystemsUi {
 fn domain_of(system: System) -> Domain { if system.domain_ok(Domain::Duct) && system != System::Other { Domain::Duct } else { Domain::Pipe } }
 
 fn size_mm(s: RunSize) -> [f64; 2] {
-    match s { RunSize::Round { diameter } => [(diameter * 1000.0).round(), 0.0], RunSize::Rect { width, height, .. } => [(width * 1000.0).round(), (height * 1000.0).round()] }
+    match s { RunSize::Round { diameter } => [(diameter * 1000.0).round(), 0.0], RunSize::Rect { width, height, .. } => [(width * 1000.0).round(), (height * 1000.0).round()], RunSize::Oval { width, height, .. } => [(width * 1000.0).round(), (height * 1000.0).round()] }
 }
 
 impl Desktop {

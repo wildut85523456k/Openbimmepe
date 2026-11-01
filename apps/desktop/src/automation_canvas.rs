@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn ctrl_click_toggles_selection_and_double_click_opens_python_editor() {
         let ctx=egui::Context::default();let mut graph=Graph::example(vec![1]);let mut pending=None;
-        graph.nodes[1].kind=NodeKind::Python {expression:"x + 0.3".into(),quantity:openbim_automation::Type::Length, lacing: openbim_automation::Lacing::Auto};
+        graph.nodes[1].kind=NodeKind::Python {expression:"x + 0.3".into(),quantity:openbim_automation::Type::Length};
         graph.wires[0].from=3;graph.validate().unwrap();
         let origin=first_curve(&frame(&ctx,&mut graph,&mut pending,vec![])).points[3]-Vec2::new(290.0,74.0);
         let first=origin+Vec2::new(140.0,45.0);let second=origin+Vec2::new(410.0,45.0);

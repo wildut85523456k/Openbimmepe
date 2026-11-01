@@ -186,6 +186,7 @@ impl Desktop {
                     Section::Rectangle => (0, self.web_mm, self.flange_mm),
                     Section::Circle => (1, self.web_mm, self.flange_mm),
                     Section::IShape { web_m, flange_m } => (2, web_m * 1000.0, flange_m * 1000.0),
+                    Section::Oval => (0, self.web_mm, self.flange_mm),
                 };
             }
             if let Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end }) = el.geometry {

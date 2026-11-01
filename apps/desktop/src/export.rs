@@ -443,6 +443,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         floor_penetrations, slab_voids, networks: if mep.segments.is_empty() { vec![] } else { vec![mep] }, families, items, rooms, wall_types: wall_types.into_iter().map(|(_, t)| t).collect(),
         wall_joins: vec![], georef: crate::georef_ui::GeorefInput::from_records(doc.app_records()).georef(doc.site()), room_settings: Default::default(), separation_lines: vec![],
         room_lighting: Default::default(), proxies, pset_map: Default::default(), grids, system_defs, assemblies, types, member_info, native: if own_data { openbim_document::native::records(doc) } else { Vec::new() },
+        footings: vec![], masses: vec![], project_parameters: Default::default(),
     };
     Ok((scene, skipped))
 }
@@ -542,6 +543,7 @@ fn types_of(doc: &Document, mep_ids: &[u64], walls: &[WallItem], beams: &[BeamIt
                 openbim_document::Section::Rectangle => "Rectangle".into(),
                 openbim_document::Section::Circle => "Circle".into(),
                 openbim_document::Section::IShape { web_m, flange_m } => format!("I web {web_m} flange {flange_m}"),
+                openbim_document::Section::Oval => "Oval".into(),
             })));
         }
         if kind == Category::Footing { props.push(("Thickness".into(), TypeProp::Len(v.thickness_m))); }

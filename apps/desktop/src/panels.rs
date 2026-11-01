@@ -274,6 +274,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Pipe => ("Pipes (1)", "Round Pipe", "pipe"), C::Level => ("Levels (1)", "Level Datum", "level"),
         C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"), C::Section => ("Views (1)", "Section", "section"), C::Elevation => ("Views (1)", "Elevation", "elevation"),
         C::Generic => ("Generic Models (1)", "Generic Model", "component"), C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
+        C::Space => ("Spaces (1)", "Space", "room"), C::DuctTerminal => ("Duct Terminals (1)", "Duct Terminal", "air_terminal"),
     }
 }
 
@@ -864,9 +865,33 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                         if ui.checkbox(&mut pinned, "Pinned").on_hover_text("Pin (PN): it cannot be moved or deleted until it is unpinned").changed() { app.pin_selected(pinned); }
                     }
                     if let Some(Geometry::Point { level, top, .. }) = el.geometry {
-                        let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
-                        read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
-                    }
+                                            let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
+                                            read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
+                                        }
+                                        if el.category == openbim_document::Category::Wall {
+                                            // Top Constraint selector (REA-014)
+                                            ui.horizontal(|ui| {
+                                                ui.label("Top Constraint");
+                                                let levels: Vec<(openbim_document::ElementId, String)> = app.document.elements()
+                                                    .filter(|e| matches!(e.geometry, Some(openbim_document::Geometry::Point { .. })))
+                                                    .filter(|e| e.category == openbim_document::Category::Level)
+                                                    .map(|e| (e.id, e.name.clone())).collect();
+                                                let current = el.top_constraint.map(|id| id.0).unwrap_or(0);
+                                                let top_name = el.top_constraint.and_then(|id| app.document.get(id)).map(|l| l.name.clone()).unwrap_or_else(|| "Unconnected".to_string());
+                                                egui::ComboBox::from_id_salt(("wall_top_constraint", el.id.0))
+                                                    .selected_text(if current == 0 { "Unconnected".to_string() } else { top_name.clone() })
+                                                    .show_ui(ui, |ui| {
+                                                        if ui.selectable_label(current == 0, "Unconnected").clicked() {
+                                                            let _ = app.document.set_top_constraint(el.id, None);
+                                                        }
+                                                        for (id, name) in &levels {
+                                                            if ui.selectable_label(current == id.0, name).clicked() {
+                                                                let _ = app.document.set_top_constraint(el.id, Some(*id));
+                                                            }
+                                                        }
+                                                    });
+                                            });
+                                        }
                     if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
                     if el.category == openbim_document::Category::Room { room_identity(app, ui, el); }
                     if el.category == openbim_document::Category::Family {
