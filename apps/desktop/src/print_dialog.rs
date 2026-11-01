@@ -8,6 +8,19 @@ use openbim_sheets::render::PrintMode;
 use std::io::{Read, Write};
 use std::path::Path;
 
+/// A named print setup (Revit's Page Setup): a profile, paper, scale and colour mode saved under a
+/// name so the same look can be re-applied to any sheet with one pick. Stored on the desktop and
+/// kept in the document so it survives save.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PageSetup {
+    pub name: String,
+    /// the print profile as JSON (so the setup is self-contained, no external file)
+    pub profile_json: String,
+    pub paper: String,
+    pub scale: u32,
+    pub mode: PrintMode,
+}
+
 struct Prepared {
     revision: u64,
     view: View,
@@ -24,6 +37,8 @@ pub struct PrintDialog {
     profile_path: String,
     prepared: Option<Prepared>,
     status: String,
+    /// Name for a page setup being saved (Revit's Page Setup).
+    page_setup_name: String,
 }
 
 impl Default for PrintDialog {
@@ -31,7 +46,7 @@ impl Default for PrintDialog {
         Self {
             open: false, profile: plan_export::generic_profile(), paper: "A3 landscape".into(),
             scale: 100, format: ExportFormat::Pdf, output_path: "plan.pdf".into(),
-            profile_path: String::new(), prepared: None, status: String::new(),
+                        profile_path: String::new(), prepared: None, status: String::new(), page_setup_name: String::new(),
         }
     }
 }
@@ -100,7 +115,7 @@ fn write_new(path: &Path, format: ExportFormat, bundle: &ExportBundle) -> Result
 impl PrintDialog {
     fn invalidate(&mut self) { self.prepared = None; self.status.clear(); }
 
-    pub fn show(&mut self, ctx: &egui::Context, document: &Document, view: View, design: bool) {
+    pub fn show(&mut self, ctx: &egui::Context, document: &Document, view: View, design: bool, page_setups: &mut Vec<crate::print_dialog::PageSetup>) {
         if !self.open { return; }
         if self.prepared.as_ref().is_some_and(|p| p.revision != document.revision() || p.view != view || !design) {
             self.invalidate();
@@ -136,6 +151,44 @@ impl PrintDialog {
                     if ui.button("Use generic").clicked() {
                         self.profile = plan_export::generic_profile();
                         self.paper = "A3 landscape".into(); self.invalidate();
+                    }
+                });
+                // Page Setup: save/apply a named profile + paper + scale + colour mode (Revit's Page Setup).
+                ui.horizontal(|ui| {
+                    ui.label("Page setup");
+                    let mut current = None;
+                    egui::ComboBox::from_id_salt("print-page-setup").selected_text(if page_setups.is_empty() { "(none)" } else { "…" }).show_ui(ui, |ui| {
+                        for (i, s) in page_setups.iter().enumerate() {
+                            if ui.selectable_label(current == Some(i), &s.name).clicked() { current = Some(i); }
+                        }
+                    });
+                    if let Some(i) = current {
+                        let s = page_setups[i].clone();
+                        if let Ok(p) = PrintProfile::from_json(&s.profile_json) { self.profile = p; }
+                        self.paper = s.paper;
+                        self.scale = s.scale;
+                        self.profile.mode = s.mode;
+                        self.invalidate();
+                        self.status = format!("Applied page setup '{}'.", s.name);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Save as");
+                    ui.text_edit_singleline(&mut self.page_setup_name);
+                    if ui.button("Save").clicked() {
+                        let name = self.page_setup_name.trim();
+                        if name.is_empty() { self.status = "Give the page setup a name.".into(); }
+                        else {
+                            let setup = PageSetup { name: name.into(), profile_json: self.profile.to_json().unwrap_or_default(), paper: self.paper.clone(), scale: self.scale, mode: self.profile.mode };
+                            if let Some(s) = page_setups.iter_mut().find(|s| s.name == setup.name) { *s = setup; }
+                            else { page_setups.push(setup); }
+                            self.page_setup_name = String::new();
+                            self.status = "Page setup saved.".into();
+                        }
+                    }
+                    if ui.button("Delete").clicked() {
+                        page_setups.retain(|s| s.name != self.page_setup_name.trim());
+                        self.page_setup_name = String::new();
                     }
                 });
                 let mut changed = false;
@@ -255,7 +308,7 @@ mod tests {
             ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             let before = doc.clone();
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                dialog.show(ui.ctx(), &doc, View::Plan, true);
+                dialog.show(ui.ctx(), &doc, View::Plan, true, &mut Vec::new());
             });
             // a run_ui produces texture deltas that must be cleared before the context is dropped,
             // or egui panics "Dropped TexturesDelta with N unapplied deltas" (as the model_view tests do)
@@ -264,7 +317,7 @@ mod tests {
             assert_eq!(doc, before);
         }
         doc.transact(doc.revision(), &[openbim_document::Command::Resize { id: crate::ElementId(1), width_m: 0.4, height_m: 0.3 }]).unwrap();
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| dialog.show(ui.ctx(), &doc, View::Plan, true));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| dialog.show(ui.ctx(), &doc, View::Plan, true, &mut Vec::new()));
         output.textures_delta.clear();
         assert!(dialog.prepared.is_none());
         assert!(dialog.status.contains("changed"));
