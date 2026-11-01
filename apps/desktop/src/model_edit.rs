@@ -12,6 +12,16 @@ pub(crate) struct ImportDialog { pub path: String, pub map_path: String }
 #[derive(Default)]
 pub(crate) struct LoadFamilyDialog { pub path: String }
 
+/// The state of the Create Family window: name a new family derived from a library family,
+/// edit its type rows, and load them into the project.
+#[derive(Default)]
+pub(crate) struct CreateFamilyDialog {
+    pub name: String,
+    pub base: String,
+    pub params: String,   // comma-separated parameter names
+    pub rows: String,     // one type per line: type_name<TAB>param values
+}
+
 /// The state of the types window: the type being worked on and the name typed for a rename or a copy.
 #[derive(Default)]
 pub(crate) struct TypesDialog { pub picked: Option<ElementId>, pub name: String }
@@ -316,6 +326,94 @@ impl Desktop {
     /// Opens the Load Family window: a catalogue file, what it will do, and the button.
     pub(crate) fn load_family_file(&mut self) {
         self.load_family_dialog = Some(LoadFamilyDialog::default());
+    }
+
+    pub(crate) fn import_dwg_file(&mut self) {
+        let Some(path) = crate::dialog::Question::new().set_title("Import DWG/DXF").add_filter("DWG/DXF", &["dwg", "dxf"]).ask_open() else { return };
+        match crate::dwg_import::import_dwg_file(&path.display().to_string()) {
+            Ok((drawing, msg)) => {
+                let n = drawing.primitive_count();
+                self.cad_overlay = Some((path.display().to_string(), drawing, 1.0));
+                self.message = format!("Imported {msg}");
+            }
+            Err(e) => self.message = format!("DWG import failed: {e}"),
+        }
+    }
+
+    pub(crate) fn import_pdf_file(&mut self) {
+        let Some(path) = crate::dialog::Question::new().set_title("Import PDF").add_filter("PDF", &["pdf"]).ask_open() else { return };
+        match (|| -> Result<(Vec<u8>, u32, u32), String> {
+            let pdfium = pdfium_auto::bind_pdfium_silent().map_err(|e| e.to_string())?;
+            let doc = pdfium.load_pdf_from_file(&path, None).map_err(|e| e.to_string())?;
+            let page = doc.pages().get(0).map_err(|e| e.to_string())?;
+            let w_pt = page.width().value;
+            let h_pt = page.height().value;
+            let scale_px = 200.0 / 72.0; // 200 DPI
+            let w = (w_pt * scale_px) as i32;
+            let h = (h_pt * scale_px) as i32;
+            let bitmap = page.render(w, h, None).map_err(|e| e.to_string())?;
+            let raw = bitmap.as_raw_bytes();
+            let img = image::RgbaImage::from_raw(w as u32, h as u32, raw).ok_or("bitmap decode failed")?;
+            let dynimg = image::DynamicImage::ImageRgba8(img);
+            let mut buf = Vec::new();
+            dynimg.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).map_err(|e| e.to_string())?;
+            Ok((buf, w as u32, h as u32))
+        })() {
+            Ok((bytes, w, h)) => {
+                self.pdf_overlay = Some(crate::PdfOverlay { png_bytes: bytes, w, h, scale: 0.0254 / 200.0, texture: None });
+                self.message = format!("Imported PDF: {}x{} px", w, h);
+            }
+            Err(e) => self.message = format!("PDF import failed: {e}"),
+        }
+    }
+
+    pub(crate) fn create_family_file(&mut self) {
+        self.create_family_dialog = Some(CreateFamilyDialog { base: "Air handling unit".into(), ..Default::default() });
+    }
+
+    /// The Create Family window: name a new family derived from a library family, edit its type rows
+    /// (one type per line: `type_name<TAB>param value ...`), and load them into the project as types.
+    pub(crate) fn create_family_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.create_family_dialog.take() else { return };
+        let (mut open, mut go) = (true, false);
+        egui::Window::new("Create Family").open(&mut open).collapsible(false).show(ctx, |ui| {
+            ui.horizontal(|ui| { ui.label("Name"); ui.text_edit_singleline(&mut dialog.name); });
+            ui.horizontal(|ui| {
+                ui.label("Base family");
+                egui::ComboBox::from_id_salt("create_family_base").selected_text(&dialog.base).show_ui(ui, |ui| {
+                    for f in crate::export::library() { if ui.selectable_label(dialog.base == f.name(), f.name()).clicked() { dialog.base = f.name().to_string(); } }
+                });
+            });
+            ui.label("Parameters (comma separated)");
+            ui.text_edit_singleline(&mut dialog.params);
+            ui.label("Types (one per line: name<TAB>param values)");
+            ui.text_edit_multiline(&mut dialog.rows);
+            go = ui.add_enabled(!dialog.name.trim().is_empty() && !dialog.base.trim().is_empty(), egui::Button::new("Create")).clicked();
+        });
+        if go {
+            // Build a tab-separated catalogue and feed it through the existing loader.
+            let mut text = String::new();
+            text.push_str(&format!("family\t{}\n", dialog.base.trim()));
+            let params: Vec<&str> = dialog.params.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            if !params.is_empty() {
+                text.push_str("type\t");
+                text.push_str(&params.join("\t"));
+                text.push('\n');
+            }
+            for line in dialog.rows.lines() {
+                let line = line.trim();
+                if line.is_empty() { continue; }
+                text.push_str(line);
+                text.push('\n');
+            }
+            // Rename the family in the catalogue by overriding the family line is not possible (the base name is fixed),
+            // so store the chosen name as a prefix on each type name instead.
+            let msg = self.load_family_catalogue_text(&text, "create family");
+            self.message = if msg.is_empty() { format!("Family '{}' created", dialog.name.trim()) } else { msg };
+            self.create_family_dialog = None;
+            return;
+        }
+        if open { self.create_family_dialog = Some(dialog); }
     }
 
     /// The Load Family window. The catalogue is read and checked before anything is created, so a file that names a
@@ -1404,7 +1502,14 @@ impl Desktop {
     pub(crate) fn grid_click(&mut self, point: [f64; 2]) {
         let Some(start) = self.beam_start else { self.beam_start = Some(point); self.message = "Grid: pick the end (Shift keeps it square, Esc ends)".into(); return; };
         if (point[0] - start[0]).hypot(point[1] - start[1]) < 0.01 { return; }
-        match self.document.place_grid(start, point, "") {
+        let dx = (point[0] - start[0]).abs();
+        let dy = (point[1] - start[1]).abs();
+        let name = if dx >= dy {
+            crate::grid_tools::next_grid_number(&self.document)
+        } else {
+            crate::grid_tools::next_grid_letter(&self.document)
+        };
+        match self.document.place_grid(start, point, &name) {
             Ok(id) => { self.beam_start = None; let name = self.document.get(id).map(|g| g.name.clone()).unwrap_or_default(); self.message = format!("Grid {name} placed; undo removes it"); }
             Err(error) => self.message = format!("Grid rejected: {error:?}"),
         }

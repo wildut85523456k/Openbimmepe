@@ -43,6 +43,35 @@ fn load_profile(path: &Path) -> Result<PrintProfile, String> {
     PrintProfile::from_json(&text).map_err(|e| e.to_string())
 }
 
+fn export_dwg(
+    document: &Document,
+    view: View,
+    profile: &PrintProfile,
+    paper: &str,
+    scale: u32,
+    output_path: &str,
+) -> Result<String, String> {
+    // Always derive DXF bytes first (independent of the selected format).
+    let bundle = plan_export::export_plan(document, view, profile, paper, scale, ExportFormat::Dxf)?;
+    let [file] = bundle.files.as_slice() else {
+        return Err("Expected one plan export file.".into());
+    };
+    let dwg_bytes = crate::dwg_export::encode_dwg(file.bytes.clone())?;
+    let dest = Path::new(output_path).with_extension("dwg");
+    // Preserve existing files.
+    let mut target = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&dest)
+        .map_err(|e| format!("Cannot create {}: {e}. Choose an unused filename.", dest.display()))?;
+    let result = target.write_all(&dwg_bytes).and_then(|()| target.sync_all());
+    drop(target);
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&dest);
+        return Err(format!("Export failed: {error}. Incomplete file removed."));
+    }
+    Ok(dest.display().to_string())
+}
 fn extension(format: ExportFormat) -> &'static str {
     match format { ExportFormat::Pdf => "pdf", ExportFormat::Dxf => "dxf" }
 }
@@ -165,6 +194,12 @@ impl PrintDialog {
                     if ui.button(format!("Save {}", extension(self.format).to_ascii_uppercase())).clicked() {
                         self.status = match write_new(Path::new(&self.output_path), self.format, &prepared.output) {
                             Ok(()) => format!("Export saved: {}", self.output_path),
+                            Err(error) => error,
+                        };
+                    }
+                    if ui.button("Save as DWG").clicked() {
+                        self.status = match export_dwg(document, view, &self.profile, &self.paper, self.scale, &self.output_path) {
+                            Ok(path) => format!("DWG saved: {path}"),
                             Err(error) => error,
                         };
                     }

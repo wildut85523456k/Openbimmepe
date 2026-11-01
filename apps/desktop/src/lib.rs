@@ -18,6 +18,9 @@ mod icons;
 mod ribbon;
 mod panels;
 mod dock;
+mod dwg_export;
+mod dwg_import;
+mod grid_tools;
 mod model_view;
 mod view3d;
 mod section_ui;
@@ -238,9 +241,17 @@ impl TempDim {
 type ElevMarks = (u64, Vec<(u8, [f64; 2], [f64; 2])>);
 /// What is being dragged in Select mode: an element to move, or one end of a wall.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Drag { Move { id: ElementId, from: [f64; 2] }, Grip { id: ElementId, at_start: bool } }
+enum Drag { Move { id: ElementId, from: [f64; 2] }, Grip { id: ElementId, at_start: bool }, Label { id: ElementId, at_start: bool, end: [f64; 2] } }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SampleElement { Duct, Model(ElementId) }
+
+struct PdfOverlay {
+    png_bytes: Vec<u8>,
+    w: u32,
+    h: u32,
+    scale: f64,
+    texture: Option<egui::TextureHandle>,
+}
 
 struct Desktop {
     automation: automation::Automation,
@@ -407,6 +418,17 @@ struct Desktop {
     show_browser: bool,
     /// the warnings window is open; the list is worked out again only when the document has a new revision
     show_warnings: bool,
+    /// Imported PDF overlay: PNG bytes, pixel dims, scale (model units per pixel), and lazily-created texture.
+    pdf_overlay: Option<PdfOverlay>,
+    /// Imported CAD overlay (DWG/DXF): name, drawing, scale (model units per DWG unit).
+    cad_overlay: Option<(String, crate::dwg_import::CadDrawing, f64)>,
+    /// Worksets: a Revit-style grouping for collaborate/edit permissions. Not yet wired to per-element
+    /// ownership, but the bottom bar exposes a dropdown so the user can pick the active workset.
+    worksets: Vec<String>,
+    current_workset: String,
+    /// per-grid bubble (label) offsets from each end, in model metres: (start offset, end offset). Revit lets
+    /// the user drag a grid's label off its end; these are view-state offsets, not stored in the IFC model.
+    grid_label_offsets: std::collections::HashMap<ElementId, ([f64; 2], [f64; 2])>,
     /// the file the model is saved in, and the questions about unsaved changes
     file: file::FileState,
     /// the types window, while it is open
@@ -432,6 +454,7 @@ struct Desktop {
     export_dialog: Option<model_edit::ExportDialog>,
     import_dialog: Option<model_edit::ImportDialog>,
     load_family_dialog: Option<model_edit::LoadFamilyDialog>,
+    create_family_dialog: Option<model_edit::CreateFamilyDialog>,
     family_types_dialog: Option<family_types_ui::FamilyTypesDialog>,
     /// which of the family's connectors meets the open connector it snaps to (Tab takes the next)
     family_snap_k: usize,
@@ -556,7 +579,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(), discipline: "All",
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -848,6 +871,9 @@ impl Desktop {
             "ifc_import" => self.import_ifc_file(),
             "ifc_export" => self.export_ifc_file(),
             "load_family" => self.load_family_file(),
+            "create_family" => self.create_family_file(),
+            "import_dwg" => self.import_dwg_file(),
+            "import_pdf" => self.import_pdf_file(),
             "new" => self.new_model(),
             "open" => self.open_file(),
             "save" => self.save_file(false),
@@ -1069,15 +1095,30 @@ impl Desktop {
             ui.horizontal_wrapped(|ui| {
                 ui.label(&self.message);
                 ui.separator();
-                ui.label("Coarse");
-                ui.separator();
-                ui.label("Fine");
-                ui.separator();
-                ui.label("Realistic");
+                // Detail Level dropdown (Coarse / Medium / Fine) for the active view.
+                ui.label("Detail");
+                let detail_key = self.current_view_key();
+                let current_detail = detail_key.as_ref().map(|k| self.document.view_settings(k).detail).unwrap_or(openbim_document::Detail::Medium);
+                let mut next_detail = current_detail;
+                egui::ComboBox::from_id_salt("bottom_detail").selected_text(current_detail.name()).width(70.0).show_ui(ui, |ui| {
+                    for d in openbim_document::Detail::ALL { ui.selectable_value(&mut next_detail, d, d.name()); }
+                });
+                if next_detail != current_detail {
+                    if let Some(k) = detail_key {
+                        let mut vs = self.document.view_settings(&k);
+                        vs.detail = next_detail;
+                        self.apply_view_settings(&vs, "Detail level changed");
+                    }
+                }
                 ui.separator();
                 ui.label("Orthographic / fit to view");
                 ui.separator();
-                ui.label("Workset: Mechanical (sample)");
+                // Workset dropdown.
+                ui.label("Workset");
+                egui::ComboBox::from_id_salt("bottom_workset").selected_text(&self.current_workset).width(110.0).show_ui(ui, |ui| {
+                    for w in self.worksets.clone() { ui.selectable_value(&mut self.current_workset, w.clone(), w); }
+                });
+                ui.separator();
                 ui.separator();
                 let name = self.file.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).and_then(|n| n.to_str()).unwrap_or("not saved yet");
                 ui.label(format!("BIM revision {} | {name}{}", self.document.revision(), if self.is_dirty() { " | unsaved changes" } else { "" }));
@@ -1093,6 +1134,7 @@ impl Desktop {
         self.export_window(&ctx);
         self.import_window(&ctx);
         self.load_family_window(&ctx);
+        self.create_family_window(&ctx);
         self.family_types_window(&ctx);
         self.types_window(&ctx);
         self.mep_settings_window(&ctx);
