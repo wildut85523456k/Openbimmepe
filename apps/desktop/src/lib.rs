@@ -1068,6 +1068,12 @@ impl Desktop {
             ui.horizontal_wrapped(|ui| {
                 ui.label(&self.message);
                 ui.separator();
+                ui.label("Coarse");
+                ui.separator();
+                ui.label("Fine");
+                ui.separator();
+                ui.label("Realistic");
+                ui.separator();
                 ui.label("Orthographic / fit to view");
                 ui.separator();
                 ui.label("Workset: Mechanical (sample)");

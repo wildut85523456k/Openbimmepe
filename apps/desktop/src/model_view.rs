@@ -126,51 +126,7 @@ fn view_label(app: &Desktop, v: View) -> String {
 }
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
-    ui.horizontal_wrapped(|ui| {
-        let level_tabs = plan_tabs(&app.levels());
-        let section_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Section).map(|e| e.id).collect();
-        let elevation_elems: Vec<(ElementId, u32)> = app.document.elements().filter(|e| e.category == Category::Elevation).map(|e| (e.id, e.count)).collect();
-        let mut sections: Vec<(String, View)> = Vec::with_capacity(section_ids.len());
-        for id in section_ids { sections.push((app.view_name(View::Section(id.0)), View::Section(id.0))); }
-        for (id, count) in elevation_elems {
-            for k in 0..4u32 {
-                if count >> k & 1 == 1 { sections.push((app.view_name(View::Marked(id.0, k as u8)), View::Marked(id.0, k as u8))); }
-            }
-        }
-        let tabs = level_tabs.into_iter()
-            .chain([("{3D}".to_string(), View::ThreeD), ("Mechanical".to_string(), View::Mechanical)])
-            .chain(crate::section_ui::FACINGS.iter().enumerate().map(|(k, f)| (f.1.to_string(), View::Elevation(k as u8))))
-            .chain(sections);
-        // Open-view tabs (REA-006): one tab per open view, the active one highlighted, each closeable.
-        // `view` is always `open_views[active_view]`, so `app.view == v` marks the active tab.
-        let mut close_ix: Option<usize> = None;
-        for i in 0..app.open_views.len() {
-            let v = app.open_views[i];
-            let label = view_label(app, v);
-            if ui.selectable_label(app.view == v, label).clicked() { app.activate_view_at(i); }
-            if ui.button("\u{2715}").clicked() { close_ix = Some(i); }
-        }
-        if let Some(i) = close_ix { app.close_view_at(i); }
-        // Available views open on demand (open-or-switch) -- as in Revit, pointing at a view
-        // makes it a tab, up to the Revit-like cap of 10; at the cap the user is asked to replace.
-        for (label, view) in tabs {
-            if ui.selectable_label(app.view == view, label).clicked() { app.set_view(view); }
-        }
-        // At the Revit-like tab cap, opening another view prompts replace/cancel (REA-006).
-        if let Some(pending) = app.view_replace_pending {
-            ui.separator();
-            ui.label(format!("Tab limit reached: pick a tab to replace to open \"{}\", or cancel.", view_label(app, pending)));
-            let mut replace_ix: Option<usize> = None;
-            for i in 0..app.open_views.len() {
-                let label = view_label(app, app.open_views[i]);
-                if ui.button(format!("Replace \"{label}\"")).clicked() { replace_ix = Some(i); }
-            }
-            if let Some(i) = replace_ix { app.replace_pending_with(i); }
-            if ui.button("Cancel").clicked() { app.cancel_replace(); }
-        }
-        if ui.small_button("Fit").clicked() { app.pan = Vec2::ZERO; app.zoom = 1.0; }
-        if ui.small_button("Clear selection").clicked() { app.select_element(None); }
-    });
+    // Viewport is clean: view tabs/labels removed (views selected from Project Browser or right-click).
     app.view_control_bar(ui);
     // Spacebar turns the selected wall over
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Space)) { app.flip_selected_wall(); }
