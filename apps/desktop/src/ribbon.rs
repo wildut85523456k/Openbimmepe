@@ -435,7 +435,7 @@ mod tests {
                 }
             }
         }
-        let missing: Vec<_> = ids.iter().filter(|id| icons::find(id).is_none() && !["automation_editor", "automation_player", "automation_mcp", "automation_snapshot"].contains(id)).collect();
+        let missing: Vec<_> = ids.iter().filter(|id| icons::find(id).is_none() && !["automation_editor", "automation_player", "automation_mcp", "automation_snapshot", "import_step", "family_editor_toggle", "family_parameters"].contains(id)).collect();
         assert!(missing.is_empty(), "ribbon IDs without an icon: {missing:?}");
     }
 

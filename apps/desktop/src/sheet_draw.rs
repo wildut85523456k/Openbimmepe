@@ -444,7 +444,7 @@ fn section_prims(doc: &Document, view: View, vs: &openbim_document::ViewSettings
 /// The 3D view as an isometric view of the model, shaded by the light from the upper left.
 fn iso_prims(doc: &Document, vs: &openbim_document::ViewSettings) -> Result<Vec<Prim>, String> {
     let s = per_metre(vs);
-    let batch = crate::view3d::batch(doc);
+    let batch = crate::view3d::batch(doc, None);
     if batch.tris.is_empty() { return Err("the model has nothing to show".into()); }
     let (yaw, pitch) = (std::f64::consts::FRAC_PI_4, 0.6155_f64);
     let proj = |v: [f64; 3]| -> ([f64; 2], f64) {

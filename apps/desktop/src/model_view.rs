@@ -4556,7 +4556,7 @@ mod tests {
         assert_eq!(app.document.get(id).unwrap().height_m, 1.1);
         // the plan, the 3D view and an elevation that looks at it draw it, and its parts are in the section engine's view
         frame(&ctx, screen, &mut app, vec![]);
-        assert!(crate::view3d::batch(&app.document).verts.len() >= 8 * 20);
+        assert!(crate::view3d::batch(&app.document, None).verts.len() >= 8 * 20);
         let railing_drawn_in = |view: View| crate::section_ui::build(&app.document, view).ok().is_some_and(|v| v.items.iter().any(|i| i.element.id == id.0 && i.element.kind == openbim_view::Kind::Railing));
         assert!((0..4u8).any(|k| railing_drawn_in(View::Elevation(k))), "an elevation shows the railing");
         // a section line across it cuts the rail, the posts and the balusters

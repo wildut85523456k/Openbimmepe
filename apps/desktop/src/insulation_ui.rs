@@ -226,7 +226,7 @@ mod tests {
         assert!((ys.iter().cloned().fold(f64::MIN, f64::max) - 20.25).abs() < 1e-9 && (ys.iter().cloned().fold(f64::MAX, f64::min) - 19.75).abs() < 1e-9, "{ys:?}");
         assert!(app.insulation_outlines(ElementId(11)).is_empty());
         // 3D: the duct keeps its own mesh and the insulation is another, bigger than the duct, with the number of the run
-        let b = crate::view3d::batch(&app.document);
+        let b = crate::view3d::batch(&app.document, None);
         let run = ids[0].0;
         assert!(b.elements.iter().any(|e| e.kind == Kind::Segment && e.id == run), "the duct is still there");
         let ins = b.elements.iter().position(|e| e.kind == Kind::Insulation && e.id == run).expect("the insulation is a mesh of its own");
@@ -245,7 +245,7 @@ mod tests {
         d.kind = InsulationKind::Lining;
         app.fit_insulation_choice(&mut d);
         assert!(app.apply_insulation(&d, false));
-        let b2 = crate::view3d::batch(&app.document);
+        let b2 = crate::view3d::batch(&app.document, None);
         assert_eq!(b2.elements.iter().filter(|e| e.kind == Kind::Insulation).count(), 1);
     }
 

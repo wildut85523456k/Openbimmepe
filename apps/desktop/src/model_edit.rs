@@ -1746,7 +1746,7 @@ mod tests {
         assert_eq!(app.section_pick, 2);
         assert!(!app.has_pending_edit());
         // its 3D mesh is closed: each edge is used twice, with opposite directions, and the volume is area x length
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         let ei = batch.elements.iter().position(|e| e.id == id.0).unwrap() as u32;
         let tris: Vec<[u32; 3]> = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| *t).collect();
         let mut edges = std::collections::HashMap::<(u32, u32), i32>::new();
@@ -1790,7 +1790,7 @@ mod tests {
         let col = app.document.elements().find(|e| e.category == Category::Column).expect("placed").id;
         assert!(app.tool == Tool::Column, "the tool stays on");
         // 3 m high between Level 1 and Level 2, 0.4 x 0.4: a closed solid of 0.48 m3 in the 3D view
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         let ei = batch.elements.iter().position(|e| e.id == col.0 && e.kind == openbim_view::Kind::Column).expect("in 3D") as u32;
         let vol: f64 = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
             let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -1886,14 +1886,14 @@ mod tests {
         app.choose_tool(Tool::Beam);
         (app.width_mm, app.height_mm, app.elevation_mm) = (200.0, 400.0, 2800.0);
         app.axis_mm = [1000.0, 1000.0, 5000.0, 1000.0];
-        let before = crate::view3d::batch(&app.document).elements.len();
+        let before = crate::view3d::batch(&app.document, None).elements.len();
         app.place_beam_from_controls();
         let id = app.selected_id().expect("the new beam is selected");
         assert!(app.tool == Tool::Select);
         let el = app.document.get(id).unwrap();
         assert_eq!(el.category, Category::Beam);
         assert!(!app.has_pending_edit(), "the controls show the beam");
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         assert_eq!(batch.elements.len(), before + 1);
         assert!(batch.elements.iter().any(|e| e.kind == openbim_view::Kind::Beam && e.id == id.0));
         // 4 m long, 0.2 x 0.4: the mesh is that box centred at 2.8 m
@@ -1949,7 +1949,7 @@ mod tests {
         assert!(app.message.contains("Roof by Footprint"), "{}", app.message);
         // an L slopes on all its edges and has a valley: a closed solid with the volume of its footprint x thickness / cos(slope)
         let volume_of = |app: &Desktop, id: ElementId| -> f64 {
-            let batch = crate::view3d::batch(&app.document);
+            let batch = crate::view3d::batch(&app.document, None);
             let ei = batch.elements.iter().position(|e| e.id == id.0).expect("in 3D") as u32;
             batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
                 let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -1983,7 +1983,7 @@ mod tests {
         assert!((f.rise_m - 3.0 * 30f64.to_radians().tan()).abs() < 1e-9, "{f:?}");
         assert!((f.surface_m2 - 60.0 / 30f64.to_radians().cos()).abs() < 1e-6, "{f:?}");
         // in 3D it is a closed solid of that volume
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         let ei = batch.elements.iter().position(|e| e.id == id.0).expect("in 3D") as u32;
         let volume: f64 = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
             let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -2151,7 +2151,7 @@ mod tests {
         assert!(app.slab_points.is_empty(), "{}", app.message);
         assert!(app.tool == Tool::Slab, "the tool stays on");
         let id = app.document.elements().find(|e| e.category == Category::Slab).expect("placed").id;
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         let ei = batch.elements.iter().position(|e| e.id == id.0 && e.kind == openbim_view::Kind::Slab).expect("in 3D") as u32;
         let volume = |batch: &openbim_view::Batch| -> f64 {
             batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
@@ -2168,7 +2168,7 @@ mod tests {
         app.apply_selected_edit();
         let el = app.document.get(id).unwrap();
         assert_eq!((el.height_m, el.elevation_m, el.slab_kind), (0.3, -0.1, openbim_document::SlabKind::Foundation));
-        assert!((volume(&crate::view3d::batch(&app.document)) - 4.8).abs() < 1e-3);
+        assert!((volume(&crate::view3d::batch(&app.document, None)) - 4.8).abs() < 1e-3);
         // exported as an IfcSlab BASESLAB with its concrete, and the outline kept
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-17T00:00:00").unwrap();
         assert_eq!(out.slabs, 1);
@@ -2194,7 +2194,7 @@ mod tests {
         let id = app.document.elements().find(|e| e.category == Category::Footing).expect("placed").id;
         assert!(app.tool == Tool::Footing, "the tool stays on");
         let ei_vol = |app: &Desktop| -> f64 {
-            let batch = crate::view3d::batch(&app.document);
+            let batch = crate::view3d::batch(&app.document, None);
             let ei = batch.elements.iter().position(|e| e.id == id.0).unwrap() as u32;
             batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
                 let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -2232,7 +2232,7 @@ mod tests {
         app.wall_footing_click(wall);
         let id = app.document.elements().find(|e| e.category == Category::WallFooting).expect("placed").id;
         let volume = |app: &Desktop| -> f64 {
-            let batch = crate::view3d::batch(&app.document);
+            let batch = crate::view3d::batch(&app.document, None);
             let ei = batch.elements.iter().position(|e| e.id == id.0).unwrap() as u32;
             batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
                 let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -2268,7 +2268,7 @@ mod tests {
         let item = crate::export::beam_item(&app.document, app.document.get(beam).unwrap()).unwrap();
         assert!((item.a[0] - 1.2).abs() < 1e-9 && (item.b[0] - 4.8).abs() < 1e-9);
         // the 3D mesh is the cut beam: 3.6 m of 0.2 x 0.4
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         let ei = batch.elements.iter().position(|e| e.id == beam.0).unwrap() as u32;
         let vol: f64 = batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei).map(|(t, _)| {
             let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -2413,7 +2413,7 @@ mod tests {
         let r = app.document.elements().find(|e| e.category == Category::Rebar).expect("placed").id;
         let bars = app.document.rebar_bars(app.document.get(r).unwrap()).unwrap().len();
         assert_eq!(bars, 35);
-        let batch = crate::view3d::batch(&app.document);
+        let batch = crate::view3d::batch(&app.document, None);
         assert!(batch.elements.iter().any(|e| e.id == r.0), "in 3D");
         let out = crate::export::export_ifc(&app.document, "P", 1, "2026-10-18T00:00:00").unwrap();
         assert_eq!(out.text.matches("IFCREINFORCINGBAR(").count(), bars);
@@ -2437,7 +2437,7 @@ mod tests {
         let wall = app.document.elements().find(|e| e.category == Category::Wall).expect("sample wall").id;
         let Some(Geometry::Linear { start, end, .. }) = app.document.get(wall).unwrap().geometry else { panic!() };
         let volume = |app: &Desktop, id: ElementId| -> f64 {
-            let batch = crate::view3d::batch(&app.document);
+            let batch = crate::view3d::batch(&app.document, None);
             let Some(ei) = batch.elements.iter().position(|e| e.id == id.0) else { return 0.0 };
             batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei as u32).map(|(t, _)| {
                 let p = t.map(|i| batch.verts[i as usize].map(f64::from));
@@ -2808,7 +2808,7 @@ mod tests {
         let upper = app.document.level_above(level).unwrap();
         let floor = app.document.place_slab(upper, &SlabSpec { outline: vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], thickness_m: 0.2, top_offset_m: 0.0, kind: openbim_document::SlabKind::Floor, material: openbim_document::Material::Concrete }).unwrap();
         let volume = |app: &Desktop, id: ElementId| -> f64 {
-            let batch = crate::view3d::batch(&app.document);
+            let batch = crate::view3d::batch(&app.document, None);
             let Some(ei) = batch.elements.iter().position(|e| e.id == id.0) else { return 0.0 };
             batch.tris.iter().zip(&batch.tri_element).filter(|(_, e)| **e == ei as u32).map(|(t, _)| {
                 let p = t.map(|i| batch.verts[i as usize].map(f64::from));

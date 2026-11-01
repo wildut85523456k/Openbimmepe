@@ -8,6 +8,10 @@ use openbim_viewport_egui::{Datum, Style};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Synthetic element id for the imported STEP overlay mesh shown in the 3D view before it is
+/// placed as a family. No document element has this id, so a click on it selects nothing.
+pub(crate) const OVERLAY_STEP_ID: u64 = u64::MAX;
+
 /// The meshes of the scene mesher for a document that has family instances or insulation: the instances, the insulation of ducts and pipes, and the walls, beams,
 /// columns and slabs they cut. Kept for the revision it was made for, because it meshes the whole scene.
 pub fn scene_meshes(doc: &Document) -> Option<Arc<Vec<openbim_view::ElementMesh>>> {
@@ -38,7 +42,9 @@ fn element(doc: &Document, id: ElementId) -> Option<Element> {
 }
 
 /// All meshes of the document as one batch. Faces are wound outwards (the solids are convex).
-pub fn batch(doc: &Document) -> Batch {
+/// `overlay` is an imported STEP mesh (millimetres) shown in the 3D view before it is placed as
+/// a family; it is scaled to metres and added as a synthetic `Family` element.
+pub fn batch(doc: &Document, overlay: Option<&openbim_document::Mesh>) -> Batch {
     let mut meshes = Vec::new();
     for el in doc.elements() {
         let Some(k) = kind(el.category) else { continue };
@@ -70,6 +76,11 @@ pub fn batch(doc: &Document) -> Batch {
             // the insulation of a duct or pipe has the number of the run, and is a mesh of its own beside the run's
             match meshes.iter().position(|(e, _, _)| e.id == em.element.id && (em.element.kind == Kind::Insulation) == (e.kind == Kind::Insulation)) { Some(i) => meshes[i] = entry, None => meshes.push(entry) }
         }
+    }
+    if let Some(m) = overlay {
+        // an imported STEP mesh stands in mm; show it scaled to metres, untrusted (its faces are wound by cadrum)
+        let mesh = openbim_document::Mesh { vertices: m.vertices.iter().map(|v| [v[0] / 1000.0, v[1] / 1000.0, v[2] / 1000.0]).collect(), faces: m.faces.clone() };
+        meshes.push((Element { kind: Kind::Family, id: OVERLAY_STEP_ID }, mesh, true));
     }
     let mut origin = [f64::MAX; 3];
     for (_, m, _) in &meshes { for v in &m.vertices { for k in 0..3 { origin[k] = origin[k].min(v[k]); } } }
@@ -190,7 +201,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     if app.view3d_revision != Some(app.document.revision()) || app.views.batch_temp != temp {
         // what the view hides (Visibility/Graphics, Hide in View, Temporary Hide/Isolate) is left out of its geometry
         let (model, datum) = (app.view_document(), app.view_datum_document());
-        app.view3d.set_batch(Arc::new(batch(model.as_ref().unwrap_or(&app.document))));
+        app.view3d.set_batch(Arc::new(batch(model.as_ref().unwrap_or(&app.document), app.imported_step.as_ref())));
         app.view3d.datums = datums(datum.as_ref().unwrap_or(&app.document));
         app.views.batch_temp = temp;
         if app.view3d_revision.is_none() { app.view3d.zoom_to_fit(ui.available_width() as f64 / ui.available_height().max(1.0) as f64); }
@@ -288,7 +299,7 @@ mod tests {
     #[test]
     fn the_sample_document_becomes_outward_facing_triangles() {
         let doc = Document::spatial_sample();
-        let b = batch(&doc);
+        let b = batch(&doc, None);
         assert!(!b.tris.is_empty() && b.elements.len() >= 3);
         // no degenerate triangles
         for (ti, t) in b.tris.iter().enumerate() {
@@ -302,6 +313,17 @@ mod tests {
     }
 
     #[test]
+    fn the_imported_step_overlay_is_scaled_into_the_batch() {
+        // a 1 m cube in mm (cadrum output is millimetres): the overlay is scaled to metres
+        let mesh = openbim_document::Mesh { vertices: vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 1000.0, 0.0], [0.0, 1000.0, 0.0], [0.0, 0.0, 1000.0], [1000.0, 0.0, 1000.0], [1000.0, 1000.0, 1000.0], [0.0, 1000.0, 1000.0]], faces: vec![vec![0, 1, 2], vec![0, 2, 3]] };
+        let doc = Document::spatial_sample();
+        let b = batch(&doc, Some(&mesh));
+        let b0 = batch(&doc, None);
+        assert!(b.elements.iter().any(|e| e.id == OVERLAY_STEP_ID), "overlay is in the batch");
+        assert!(b.verts.len() > b0.verts.len(), "overlay adds vertices");
+    }
+
+    #[test]
     fn the_three_d_view_draws_the_elbows_of_a_routed_duct() {
         use openbim_family::mep::{Domain, System};
         use openbim_place::penetrations::RunSize;
@@ -312,7 +334,7 @@ mod tests {
         doc.place_mep_route(ElementId(10), &duct).unwrap();
         // the elbow where the two legs meet is drawn: it is not a document element (its id is from the route),
         // but the 3D batch keeps it, so the ductwork is not left with a gap
-        let b = batch(&doc);
+        let b = batch(&doc, None);
         assert!(b.elements.iter().any(|e| e.kind == Kind::Fitting), "the elbow is in the 3D view: {:?}", b.elements.iter().map(|e| e.kind).collect::<Vec<_>>());
     }
 

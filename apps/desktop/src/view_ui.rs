@@ -589,8 +589,8 @@ mod tests {
         assert!(seen.elements().all(|e| e.category != Category::Wall));
         assert!(app.document.elements().any(|e| e.category == Category::Wall), "the model keeps them");
         frames(&mut app, 2, &|app, ui| crate::view3d::show(app, ui));
-        let with = crate::view3d::batch(&app.document).tris.len();
-        let without = crate::view3d::batch(&seen).tris.len();
+        let with = crate::view3d::batch(&app.document, None).tris.len();
+        let without = crate::view3d::batch(&seen, None).tris.len();
         assert!(without < with, "the batch of the view has fewer items ({without} against {with})");
         // an elevation made from the document without the walls has fewer lines than the one made from the whole model
         let (a, b) = (crate::section_ui::build(&app.document, View::Elevation(0)), crate::section_ui::build(&seen, View::Elevation(0)));
