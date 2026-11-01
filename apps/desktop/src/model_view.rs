@@ -87,8 +87,8 @@ fn plan_edges(doc: &openbim_document::Document, level: ElementId) -> Vec<crate::
     for el in doc.elements() {
         match el.geometry {
             Some(Geometry::Linear { start, end, level: l }) if el.category == Category::Wall && l == level => {
-                line(start, end);
-                if let Some(r) = doc.wall_plan(el.id) { for i in 0..4 { line(r[i], r[(i + 1) % 4]); } }
+                            if el.bulge != 0.0 { for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { line(w[0], w[1]); } } else { line(start, end); }
+                            if let Some(r) = doc.wall_plan(el.id) { for i in 0..4 { line(r[i], r[(i + 1) % 4]); } }
             }
             Some(Geometry::Grid { start, end }) => { for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { line(w[0], w[1]); } }
             _ => {}

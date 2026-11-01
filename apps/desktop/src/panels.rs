@@ -893,6 +893,35 @@ pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
                                             });
                                         }
                     if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
+if el.category == openbim_document::Category::Wall {
+                        ui.horizontal(|ui| {
+                            ui.label("Top Constraint");
+                            let levels: Vec<(openbim_document::ElementId, String)> = app.document.elements()
+                                .filter(|e| e.category == openbim_document::Category::Level)
+                                .map(|e| (e.id, e.name.clone())).collect();
+                            let current = el.top_constraint.map(|id| id.0).unwrap_or(0);
+                            let top_name = el.top_constraint.and_then(|id| app.document.get(id)).map(|l| l.name.clone()).unwrap_or_else(|| "Unconnected".to_string());
+                            egui::ComboBox::from_id_salt(("wall_top_constraint", el.id.0))
+                                .selected_text(if current == 0 { "Unconnected".to_string() } else { top_name.clone() })
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_label(current == 0, "Unconnected").clicked() {
+                                        let _ = app.document.set_top_constraint(el.id, None);
+                                    }
+                                    for (id, name) in &levels {
+                                        if ui.selectable_label(current == id.0, name).clicked() {
+                                            let _ = app.document.set_top_constraint(el.id, Some(*id));
+                                        }
+                                    }
+                                });
+                        });
+                        let mut bulge = el.bulge;
+                        ui.horizontal(|ui| {
+                            ui.label("Bulge (arc)");
+                            if ui.add(egui::DragValue::new(&mut bulge).speed(0.01).range(-1.0..=1.0)).changed() {
+                                let _ = app.document.transact(app.document.revision(), &[openbim_document::Command::SetBulge { id: el.id, bulge }]);
+                            }
+                        });
+                    }
                     if el.category == openbim_document::Category::Room { room_identity(app, ui, el); }
                     if el.category == openbim_document::Category::Family {
                         read_only_group(ui, "Identity Data", &query, &[("Family", &el.family)]);
