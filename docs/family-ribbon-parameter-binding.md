@@ -108,7 +108,116 @@ Apply commits the whole table as one undo step; invalid row aborts the whole com
 6. Family Editor mode + ribbon tab + Load into Project.
 7. Shared parameters.
 
-## 7. Open questions
+## 8. Family authoring workflow (Revit parity) — additional capabilities
+
+The parameter binding doc (§1-7) covers parameters. This section covers the rest of
+Revit's family authoring surface that users expect: geometry authoring, constraints,
+visibility, STEP import, and MEP connectors.
+
+### 8.1 Geometry authoring (modelling the family)
+Revit: Family Editor has the same draw/modify tools as the project (lines, arcs, circles,
+rectangles, extrusions, blends, revolves, sweeps, voids) plus work planes and reference
+planes/lines. Our app already has wall/slab/door/window geometry primitives and 3D
+extrude; family authoring reuses them in an isolated "Family Editor" document.
+
+- **Reference planes/lines** (named, parametrically driven) are the backbone of constraints.
+- **Work planes** (pick a face/plane) for sketching.
+- **Solids and voids** with boolean operations; voids cut solids.
+- **Nested families** (insert another family into this one) with type/instance parameters
+  mapped.
+
+Status: **partial** — primitives exist; Family Editor mode + reference planes + voids not yet.
+
+### 8.2 Constraints
+- **Dimensional constraints**: lock a dimension to a value or to a parameter (driving).
+- **Alignment constraints**: align edges/faces/centres; "lock" to keep them aligned.
+- **Equality constraints**: force two dimensions equal.
+- **Reference planes** as datum for constraints.
+
+Status: **partial** — dimensions exist; parametric dimension binding is part of §3.
+
+### 8.3 Visibility & graphics
+- **Visibility settings per element**: show in Coarse/Medium/Fine, show in plan/section/3D,
+  show when a YesNo parameter is true, show in specific view types.
+- **Subcategory assignment** for line weight/color per category.
+- **Material** driven by a Material parameter.
+
+Status: **partial** — detail level exists; per-element visibility settings not yet.
+
+### 8.4 Import STEP / SAT / DWG into a family
+Revit: Import (not link) STEP/SAT/DWG/DXF/Image into a family; imported geometry becomes
+part of the family (can be exploded for some formats). Used to bring manufacturer 3D models
+into families.
+
+Our app: already has DWG import (acadrust) and PDF import. STEP/SAT need a parser.
+- **STEP**: use a Rust STEP reader (e.g. `step` crate or OpenCASCADE via FFI). Geometry
+  becomes meshes/B-rep; for family authoring we likely import as a mesh/shape (display only)
+  or tessellate to faces. Full B-rep editing of imported STEP is out of scope for v1.
+- **SAT**: similar to STEP.
+- **DWG/DXF**: already supported via acadrust; import as overlay/geometry.
+- **Images**: already supported (PDF overlay).
+
+Status: **DWG/DXF/PDF done; STEP/SAT not done.**
+
+### 8.5 Connectors (MEP ports) for systems
+Revit: in the family editor, place **connectors** (duct, pipe, electrical, cable tray,
+conduit) on faces; each connector has domain, system type, flow direction, size, and optional
+flow/pressure. When the family is placed, connectors snap to system runs.
+
+Our app already has MEP connectors on placed instances (elec_ui instance_connectors, compute).
+What's missing for family authoring:
+- **Connector placement tool** in Family Editor: click a face → add connector; edit
+  domain/system/flow/size in a properties panel.
+- **Connector geometry** (port location + direction) stored in the family definition,
+  transformed with the instance.
+- **System assignment** on placement (auto-connect run ends to nearest connector).
+
+Status: **connectors on instances done; authoring connectors in families not done.**
+
+### 8.6 Family Editor mode
+- Toggle: "Create Family" / "Load Family" enters Family Editor mode; ribbon switches to
+  Family tabs; document is treated as a family definition file (not a project).
+- Save as .rfa-equivalent (our family catalogue format) and "Load into Project".
+
+Status: **not done** (create_family is catalogue-based, not a full editor).
+
+## 9. Status matrix
+
+| Capability | Status |
+|---|---|
+| Family types table (rows × params) | ✅ done (`family_types_ui.rs`) |
+| Load family catalogue (CSV) | ✅ done |
+| Create family from base (catalogue) | ✅ done (basic) |
+| Parameters (family/shared, type/instance) | ❌ design only |
+| Formulas / re-evaluation | ❌ design only |
+| Dimension/visibility/material binding | ❌ design only |
+| Reference planes/lines + work planes | ❌ not started |
+| Voids & boolean solids | ❌ not started |
+| Nested families | ❌ not started |
+| Constraints (align/equality/lock) | ❌ not started |
+| Per-element visibility settings | ❌ not started |
+| Import STEP/SAT | ❌ not started |
+| Import DWG/DXF into family | ✅ (overlay) |
+| Connector authoring in family | ❌ not started |
+| Family Editor mode + ribbon tab | ❌ not started |
+| Load into Project | ✅ (via catalogue) |
+| Shared parameter file | ❌ not started |
+
+## 10. Implementation order (full family authoring)
+
+1. Family Editor mode + ribbon tab (entry point).
+2. Reference planes/lines + work planes.
+3. Solid/void geometry + booleans (reuse existing primitives).
+4. Parameters + formulas (§3) + Family Types dialog extension.
+5. Binding: dimensions → params, visibility, material.
+6. Constraints (align/equality/lock).
+7. Connector authoring.
+8. Import STEP/SAT (mesh import).
+9. Nested families + type mapping.
+10. Shared parameters + type catalogs.
+
+## 11. Open questions (carried over)
+
 - Should formulas be stored in metres or in the parameter's display unit? (Revit stores in
   the parameter's unit; recommend storing in display unit and converting at eval.)
 - Shared-parameter file format: reuse Revit's .txt shared-parameter format for
