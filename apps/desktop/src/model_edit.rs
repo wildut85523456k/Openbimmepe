@@ -340,6 +340,19 @@ impl Desktop {
         }
     }
 
+    pub(crate) fn import_step_file(&mut self) {
+        let Some(path) = crate::dialog::Question::new().set_title("Import STEP").add_filter("STEP", &["step", "stp"]).ask_open() else { return };
+        match crate::step_import::import_step(&path.display().to_string()) {
+            Ok(mesh) => {
+                let verts = mesh.vertices.len();
+                let tris = mesh.faces.len();
+                self.imported_step = Some(mesh);
+                self.message = format!("Imported STEP: {verts} vertices, {tris} triangles (mm units, awaiting placement)");
+            }
+            Err(e) => self.message = format!("STEP import failed: {e}"),
+        }
+    }
+
     pub(crate) fn import_pdf_file(&mut self) {
         let Some(path) = crate::dialog::Question::new().set_title("Import PDF").add_filter("PDF", &["pdf"]).ask_open() else { return };
         match (|| -> Result<(Vec<u8>, u32, u32), String> {
