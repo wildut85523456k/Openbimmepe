@@ -824,8 +824,13 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
 }
 
 pub fn properties(app: &mut Desktop, ui: &mut egui::Ui) {
-    use openbim_document::Geometry;
     title_bar(ui, "Properties", &mut app.show_properties);
+    properties_body(app, ui);
+}
+
+/// The properties content without its own title bar, for embedding in the dock (which supplies the title).
+pub fn properties_body(app: &mut Desktop, ui: &mut egui::Ui) {
+    use openbim_document::Geometry;
     let selected = app.selected_ids();
     let element = app.selected_id().and_then(|id| app.document.get(id).cloned());
     let multi_count = selected.len();
@@ -1266,6 +1271,11 @@ fn tree_node(app: &mut Desktop, ui: &mut egui::Ui, node: &Node, parent: &str, qu
 
 pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
     title_bar(ui, "Project Browser — Project1", &mut app.show_browser);
+    browser_body(app, ui);
+}
+
+/// The browser content without its own title bar, for embedding in the dock (which supplies the title).
+pub fn browser_body(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.add(egui::TextEdit::singleline(&mut app.browser_query)
         .hint_text("Search views and categories").desired_width(f32::INFINITY));
     ui.separator();
@@ -1308,6 +1318,20 @@ pub fn browser(app: &mut Desktop, ui: &mut egui::Ui) {
             }
             if !TREE.iter().any(|node| node_matches(app, node, &query)) { ui.weak("No matching items"); }
         });
+}
+
+/// The warnings list, rendered inside a dockable panel: each row selects the element it is about.
+pub fn warnings(app: &mut Desktop, ui: &mut egui::Ui) {
+    let list: Vec<_> = app.warnings().to_vec();
+    if list.is_empty() { ui.weak("The model has no warnings."); }
+    egui::ScrollArea::vertical().id_salt("warnings_scroll").show(ui, |ui| {
+        for w in &list {
+            ui.horizontal_wrapped(|ui| {
+                if ui.small_button("Select").clicked() { if let Some(id) = w.elements.first().copied() { app.select_element(Some(id)); } }
+                ui.label(&w.message);
+            });
+        }
+    });
 }
 
 /// The plans of the levels after the first two (whose plans are the fixed Level 1 and Level 2 entries): listed in

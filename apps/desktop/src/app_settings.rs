@@ -16,6 +16,17 @@ impl Theme {
     pub(crate) fn name(self) -> &'static str { match self { Theme::Light => "light", Theme::Dark => "dark" } }
 }
 
+/// Which screen edge a dockable side panel is pinned to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DockEdge { Left, Right, Top, Bottom }
+
+impl Default for DockEdge { fn default() -> Self { DockEdge::Left } }
+
+impl DockEdge {
+    pub(crate) fn name(self) -> &'static str { match self { DockEdge::Left => "left", DockEdge::Right => "right", DockEdge::Top => "top", DockEdge::Bottom => "bottom" } }
+    pub(crate) fn from_name(s: &str) -> Self { match s { "right" => DockEdge::Right, "top" => DockEdge::Top, "bottom" => DockEdge::Bottom, _ => DockEdge::Left } }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AppSettings {
     /// minutes between automatic saves of unsaved work; 0 switches it off
@@ -30,16 +41,25 @@ pub(crate) struct AppSettings {
     pub sidebar_width: f32,
     /// fraction of the sidebar height given to the top Properties strip vs the Browser, persisted
     pub properties_split: f32,
+    /// the edge each dockable side panel (Properties, Browser, Warnings) is pinned to, persisted
+    pub panel_edges: [DockEdge; 3],
+    /// whether each dockable side panel (Properties, Browser, Warnings) is shown, persisted
+    pub panel_visible: [bool; 3],
+    /// cross-size (width for Left/Right, height for Top/Bottom) of each screen edge's dock group, persisted
+    pub edge_sizes: [f32; 4],
 }
 
 impl Default for AppSettings {
-    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light, keymap_overrides: String::new(), sidebar_width: 310.0, properties_split: 0.55 } }
+    fn default() -> Self { Self { autosave_minutes: 1, autosave_to_file: false, theme: Theme::Light, keymap_overrides: String::new(), sidebar_width: 310.0, properties_split: 0.55, panel_edges: [DockEdge::Left, DockEdge::Left, DockEdge::Right], panel_visible: [true, true, false], edge_sizes: [310.0, 360.0, 240.0, 200.0] } }
 }
 
 impl AppSettings {
     pub(crate) fn to_text(&self) -> String {
         let escaped = self.keymap_overrides.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', "\\t");
-        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\nkeymap_overrides={}\nsidebar_width={:.1}\nproperties_split={:.3}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name(), escaped, self.sidebar_width, self.properties_split)
+        let edges = self.panel_edges.iter().map(|e| e.name()).collect::<Vec<_>>().join(",");
+        let vis = self.panel_visible.iter().map(|v| if *v { "1" } else { "0" }).collect::<Vec<_>>().join(",");
+        let sizes = self.edge_sizes.iter().map(|s| format!("{s:.1}")).collect::<Vec<_>>().join(",");
+        format!("autosave_minutes={}\nautosave_to_file={}\ntheme={}\nkeymap_overrides={}\nsidebar_width={:.1}\nproperties_split={:.3}\npanel_edges={}\npanel_visible={}\nedge_sizes={}\n", self.autosave_minutes, u8::from(self.autosave_to_file), self.theme.name(), escaped, self.sidebar_width, self.properties_split, edges, vis, sizes)
     }
 
     pub(crate) fn from_text(text: &str) -> Self {
@@ -56,6 +76,21 @@ impl AppSettings {
                 }
                 "sidebar_width" => if let Ok(w) = v.trim().parse::<f32>() { s.sidebar_width = w.clamp(260.0, 520.0); },
                 "properties_split" => if let Ok(f) = v.trim().parse::<f32>() { s.properties_split = f.clamp(0.1, 0.9); },
+                "panel_edges" => {
+                    for (i, part) in v.split(',').enumerate() {
+                        if i < 3 { s.panel_edges[i] = DockEdge::from_name(part.trim()); }
+                    }
+                }
+                "panel_visible" => {
+                    for (i, part) in v.split(',').enumerate() {
+                        if i < 3 { s.panel_visible[i] = part.trim() == "1"; }
+                    }
+                }
+                "edge_sizes" => {
+                    for (i, part) in v.split(',').enumerate() {
+                        if i < 4 { if let Ok(z) = part.trim().parse::<f32>() { s.edge_sizes[i] = z; } }
+                    }
+                }
                 _ => {}
             }
         }

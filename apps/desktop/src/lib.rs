@@ -17,6 +17,7 @@ macro_rules! test_hit {
 mod icons;
 mod ribbon;
 mod panels;
+mod dock;
 mod model_view;
 mod view3d;
 mod section_ui;
@@ -1085,8 +1086,7 @@ impl Desktop {
                 let label = if n == 0 { "No warnings".to_string() } else { format!("⚠ {n} warning{}", if n == 1 { "" } else { "s" }) };
                 if ui.selectable_label(self.show_warnings, label).clicked() { self.show_warnings = !self.show_warnings; }
                 ui.separator();
-                ui.checkbox(&mut self.show_properties, "Properties");
-                ui.checkbox(&mut self.show_browser, "Browser");
+                dock::status_toggles(self, ui);
             });
         });
         self.warnings_window(&ctx);
@@ -1119,18 +1119,9 @@ impl Desktop {
         ctx.request_repaint_after(std::time::Duration::from_secs(30));
         self.options_window(&ctx);
         self.georef_window(&ctx);
-        if self.show_properties || self.show_browser {
-            let side = egui::Panel::left("side").default_size(self.settings.sidebar_width).min_size(260.0)
-                .max_size(520.0).resizable(true).show(ui, |ui| panels::sidebar(self, ui));
-            // persist a drag on the docking sidebar across restarts (skipped under cfg(test): path() is None)
-            if app_settings::AppSettings::path().is_some() {
-                let w = side.response.rect.width().clamp(260.0, 520.0);
-                if (w - self.settings.sidebar_width).abs() > 1.0 && !ui.input(|i| i.pointer.any_down()) {
-                    self.settings.sidebar_width = w;
-                    let _ = self.settings.save();
-                }
-            }
-        }
+        // Dockable side panels (Properties / Browser / Warnings): each pinned to any edge, resizable,
+        // and saved to settings. Replaces the old single left sidebar.
+        dock::render(self, ui);
         egui::CentralPanel::default().show(ui, |ui| {
             match self.workspace {
                 Workspace::Design => self.viewport(ui),
