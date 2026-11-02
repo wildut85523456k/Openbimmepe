@@ -30,6 +30,7 @@ mod view_tools;
 mod view_notes;
 mod model_edit;
 mod family_types_ui;
+mod family_parameters_ui;
 mod snap_place;
 mod type_editor;
 mod wall_shapes;
@@ -466,6 +467,7 @@ struct Desktop {
     /// the active work plane (a reference plane / grid / level the user sketches on); None = default level plane
     work_plane: Option<ElementId>,
     family_types_dialog: Option<family_types_ui::FamilyTypesDialog>,
+    family_parameters_dialog: Option<family_parameters_ui::FamilyParametersDialog>,
     /// which of the family's connectors meets the open connector it snaps to (Tab takes the next)
     family_snap_k: usize,
     /// Move with Revit's Disjoin option
@@ -591,7 +593,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(), discipline: "All",
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, imported_step: None, step_params_dialog: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, work_plane: None, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), page_setups: Vec::new(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, imported_step: None, step_params_dialog: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, work_plane: None, family_types_dialog: None, family_parameters_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), page_setups: Vec::new(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -887,6 +889,7 @@ impl Desktop {
             "family_editor_toggle" => { self.family_editor_mode = !self.family_editor_mode; if self.family_editor_mode { self.ribbon = "Family"; } self.message = if self.family_editor_mode { "Family Editor mode on".into() } else { "Family Editor mode off".into() }; }
             "import_dwg" => self.import_dwg_file(),
             "import_step" => self.import_step_file(),
+            "family_parameters" => self.open_family_parameters_dialog(),
             "import_pdf" => self.import_pdf_file(),
             "new" => self.new_model(),
             "open" => self.open_file(),
@@ -1151,6 +1154,7 @@ impl Desktop {
         self.load_family_window(&ctx);
         self.create_family_window(&ctx);
         self.family_types_window(&ctx);
+        self.family_parameters_window(&ctx);
         self.types_window(&ctx);
         self.mep_settings_window(&ctx);
         self.insulation_window(&ctx);

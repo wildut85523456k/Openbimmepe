@@ -340,6 +340,11 @@ impl Desktop {
         }
     }
 
+    pub(crate) fn open_family_parameters_dialog(&mut self) {
+        let family = self.document.family_defs().keys().next().cloned().unwrap_or_else(|| "Family".to_string());
+        self.family_parameters_dialog = Some(crate::family_parameters_ui::FamilyParametersDialog::open(&family));
+    }
+
     pub(crate) fn import_step_file(&mut self) {
         let Some(path) = crate::dialog::Question::new().set_title("Import STEP").add_filter("STEP", &["step", "stp"]).ask_open() else { return };
         match crate::step_import::import_step(&path.display().to_string()) {
