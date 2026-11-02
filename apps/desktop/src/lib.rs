@@ -889,6 +889,7 @@ impl Desktop {
             "duct_elbow" | "duct_fitting" | "duct_transition" | "flex_duct" => self.choose_tool(Tool::Duct),
             "pipe_elbow" | "pipe_fitting" | "pipe_tee" | "pipe_transition" | "pipe_support" => self.choose_tool(Tool::Pipe),
             "rebar" => self.choose_tool(Tool::Rebar),
+            "backflow_preventer" | "cleanout" | "drain" | "socket" | "switch" | "lighting_fixture" | "sprinkler" | "generator" | "transformer" | "panel" | "pump" | "cooling_tower" | "chiller" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),
             "slab" => { self.slab_kind_pick = openbim_document::SlabKind::Foundation; self.choose_tool(Tool::Slab) }
