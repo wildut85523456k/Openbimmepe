@@ -30,13 +30,17 @@ pub(crate) struct FamilyTypesDialog {
     pub error: String,
     /// the CSV file typed or picked for Import
     pub csv_path: String,
+    /// which row is selected for attaching an imported STEP mesh
+    pub selected_row: Option<usize>,
+    /// scale applied to an imported STEP mesh when attaching it to a type (1.0 = as imported)
+    pub mesh_scale: f64,
 }
 
 impl FamilyTypesDialog {
     /// The table of `family` as the document has it. None for a family the library does not have.
     pub fn open(doc: &Document, family: &str) -> Option<Self> {
         let f = crate::export::library().iter().find(|f| f.name() == family)?;
-        let mut d = FamilyTypesDialog { family: family.into(), ..Default::default() };
+        let mut d = FamilyTypesDialog { family: family.into(), mesh_scale: 1.0, ..Default::default() };
         let rows: Vec<&openbim_document::Element> = doc.types_for(Category::Family).into_iter().filter(|t| t.family == family).collect();
         // the columns come from the family itself, so a family with no type yet still has its table
         let (nums, texts) = crate::export::family_type_inputs_of(f, &[], &[])?;
@@ -159,6 +163,27 @@ impl Desktop {
     }
 
     /// Applies the table: every row is checked against the family first, then all of it is one undoable step.
+    pub(crate) fn attach_step_to_type(&mut self, d: &mut FamilyTypesDialog) {
+        let Some(k) = d.selected_row else { return };
+        if k >= d.rows.len() { return; }
+        let Some(type_id) = d.rows[k].id else { self.message = "That type has not been saved yet; press Apply first".into(); return; };
+        let Some(path) = crate::dialog::Question::new().set_title("Import STEP for type").add_filter("STEP", &["step", "stp"]).ask_open() else { return };
+        match crate::step_import::import_step(&path.display().to_string()) {
+            Ok(mut mesh) => {
+                let scale = d.mesh_scale;
+                if (scale - 1.0).abs() > 1e-9 {
+                    for v in &mut mesh.vertices { v[0] *= scale; v[1] *= scale; v[2] *= scale; }
+                }
+                let verts = mesh.vertices.len();
+                let tris = mesh.faces.len();
+                self.document.set_display_mesh(type_id, Some(mesh));
+                self.message = format!("Attached STEP ({} vertices, {} triangles, scale {:.2}) to type {}; instances of that type now show it", verts, tris, scale, self.document.get(type_id).map(|e| e.name.clone()).unwrap_or_default());
+            }
+            Err(e) => self.message = format!("STEP import failed: {e}"),
+        }
+    }
+
+    /// Applies the table: every row is checked against the family first, then all of it is one undoable step.
     pub(crate) fn apply_family_types(&mut self, d: &mut FamilyTypesDialog) -> bool {
         match self.document.save_family_types(&d.family, &d.type_rows(), &d.removed) {
             Ok(_) => {
@@ -172,7 +197,7 @@ impl Desktop {
 
     pub(crate) fn family_types_window(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.family_types_dialog.take() else { return };
-        let (mut open, mut apply, mut add, mut remove, mut import) = (true, false, false, None, false);
+        let (mut open, mut apply, mut add, mut remove, mut import, mut attach_step) = (true, false, false, None, false, false);
         egui::Window::new(format!("Family Types: {}", d.family)).open(&mut open).default_width(640.0).show(ctx, |ui| {
             egui::ScrollArea::both().max_height(360.0).id_salt("family_types_table").show(ui, |ui| {
                 egui::Grid::new("family_types_grid").striped(true).show(ui, |ui| {
@@ -185,6 +210,8 @@ impl Desktop {
                     for k in 0..d.rows.len() {
                         let used = d.users.get(k).copied().unwrap_or(0);
                         let r = &mut d.rows[k];
+                        let selected = d.selected_row == Some(k);
+                        if ui.selectable_label(selected, "●").clicked() { d.selected_row = Some(k); }
                         ui.add(egui::TextEdit::singleline(&mut r.name).desired_width(110.0));
                         for (v, c) in r.nums.iter_mut().zip(&nums) {
                             ui.add(egui::DragValue::new(v).speed(if c.length { 1.0 } else { 0.01 }));
@@ -211,7 +238,13 @@ impl Desktop {
                 }
                 import = ui.add_enabled(!d.csv_path.trim().is_empty(), egui::Button::new("Import CSV")).clicked();
             });
-            if !d.error.is_empty() { ui.colored_label(egui::Color32::from_rgb(200, 60, 40), &d.error); }
+            ui.horizontal(|ui| {
+                ui.label("Scale");
+                ui.add(egui::DragValue::new(&mut d.mesh_scale).speed(0.01).range(0.01..=100.0));
+                let enabled = d.selected_row.is_some_and(|k| k < d.rows.len() && d.rows[k].id.is_some());
+                if ui.add_enabled(enabled, egui::Button::new("Import STEP for selected type")).clicked() { attach_step = true; }
+                if !enabled { ui.small("select a saved type row first"); }
+            });
             ui.small("CSV: the first line names the columns (type name first, then inputs as shown above), one line per type. Lengths are in millimetres. Nothing changes in the model until Apply; Apply is one undo step, and a row the family does not accept refuses the whole table.");
         });
         if add { d.add_row(); }
@@ -225,6 +258,9 @@ impl Desktop {
                     Err(why) => { d.error = why.clone(); format!("CSV refused, the table is as it was: {why}") }
                 },
             };
+        }
+        if attach_step {
+            self.attach_step_to_type(&mut d);
         }
         if apply { self.apply_family_types(&mut d); }
         if open { self.family_types_dialog = Some(d); }
