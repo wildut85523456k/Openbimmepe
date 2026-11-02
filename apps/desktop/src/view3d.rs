@@ -63,7 +63,7 @@ pub fn batch(doc: &Document, overlay: Option<&openbim_document::Mesh>) -> Batch 
             meshes.push((Element { kind: k, id: el.id.0 }, openbim_document::Mesh { vertices: m.verts, faces }, true));
             continue;
         }
-        let Some(mesh) = doc.mesh(el.id) else { continue };
+        let Some(mesh) = doc.mesh_with_voids(el.id) else { continue };
         // a slab's outline is not convex, but its faces are wound outward by construction
         meshes.push((Element { kind: k, id: el.id.0 }, mesh, matches!(el.category, Category::Slab | Category::Generic | Category::Footing | Category::WallFooting | Category::Rebar | Category::Railing)));
     }
