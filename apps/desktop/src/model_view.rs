@@ -1181,6 +1181,30 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 }
             }
             for p in [sa, screen([b[0], b[1], level_z])] { painter.circle_stroke(p, 11.0, Stroke::new(1.0, blue)); }
+            // distance dimension to the nearest parallel existing grid
+            {
+                let existing: Vec<([f64;2],[f64;2])> = app.document.elements().filter(|e| e.category == Category::Grid).filter_map(|e| match e.geometry { Some(Geometry::Grid{start,end,..}) => Some((start,end)), _ => None }).collect();
+                let mut best: Option<(f64, [f64;2], [f64;2])> = None;
+                for (s2, e2) in &existing {
+                    let cross = (e2[0]-s2[0])*(b[1]-a[1]) - (e2[1]-s2[1])*(b[0]-a[0]);
+                    if cross.abs() > 1e-6 { continue; } // not parallel
+                    // perpendicular distance from midpoint of moving grid to existing line
+                    let dx = e2[0]-s2[0]; let dy = e2[1]-s2[1];
+                    let len2 = dx*dx+dy*dy;
+                    if len2 < 1e-12 { continue; }
+                    let t = ((a[0]-s2[0])*dx + (a[1]-s2[1])*dy) / len2;
+                    let foot = [s2[0]+t*dx, s2[1]+t*dy];
+                    let d = (foot[0]-a[0]).hypot(foot[1]-a[1]);
+                    if best.map_or(true, |(bd,_,_)| d < bd) { best = Some((d, foot, a)); }
+                }
+                if let Some((d, foot, pt)) = best {
+                    if d > 1e-3 && d < 100.0 {
+                        let mid = [(foot[0]+pt[0])/2.0, (foot[1]+pt[1])/2.0];
+                        let sp = screen([mid[0], mid[1], level_z]);
+                        painter.text(sp, egui::Align2::CENTER_CENTER, format!("{:.0} mm", d*1000.0), egui::FontId::proportional(note_px), Color32::from_rgb(90,160,220));
+                    }
+                }
+            }
             // the name this grid will get, at the moving end (Revit shows the label as it is drawn)
             if (b[0] - a[0]).hypot(b[1] - a[1]) > 0.1 {
                 let dx = (b[0] - a[0]).abs();
