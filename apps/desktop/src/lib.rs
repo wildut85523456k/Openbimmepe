@@ -874,6 +874,11 @@ impl Desktop {
             "truss" => self.choose_tool(Tool::Truss),
             "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Door); self.choose_tool(Tool::Family) }
             "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Window); self.choose_tool(Tool::Family) }
+            "curtain_wall" => self.choose_tool(Tool::Wall),
+            "ramp" => self.choose_tool(Tool::Stair),
+            "framing" => self.choose_tool(Tool::Beam),
+            "structural_section" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
+            "model_line" => self.choose_tool(Tool::Wall),
             "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "rebar" => self.choose_tool(Tool::Rebar),
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
