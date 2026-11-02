@@ -884,6 +884,8 @@ impl Desktop {
             "structural_floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
             "structural_wall" | "shear_wall" => self.choose_tool(Tool::Wall),
             "detail" => { let key = crate::view_ui::view_key(self.view).filter(|k| self.placeable_views().iter().any(|v| &v.0 == k)); self.open_add_view(None, key) }
+            "air_terminal" | "diffuser" | "grille" | "chiller" | "fan" | "vav_box" | "damper" | "mechanical_equipment" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
+            "cable_tray" | "cable_tray_fitting" | "conduit" | "conduit_fitting" | "junction_box" | "pull_box" | "raceway" => self.choose_tool(Tool::Cable),
             "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "rebar" => self.choose_tool(Tool::Rebar),
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
