@@ -1153,9 +1153,32 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 b = aln.point;
                 let sb = screen([b[0], b[1], level_z]);
                 dashed(&painter, screen([aln.reference[0], aln.reference[1], level_z]), sb, Stroke::new(1.0, Color32::from_rgb(90, 160, 220)));
-                dashed(&painter, sa, sb, Stroke::new(1.5, blue));
+                // ghost preview of the array
+                let len = (b[0]-a[0]).hypot(b[1]-a[1]);
+                let (nx, ny) = (-(b[1]-a[1])/len, (b[0]-a[0])/len);
+                let cnt = app.grid_count.max(1);
+                let sp = app.grid_spacing_mm / 1000.0;
+                for i in 0..cnt {
+                    let off = if cnt == 1 { 0.0 } else { (i as f64 - (cnt as f64 - 1.0)/2.0) * sp };
+                    let sa2 = screen([a[0]+nx*off, a[1]+ny*off, level_z]);
+                    let sb2 = screen([b[0]+nx*off, b[1]+ny*off, level_z]);
+                    dashed(&painter, sa2, sb2, Stroke::new(1.5, blue));
+                }
             } else {
-                dashed(&painter, sa, screen([b[0], b[1], level_z]), Stroke::new(1.5, blue));
+                let len = (b[0]-a[0]).hypot(b[1]-a[1]);
+                if len > 1e-9 {
+                    let (nx, ny) = (-(b[1]-a[1])/len, (b[0]-a[0])/len);
+                    let cnt = app.grid_count.max(1);
+                    let sp = app.grid_spacing_mm / 1000.0;
+                    for i in 0..cnt {
+                        let off = if cnt == 1 { 0.0 } else { (i as f64 - (cnt as f64 - 1.0)/2.0) * sp };
+                        let sa2 = screen([a[0]+nx*off, a[1]+ny*off, level_z]);
+                        let sb2 = screen([b[0]+nx*off, b[1]+ny*off, level_z]);
+                        dashed(&painter, sa2, sb2, Stroke::new(1.5, blue));
+                    }
+                } else {
+                    dashed(&painter, sa, screen([b[0], b[1], level_z]), Stroke::new(1.5, blue));
+                }
             }
             for p in [sa, screen([b[0], b[1], level_z])] { painter.circle_stroke(p, 11.0, Stroke::new(1.0, blue)); }
             // the name this grid will get, at the moving end (Revit shows the label as it is drawn)
