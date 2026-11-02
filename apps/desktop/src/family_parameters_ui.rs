@@ -14,11 +14,12 @@ pub(crate) struct FamilyParametersDialog {
     pub geom_name: String,
     pub geom_vis: usize,
     pub geom_mat: usize,
+    pub nested_name: String,
 }
 
 impl FamilyParametersDialog {
     pub fn open(family: &str) -> Self {
-        Self { family: family.into(), new_name: String::new(), error: String::new(), constraint_a: 0, constraint_b: 1, geom_name: String::new(), geom_vis: 0, geom_mat: 0 }
+        Self { family: family.into(), new_name: String::new(), error: String::new(), constraint_a: 0, constraint_b: 1, geom_name: String::new(), geom_vis: 0, geom_mat: 0, nested_name: String::new() }
     }
     pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) -> bool {
         let mut open = true;
@@ -66,6 +67,7 @@ impl crate::Desktop {
         let mut open = true;
         let family = d.family.clone();
         let mut add_binding = false;
+        let mut add_nested = false;
         egui::Window::new(format!("Family Parameters: {}", family)).open(&mut open).show(ctx, |ui| {
             if let Some(def) = self.document.family_defs().get(&family) {
                 ui.label(format!("{} parameters", def.parameters.len()));
@@ -84,6 +86,13 @@ impl crate::Desktop {
                     });
                     if ui.button("Add binding").clicked() && !d.geom_name.trim().is_empty() {
                         add_binding = true;
+                    }
+                });
+                ui.label(format!("{} nested families", def.nested.len()));
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut d.nested_name);
+                    if ui.button("Add nested").clicked() && !d.nested_name.trim().is_empty() {
+                        add_nested = true;
                     }
                 });
                 let names: Vec<String> = def.parameters.iter().map(|p| p.name.clone()).collect();
@@ -144,6 +153,17 @@ impl crate::Desktop {
                         material_param: mat_param,
                     });
                     d.geom_name.clear();
+                }
+                self.document.set_family_defs(defs);
+            }
+            if add_nested {
+                let mut defs = self.document.family_defs().clone();
+                if let Some(def) = defs.get_mut(&family) {
+                    def.nested.push(openbim_document::nested_family::NestedFamily {
+                        family: d.nested_name.trim().to_string(),
+                        ..Default::default()
+                    });
+                    d.nested_name.clear();
                 }
                 self.document.set_family_defs(defs);
             }
