@@ -3175,7 +3175,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "openbim-arch"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "openbim-geom",
 ]
@@ -3183,7 +3183,7 @@ dependencies = [
 [[package]]
 name = "openbim-automation"
 version = "0.1.0"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "openbim-document",
  "openbim-graph",
@@ -3195,7 +3195,7 @@ dependencies = [
 [[package]]
 name = "openbim-calc"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "rayon",
 ]
@@ -3203,7 +3203,7 @@ dependencies = [
 [[package]]
 name = "openbim-clash"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "ifc-lite-clash",
  "openbim-document",
@@ -3212,7 +3212,7 @@ dependencies = [
 [[package]]
 name = "openbim-commands"
 version = "0.1.0"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "serde",
 ]
@@ -3254,7 +3254,7 @@ dependencies = [
 [[package]]
 name = "openbim-document"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "earcutr",
  "i_overlay",
@@ -3272,7 +3272,7 @@ dependencies = [
 [[package]]
 name = "openbim-family"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "earcutr",
  "openbim-photo",
@@ -3283,7 +3283,7 @@ dependencies = [
 [[package]]
 name = "openbim-geom"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "earcutr",
  "rayon",
@@ -3292,7 +3292,7 @@ dependencies = [
 [[package]]
 name = "openbim-graph"
 version = "0.1.0"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "serde",
  "serde_json",
@@ -3301,7 +3301,7 @@ dependencies = [
 [[package]]
 name = "openbim-ifc"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "ifc-lite-core",
  "openbim-arch",
@@ -3315,17 +3315,17 @@ dependencies = [
 [[package]]
 name = "openbim-keymap"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 
 [[package]]
 name = "openbim-oplog"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 
 [[package]]
 name = "openbim-photo"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "zip",
 ]
@@ -3333,7 +3333,7 @@ dependencies = [
 [[package]]
 name = "openbim-place"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "openbim-arch",
  "openbim-family",
@@ -3344,7 +3344,7 @@ dependencies = [
 [[package]]
 name = "openbim-route"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "openbim-family",
  "openbim-geom",
@@ -3354,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "openbim-schematic"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "serde",
  "serde_json",
@@ -3363,7 +3363,7 @@ dependencies = [
 [[package]]
 name = "openbim-sheets"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "calamine",
  "serde",
@@ -3373,12 +3373,12 @@ dependencies = [
 [[package]]
 name = "openbim-sketch"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 
 [[package]]
 name = "openbim-view"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "earcutr",
  "openbim-arch",
@@ -3393,7 +3393,7 @@ dependencies = [
 [[package]]
 name = "openbim-viewport"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "openbim-geom",
  "openbim-ifc",
@@ -3404,7 +3404,7 @@ dependencies = [
 [[package]]
 name = "openbim-viewport-egui"
 version = "0.0.1"
-source = "git+https://github.com/wildut85523456k/openbim-core?rev=14a215566ae77ee0d37a748dc1d6d63752adb1fd#14a215566ae77ee0d37a748dc1d6d63752adb1fd"
+source = "git+https://github.com/wildut85523456k/openbim-core?rev=cf77ab580ea027f7566913af66ca4afe28164afc#cf77ab580ea027f7566913af66ca4afe28164afc"
 dependencies = [
  "bytemuck",
  "egui",
