@@ -471,6 +471,11 @@ pub fn options(app: &mut Desktop, ui: &mut egui::Ui) {
             ui.strong("Place Grid");
             ui.separator();
             ui.label(format!("Next name: {}", app.document.next_grid_name()));
+            ui.separator();
+            ui.label("Array count");
+            ui.add(egui::DragValue::new(&mut app.grid_count).range(1..=20));
+            ui.label("Spacing (mm)");
+            ui.add(egui::DragValue::new(&mut app.grid_spacing_mm).speed(10.0).range(100.0..=100000.0));
         });
         return;
     }

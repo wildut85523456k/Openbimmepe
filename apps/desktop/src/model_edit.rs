@@ -1612,10 +1612,25 @@ impl Desktop {
         } else {
             crate::grid_tools::next_grid_letter(&self.document)
         };
-        match self.document.place_grid(start, point, &name) {
-            Ok(id) => { self.beam_start = None; let name = self.document.get(id).map(|g| g.name.clone()).unwrap_or_default(); self.message = format!("Grid {name} placed; undo removes it"); }
-            Err(error) => self.message = format!("Grid rejected: {error:?}"),
+        let count = self.grid_count.max(1);
+        let spacing_m = self.grid_spacing_mm / 1000.0;
+        // offset the array perpendicular to the grid direction
+        let len = (point[0] - start[0]).hypot(point[1] - start[1]);
+        let nx = -(point[1] - start[1]) / len;
+        let ny = (point[0] - start[0]) / len;
+        let mut ids = Vec::new();
+        for i in 0..count {
+            let off = if count == 1 { 0.0 } else { (i as f64 - (count as f64 - 1.0) / 2.0) * spacing_m };
+            let s = [start[0] + nx * off, start[1] + ny * off];
+            let e = [point[0] + nx * off, point[1] + ny * off];
+            match self.document.place_grid(s, e, &name) {
+                Ok(id) => ids.push(id),
+                Err(error) => { self.beam_start = None; self.message = format!("Grid array rejected: {error:?}"); return; }
+            }
         }
+        self.beam_start = None;
+        let name = self.document.get(ids[0]).map(|g| g.name.clone()).unwrap_or_default();
+        self.message = if count > 1 { format!("Grid array {name} placed ({count} lines at {:.3} m)", spacing_m) } else { format!("Grid {name} placed; undo removes it") };
     }
 
     /// The Level tool: adds a level at the elevation of the options bar and opens nothing; its plan view is listed.

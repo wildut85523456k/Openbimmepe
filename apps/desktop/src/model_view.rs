@@ -2885,6 +2885,7 @@ mod tests {
         assert_eq!(app.document.level_of(wall.id), Some(levels[0].0), "the wall stands on the level of the plan");
         // and a grid, on the same empty canvas
         app.choose_tool(crate::Tool::Grid);
+        app.grid_count = 1;
         for at in [Pos2::new(300.0, 200.0), Pos2::new(300.0, 500.0)] {
             frame(&ctx, screen, &mut app, vec![button(at, true)]);
             frame(&ctx, screen, &mut app, vec![button(at, false)]);
@@ -3101,6 +3102,7 @@ mod tests {
         let n = grids(&app);
         app.run_command("grid", "Grid");
         assert!(app.tool == crate::Tool::Grid);
+        app.grid_count = 1;
         let (a, b, c, d) = (Pos2::new(300.0, 200.0), Pos2::new(300.0, 500.0), Pos2::new(420.0, 200.0), Pos2::new(420.0, 500.0));
         frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(a)]);
         // a click on each end, then a press-drag-release
