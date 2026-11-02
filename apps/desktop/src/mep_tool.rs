@@ -11,7 +11,7 @@ use openbim_route::{route_path, RoutingPrefs};
 
 /// What the drawing tool assumes: elbows at any angle, rounded as Revit's defaults (a duct bends on one width, a pipe
 /// on one and a half diameters), a reducer at no more than 30 degrees, and a tee for a branch.
-pub(crate) fn route_prefs(domain: Domain, system: System) -> RoutingPrefs { openbim_document::default_route_prefs(domain, system) }
+pub(crate) fn route_prefs(domain: Domain, system: System) -> RoutingPrefs { openbim_document::Document::default_route_prefs(domain, system) }
 
 /// Where the drawn line sits across the duct or pipe (Revit's Horizontal Justification), looking along the way it is drawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

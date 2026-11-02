@@ -48,6 +48,7 @@ impl FamilyParametersDialog {
                             is_instance: false,
                             formula: None,
                             value: openbim_document::family_params::ParamValue::Number(0.0),
+                            shared_guid: None,
                         };
                         if def.add_parameter(p) { self.new_name.clear(); changed = true; }
                         else { self.error = "duplicate name".into(); }
@@ -134,6 +135,7 @@ impl crate::Desktop {
                             is_instance: false,
                             formula: None,
                             value: openbim_document::family_params::ParamValue::Number(0.0),
+                            shared_guid: None,
                         };
                         if def.add_parameter(p) { d.new_name.clear(); }
                         else { d.error = "duplicate name".into(); }
