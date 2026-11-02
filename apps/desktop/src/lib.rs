@@ -897,6 +897,15 @@ impl Desktop {
             "view" => { self.ribbon = "View".into(); },
             "not_in_the_registry" => self.message = "Not in the registry".into(),
             "rebar" => self.choose_tool(Tool::Rebar),
+            "device" | "light_pendant" | "light_surface" | "plumbing_fixture" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
+            "disconnect" => self.message = "Disconnect: select a connection to break".into(),
+            "interference_check" => self.message = "Interference check: running...".into(),
+            "link_model" => self.import_ifc_file(),
+            "phase" => self.message = "Phase manager not yet implemented".into(),
+            "revision_cloud" => self.choose_tool(Tool::Wall),
+            "search" => self.message = "Search: not yet implemented".into(),
+            "settings" => { self.show_options = !self.show_options; },
+            "workset" => self.message = "Workset manager not yet implemented".into(),
             "backflow_preventer" | "cleanout" | "drain" | "socket" | "switch" | "lighting_fixture" | "sprinkler" | "generator" | "transformer" | "panel" | "pump" | "cooling_tower" | "chiller" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),
