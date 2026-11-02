@@ -360,6 +360,56 @@ impl Desktop {
         }
     }
 
+        pub(crate) fn import_family_manifest_file(&mut self) {
+        let Some(path) = crate::dialog::Question::new().set_title("Import Family (rvt2ifc manifest)").add_filter("JSON", &["json"]).ask_open() else { return };
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(v) => {
+                    let fd = v.get("family_def").cloned().unwrap_or(serde_json::Value::Null);
+                    let name = fd.get("name").and_then(|x| x.as_str()).unwrap_or("Imported").to_string();
+                    let mut def = openbim_document::family_params::FamilyDef::new(&name);
+                    let mut id_counter: u64 = 1;
+                    if let Some(params) = fd.get("parameters").and_then(|x| x.as_array()) {
+                        for p in params {
+                            let pname = p.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                            if pname.is_empty() { continue; }
+                            let storage = p.get("storage_type").and_then(|x| x.as_str()).unwrap_or("Text");
+                            let kind = match storage {
+                                "Length" => openbim_document::family_params::ParamKind::Length,
+                                "Integer" => openbim_document::family_params::ParamKind::Integer,
+                                "Number" => openbim_document::family_params::ParamKind::Number,
+                                "YesNo" => openbim_document::family_params::ParamKind::YesNo,
+                                "Text" | "URL" => openbim_document::family_params::ParamKind::Text,
+                                "Material" => openbim_document::family_params::ParamKind::Material,
+                                _ => openbim_document::family_params::ParamKind::Text,
+                            };
+                            let is_type = p.get("is_type_param").and_then(|x| x.as_bool()).unwrap_or(false);
+                            let formula = p.get("formula").and_then(|x| x.as_str()).map(|s| s.to_string());
+                            def.parameters.push(openbim_document::family_params::Parameter {
+                                id: id_counter,
+                                name: pname,
+                                discipline: openbim_document::family_params::ParamDiscipline::Common,
+                                kind,
+                                group: openbim_document::family_params::ParamGroup::Other,
+                                is_instance: !is_type,
+                                formula,
+                                value: openbim_document::family_params::ParamValue::Text(String::new()),
+                                shared_guid: None,
+                            });
+                            id_counter += 1;
+                        }
+                    }
+                    let mut defs = self.document.family_defs().clone();
+                    defs.insert(name.clone(), def);
+                    self.document.set_family_defs(defs);
+                    self.message = format!("Imported family '{}' from {}", name, path.display());
+                }
+                Err(e) => self.message = format!("Manifest parse failed: {e}"),
+            },
+            Err(e) => self.message = format!("Read failed: {e}"),
+        }
+    }
+
     pub(crate) fn import_step_file(&mut self) {
         let Some(path) = crate::dialog::Question::new().set_title("Import STEP").add_filter("STEP", &["step", "stp"]).ask_open() else { return };
         match crate::step_import::import_step(&path.display().to_string()) {
