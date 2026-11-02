@@ -241,7 +241,33 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 for (pt, off) in [(a, offs.0), (b, offs.1)] {
                     let bp = pt + Vec2::new(off[0] as f32 * scale, -off[1] as f32 * scale); // offset in model metres -> screen
                     if (off[0].abs() + off[1].abs()) > 1e-9 {
-                        painter.line_segment([pt, bp], Stroke::new(1.0, stroke.color.gamma_multiply(0.6)));
+                        // break the leader where it crosses another grid line
+                        let other_grids: Vec<(Pos2, Pos2)> = app.document.elements().filter(|e2| e2.id != el.id && e2.category == Category::Grid).filter_map(|e2| match e2.geometry { Some(Geometry::Grid { start, end, .. }) => Some((screen([start[0], start[1], level_z]), screen([end[0], end[1], level_z]))), _ => None }).collect();
+                        let mut segs: Vec<(Pos2, Pos2)> = vec![(pt, bp)];
+                        for (g0, g1) in &other_grids {
+                            let mut new_segs = Vec::new();
+                            for (p0, p1) in &segs {
+                                // segment-segment intersection
+                                let d1 = *p1 - *p0; let d2 = *g1 - *g0;
+                                let cross = d1.x * d2.y - d1.y * d2.x;
+                                if cross.abs() < 1e-6 { new_segs.push((*p0, *p1)); continue; }
+                                let t = ((*g0 - *p0).x * d2.y - (*g0 - *p0).y * d2.x) / cross;
+                                let u = ((*g0 - *p0).x * d1.y - (*g0 - *p0).y * d1.x) / cross;
+                                if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                                    let ip = *p0 + d1 * t;
+                                    let gap = 3.0;
+                                    let dir = d1.normalized();
+                                    new_segs.push((*p0, ip - dir * gap));
+                                    new_segs.push((ip + dir * gap, *p1));
+                                } else {
+                                    new_segs.push((*p0, *p1));
+                                }
+                            }
+                            segs = new_segs;
+                        }
+                        for (p0, p1) in &segs {
+                            if p0.distance(*p1) > 0.5 { painter.line_segment([*p0, *p1], Stroke::new(1.0, stroke.color.gamma_multiply(0.6))); }
+                        }
                     }
                     painter.circle(bp, bubble_r, ui.visuals().panel_fill, stroke);
                     painter.text(bp, egui::Align2::CENTER_CENTER, &el.name, egui::FontId::proportional(note_px), stroke.color);
