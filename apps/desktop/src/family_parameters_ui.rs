@@ -15,11 +15,12 @@ pub(crate) struct FamilyParametersDialog {
     pub geom_vis: usize,
     pub geom_mat: usize,
     pub nested_name: String,
+    pub shared_guid_input: String,
 }
 
 impl FamilyParametersDialog {
     pub fn open(family: &str) -> Self {
-        Self { family: family.into(), new_name: String::new(), error: String::new(), constraint_a: 0, constraint_b: 1, geom_name: String::new(), geom_vis: 0, geom_mat: 0, nested_name: String::new() }
+        Self { family: family.into(), new_name: String::new(), error: String::new(), constraint_a: 0, constraint_b: 1, geom_name: String::new(), geom_vis: 0, geom_mat: 0, nested_name: String::new(), shared_guid_input: String::new() }
     }
     pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) -> bool {
         let mut open = true;
@@ -48,7 +49,7 @@ impl FamilyParametersDialog {
                             is_instance: false,
                             formula: None,
                             value: openbim_document::family_params::ParamValue::Number(0.0),
-                            shared_guid: None,
+                            shared_guid: if self.shared_guid_input.trim().is_empty() { None } else { Some(self.shared_guid_input.trim().to_string()) },
                         };
                         if def.add_parameter(p) { self.new_name.clear(); changed = true; }
                         else { self.error = "duplicate name".into(); }
@@ -123,6 +124,7 @@ impl crate::Desktop {
             }
             ui.horizontal(|ui| {
                 ui.text_edit_singleline(&mut d.new_name);
+                ui.text_edit_singleline(&mut d.shared_guid_input);
                 if ui.button("Add").clicked() && !d.new_name.trim().is_empty() {
                     let mut defs = self.document.family_defs().clone();
                     if let Some(def) = defs.get_mut(&family) {
@@ -135,7 +137,7 @@ impl crate::Desktop {
                             is_instance: false,
                             formula: None,
                             value: openbim_document::family_params::ParamValue::Number(0.0),
-                            shared_guid: None,
+                            shared_guid: if d.shared_guid_input.trim().is_empty() { None } else { Some(d.shared_guid_input.trim().to_string()) },
                         };
                         if def.add_parameter(p) { d.new_name.clear(); }
                         else { d.error = "duplicate name".into(); }
