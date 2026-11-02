@@ -21,6 +21,7 @@ mod dock;
 mod dwg_export;
 mod dwg_import;
 mod step_import;
+mod step_params_ui;
 mod grid_tools;
 mod model_view;
 mod view3d;
@@ -425,6 +426,8 @@ struct Desktop {
     cad_overlay: Option<(String, crate::dwg_import::CadDrawing, f64)>,
     /// Imported STEP mesh (cadrum tessellation), mm units, awaiting placement as a family display mesh.
     imported_step: Option<openbim_document::Mesh>,
+    /// The parameter table of the imported STEP, shown after import.
+    step_params_dialog: Option<step_params_ui::StepParamsDialog>,
     /// Worksets: a Revit-style grouping for collaborate/edit permissions. Not yet wired to per-element
     /// ownership, but the bottom bar exposes a dropdown so the user can pick the active workset.
     worksets: Vec<String>,
@@ -586,7 +589,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(), discipline: "All",
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, imported_step: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), page_setups: Vec::new(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, imported_step: None, step_params_dialog: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, family_types_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), page_setups: Vec::new(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -1160,6 +1163,7 @@ impl Desktop {
         self.add_view_window(&ctx);
         self.print_window(&ctx);
         self.print_dialog.show(&ctx, &self.document, self.view, self.workspace == Workspace::Design, &mut self.page_setups);
+        self.step_params_window(&ctx);
         self.vis_graphics_window(&ctx);
         self.layout_window(&ctx);
         self.type_editor_window(&ctx);

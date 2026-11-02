@@ -346,11 +346,19 @@ impl Desktop {
             Ok(mesh) => {
                 let verts = mesh.vertices.len();
                 let tris = mesh.faces.len();
+                let params = crate::step_import::mesh_params(&mesh);
                 self.imported_step = Some(mesh);
+                self.step_params_dialog = Some(crate::step_params_ui::StepParamsDialog { name: path.display().to_string(), params });
                 self.message = format!("Imported STEP: {verts} vertices, {tris} triangles (mm units, awaiting placement)");
             }
             Err(e) => self.message = format!("STEP import failed: {e}"),
         }
+    }
+
+    pub(crate) fn step_params_window(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.step_params_dialog.take() else { return };
+        d.window(ctx);
+        if !d.name.is_empty() { self.step_params_dialog = Some(d); }
     }
 
     pub(crate) fn import_pdf_file(&mut self) {
@@ -2627,6 +2635,20 @@ mod tests {
         app.document.delete_type(t).unwrap();
         ctx.run_ui(Default::default(), |ui| app.types_window(ui.ctx())).textures_delta.clear();
         assert_eq!(app.types_dialog.as_ref().unwrap().picked, None, "a type that is gone is let go");
+    }
+
+    #[test]
+    fn the_step_params_window_shows_the_parameter_table() {
+        use openbim_document::Mesh;
+        let mut app = Desktop::sample();
+        let mesh = Mesh { vertices: vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 3.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0], [2.0, 0.0, 4.0], [2.0, 3.0, 4.0], [0.0, 3.0, 4.0]], faces: vec![vec![0, 3, 2], vec![0, 2, 1], vec![4, 5, 6], vec![4, 6, 7], vec![0, 1, 5], vec![0, 5, 4], vec![1, 2, 6], vec![1, 6, 5], vec![2, 3, 7], vec![2, 7, 6], vec![3, 0, 4], vec![3, 4, 7]] };
+        app.step_params_dialog = Some(crate::step_params_ui::StepParamsDialog { name: "part.stp".into(), params: crate::step_import::mesh_params(&mesh) });
+        let ctx = eframe::egui::Context::default();
+        ctx.run_ui(Default::default(), |ui| app.step_params_window(ui.ctx())).textures_delta.clear();
+        // the dialog stays open (name not cleared) and the params are the box's
+        assert!(app.step_params_dialog.is_some(), "dialog stays open");
+        let p = &app.step_params_dialog.as_ref().unwrap().params;
+        assert!((p.width - 2.0).abs() < 1e-9 && (p.volume - 24.0).abs() < 1e-6, "{p:?}");
     }
 
     #[test]
