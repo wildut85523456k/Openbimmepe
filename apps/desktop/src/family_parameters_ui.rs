@@ -64,6 +64,7 @@ impl crate::Desktop {
             if let Some(def) = self.document.family_defs().get(&family) {
                 ui.label(format!("{} parameters", def.parameters.len()));
                 for p in &def.parameters { ui.label(format!("{} ({:?})", p.name, p.kind)); }
+                ui.label(format!("{} constraints", def.constraints.len()));
             } else {
                 ui.label("No FamilyDef stored for this family.");
             }
