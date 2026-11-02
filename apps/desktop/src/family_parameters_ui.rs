@@ -73,7 +73,12 @@ impl crate::Desktop {
         egui::Window::new(format!("Family Parameters: {}", family)).open(&mut open).show(ctx, |ui| {
             if let Some(def) = self.document.family_defs().get(&family) {
                 ui.label(format!("{} parameters", def.parameters.len()));
-                for p in &def.parameters { ui.label(format!("{} ({:?})", p.name, p.kind)); }
+                for p in &def.parameters { 
+                    let label = if let Some(g) = &p.shared_guid {
+                        if let Some(sp) = self.document.shared_param(g) { format!("{} ({:?}) [shared: {}]", p.name, p.kind, sp.name) } else { format!("{} ({:?}) [shared: {}]", p.name, p.kind, g) }
+                    } else { format!("{} ({:?})", p.name, p.kind) };
+                    ui.label(label);
+                }
                 ui.label(format!("{} constraints", def.constraints.len()));
                 ui.label(format!("{} geometry bindings", def.geometry_bindings.len()));
                 let vis_names: Vec<String> = std::iter::once("(none)".to_string()).chain(def.parameters.iter().map(|p| p.name.clone())).collect();
