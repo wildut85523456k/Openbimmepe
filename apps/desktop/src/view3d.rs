@@ -119,7 +119,7 @@ pub fn datums(doc: &Document) -> Vec<Datum> {
     let mut out = Vec::new();
     let mut ends: Vec<[f64; 2]> = Vec::new();
     for el in doc.elements() {
-        if let Some(Geometry::Grid { start, end }) = el.geometry {
+        if let Some(Geometry::Grid { start, end, .. }) = el.geometry {
             out.push(Datum { a: [start[0], start[1], base], b: [end[0], end[1], base], label: el.name.clone(), bubbles: true });
             ends.extend([start, end]);
         }

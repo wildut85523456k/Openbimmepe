@@ -98,7 +98,7 @@ pub fn plan_content(document: &Document, view: View) -> Result<PlanContent, Stri
             a, b, category: cat.into(), params: Params::new(), link: None, weight,
         });
         match el.geometry {
-            Some(Geometry::Grid { start, end }) => {
+            Some(Geometry::Grid { start, end, .. }) => {
                 for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { push(w[0], w[1]); }
                 for at in [start, end] {
                     markers.push(ViewMarker { at, label: el.name.clone(), category: cat.into(),

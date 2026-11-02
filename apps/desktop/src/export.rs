@@ -344,7 +344,7 @@ fn scene_with(doc: &Document, project_name: &str, project_key: u64, timestamp: &
         .map(|d| openbim_ifc::SystemDef { name: d.name.clone(), system: d.system, members: d.members.iter().map(|m| m.0).collect() }).collect();
     // grid lines leave as one IfcGrid
     let grids: Vec<openbim_ifc::GridItem> = doc.elements().filter_map(|e| match e.geometry {
-        Some(Geometry::Grid { start, end }) => Some(openbim_ifc::GridItem { id: e.id.0, name: e.name.clone(), start, end, bulge: e.bulge }),
+        Some(Geometry::Grid { start, end, .. }) => Some(openbim_ifc::GridItem { id: e.id.0, name: e.name.clone(), start, end, bulge: e.bulge }),
         _ => None,
     }).collect();
     // family instances, after the walls they may stand in

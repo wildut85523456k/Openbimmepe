@@ -134,7 +134,7 @@ impl Desktop {
     pub(crate) fn pin_marks(&self, level: ElementId) -> Vec<[f64; 2]> {
         self.document.elements().filter(|e| e.pinned && self.document.level_of(e.id).is_none_or(|l| l == level))
             .filter_map(|e| match e.geometry {
-                Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end }) => Some([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0]),
+                Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end, .. }) => Some([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0]),
                 _ => openbim_document::plan_points(e).first().copied(),
             }).collect()
     }
