@@ -10,22 +10,22 @@ eframe = "0.37"
 egui = "0.37"
 egui_extras = { version = "0.37", default-features = false, features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-openbim-keymap = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-commands = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-document = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-oplog = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-arch = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-geom = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-ifc = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
+openbim-keymap = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-commands = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-document = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-oplog = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-arch = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-geom = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-ifc = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
 serde_json = "1"
-openbim-place = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-calc = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-family = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-route = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-view = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-viewport-egui = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-sheets = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
-openbim-clash = { git = "https://github.com/wildut85523456k/openbim-core", rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f" }
+openbim-place = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-calc = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-family = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-route = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-view = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-viewport-egui = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-sheets = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
+openbim-clash = { git = "https://github.com/wildut85523456k/openbim-core", rev = "5cf8d549bad11391d7015316f955943664ca03e0" }
 rfd = "0.17.2"
 rayon = "1.10"
 acadrust = "0.6.8"
@@ -39,7 +39,7 @@ unsafe_code = "forbid"
 
 [dependencies.openbim-automation]
 git = "https://github.com/wildut85523456k/openbim-core"
-rev = "f2062ea5e99fd4cd793a0ddb5e1fed40729e811f"
+rev = "5cf8d549bad11391d7015316f955943664ca03e0"
 
 [package.metadata.bundle]
 name = "OpenBIM"
