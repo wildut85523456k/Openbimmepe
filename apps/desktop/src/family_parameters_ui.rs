@@ -9,11 +9,13 @@ pub(crate) struct FamilyParametersDialog {
     pub family: String,
     pub new_name: String,
     pub error: String,
+    pub constraint_a: usize,
+    pub constraint_b: usize,
 }
 
 impl FamilyParametersDialog {
     pub fn open(family: &str) -> Self {
-        Self { family: family.into(), new_name: String::new(), error: String::new() }
+        Self { family: family.into(), new_name: String::new(), error: String::new(), constraint_a: 0, constraint_b: 1 }
     }
     pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) -> bool {
         let mut open = true;
@@ -65,6 +67,28 @@ impl crate::Desktop {
                 ui.label(format!("{} parameters", def.parameters.len()));
                 for p in &def.parameters { ui.label(format!("{} ({:?})", p.name, p.kind)); }
                 ui.label(format!("{} constraints", def.constraints.len()));
+                let names: Vec<String> = def.parameters.iter().map(|p| p.name.clone()).collect();
+                let ids: Vec<u64> = def.parameters.iter().map(|p| p.id).collect();
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("ca").selected_text(names.get(d.constraint_a).cloned().unwrap_or_default()).show_ui(ui, |ui| {
+                        for (i, n) in names.iter().enumerate() { ui.selectable_value(&mut d.constraint_a, i, n); }
+                    });
+                    egui::ComboBox::from_id_salt("cb").selected_text(names.get(d.constraint_b).cloned().unwrap_or_default()).show_ui(ui, |ui| {
+                        for (i, n) in names.iter().enumerate() { ui.selectable_value(&mut d.constraint_b, i, n); }
+                    });
+                    if ui.button("Add Equal").clicked() && d.constraint_a < ids.len() && d.constraint_b < ids.len() && d.constraint_a != d.constraint_b {
+                        let mut defs = self.document.family_defs().clone();
+                        if let Some(def) = defs.get_mut(&family) {
+                            let c = openbim_document::constraints::Constraint::equal(
+                                (def.constraints.len() as u64) + 1,
+                                ids[d.constraint_a],
+                                ids[d.constraint_b],
+                            );
+                            def.constraints.push(c);
+                        }
+                        self.document.set_family_defs(defs);
+                    }
+                });
             } else {
                 ui.label("No FamilyDef stored for this family.");
             }
