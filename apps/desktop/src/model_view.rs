@@ -90,7 +90,7 @@ fn plan_edges(doc: &openbim_document::Document, level: ElementId) -> Vec<crate::
                             if el.bulge != 0.0 { for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { line(w[0], w[1]); } } else { line(start, end); }
                             if let Some(r) = doc.wall_plan(el.id) { for i in 0..4 { line(r[i], r[(i + 1) % 4]); } }
             }
-            Some(Geometry::Grid { start, end }) => { for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { line(w[0], w[1]); } }
+            Some(Geometry::Grid { start, end, .. }) => { for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { line(w[0], w[1]); } }
             _ => {}
         }
     }
@@ -183,7 +183,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     app.views.out_of_range = out_of_range;
     // Include datum extents so grid bubbles remain inside the viewport.
     for el in app.document.elements() {
-        if let Some(Geometry::Grid { start, end }) = el.geometry {
+        if let Some(Geometry::Grid { start, end, .. }) = el.geometry {
             for [x, y] in openbim_document::grid_arc::points(start, end, el.bulge) { bounds.extend_with(Pos2::ZERO + proj([x, y, level_z]).0); }
         }
     }
@@ -203,7 +203,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     let selected_all = app.selected_ids();
     let blue = ui.visuals().hyperlink_color;
     let axes: Vec<_> = app.document.elements().flat_map(|el| match el.geometry {
-        Some(Geometry::Grid { start, end } | Geometry::Linear { start, end, .. }) => vec![start, end],
+        Some(Geometry::Grid { start, end, .. } | Geometry::Linear { start, end, .. }) => vec![start, end],
         _ => vec![],
     }).collect();
     let left = axes.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
@@ -233,7 +233,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         let active = selected_all.contains(&el.id);
         let stroke = Stroke::new(if active { 2.5 } else { 1.0 }, if shown == crate::view_ui::Show::Revealed { reveal_ink } else if active { blue } else { Color32::from_gray(135) });
         match el.geometry {
-            Some(Geometry::Grid { start, end }) => {
+            Some(Geometry::Grid { start, end, .. }) => {
                 let a = screen([start[0], start[1], level_z]);
                 let b = screen([end[0], end[1], level_z]);
                 for w in openbim_document::grid_arc::points(start, end, el.bulge).windows(2) { dashed(&painter, screen([w[0][0], w[0][1], level_z]), screen([w[1][0], w[1][1], level_z]), stroke); }
@@ -1130,7 +1130,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     } else if app.tool == crate::Tool::Grid && !three_d {
         // two picks (or press, drag, release) draw a grid line, snapped to 50 mm and to the ends of other grid lines
         let (pan, centre, bc) = (app.pan, rect.center(), bounds.center().to_vec2());
-        let ends: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry { Some(Geometry::Grid { start, end }) => vec![start, end], _ => vec![] }).collect();
+        let ends: Vec<[f64; 2]> = app.document.elements().flat_map(|el| match el.geometry { Some(Geometry::Grid { start, end, .. }) => vec![start, end], _ => vec![] }).collect();
         let ortho = ui.input(|i| i.modifiers.shift);
         let start = app.beam_start;
         let to_model = |p: Pos2| {
@@ -1409,7 +1409,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         // A selected grid shows a grip at each end; dragging one moves that end (the other grids of a
         // multi-selection follow as a group), lined up with the bubble lines of the parallel grids.
         let grid_ends_sel = selected.and_then(|id| match app.document.get(id) {
-            Some(e) if e.category == Category::Grid => match e.geometry { Some(Geometry::Grid { start, end }) => Some((id, start, end)), _ => None },
+            Some(e) if e.category == Category::Grid => match e.geometry { Some(Geometry::Grid { start, end, .. }) => Some((id, start, end)), _ => None },
             _ => None,
         });
         if let (Some((_, a, b)), None) = (grid_ends_sel, app.drag) {
@@ -1467,7 +1467,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 } else if let Some((id, at_start, end_pt)) = {
                     let grids: Vec<_> = app.document.elements().filter(|e| e.category == Category::Grid).collect();
                     grids.into_iter().find_map(|e| {
-                        let (start, end) = match &e.geometry { Some(Geometry::Grid { start, end }) => (*start, *end), _ => return None };
+                        let (start, end) = match &e.geometry { Some(Geometry::Grid { start, end, .. }) => (*start, *end), _ => return None };
                         let offs = app.grid_label_offsets.get(&e.id).copied().unwrap_or(([0.0, 0.0], [0.0, 0.0]));
                         for (i, (pt, off)) in [(start, offs.0), (end, offs.1)].iter().enumerate() {
                             let bp = screen([pt[0], pt[1], level_z]) + Vec2::new(off[0] as f32 * scale, -off[1] as f32 * scale);
@@ -1484,7 +1484,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                 } else if let Some(hit) = faces.iter().rev().find(|(_, _, polygon, _)| contains(polygon, p)).map(|(_, id, _, _)| *id) {
                     if !selected_all.contains(&hit) { app.select_element(Some(hit)); }
                     app.drag = Some(crate::Drag::Move { id: hit, from: snap_to(p, None) });
-                } else if let Some((id, a, b)) = app.document.elements().filter(|e| e.category == Category::Grid).filter_map(|e| e.geometry.and_then(|g| match g { Geometry::Grid { start, end } => Some((e.id, start, end)), _ => None })).collect::<Vec<_>>().iter().rev().find(|(_, a, b)| { let sa = screen([a[0], a[1], level_z]); let sb = screen([b[0], b[1], level_z]); segment_distance(p, sa, sb) < 7.0 }).map(|(id, a, b)| (*id, *a, *b)) {
+                } else if let Some((id, a, b)) = app.document.elements().filter(|e| e.category == Category::Grid).filter_map(|e| e.geometry.and_then(|g| match g { Geometry::Grid { start, end, .. } => Some((e.id, start, end)), _ => None })).collect::<Vec<_>>().iter().rev().find(|(_, a, b)| { let sa = screen([a[0], a[1], level_z]); let sb = screen([b[0], b[1], level_z]); segment_distance(p, sa, sb) < 7.0 }).map(|(id, a, b)| (*id, *a, *b)) {
                     // grab the grid line itself (not a wall under it): move the whole grid and its group
                     if !selected_all.contains(&id) { app.select_element(Some(id)); }
                     app.drag = Some(crate::Drag::Move { id, from: snap_to(p, None) });
@@ -1541,7 +1541,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                         // the grid lines of the group move with a dashed ghost
                         for el in app.document.elements() {
                             if el.category == Category::Grid && group.contains(&el.id) {
-                                if let Some(Geometry::Grid { start, end }) = el.geometry {
+                                if let Some(Geometry::Grid { start, end, .. }) = el.geometry {
                                     let ga = xf.point(start); let gb = xf.point(end);
                                     dashed(&painter, screen([ga[0], ga[1], level_z]), screen([gb[0], gb[1], level_z]), ghost);
                                 }
@@ -1554,7 +1554,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                         // A grid: move one end, lined up with the bubble lines of the parallel grids; the
                         // other grids of a multi-selection follow as a group. Else a wall or section end.
                         if app.document.get(id).is_some_and(|e| e.category == Category::Grid) {
-                            if let Some(Geometry::Grid { start, end }) = app.document.get(id).and_then(|e| e.geometry.clone()) {
+                            if let Some(Geometry::Grid { start, end, .. }) = app.document.get(id).and_then(|e| e.geometry.clone()) {
                                 let (fixed, moving) = if at_start { (end, start) } else { (start, end) };
                                 let raw_to = snap_to(h, Some(fixed));
                                 let aln = crate::grid_tools::align_end(&crate::grid_tools::grid_ends(&app.document), Some(fixed), raw_to, 12.0 / scale as f64);
@@ -1569,13 +1569,13 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
                                 let mut ops: Vec<openbim_document::Command> = Vec::new();
                                 for gid in group {
                                     if gid == id || app.document.get(gid).is_some_and(|e| e.category == Category::Grid) {
-                                        if let Some(Geometry::Grid { start: gs, end: ge }) = app.document.get(gid).and_then(|e| e.geometry.clone()) {
+                                        if let Some(Geometry::Grid { start: gs, end: ge, label_off }) = app.document.get(gid).and_then(|e| e.geometry.clone()) {
                                             let (nstart, nend) = if gid == id {
                                                 if at_start { (to, ge) } else { (gs, to) }
                                             } else {
                                                 ([gs[0] + delta[0], gs[1] + delta[1]], [ge[0] + delta[0], ge[1] + delta[1]])
                                             };
-                                            ops.push(openbim_document::Command::SetGeometry { id: gid, geometry: Geometry::Grid { start: nstart, end: nend } });
+                                            ops.push(openbim_document::Command::SetGeometry { id: gid, geometry: Geometry::Grid { start: nstart, end: nend, label_off } });
                                         }
                                     }
                                 }
@@ -3402,10 +3402,10 @@ mod tests {
         assert!(matches!(app.drag, Some(crate::Drag::Grip { id, at_start: false }) if id == b), "{:?}", app.drag);
         frame(&ctx, screen, &mut app, vec![egui::Event::PointerMoved(to)]);
         frame(&ctx, screen, &mut app, vec![button(to, false)]);
-        let end = match app.document.get(b).unwrap().geometry { Some(Geometry::Grid { start, end }) => (start, end), _ => panic!() };
+        let end = match app.document.get(b).unwrap().geometry { Some(Geometry::Grid { start, end, .. }) => (start, end), _ => panic!() };
         assert!((end.1[0] - 5.0).abs() < 1e-6 && (end.1[1] - 10.0).abs() < 1e-6, "B's top lined up with A's end at (5,10): {end:?} {}", app.message);
         app.document.undo().unwrap();
-        let back = match app.document.get(b).unwrap().geometry { Some(Geometry::Grid { start, end }) => (start, end), _ => panic!() };
+        let back = match app.document.get(b).unwrap().geometry { Some(Geometry::Grid { start, end, .. }) => (start, end), _ => panic!() };
         assert!((back.1[1] - 9.0).abs() < 1e-6, "undo restores B's top at y=9: {back:?}");
     }
 

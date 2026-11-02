@@ -79,7 +79,7 @@ pub(crate) fn align_end(others: &[[[f64; 2]; 2]], fixed: Option<[f64; 2]>, raw: 
 pub(crate) fn grid_ends(doc: &openbim_document::Document) -> Vec<[[f64; 2]; 2]> {
     doc.elements()
         .filter_map(|el| match el.geometry {
-            Some(openbim_document::Geometry::Grid { start, end }) => Some([start, end]),
+            Some(openbim_document::Geometry::Grid { start, end, .. }) => Some([start, end]),
             _ => None,
         })
         .collect()

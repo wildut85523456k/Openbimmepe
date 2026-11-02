@@ -199,7 +199,7 @@ impl Desktop {
                     Section::Oval => (0, self.web_mm, self.flange_mm),
                 };
             }
-            if let Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end }) = el.geometry {
+            if let Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end, .. }) = el.geometry {
                 self.axis_mm = [start[0], start[1], end[0], end[1]].map(|n| n * 1000.0);
             }
         } else { self.selected = None; }
@@ -230,7 +230,7 @@ impl Desktop {
         let elevation = el.category != Category::Grid && differs(el.elevation_m * 1000.0, self.elevation_mm);
         let slope = el.slope_ratio.is_some_and(|s| differs(s * 100.0, self.slope_percent));
         let axis = match el.geometry {
-            Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end }) =>
+            Some(Geometry::Linear { start, end, .. } | Geometry::Grid { start, end, .. }) =>
                 [start[0], start[1], end[0], end[1]].iter().zip(self.axis_mm)
                     .any(|(a, b)| differs(a * 1000.0, b)),
             _ => false,
@@ -347,9 +347,21 @@ impl Desktop {
                 let verts = mesh.vertices.len();
                 let tris = mesh.faces.len();
                 let params = crate::step_import::mesh_params(&mesh);
-                self.imported_step = Some(mesh);
+                // place the imported part as a Family element carrying the mesh, on the first level if there is one
+                let level = self.document.elements().find(|e| e.geometry == Some(openbim_document::Geometry::Level)).map(|l| l.id);
+                let placed_id = level.and_then(|level| {
+                    let spec = openbim_document::FamilySpec { family: "Imported STEP".into(), type_name: String::new(), overrides: Vec::new(), angle_deg: 0.0, elevation_m: 0.0 };
+                    self.document.place_family(level, [0.0, 0.0], &spec).ok()
+                });
+                if let Some(id) = placed_id {
+                    self.document.set_display_mesh(id, Some(mesh.clone()));
+                    self.imported_step = None;
+                    self.message = format!("Imported STEP: {verts} vertices, {tris} triangles placed as family element {} (mm units)", id.0);
+                } else {
+                    self.imported_step = Some(mesh);
+                    self.message = format!("Imported STEP: {verts} vertices, {tris} triangles (mm units, no level to place on; shown as overlay)");
+                }
                 self.step_params_dialog = Some(crate::step_params_ui::StepParamsDialog { name: path.display().to_string(), params });
-                self.message = format!("Imported STEP: {verts} vertices, {tris} triangles (mm units, awaiting placement)");
             }
             Err(e) => self.message = format!("STEP import failed: {e}"),
         }
@@ -1664,7 +1676,7 @@ impl Desktop {
         let end = [self.axis_mm[2] / 1000.0, self.axis_mm[3] / 1000.0];
         let geometry = match el.geometry {
             Some(Geometry::Linear { level, .. }) => Some(Geometry::Linear { start, end, level }),
-            Some(Geometry::Grid { .. }) => Some(Geometry::Grid { start, end }),
+            Some(Geometry::Grid { .. }) => Some(Geometry::Grid { start, end, label_off: [0.0, 0.0] }),
             Some(Geometry::Pad { at, level, .. }) => Some(Geometry::Pad { at, level, thickness_m: self.footing_thickness_mm / 1000.0 }),
             _ => None,
         };

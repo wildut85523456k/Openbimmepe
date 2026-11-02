@@ -479,14 +479,14 @@ pub fn plan_with(doc: &Document, imp: &Imported, map: &ClassMap) -> (Vec<Command
         *report.added.entry(name).or_default() += 1;
     }
     // grid lines: those the model has already (same name and ends) are not made twice
-    let known: Vec<(String, [f64; 2], [f64; 2], f64)> = doc.elements().filter_map(|e| match e.geometry { Some(Geometry::Grid { start, end }) if e.category == Category::Grid => Some((e.name.clone(), start, end, e.bulge)), _ => None }).collect();
+    let known: Vec<(String, [f64; 2], [f64; 2], f64)> = doc.elements().filter_map(|e| match e.geometry { Some(Geometry::Grid { start, end, .. }) if e.category == Category::Grid => Some((e.name.clone(), start, end, e.bulge)), _ => None }).collect();
     for g in &imp.grids {
         let (a, b) = ([r6(g.start[0]), r6(g.start[1])], [r6(g.end[0]), r6(g.end[1])]);
         if known.iter().any(|k| k.0 == g.name && close2(k.1, a) && close2(k.2, b) && (k.3 - g.bulge).abs() < 1e-6) { continue; }
         let id = take(None, &mut used);
         ops.extend([
             Command::Create { id, category: Category::Grid, name: if g.name.trim().is_empty() { "Grid".into() } else { g.name.clone() }, width_m: 1.0, height_m: 1.0, elevation_m: 0.0 },
-            Command::SetGeometry { id, geometry: Geometry::Grid { start: a, end: b } },
+            Command::SetGeometry { id, geometry: Geometry::Grid { start: a, end: b, label_off: [0.0, 0.0] } },
         ]);
         if g.bulge != 0.0 { ops.push(Command::SetBulge { id, bulge: g.bulge }); }
         *report.added.entry("grid lines").or_default() += 1;
@@ -1578,7 +1578,7 @@ mod tests {
     #[test]
     fn the_grid_lines_of_a_file_from_another_program_come_back_by_name_and_are_not_doubled() {
         let d = Document::spatial_sample();
-        let lines = |d: &Document| { let mut v: Vec<(String, [f64; 2], [f64; 2])> = d.elements().filter_map(|e| match e.geometry { Some(Geometry::Grid { start, end }) => Some((e.name.clone(), start, end)), _ => None }).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v };
+        let lines = |d: &Document| { let mut v: Vec<(String, [f64; 2], [f64; 2])> = d.elements().filter_map(|e| match e.geometry { Some(Geometry::Grid { start, end, .. }) => Some((e.name.clone(), start, end)), _ => None }).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v };
         let want = lines(&d);
         assert_eq!(want.len(), 6);
         let out = crate::export::export_ifc_with(&d, "P", 1, "2026-10-24T00:00:00", crate::export::Schema::Ifc4x3, false).unwrap();
@@ -1756,7 +1756,7 @@ mod tests {
         let report = import_ifc(&mut back, &out.text).unwrap();
         let got = back.elements().find(|e| e.name == "R1").unwrap_or_else(|| panic!("{}", report.text()));
         assert!((got.bulge - 0.35).abs() < 1e-6, "{}", got.bulge);
-        assert!(matches!(got.geometry, Some(Geometry::Grid { start, end }) if close2(start, [0.0, 20.0]) && close2(end, [12.0, 20.0])));
+        assert!(matches!(got.geometry, Some(Geometry::Grid { start, end, .. }) if close2(start, [0.0, 20.0]) && close2(end, [12.0, 20.0])));
         import_ifc(&mut back, &out.text).unwrap();
         assert_eq!(back.elements().filter(|e| e.name == "R1").count(), 1);
         let _ = id;
