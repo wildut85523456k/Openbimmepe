@@ -879,6 +879,11 @@ impl Desktop {
             "framing" => self.choose_tool(Tool::Beam),
             "structural_section" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "model_line" => self.choose_tool(Tool::Wall),
+            "area" => self.choose_tool(Tool::Room),
+            "structural_column" => self.choose_tool(Tool::Column),
+            "structural_floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }
+            "structural_wall" | "shear_wall" => self.choose_tool(Tool::Wall),
+            "detail" => { let key = crate::view_ui::view_key(self.view).filter(|k| self.placeable_views().iter().any(|v| &v.0 == k)); self.open_add_view(None, key) }
             "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "rebar" => self.choose_tool(Tool::Rebar),
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
