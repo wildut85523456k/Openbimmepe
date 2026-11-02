@@ -275,6 +275,7 @@ fn category_info(category: openbim_document::Category) -> (&'static str, &'stati
         C::Type => ("Types", "Type", "component"), C::Tag => ("Tags (1)", "Tag", "tag"), C::Dimension => ("Dimensions (1)", "Aligned Dimension", "dimension"), C::Room => ("Rooms (1)", "Room", "room"), C::Stair => ("Stairs (1)", "Stair", "stair"), C::Opening => ("Openings (1)", "Opening", "opening"), C::Section => ("Views (1)", "Section", "section"), C::Elevation => ("Views (1)", "Elevation", "elevation"),
         C::Generic => ("Generic Models (1)", "Generic Model", "component"), C::Grid => ("Grids (1)", "Straight Grid", "grid"), C::Equipment => ("Equipment (1)", "Equipment", "ahu"),
         C::Space => ("Spaces (1)", "Space", "room"), C::DuctTerminal => ("Duct Terminals (1)", "Duct Terminal", "air_terminal"),
+        C::ReferencePlane => ("Reference Planes (1)", "Reference Plane", "grid"),
     }
 }
 

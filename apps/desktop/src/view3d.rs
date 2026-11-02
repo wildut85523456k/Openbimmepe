@@ -123,6 +123,11 @@ pub fn datums(doc: &Document) -> Vec<Datum> {
             out.push(Datum { a: [start[0], start[1], base], b: [end[0], end[1], base], label: el.name.clone(), bubbles: true });
             ends.extend([start, end]);
         }
+        if let Some(Geometry::ReferencePlane { start, end, level }) = el.geometry {
+            let z = doc.get(level).map(|l| l.elevation_m).unwrap_or(base);
+            out.push(Datum { a: [start[0], start[1], z], b: [end[0], end[1], z], label: el.name.clone(), bubbles: false });
+            ends.extend([start, end]);
+        }
     }
     if ends.is_empty() { return out; }
     let left = ends.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
