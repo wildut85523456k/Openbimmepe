@@ -886,7 +886,8 @@ impl Desktop {
             "detail" => { let key = crate::view_ui::view_key(self.view).filter(|k| self.placeable_views().iter().any(|v| &v.0 == k)); self.open_add_view(None, key) }
             "air_terminal" | "diffuser" | "grille" | "chiller" | "fan" | "vav_box" | "damper" | "mechanical_equipment" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "cable_tray" | "cable_tray_fitting" | "conduit" | "conduit_fitting" | "junction_box" | "pull_box" | "raceway" => self.choose_tool(Tool::Cable),
-            "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
+            "duct_elbow" | "duct_fitting" | "duct_transition" | "flex_duct" => self.choose_tool(Tool::Duct),
+            "pipe_elbow" | "pipe_fitting" | "pipe_tee" | "pipe_transition" | "pipe_support" => self.choose_tool(Tool::Pipe),
             "rebar" => self.choose_tool(Tool::Rebar),
             "beam_system" => { self.usage_pick = openbim_document::Usage::Joist; self.choose_tool(Tool::BeamSystem) }
             "foundation" => self.choose_tool(Tool::Footing),
