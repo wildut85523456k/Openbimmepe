@@ -345,6 +345,21 @@ impl Desktop {
         self.family_parameters_dialog = Some(crate::family_parameters_ui::FamilyParametersDialog::open(&family));
     }
 
+    pub(crate) fn load_shared_params_file(&mut self) {
+        let Some(path) = crate::dialog::Question::new().set_title("Load Shared Parameters").add_filter("JSON", &["json"]).ask_open() else { return };
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match serde_json::from_str::<openbim_document::shared_params::SharedParamFile>(&text) {
+                Ok(sp) => {
+                    let n = sp.params.len();
+                    self.document.set_shared_params(sp);
+                    self.message = format!("Loaded {n} shared parameters from {}", path.display());
+                }
+                Err(e) => self.message = format!("Shared params parse failed: {e}"),
+            },
+            Err(e) => self.message = format!("Read failed: {e}"),
+        }
+    }
+
     pub(crate) fn import_step_file(&mut self) {
         let Some(path) = crate::dialog::Question::new().set_title("Import STEP").add_filter("STEP", &["step", "stp"]).ask_open() else { return };
         match crate::step_import::import_step(&path.display().to_string()) {
