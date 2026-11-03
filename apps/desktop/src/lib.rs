@@ -924,6 +924,7 @@ impl Desktop {
             "import_dwg" => self.import_dwg_file(),
             "import_step" => self.import_step_file(),
             "import_family_manifest" => self.import_family_manifest_file(),
+            "import_family_manifest_folder" => self.import_family_manifest_folder(),
             "load_shared_params" => self.load_shared_params_file(),
             "family_parameters" => self.open_family_parameters_dialog(),
             "import_pdf" => self.import_pdf_file(),

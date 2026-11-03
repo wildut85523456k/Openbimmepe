@@ -360,7 +360,63 @@ impl Desktop {
         }
     }
 
-        pub(crate) fn import_family_manifest_file(&mut self) {
+            pub(crate) fn import_family_manifest_folder(&mut self) {
+        let Some(folder) = rfd::FileDialog::new().set_title("Import Family Folder").pick_folder() else { return };
+        let mut count = 0;
+        let mut defs = self.document.family_defs().clone();
+        let mut manifests: Vec<std::path::PathBuf> = Vec::new();
+        fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.is_dir() { collect(&p, out); }
+                    else if p.file_name().map(|n| n == "family_manifest.json").unwrap_or(false) { out.push(p); }
+                }
+            }
+        }
+        collect(&folder, &mut manifests);
+        for mpath in &manifests {
+            let Ok(text) = std::fs::read_to_string(mpath) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+            let fd = v.get("family_def").cloned().unwrap_or(serde_json::Value::Null);
+            let name = fd.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            if name.is_empty() { continue; }
+            let mut def = openbim_document::family_params::FamilyDef::new(&name);
+            let mut idc: u64 = 1;
+            if let Some(params) = fd.get("parameters").and_then(|x| x.as_array()) {
+                for p in params {
+                    let pname = p.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                    if pname.is_empty() { continue; }
+                    let storage = p.get("storage_type").and_then(|x| x.as_str()).unwrap_or("Text");
+                    let kind = match storage {
+                        "Length" => openbim_document::family_params::ParamKind::Length,
+                        "Integer" => openbim_document::family_params::ParamKind::Integer,
+                        "Number" => openbim_document::family_params::ParamKind::Number,
+                        "YesNo" => openbim_document::family_params::ParamKind::YesNo,
+                        "Text" | "URL" => openbim_document::family_params::ParamKind::Text,
+                        "Material" => openbim_document::family_params::ParamKind::Material,
+                        _ => openbim_document::family_params::ParamKind::Text,
+                    };
+                    let is_type = p.get("is_type_param").and_then(|x| x.as_bool()).unwrap_or(false);
+                    let formula = p.get("formula").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    def.parameters.push(openbim_document::family_params::Parameter {
+                        id: idc, name: pname,
+                        discipline: openbim_document::family_params::ParamDiscipline::Common,
+                        kind, group: openbim_document::family_params::ParamGroup::Other,
+                        is_instance: !is_type, formula,
+                        value: openbim_document::family_params::ParamValue::Text(String::new()),
+                        shared_guid: None,
+                    });
+                    idc += 1;
+                }
+            }
+            defs.insert(name, def);
+            count += 1;
+        }
+        self.document.set_family_defs(defs);
+        self.message = format!("Imported {count} families from {}", folder.display());
+    }
+    pub(crate) fn import_family_manifest_file(&mut self) {
         let Some(path) = crate::dialog::Question::new().set_title("Import Family (rvt2ifc manifest)").add_filter("JSON", &["json"]).ask_open() else { return };
         match std::fs::read_to_string(&path) {
             Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
