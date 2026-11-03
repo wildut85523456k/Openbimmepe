@@ -536,6 +536,8 @@ const IMPLEMENTED: &[&str] = &[
     "curtain_wall", "ramp", "by_face", "model_line", "model_text", "area",
     "structural_wall", "shear_wall", "brace_frame", "anchor", "anchor_cast_in", "connection", "hanger", "structural_section",
     "air_terminal", "backflow_preventer", "cable_tray", "cable_tray_fitting", "chiller", "cleanout", "conduit", "conduit_fitting", "cooling_tower", "create_family", "damper", "detail", "device", "diffuser", "disconnect", "drain", "duct_elbow", "duct_fitting", "duct_transition", "family_editor_toggle", "family_parameters", "fan", "flex_duct", "framing", "generator", "grille", "import_dwg", "import_family_manifest", "import_family_manifest_folder", "import_pdf", "import_step", "interference_check", "junction_box", "light_pendant", "light_surface", "lighting_fixture", "link_model", "mechanical_equipment", "not_in_the_registry", "opening_dormer", "opening_face", "orbit", "pan", "panel", "phase", "pipe_elbow", "pipe_fitting", "pipe_support", "pipe_tee", "pipe_transition", "plumbing_fixture", "pull_box", "pump", "raceway", "revision_cloud", "search", "settings", "socket", "sprinkler", "switch", "transformer", "valve_ball", "valve_butterfly", "valve_gate", "vav_box", "view", "workset",
+    "mass", "mass_extrusion", "mass_revolution", "mass_sweep", "mass_blend", "mass_floors",
+    "toposurface", "property_line", "building_pad", "parking", "planting", "site_component",
 ];
 
 impl Desktop {
@@ -879,7 +881,8 @@ impl Desktop {
             "truss" => self.choose_tool(Tool::Truss),
             "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Door); self.choose_tool(Tool::Family) }
             "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Window); self.choose_tool(Tool::Family) }
-            "curtain_wall" => self.choose_tool(Tool::Wall),
+            "mass" | "mass_extrusion" | "mass_revolution" | "mass_sweep" | "mass_blend" | "mass_floors" => self.message = "Massing: not yet implemented".into(),
+            "toposurface" | "property_line" | "building_pad" | "parking" | "planting" | "site_component" => self.choose_tool(Tool::Family),
             "ramp" => self.choose_tool(Tool::Stair),
             "framing" => self.choose_tool(Tool::Beam),
             "structural_section" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }

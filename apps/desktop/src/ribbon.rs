@@ -159,7 +159,10 @@ const ANALYZE: &[Group] = &[
     Group { title: "Systems", commands: &[c("end_point", "End Point"), c("compute", "Compute")] },
     Group { title: "Coordination", commands: &[c("clash", "Clash Detection"), c("interference_check", "Interference Check")] },
 ];
-const MASSING: &[Group] = &[Group { title: "Model Site", commands: &[c("component", "Site Component")] }];
+const MASSING: &[Group] = &[
+    Group { title: "Massing", commands: &[c("mass", "Mass"), c("mass_extrusion", "Extrusion"), c("mass_revolution", "Revolution"), c("mass_sweep", "Sweep"), c("mass_blend", "Blend"), c("mass_floors", "Mass Floors")] },
+    Group { title: "Site", commands: &[c("toposurface", "Toposurface"), c("property_line", "Property Line"), c("building_pad", "Building Pad"), c("parking", "Parking"), c("planting", "Planting"), c("site_component", "Site Component")] },
+];
 const COLLABORATE: &[Group] = &[
     Group { title: "Manage Collaboration", commands: &[c("workset", "Worksets"), c("phase", "Phases")] },
     Group { title: "Coordinate", commands: &[c("link_model", "Link Model"), c("clash", "Clash Detection")] },
