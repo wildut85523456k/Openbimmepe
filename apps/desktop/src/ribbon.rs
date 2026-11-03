@@ -191,7 +191,7 @@ const MODIFY: &[Group] = &[
     Group { title: "Clipboard", commands: &[c("paste", "Paste"), c("paste_same_place", "Paste Same Place"), c("cut", "Cut"), c("copy_clipboard", "Copy"), c("match_type", "Match Type")] },
     Group { title: "Modify", commands: &[
         c("move", "Move"), c("copy", "Copy"), c("rotate", "Rotate"), c("mirror", "Mirror"), c("align", "Align"),
-        c("offset", "Offset"), c("trim", "Trim/Extend"), c("pin", "Pin"), c("unpin", "Unpin"), c("delete", "Delete"),
+        c("offset", "Offset"), c("trim", "Trim/Extend"), c("array", "Array"), c("pin", "Pin"), c("unpin", "Unpin"), c("delete", "Delete"),
     ]},
     Group { title: "Create", commands: &[c("create_similar", "Create Similar")] },
     Group { title: "Geometry", commands: &[c("wall_joins", "Wall Joins")] },

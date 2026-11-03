@@ -539,6 +539,7 @@ const IMPLEMENTED: &[&str] = &[
     "mass", "mass_extrusion", "mass_revolution", "mass_sweep", "mass_blend", "mass_floors",
     "toposurface", "property_line", "building_pad", "parking", "planting", "site_component",
     "publish", "sync",
+    "array",
 ];
 
 impl Desktop {
@@ -902,6 +903,7 @@ impl Desktop {
             "brace_frame" => self.choose_tool(Tool::Beam),
             "anchor" | "anchor_cast_in" | "connection" | "hanger" => self.choose_tool(Tool::Family),
             "valve_ball" | "valve_butterfly" | "valve_gate" => self.choose_tool(Tool::Pipe),
+            "array" => self.message = "Array: not yet implemented".into(),
             "opening_dormer" | "opening_face" => { self.opening_host = None; self.opening_cands.clear(); self.slab_points.clear(); self.choose_tool(Tool::VerticalOpening) },
             "orbit" => { self.message = "Orbit mode: drag in the 3D view to orbit; Esc to exit".into() },
             "pan" => { self.message = "Pan mode: drag in the view to pan; Esc to exit".into() },

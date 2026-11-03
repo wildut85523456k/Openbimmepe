@@ -21,6 +21,7 @@ pub static ICONS: &[Icon] = &[
     icon!("ahu"),
     icon!("air_terminal"),
     icon!("align"),
+    icon!("array"),
     icon!("analytical_model"),
     icon!("anchor"),
     icon!("area"),
