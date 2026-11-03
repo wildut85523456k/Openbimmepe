@@ -165,7 +165,8 @@ const MASSING: &[Group] = &[
 ];
 const COLLABORATE: &[Group] = &[
     Group { title: "Manage Collaboration", commands: &[c("workset", "Worksets"), c("phase", "Phases")] },
-    Group { title: "Coordinate", commands: &[c("link_model", "Link Model"), c("clash", "Clash Detection")] },
+    Group { title: "Coordinate", commands: &[c("link_model", "Link Model"), c("clash", "Clash Detection"), c("interference_check", "Interference Check")] },
+    Group { title: "Publish", commands: &[c("publish", "Publish"), c("sync", "Sync with Central")] },
 ];
 const VIEW: &[Group] = &[
     Group { title: "Create", commands: &[

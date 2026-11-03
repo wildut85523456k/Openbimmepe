@@ -217,6 +217,8 @@ pub static ICONS: &[Icon] = &[
     icon!("parking"),
     icon!("planting"),
     icon!("site_component"),
+    icon!("publish"),
+    icon!("sync"),
     icon!("workset"),
     icon!("zoom_in"),
     icon!("zoom_out"),

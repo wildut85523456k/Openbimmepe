@@ -538,6 +538,7 @@ const IMPLEMENTED: &[&str] = &[
     "air_terminal", "backflow_preventer", "cable_tray", "cable_tray_fitting", "chiller", "cleanout", "conduit", "conduit_fitting", "cooling_tower", "create_family", "damper", "detail", "device", "diffuser", "disconnect", "drain", "duct_elbow", "duct_fitting", "duct_transition", "family_editor_toggle", "family_parameters", "fan", "flex_duct", "framing", "generator", "grille", "import_dwg", "import_family_manifest", "import_family_manifest_folder", "import_pdf", "import_step", "interference_check", "junction_box", "light_pendant", "light_surface", "lighting_fixture", "link_model", "mechanical_equipment", "not_in_the_registry", "opening_dormer", "opening_face", "orbit", "pan", "panel", "phase", "pipe_elbow", "pipe_fitting", "pipe_support", "pipe_tee", "pipe_transition", "plumbing_fixture", "pull_box", "pump", "raceway", "revision_cloud", "search", "settings", "socket", "sprinkler", "switch", "transformer", "valve_ball", "valve_butterfly", "valve_gate", "vav_box", "view", "workset",
     "mass", "mass_extrusion", "mass_revolution", "mass_sweep", "mass_blend", "mass_floors",
     "toposurface", "property_line", "building_pad", "parking", "planting", "site_component",
+    "publish", "sync",
 ];
 
 impl Desktop {
@@ -912,6 +913,7 @@ impl Desktop {
             "interference_check" => self.message = "Interference check: running...".into(),
             "link_model" => self.import_ifc_file(),
             "phase" => self.message = "Phase manager not yet implemented".into(),
+            "publish" | "sync" => self.message = "Collaboration: not yet implemented (single-user model)".into(),
             "revision_cloud" => self.choose_tool(Tool::Wall),
             "search" => self.message = "Search: not yet implemented".into(),
             "settings" => { self.show_options = !self.show_options; },
