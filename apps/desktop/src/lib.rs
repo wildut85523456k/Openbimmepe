@@ -886,7 +886,8 @@ impl Desktop {
             "truss" => self.choose_tool(Tool::Truss),
             "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Door); self.choose_tool(Tool::Family) }
             "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Window); self.choose_tool(Tool::Family) }
-            "mass" | "mass_extrusion" | "mass_revolution" | "mass_sweep" | "mass_blend" | "mass_floors" => self.message = "Massing: not yet implemented".into(),
+            "mass" | "mass_extrusion" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab); self.message = "Mass Extrusion: sketch a profile in plan, then set the height in the options bar".into(); },
+            "mass_revolution" | "mass_sweep" | "mass_blend" | "mass_floors" => self.message = "Massing: not yet implemented".into(),
             "toposurface" | "property_line" | "building_pad" | "parking" | "planting" | "site_component" => self.choose_tool(Tool::Family),
             "ramp" => self.choose_tool(Tool::Stair),
             "framing" => self.choose_tool(Tool::Beam),
