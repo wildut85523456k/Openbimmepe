@@ -439,6 +439,8 @@ struct Desktop {
     /// per-grid bubble (label) offsets from each end, in model metres: (start offset, end offset). Revit lets
     /// the user drag a grid's label off its end; these are view-state offsets, not stored in the IFC model.
     grid_label_offsets: std::collections::HashMap<ElementId, ([f64; 2], [f64; 2])>,
+    curtain_wall_ids: std::collections::HashSet<ElementId>,
+    curtain_wall_mode: bool,
     /// the file the model is saved in, and the questions about unsaved changes
     file: file::FileState,
     /// the types window, while it is open
@@ -604,7 +606,7 @@ impl Desktop {
             property_query: String::new(), browser_query: String::new(), ribbon_query: String::new(), discipline: "All",
             browser_selected: String::new(),
             message: "Sample scene - use Save to keep your edits".into(),
-            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, imported_step: None, step_params_dialog: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, work_plane: None, family_types_dialog: None, family_parameters_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), page_setups: Vec::new(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
+            show_properties: true, show_browser: true, show_warnings: false, pdf_overlay: None, cad_overlay: None, imported_step: None, step_params_dialog: None, worksets: vec!["Mechanical".into(), "Electrical".into(), "Plumbing".into(), "Structural".into()], current_workset: "Mechanical".into(), grid_label_offsets: Default::default(), curtain_wall_ids: Default::default(), curtain_wall_mode: false, file: file::FileState { saved_revision: document_revision, ..Default::default() }, types_dialog: None, mep_settings_dialog: None, insulation_dialog: None, systems: Default::default(), schedules: Default::default(), views: Default::default(), sheets: Default::default(), type_editor: None, end_draft: Default::default(), compute: Default::default(), elec_draft: Default::default(), elec: Default::default(), cable_from: None, cable_via: Vec::new(), export_dialog: None, import_dialog: None, load_family_dialog: None, create_family_dialog: None, family_editor_mode: false, work_plane: None, family_types_dialog: None, family_parameters_dialog: None, family_snap_k: 0, move_disjoin: false, ghost_cache: None, family_type_editing: None, family_type_values: Vec::new(), family_type_texts: Vec::new(), print_dialog: print_dialog::PrintDialog::default(), page_setups: Vec::new(), type_name_input: String::new(), warnings_cache: (u64::MAX, Vec::new()), show_help: false, settings: if cfg!(test) { app_settings::AppSettings { autosave_minutes: 0, ..Default::default() } } else { Default::default() }, show_options: false, georef: Default::default(), show_georef: false, dark: false,
             zoom: 1.0, pan: Vec2::ZERO, keymap, key_typed: Vec::new(), level_rename_id: None, level_rename_name: String::new(), level_elev_edit: None,
             #[cfg(test)]
             ribbon_hits: Vec::new(),
@@ -867,6 +869,7 @@ impl Desktop {
             "delete" => self.delete_selected(),
             "level" => { self.level_elev_mm = self.levels().last().map_or(0.0, |l| l.2 * 1000.0 + 3000.0); self.level_name.clear(); self.choose_tool(Tool::Level) }
             "wall" => { self.wall_type = None; self.wall_flip = false; self.choose_tool(Tool::Wall) }
+            "curtain_wall" => { self.curtain_wall_mode = true; self.wall_type = None; self.wall_flip = false; self.choose_tool(Tool::Wall); self.message = "Curtain Wall: draw walls; mullions will be shown".into(); }
             "beam" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "structural_column" | "column" => self.choose_tool(Tool::Column),
             "structural_floor" | "floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }

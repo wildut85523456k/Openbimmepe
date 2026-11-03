@@ -702,10 +702,34 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         for el in app.document.elements().filter(|e| e.category == Category::Wall && e.type_id.is_some()) {
             if app.document.level_of(el.id) != Some(level_id) || detail == openbim_document::Detail::Coarse || !classes.contains_key(&el.id) { continue; }
             for (a, b, core) in app.document.wall_layer_lines(el.id) {
-                painter.line_segment([screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z])], Stroke::new(if core { 1.2 } else { 0.5 }, ink));
+                    painter.line_segment([screen([a[0], a[1], level_z]), screen([b[0], b[1], level_z])], Stroke::new(if core { 1.2 } else { 0.5 }, ink));
+                }
             }
         }
-    }
+        // curtain wall mullions
+        for el in app.document.elements().filter(|e| e.category == Category::Wall) {
+                if !app.curtain_wall_ids.contains(&el.id) { continue; }
+                if app.document.level_of(el.id) != Some(level_id) { continue; }
+                let Some(Geometry::Linear { start, end, .. }) = el.geometry else { continue; };
+                let dx = end[0] - start[0]; let dy = end[1] - start[1];
+                let len = (dx*dx + dy*dy).sqrt();
+                if len < 1e-6 { continue; }
+                let nx = dx / len; let ny = dy / len;
+                let spacing = 1.2_f64;
+                let n = (len / spacing).floor() as i32;
+                let mullion_color = Color32::from_rgb(80, 80, 80);
+                for i in 1..=n {
+                    let t = (i as f64 * spacing) / len;
+                    if t >= 1.0 { break; }
+                    let mx = start[0] + dx * t; let my = start[1] + dy * t;
+                    let (x0, y0) = (mx - ny * 0.15, my + nx * 0.15);
+                    let (x1, y1) = (mx + ny * 0.15, my - nx * 0.15);
+                    painter.line_segment([screen([x0, y0, level_z]), screen([x1, y1, level_z])], Stroke::new(1.0, mullion_color));
+                }
+                // horizontal mullion at mid-height
+                let mx0 = start[0] + ny * 0.0; // placeholder
+                let _ = (mx0,);
+            }
     if !three_d {
         let report = app.compute.report.as_ref().map(|(_, r)| r);
         crate::compute_ui::draw_overlay(&app.document, report, &painter, &screen, level_z, app.tool == crate::Tool::EndPoint);

@@ -1573,7 +1573,7 @@ impl Desktop {
         let lines = self.rectangle_lines(a, b);
         let m = |v: f64| v / 1000.0;
         match self.document.place_walls(level, &lines, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
-            Ok(ids) => self.message = format!("{} walls placed; undo removes them together", ids.len()),
+            Ok(ids) => { if self.curtain_wall_mode { self.curtain_wall_ids.extend(ids.iter().copied()); } self.message = format!("{} walls placed; undo removes them together", ids.len()) },
             Err(e) => self.message = format!("Walls rejected: {e:?}"),
         }
     }
@@ -1618,7 +1618,7 @@ impl Desktop {
         let Some(lines) = self.shape_lines(&pts) else { self.message = "Wall: those points make no shape (too small, or on a line)".into(); return };
         let m = |v: f64| v / 1000.0;
         match self.document.place_walls(level, &lines, m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
-            Ok(ids) => self.message = format!("{} walls placed{}; undo removes them together", ids.len(), if self.wall_mode >= 5 { " (a curve is built of straight walls)" } else { "" }),
+            Ok(ids) => { if self.curtain_wall_mode { self.curtain_wall_ids.extend(ids.iter().copied()); } self.message = format!("{} walls placed{}; undo removes them together", ids.len(), if self.wall_mode >= 5 { " (a curve is built of straight walls)" } else { "" }) },
             Err(e) => self.message = format!("Walls rejected: {e:?}"),
         }
     }
@@ -1632,7 +1632,7 @@ impl Desktop {
         let (a, b) = self.wall_axis(s, t);
         let m = |v: f64| v / 1000.0;
         match self.document.place_walls(level, &[(a, b)], m(self.width_mm), m(self.height_mm), m(self.elevation_mm), self.wall_type) {
-            Ok(ids) => self.message = format!("Wall {} placed on the line; undo removes it", ids[0].0),
+            Ok(ids) => { if self.curtain_wall_mode { self.curtain_wall_ids.extend(ids.iter().copied()); } self.message = format!("Wall {} placed on the line; undo removes it", ids[0].0) },
             Err(e) => self.message = format!("Wall rejected: {e:?}"),
         }
     }
