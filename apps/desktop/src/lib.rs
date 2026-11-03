@@ -533,6 +533,7 @@ const IMPLEMENTED: &[&str] = &[
     "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out",
     "load_family",
     "curtain_wall", "ramp", "by_face", "model_line", "model_text", "area",
+    "structural_wall", "shear_wall", "brace_frame", "anchor", "anchor_cast_in", "connection", "hanger", "structural_section",
 ];
 
 impl Desktop {
