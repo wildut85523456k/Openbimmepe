@@ -1656,6 +1656,13 @@ impl Desktop {
             Err(_) => self.message = "Tag: click a building element (walls, doors, ducts, equipment, ...)".into(),
         }
     }
+    /// A click placing a free-standing text note on the current level at `at`.
+    pub(crate) fn text_note_click(&mut self, level: ElementId, at: [f64; 2]) {
+        match self.document.place_text_note(level, at) {
+            Ok(id) => self.message = format!("Text note placed; undo removes it ({})", self.document.tag_text(id)),
+            Err(e) => self.message = format!("Text note rejected: {e:?}"),
+        }
+    }
 
     /// A pick of the Grid tool: the first starts a grid line, the second draws it, named after the last one.
     pub(crate) fn grid_click(&mut self, point: [f64; 2]) {

@@ -775,6 +775,20 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             painter.rect_stroke(r, 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Middle);
             painter.galley(r.center() - galley.size() / 2.0, galley, ink);
         }
+        // free-standing text notes
+        let text_note_ids: Vec<ElementId> = app.document.elements().filter(|e| e.category == Category::Tag && !vis.hidden(e)).filter(|e| matches!(e.geometry, Some(Geometry::TextNote { .. }))).map(|e| e.id).collect();
+        for id in text_note_ids {
+            let Some(Geometry::TextNote { level, at }) = app.document.get(id).and_then(|t| t.geometry) else { continue };
+            if level != level_id { continue; }
+            let head = screen([at[0], at[1], level_z]);
+            let text = app.document.tag_text(id);
+            let ink = ui.visuals().text_color();
+            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(note_px), ink);
+            let r = Rect::from_center_size(head, galley.size() + Vec2::new(10.0, 6.0));
+            painter.rect_filled(r, 2.0, ui.visuals().panel_fill);
+            painter.rect_stroke(r, 2.0, Stroke::new(1.0, ink), egui::StrokeKind::Middle);
+            painter.galley(r.center() - galley.size() / 2.0, galley, ink);
+        }
     }
     // Revit's way of picking a point: a click, or press at the start, drag, release at the end. A drag
     // starting a tool with nothing pending picks its start point at the press and its next point at the release.
@@ -1151,7 +1165,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
             let hit = faces.iter().rev().find(|(_, id, polygon, _)| contains(polygon, p) && app.document.get(*id).is_some()).map(|(_, id, _, _)| *id);
             // a door or window is tagged by a click in its opening, as it is selected
             let hit = hit.map(|h| filler_in_opening(app, h, p, &screen, level_z).unwrap_or(h));
-            match hit { Some(id) => app.tag_click(id, to_model(p)), None => app.message = "Tag: click an element".into() }
+            match hit { Some(id) => app.tag_click(id, to_model(p)), None => { if app.tool == crate::Tool::TextNote { app.text_note_click(level_id, to_model(p)); } else { app.message = "Tag: click an element".into(); } } }
         }
     } else if app.tool == crate::Tool::Grid && !three_d {
         // two picks (or press, drag, release) draw a grid line, snapped to 50 mm and to the ends of other grid lines

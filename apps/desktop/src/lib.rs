@@ -218,7 +218,7 @@ impl Desktop {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
+enum Tool { Select, Paste, MatchType, Railing, Stair, VerticalOpening, Room, Section, Elevation, Shaft, WallOpening, WallJoins, Dimension, Measure, Move, Copy, Rotate, Mirror, Align, Trim, Offset, Duct, Pipe, EndPoint, ElecNode, Cable, Wall, Grid, Level, Tag, TextNote, Beam, Column, Slab, Footing, WallFooting, BeamSystem, Truss, Rebar, Family }
 /// What the options bar starts from when a command is chosen. A field left `None` is not touched (A5).
 #[derive(Clone, Copy, Default)]
 struct ToolDefaults {
@@ -532,6 +532,7 @@ const IMPLEMENTED: &[&str] = &[
     "create_pipe_system", "generate_layout", "system_browser", "schedule", "sheet", "add_view", "print",
     "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out",
     "load_family",
+    "model_text_note",
     "curtain_wall", "ramp", "by_face", "model_line", "model_text", "area",
     "structural_wall", "shear_wall", "brace_frame", "anchor", "anchor_cast_in", "connection", "hanger", "structural_section",
 ];
@@ -738,6 +739,7 @@ impl Desktop {
             Tool::Trim => "Trim/Extend to Corner: click the first wall on the part to keep, then the second wall on the part to keep; both meet at the corner of their lines (Esc ends).".into(),
             Tool::Offset => "Offset: set the distance in the options bar and click a wall, beam or grid on the side to offset to; Copy keeps the original (Esc ends).".into(),
             Tool::Tag => "Tag: click an element in a plan view, an elevation or a section; the tag shows its type (or its name), follows the element and belongs to the view it is placed in. With Leader on, the label stands off the element on a leader line. Esc ends.".into(),
+            Tool::TextNote => "Text Note: click in a plan view to place a free-standing text note. Esc ends.".into(),
             Tool::Grid => "Grid: click the start and the end of the grid line in a plan view, or press, drag and release; each is named after the last (Shift keeps it square, Esc ends).".into(),
             Tool::Level => "Level: set the elevation (and a name, if you want one) in the options bar and click in a plan view. Revit draws a level in an elevation view; there is none here yet, so the click only confirms. The level gets its own plan view.".into(),
             Tool::Wall => "Wall: (Draw: Line, Rectangle or Pick Lines in the options bar; Spacebar flips the wall) click the start and then each next point in a plan view, or press, drag and release for one wall. The line you draw is the Location Line of the options bar (centreline, or the exterior or interior face, exterior on the left when you draw clockwise). Shift keeps it square, a typed length (mm) and Enter sets it, clicking the first point closes the loop; Esc ends the chain, Esc again the tool.".into(),
@@ -882,6 +884,7 @@ impl Desktop {
             "structural_section" => { self.usage_pick = openbim_document::Usage::Girder; self.choose_tool(Tool::Beam) }
             "model_line" => self.choose_tool(Tool::Wall),
             "model_text" => self.choose_tool(Tool::Tag),
+            "model_text_note" => self.choose_tool(Tool::TextNote),
             "area" => self.choose_tool(Tool::Room),
             "structural_column" => self.choose_tool(Tool::Column),
             "structural_floor" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab) }

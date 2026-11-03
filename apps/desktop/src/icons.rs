@@ -204,6 +204,7 @@ pub static ICONS: &[Icon] = &[
     icon!("visual_programming"),
     icon!("wall"),
     icon!("window"),
+    icon!("model_text_note"),
     icon!("workset"),
     icon!("zoom_in"),
     icon!("zoom_out"),

@@ -151,7 +151,7 @@ const INSERT: &[Group] = &[Group { title: "Link", commands: &[
 const ANNOTATE: &[Group] = &[
     Group { title: "Dimension", commands: &[c("dimension", "Aligned")] },
     Group { title: "Detail", commands: &[c("detail", "Detail")] },
-    Group { title: "Tag", commands: &[c("tag", "Tag")] },
+    Group { title: "Tag", commands: &[c("tag", "Tag"), c("model_text_note", "Text Note")] },
     Group { title: "Revision", commands: &[c("revision_cloud", "Revision Cloud")] },
 ];
 const ANALYZE: &[Group] = &[
