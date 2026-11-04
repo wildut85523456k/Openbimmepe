@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "canvas": 24,
+  "strokeWidth": 1.75,
+  "palette": {
+    "navy": "#000080",
+    "neon": "#1F51FF"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "icons": [
+    {
+      "id": "wall",
+      "category": "Architecture"
+    },
+    {
+      "id": "door",
+      "category": "Architecture"
+    },
+    {
+      "id": "window",
+      "category": "Architecture"
+    },
+    {
+      "id": "slab",
+      "category": "Architecture"
+    },
+    {
+      "id": "roof",
+      "category": "Architecture"
+    },
+    {
+      "id": "curtain-wall",
+      "category": "Architecture"
+    },
+    {
+      "id": "stair",
+      "category": "Architecture"
+    },
+    {
+      "id": "ramp",
+      "category": "Architecture"
+    },
+    {
+      "id": "ceiling",
+      "category": "Architecture"
+    },
+    {
+      "id": "opening",
+      "category": "Architecture"
+    },
+    {
+      "id": "room",
+      "category": "Architecture"
+    },
+    {
+      "id": "railing",
+      "category": "Architecture"
+    },
+    {
+      "id": "column",
+      "category": "Structure"
+    },
+    {
+      "id": "beam",
+      "category": "Structure"
+    },
+    {
+      "id": "brace",
+      "category": "Structure"
+    },
+    {
+      "id": "pad-footing",
+      "category": "Structure"
+    },
+    {
+      "id": "strip-footing",
+      "category": "Structure"
+    },
+    {
+      "id": "rebar",
+      "category": "Structure"
+    },
+    {
+      "id": "duct",
+      "category": "HVAC"
+    },
+    {
+      "id": "duct-elbow",
+      "category": "HVAC"
+    },
+    {
+      "id": "flex-duct",
+      "category": "HVAC"
+    },
+    {
+      "id": "fan",
+      "category": "HVAC"
+    },
+    {
+      "id": "diffuser",
+      "category": "HVAC"
+    },
+    {
+      "id": "damper",
+      "category": "HVAC"
+    },
+    {
+      "id": "pipe",
+      "category": "Plumbing"
+    },
+    {
+      "id": "pipe-elbow",
+      "category": "Plumbing"
+    },
+    {
+      "id": "valve",
+      "category": "Plumbing"
+    },
+    {
+      "id": "pump",
+      "category": "Plumbing"
+    },
+    {
+      "id": "tank",
+      "category": "Plumbing"
+    },
+    {
+      "id": "drain",
+      "category": "Plumbing"
+    },
+    {
+      "id": "luminaire",
+      "category": "Electrical"
+    },
+    {
+      "id": "switch",
+      "category": "Electrical"
+    },
+    {
+      "id": "socket",
+      "category": "Electrical"
+    },
+    {
+      "id": "panel",
+      "category": "Electrical"
+    },
+    {
+      "id": "cable-tray",
+      "category": "Electrical"
+    },
+    {
+      "id": "conduit",
+      "category": "Electrical"
+    },
+    {
+      "id": "move",
+      "category": "Modify"
+    },
+    {
+      "id": "rotate",
+      "category": "Modify"
+    },
+    {
+      "id": "mirror",
+      "category": "Modify"
+    },
+    {
+      "id": "align",
+      "category": "Modify"
+    },
+    {
+      "id": "trim",
+      "category": "Modify"
+    },
+    {
+      "id": "offset",
+      "category": "Modify"
+    },
+    {
+      "id": "dimension",
+      "category": "Documentation"
+    },
+    {
+      "id": "section",
+      "category": "Documentation"
+    },
+    {
+      "id": "level",
+      "category": "Documentation"
+    },
+    {
+      "id": "grid",
+      "category": "Documentation"
+    },
+    {
+      "id": "view-3d",
+      "category": "Documentation"
+    },
+    {
+      "id": "automation",
+      "category": "Documentation"
+    }
+  ]
+}
+
