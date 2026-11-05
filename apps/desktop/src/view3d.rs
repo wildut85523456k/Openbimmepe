@@ -215,6 +215,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.small("3D - middle-drag pan / Shift+middle-drag orbit / wheel zoom / double middle-click fit / ViewCube / click selects");
         if ui.small_button("Fit").clicked() { app.view3d.zoom_to_fit(ui.available_width() as f64 / ui.available_height().max(1.0) as f64); }
+        ui.checkbox(&mut app.view3d.camera.orthographic, "Orthographic");
     });
     ui.horizontal_wrapped(|ui| {
         for (st, name) in [(Style::Wireframe, "Wireframe"), (Style::HiddenLine, "Hidden Line"), (Style::Shaded, "Shaded"), (Style::Realistic, "Realistic")] {
