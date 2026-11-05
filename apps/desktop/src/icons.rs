@@ -213,7 +213,6 @@ pub static ICONS: &[Icon] = &[
     icon!("mass_blend"),
     icon!("mass_floors"),
     icon!("toposurface"),
-    icon!("property_line"),
     icon!("building_pad"),
     icon!("parking"),
     icon!("planting"),
