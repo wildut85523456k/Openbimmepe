@@ -529,7 +529,7 @@ const IMPLEMENTED: &[&str] = &[
     "pin", "unpin", "select_instances", "create_similar", "rotate", "mirror", "delete", "level", "wall", "beam",
     "structural_column", "column", "structural_floor", "floor", "elevation", "railing", "section",
     "opening_vertical", "shaft", "opening_wall", "stair", "ceiling", "roof", "footing", "truss", "door", "window",
-    "rebar", "beam_system", "foundation", "slab", "brace", "select", "clash", "ifc_export", "ifc_import",
+    "ahu", "component", "rebar", "beam_system", "foundation", "slab", "brace", "select", "clash", "ifc_export", "ifc_import",
     "new", "open", "save", "save_as", "mep_settings", "duct_insulation", "pipe_insulation", "create_mech_system",
     "create_pipe_system", "generate_layout", "system_browser", "schedule", "sheet", "add_view", "print",
     "visibility", "view_range", "project_parameters", "undo", "redo", "zoom_in", "zoom_out",
@@ -884,6 +884,7 @@ impl Desktop {
             "roof" => { self.slab_kind_pick = openbim_document::SlabKind::Roof; self.choose_tool(Tool::Slab) }
             "footing" => self.choose_tool(Tool::WallFooting),
             "truss" => self.choose_tool(Tool::Truss),
+            "ahu" | "component" => { self.family_pick = "Fan coil unit, ducted".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::UnitaryEquipment); self.choose_tool(Tool::Family) }
             "door" => { self.family_pick = "Door, single flush".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Door); self.choose_tool(Tool::Family) }
             "window" => { self.family_pick = "Window, fixed with mullions".into(); self.family_type.clear(); self.family_kind = Some(openbim_family::Category::Window); self.choose_tool(Tool::Family) }
             "mass" | "mass_extrusion" => { self.slab_kind_pick = openbim_document::SlabKind::Floor; self.choose_tool(Tool::Slab); self.message = "Mass Extrusion: sketch a profile in plan, then set the height in the options bar".into(); },
