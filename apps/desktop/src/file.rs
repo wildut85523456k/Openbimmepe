@@ -24,8 +24,8 @@ pub(crate) fn document_from(text: &str) -> Result<Document, String> {
     doc.clear_undo_history();
     doc.set_project_key(native::parse_project_key(&lines));
     doc.set_app_records(native::parse_app_records(&lines));
-    doc.set_family_defs(native::parse_family_defs(&lines));
-    doc.set_shared_params(native::parse_shared_params(&lines));
+    doc.load_family_defs(native::parse_family_defs(&lines));
+    doc.load_shared_params(native::parse_shared_params(&lines));
     Ok(doc)
 }
 
