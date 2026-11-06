@@ -4725,28 +4725,30 @@ mod tests {
         assert!(!app.widget_hits.iter().any(|(n, ..)| n == "sun:window"), "the sun settings stay out of the way until asked for");
         click_widget(&ctx, screen, &mut app, "bar:sun");
         let dialog = widget(&ctx, screen, &mut app, "sun:window");
+        let view = widget(&ctx, screen, &mut app, "view:area");
         assert!(dialog.width() > 100.0 && dialog.height() > 40.0, "{dialog:?}");
+        assert!(view.contains_rect(dialog), "the dialog {dialog:?} opens over the view {view:?}, near the button");
     }
 
     #[test]
-    fn the_section_box_is_set_in_properties_when_nothing_is_selected() {
+    fn the_section_box_is_in_properties_with_or_without_a_selection() {
         let ctx = egui::Context::default();
-        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 850.0));
         let mut app = Desktop::sample();
         let _ = app.set_view(crate::View::ThreeD);
-        app.select_many(vec![]);
+        assert!(!app.selected_ids().is_empty(), "the app starts with an element selected");
         click_widget(&ctx, screen, &mut app, "props:section_box");
         let whole = app.view3d.section.expect("the box is on");
         let storey = app.levels()[0].1.clone();
         click_widget(&ctx, screen, &mut app, &format!("props:storey:{storey}"));
         assert!(app.view3d.section.expect("still on").max[2] < whole.max[2], "the storey cuts the box down");
+        app.select_many(vec![]);
         click_widget(&ctx, screen, &mut app, "props:section_box");
         assert!(app.view3d.section.is_none());
-        let wall = app.document.elements().find(|e| e.category == Category::Wall).unwrap().id;
-        app.select_many(vec![wall]);
+        let _ = app.set_view(crate::View::Plan);
         window_frame(&ctx, screen, &mut app, vec![]);
         window_frame(&ctx, screen, &mut app, vec![]);
-        assert!(!app.widget_hits.iter().any(|(n, ..)| n == "props:section_box"), "with a selection Properties shows the element");
+        assert!(!app.widget_hits.iter().any(|(n, ..)| n == "props:section_box"), "a plan has no section box");
     }
 
     #[test]

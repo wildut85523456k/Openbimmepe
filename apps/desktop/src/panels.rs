@@ -870,7 +870,9 @@ pub fn properties_body(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.separator();
     egui::ScrollArea::vertical().id_salt("property_parameters")
         .max_height((ui.available_height() - 50.0).max(20.0)).auto_shrink([false, false]).show(ui, |ui| {
-            if selected.is_empty() && app.view == View::ThreeD { crate::view3d::section_controls(app, ui); }
+            if app.view == View::ThreeD {
+                egui::CollapsingHeader::new("Extents").default_open(true).show(ui, |ui| crate::view3d::section_controls(app, ui));
+            }
             if let Some(el) = &element {
                 ui.push_id(el.id.0, |ui| {
                     if el.category != openbim_document::Category::Type && (query.is_empty() || "pinned constraints".contains(&query)) {
@@ -881,32 +883,9 @@ pub fn properties_body(app: &mut Desktop, ui: &mut egui::Ui) {
                                             let name = |id| app.document.get(id).map_or("Missing level", |l| l.name.as_str());
                                             read_only_group(ui, "Constraints", &query, &[("Base Level", name(level)), ("Top Level", name(top))]);
                                         }
-                                        if el.category == openbim_document::Category::Wall {
-                                            // Top Constraint selector (REA-014)
-                                            ui.horizontal(|ui| {
-                                                ui.label("Top Constraint");
-                                                let levels: Vec<(openbim_document::ElementId, String)> = app.document.elements()
-                                                    .filter(|e| matches!(e.geometry, Some(openbim_document::Geometry::Point { .. })))
-                                                    .filter(|e| e.category == openbim_document::Category::Level)
-                                                    .map(|e| (e.id, e.name.clone())).collect();
-                                                let current = el.top_constraint.map(|id| id.0).unwrap_or(0);
-                                                let top_name = el.top_constraint.and_then(|id| app.document.get(id)).map(|l| l.name.clone()).unwrap_or_else(|| "Unconnected".to_string());
-                                                egui::ComboBox::from_id_salt(("wall_top_constraint", el.id.0))
-                                                    .selected_text(if current == 0 { "Unconnected".to_string() } else { top_name.clone() })
-                                                    .show_ui(ui, |ui| {
-                                                        if ui.selectable_label(current == 0, "Unconnected").clicked() {
-                                                            let _ = app.document.set_top_constraint(el.id, None);
-                                                        }
-                                                        for (id, name) in &levels {
-                                                            if ui.selectable_label(current == id.0, name).clicked() {
-                                                                let _ = app.document.set_top_constraint(el.id, Some(*id));
-                                                            }
-                                                        }
-                                                    });
-                                            });
-                                        }
                     if matches!(el.category, openbim_document::Category::Slab | openbim_document::Category::Footing) && el.category == openbim_document::Category::Footing { usage_material_combos(app, ui, false); }
 if el.category == openbim_document::Category::Wall {
+                        // Top Constraint selector (REA-014)
                         ui.horizontal(|ui| {
                             ui.label("Top Constraint");
                             let levels: Vec<(openbim_document::ElementId, String)> = app.document.elements()

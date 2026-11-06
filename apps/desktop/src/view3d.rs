@@ -211,12 +211,15 @@ fn sync_sun(app: &mut Desktop) {
 /// The Sun Settings dialog of the view control bar.
 fn sun_window(app: &mut Desktop, ctx: &egui::Context) {
     let mut open = true;
-    let window = egui::Window::new("Sun Settings").open(&mut open).default_width(340.0).show(ctx, |ui| sun_controls(app, ui));
+    // it opens over the view, next to the button in the bar, and not in the corner of the window
+    let corner = app.view3d.view_rect().left_bottom() + egui::vec2(12.0, -12.0);
+    let window = egui::Window::new("Sun Settings").open(&mut open).default_width(340.0)
+        .pivot(egui::Align2::LEFT_BOTTOM).default_pos(corner).show(ctx, |ui| sun_controls(app, ui));
     if let Some(window) = window { test_hit!(app, window.response, "sun:window"); }
     app.views.sun_open = open;
 }
 
-/// The Section Box of the 3D view, shown in Properties when nothing is selected.
+/// The Section Box of the 3D view, in the Extents group of Properties.
 pub(crate) fn section_controls(app: &mut Desktop, ui: &mut egui::Ui) {
     let bounds = app.view3d.model_bounds();
     let mut on = app.view3d.section.is_some();
