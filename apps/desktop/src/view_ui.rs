@@ -3,6 +3,7 @@
 //! Elements, and Temporary Hide/Isolate (which is not saved and not an edit). The settings are saved with the model, one
 //! undo step each (`openbim_document::ViewSettings`).
 use crate::{Desktop, View};
+use openbim_viewport_egui::Style;
 use eframe::egui;
 use openbim_document::{Detail, Document, Element, ElementId, Mesh, RangeClass, ViewCategory, ViewRange, ViewSettings, STANDARD_SCALES};
 use std::sync::Arc;
@@ -64,6 +65,17 @@ pub(crate) struct RangeDialog {
     pub range: ViewRange,
 }
 
+/// The name of a visual style in the view control bar.
+fn style_name(style: Style) -> &'static str {
+    match style {
+        Style::Wireframe => "Wireframe",
+        Style::HiddenLine => "Hidden Line",
+        Style::Shaded => "Shaded",
+        Style::ConsistentColors => "Consistent Colors",
+        Style::Realistic => "Realistic",
+    }
+}
+
 /// The Visibility/Graphics window.
 pub(crate) struct VgDialog {
     pub draft: ViewSettings,
@@ -77,6 +89,8 @@ pub(crate) struct ViewUi {
     pub temp: Option<Temp>,
     /// Reveal Hidden Elements
     pub reveal: bool,
+    /// the Sun Settings dialog is open
+    pub sun_open: bool,
     /// how many elements the view range kept out of the plan on show, for the control bar
     pub out_of_range: usize,
     plan: Option<(u64, Arc<Vec<PlanMesh>>)>,
@@ -297,14 +311,30 @@ impl Desktop {
         if self.apply_view_settings(&vs, "Hide/Isolate applied to the view") { self.views.temp = None; }
     }
 
-    /// The View Control Bar: scale, detail level, View Range, Visibility/Graphics, Hide in View, Temporary Hide/Isolate.
+    /// The right-click menu of a view: Hide in View, and Unhide while Reveal Hidden Elements is on.
+    pub(crate) fn hide_in_view_menu(&mut self, ui: &mut egui::Ui) {
+        let menu = ui.menu_button("Hide in View", |ui| {
+            let elements = ui.button("Elements");
+            test_hit!(self, elements, "view_menu:elements");
+            if elements.clicked() { self.hide_in_view(false); ui.close(); }
+            if ui.button("Category").clicked() { self.hide_in_view(true); ui.close(); }
+            ui.separator();
+            if ui.add_enabled(self.views.reveal, egui::Button::new("Unhide Elements")).clicked() { self.unhide_in_view(false); ui.close(); }
+            if ui.add_enabled(self.views.reveal, egui::Button::new("Unhide Category")).clicked() { self.unhide_in_view(true); ui.close(); }
+        });
+        test_hit!(self, menu.response, "view_menu:hide");
+    }
+
+    /// The View Control Bar along the bottom of a view: scale, detail level, View Range or Visual Style and Sun
+    /// Settings, Temporary Hide/Isolate, Reveal Hidden Elements.
     pub(crate) fn view_control_bar(&mut self, ui: &mut egui::Ui) {
         let Some(key) = self.current_view_key() else { return };
         let vs = self.document.view_settings(&key);
         let plan = ViewSettings::is_plan_key(&key);
         let mut next = vs.clone();
         ui.horizontal_wrapped(|ui| {
-            ui.label("Scale");
+            let scale = ui.label("Scale");
+            test_hit!(self, scale, "bar:scale");
             let current = format!("1 : {}", vs.scale);
             egui::ComboBox::from_id_salt("view_scale").selected_text(current).width(90.0).show_ui(ui, |ui| {
                 for s in STANDARD_SCALES { ui.selectable_value(&mut next.scale, s, format!("1 : {s}")); }
@@ -317,7 +347,19 @@ impl Desktop {
                 for d in Detail::ALL { ui.selectable_value(&mut next.detail, d, d.name()); }
             });
             if plan && ui.button("View Range…").clicked() { self.open_view_range(); }
-            if ui.button("Visibility/Graphics…").clicked() { self.open_vis_graphics(); }
+            if key == "3d" {
+                ui.label("Visual Style");
+                let combo = egui::ComboBox::from_id_salt("view_style").selected_text(style_name(self.view3d.style)).width(120.0).show_ui(ui, |ui| {
+                    for st in [Style::Wireframe, Style::HiddenLine, Style::Shaded, Style::ConsistentColors, Style::Realistic] {
+                        let item = ui.selectable_value(&mut self.view3d.style, st, style_name(st));
+                        test_hit!(self, item, "bar:style:{}", style_name(st));
+                    }
+                });
+                test_hit!(self, combo.response, "bar:style");
+                let sun = ui.button("Sun Settings…");
+                test_hit!(self, sun, "bar:sun");
+                if sun.clicked() { self.views.sun_open = true; }
+            }
             ui.menu_button("Temporary Hide/Isolate", |ui| {
                 if ui.button("Hide Element").clicked() { self.temporary_hide_isolate(TempMode::Hide, false); ui.close(); }
                 if ui.button("Hide Category").clicked() { self.temporary_hide_isolate(TempMode::Hide, true); ui.close(); }
@@ -326,13 +368,6 @@ impl Desktop {
                 ui.separator();
                 if ui.add_enabled(self.views.temp.is_some(), egui::Button::new("Apply Hide/Isolate to View")).clicked() { self.apply_temporary(); ui.close(); }
                 if ui.add_enabled(self.views.temp.is_some(), egui::Button::new("Reset Temporary Hide/Isolate")).clicked() { self.reset_temporary(); ui.close(); }
-            });
-            ui.menu_button("Hide in View", |ui| {
-                if ui.button("Elements").clicked() { self.hide_in_view(false); ui.close(); }
-                if ui.button("Category").clicked() { self.hide_in_view(true); ui.close(); }
-                ui.separator();
-                if ui.add_enabled(self.views.reveal, egui::Button::new("Unhide Elements")).clicked() { self.unhide_in_view(false); ui.close(); }
-                if ui.add_enabled(self.views.reveal, egui::Button::new("Unhide Category")).clicked() { self.unhide_in_view(true); ui.close(); }
             });
             ui.checkbox(&mut self.views.reveal, "Reveal Hidden Elements").on_hover_text("Hidden elements are drawn in magenta; select them to unhide");
             if plan && self.views.out_of_range > 0 { ui.weak(format!("{} element(s) outside the view range", self.views.out_of_range)); }

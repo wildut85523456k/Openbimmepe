@@ -200,6 +200,54 @@ impl Desktop {
     }
 }
 
+/// The sun of the view follows the project site every frame, also after an undo with the dialog closed.
+fn sync_sun(app: &mut Desktop) {
+    if let Some(site) = app.document.site() {
+        let shown = app.site_edit.unwrap_or(site);
+        app.view3d.sun = sun_at(&shown, app.view3d.sun);
+    }
+}
+
+/// The Sun Settings dialog of the view control bar.
+fn sun_window(app: &mut Desktop, ctx: &egui::Context) {
+    let mut open = true;
+    let window = egui::Window::new("Sun Settings").open(&mut open).default_width(340.0).show(ctx, |ui| sun_controls(app, ui));
+    if let Some(window) = window { test_hit!(app, window.response, "sun:window"); }
+    app.views.sun_open = open;
+}
+
+/// The Section Box of the 3D view, shown in Properties when nothing is selected.
+pub(crate) fn section_controls(app: &mut Desktop, ui: &mut egui::Ui) {
+    let bounds = app.view3d.model_bounds();
+    let mut on = app.view3d.section.is_some();
+    let check = ui.checkbox(&mut on, "Section Box");
+    test_hit!(app, check, "props:section_box");
+    if check.changed() { app.view3d.section = if on { bounds } else { None }; }
+    let model = app.view3d.model_bounds();
+    if let (Some(sec), Some(b)) = (&mut app.view3d.section, model) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Storey");
+            for (name, lo, hi) in level_bands(&app.document, b.max[2]) {
+                let storey = ui.small_button(&name).on_hover_text(format!("{lo:.3} m to {hi:.3} m"));
+                test_hit!(app, storey, "props:storey:{name}");
+                if storey.clicked() {
+                    (sec.min, sec.max) = ([b.min[0], b.min[1], lo.max(b.min[2])], [b.max[0], b.max[1], hi.min(b.max[2])]);
+                }
+            }
+        });
+        for (k, axis) in ["X", "Y", "Z"].iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(*axis);
+                let (mut lo, mut hi) = (sec.min[k], sec.max[k]);
+                ui.add(egui::Slider::new(&mut lo, b.min[k]..=b.max[k]).show_value(false));
+                ui.add(egui::Slider::new(&mut hi, b.min[k]..=b.max[k]).show_value(false));
+                sec.min[k] = lo.min(hi);
+                sec.max[k] = hi.max(lo);
+            });
+        }
+    }
+}
+
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // new geometry only when the document changed
     let temp = app.vis().temp;
@@ -212,39 +260,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         if app.view3d_revision.is_none() { app.view3d.zoom_to_fit(ui.available_width() as f64 / ui.available_height().max(1.0) as f64); }
         app.view3d_revision = Some(app.document.revision());
     }
-    ui.horizontal(|ui| {
-        if ui.small_button("Fit").clicked() { app.view3d.zoom_to_fit(ui.available_width() as f64 / ui.available_height().max(1.0) as f64); }
-    });
-    ui.horizontal_wrapped(|ui| {
-        for (st, name) in [(Style::Wireframe, "Wireframe"), (Style::HiddenLine, "Hidden Line"), (Style::Shaded, "Shaded"), (Style::ConsistentColors, "Consistent Colors"), (Style::Realistic, "Realistic")] {
-            ui.selectable_value(&mut app.view3d.style, st, name);
-        }
-        let bounds = app.view3d.model_bounds();
-        let mut on = app.view3d.section.is_some();
-        if ui.checkbox(&mut on, "Section Box").changed() { app.view3d.section = if on { bounds } else { None }; }
-    });
-    if app.view3d.style == Style::Realistic { sun_controls(app, ui); }
-    let model = app.view3d.model_bounds();
-    if let (Some(sec), Some(b)) = (&mut app.view3d.section, model) {
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Storey");
-            for (name, lo, hi) in level_bands(&app.document, b.max[2]) {
-                if ui.small_button(&name).on_hover_text(format!("{lo:.3} m to {hi:.3} m")).clicked() {
-                    (sec.min, sec.max) = ([b.min[0], b.min[1], lo.max(b.min[2])], [b.max[0], b.max[1], hi.min(b.max[2])]);
-                }
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            for (k, axis) in ["X", "Y", "Z"].iter().enumerate() {
-                ui.label(*axis);
-                let (mut lo, mut hi) = (sec.min[k], sec.max[k]);
-                ui.add(egui::Slider::new(&mut lo, b.min[k]..=b.max[k]).show_value(false));
-                ui.add(egui::Slider::new(&mut hi, b.min[k]..=b.max[k]).show_value(false));
-                sec.min[k] = lo.min(hi);
-                sec.max[k] = hi.max(lo);
-            }
-        });
-    }
+    if app.view3d.style == Style::Realistic { sync_sun(app); }
+    if app.views.sun_open { sun_window(app, ui.ctx()); }
     // the selection of the app drives the view; a click in the view drives the app
     let wanted: HashSet<Element> = app.selected_id().and_then(|id| element(&app.document, id)).into_iter().collect();
     app.view3d.select(wanted.clone());
@@ -252,7 +269,9 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     app.view3d.track_hover = app.tool == crate::Tool::Family;
     // The Family tool previews the family under the pointer, as the plan does — handled by the application, not drawn as viewport overlays.
     let _ = app.view3d.hover_hit.filter(|_| app.tool == crate::Tool::Family).and_then(|h| app.family_ghost_at_hit(&h));
-    app.view3d.ui(ui);
+    let view = app.view3d.ui(ui);
+    test_hit!(app, view, "view:area");
+    view.context_menu(|ui| app.hide_in_view_menu(ui));
     if app.tool == crate::Tool::Family {
         // a click in 3D places the family: a door or window goes into the wall under the click, anything else stands
         // on the level of what it was dropped on. The hit is consumed so one click places one element.

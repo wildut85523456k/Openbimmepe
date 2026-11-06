@@ -127,7 +127,8 @@ fn view_label(app: &Desktop, v: View) -> String {
 
 pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
     // Viewport is clean: view tabs/labels removed (views selected from Project Browser or right-click).
-    app.view_control_bar(ui);
+    // the view control bar runs along the bottom edge of every view, as in Revit
+    if app.current_view_key().is_some() { egui::Panel::bottom("view_control_bar").show(ui, |ui| app.view_control_bar(ui)); }
     // Spacebar turns the selected wall over
     if app.tool == crate::Tool::Select && !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Space)) { app.flip_selected_wall(); }
     // Delete removes the selected element with what stands on it (Backspace is the Delete key of a Mac keyboard)
@@ -151,6 +152,8 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         }
     });
     let (response, painter) = ui.allocate_painter(ui.available_size().max(Vec2::splat(50.0)), Sense::click_and_drag());
+    test_hit!(app, response, "view:area");
+    response.context_menu(|ui| app.hide_in_view_menu(ui));
     let rect = response.rect;
     painter.rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
     if response.dragged_by(egui::PointerButton::Middle) { app.pan += response.drag_delta(); }
@@ -4687,5 +4690,79 @@ mod tests {
         assert_eq!(railings(&app), 0);
         app.document.undo().unwrap();
         assert_eq!(railings(&app), 1);
+    }
+
+    /// The view fills everything above the bar, so no control of the view sits on the model.
+    fn bar_below_view(ctx: &egui::Context, screen: Rect, app: &mut Desktop) {
+        let bar = widget(ctx, screen, app, "bar:scale");
+        let view = widget(ctx, screen, app, "view:area");
+        assert!(view.max.y <= bar.min.y, "the view {view:?} ends above the bar {bar:?}");
+        assert!(view.height() > 400.0, "the model keeps the room: {view:?}");
+    }
+
+    #[test]
+    fn the_view_control_bar_runs_under_the_view_in_a_plan_and_in_3d() {
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        let mut app = Desktop::sample();
+        let _ = app.set_view(crate::View::Plan);
+        bar_below_view(&ctx, screen, &mut app);
+        assert!(!app.widget_hits.iter().any(|(n, ..)| n == "bar:style"), "a plan has no visual style");
+        let _ = app.set_view(crate::View::ThreeD);
+        bar_below_view(&ctx, screen, &mut app);
+    }
+
+    #[test]
+    fn the_visual_style_is_chosen_from_the_bar_and_the_sun_opens_its_own_dialog() {
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        let mut app = Desktop::sample();
+        let _ = app.set_view(crate::View::ThreeD);
+        click_widget(&ctx, screen, &mut app, "bar:style");
+        click_widget(&ctx, screen, &mut app, "bar:style:Realistic");
+        assert_eq!(app.view3d.style, openbim_viewport_egui::Style::Realistic);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(!app.widget_hits.iter().any(|(n, ..)| n == "sun:window"), "the sun settings stay out of the way until asked for");
+        click_widget(&ctx, screen, &mut app, "bar:sun");
+        let dialog = widget(&ctx, screen, &mut app, "sun:window");
+        assert!(dialog.width() > 100.0 && dialog.height() > 40.0, "{dialog:?}");
+    }
+
+    #[test]
+    fn the_section_box_is_set_in_properties_when_nothing_is_selected() {
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        let mut app = Desktop::sample();
+        let _ = app.set_view(crate::View::ThreeD);
+        app.select_many(vec![]);
+        click_widget(&ctx, screen, &mut app, "props:section_box");
+        let whole = app.view3d.section.expect("the box is on");
+        let storey = app.levels()[0].1.clone();
+        click_widget(&ctx, screen, &mut app, &format!("props:storey:{storey}"));
+        assert!(app.view3d.section.expect("still on").max[2] < whole.max[2], "the storey cuts the box down");
+        click_widget(&ctx, screen, &mut app, "props:section_box");
+        assert!(app.view3d.section.is_none());
+        let wall = app.document.elements().find(|e| e.category == Category::Wall).unwrap().id;
+        app.select_many(vec![wall]);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        window_frame(&ctx, screen, &mut app, vec![]);
+        assert!(!app.widget_hits.iter().any(|(n, ..)| n == "props:section_box"), "with a selection Properties shows the element");
+    }
+
+    #[test]
+    fn hide_in_view_is_on_the_right_click_menu_of_the_plan_and_the_3d_view() {
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(2200.0, 1400.0));
+        for (view, key) in [(crate::View::Plan, "p10"), (crate::View::ThreeD, "3d")] {
+            let mut app = Desktop::sample();
+            let _ = app.set_view(view);
+            let wall = app.document.elements().find(|e| e.category == Category::Wall).unwrap().id;
+            app.select_many(vec![wall]);
+            window_frame(&ctx, screen, &mut app, vec![]);
+            right_click_widget(&ctx, screen, &mut app, "view:area");
+            click_widget(&ctx, screen, &mut app, "view_menu:hide");
+            click_widget(&ctx, screen, &mut app, "view_menu:elements");
+            assert_eq!(app.document.view_settings(key).hidden_elements, vec![wall], "{key}: {}", app.message);
+        }
     }
 }

@@ -870,6 +870,7 @@ pub fn properties_body(app: &mut Desktop, ui: &mut egui::Ui) {
     ui.separator();
     egui::ScrollArea::vertical().id_salt("property_parameters")
         .max_height((ui.available_height() - 50.0).max(20.0)).auto_shrink([false, false]).show(ui, |ui| {
+            if selected.is_empty() && app.view == View::ThreeD { crate::view3d::section_controls(app, ui); }
             if let Some(el) = &element {
                 ui.push_id(el.id.0, |ui| {
                     if el.category != openbim_document::Category::Type && (query.is_empty() || "pinned constraints".contains(&query)) {
