@@ -218,7 +218,7 @@ pub fn show(app: &mut Desktop, ui: &mut egui::Ui) {
         ui.checkbox(&mut app.view3d.camera.orthographic, "Orthographic");
     });
     ui.horizontal_wrapped(|ui| {
-        for (st, name) in [(Style::Wireframe, "Wireframe"), (Style::HiddenLine, "Hidden Line"), (Style::Shaded, "Shaded"), (Style::Realistic, "Realistic")] {
+        for (st, name) in [(Style::Wireframe, "Wireframe"), (Style::HiddenLine, "Hidden Line"), (Style::Shaded, "Shaded"), (Style::ConsistentColors, "Consistent Colors"), (Style::Realistic, "Realistic")] {
             ui.selectable_value(&mut app.view3d.style, st, name);
         }
         let bounds = app.view3d.model_bounds();
